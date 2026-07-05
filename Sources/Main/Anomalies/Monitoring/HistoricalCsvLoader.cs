@@ -4,7 +4,6 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using System.Globalization;
-using System.Linq;
 using System.Text;
 using DevOnBike.Overfit.Anomalies.Monitoring.Contracts;
 
@@ -144,7 +143,14 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
             }
 
             // Validate all required columns are present
-            var missing = ExpectedHeaders.Where(h => !index.ContainsKey(h)).ToList();
+            var missing = new List<string>();
+            foreach (var h in ExpectedHeaders)
+            {
+                if (!index.ContainsKey(h))
+                {
+                    missing.Add(h);
+                }
+            }
             if (missing.Count > 0)
             {
                 throw new OverfitFormatException(

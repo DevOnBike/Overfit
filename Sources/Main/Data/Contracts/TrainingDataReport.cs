@@ -3,7 +3,6 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using System.Linq;
 
 namespace DevOnBike.Overfit.Data.Contracts
 {
@@ -52,11 +51,38 @@ namespace DevOnBike.Overfit.Data.Contracts
         public bool IsViableForTraining => Errors.Count == 0;
 
         /// <summary>Number of features flagged as effectively constant.</summary>
-        public int ConstantFeatureCount =>
-            FeatureReports.Count(f => f.IsConstant);
+        public int ConstantFeatureCount
+        {
+            get
+            {
+                var count = 0;
+
+                foreach (var f in FeatureReports)
+                {
+                    if (f.IsConstant)
+                    {
+                        count++;
+                    }
+                }
+
+                return count;
+            }
+        }
 
         /// <summary>Total non-finite values across all features and samples.</summary>
-        public int TotalNonFiniteCount =>
-            FeatureReports.Sum(f => f.NonFiniteCount);
+        public int TotalNonFiniteCount
+        {
+            get
+            {
+                var total = 0;
+
+                foreach (var f in FeatureReports)
+                {
+                    total += f.NonFiniteCount;
+                }
+
+                return total;
+            }
+        }
     }
 }

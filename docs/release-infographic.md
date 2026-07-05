@@ -12,13 +12,14 @@ scannable bullets), a proof-numbers strip, the footer line, and an image-generat
 
 Run, fine-tune and build agents on real LLMs, serve an OpenAI-compatible API, do testable RAG, and
 transcribe speech — entirely in managed .NET. No Python. No GPU. No native binary. No model server.
-No data egress.
+No data egress. The same engine runs a chat model **entirely on an Android phone** — everyone else
+reaches for a bigger GPU; Overfit goes the other way.
 
 ## Badges
 
-`Pure .NET 10` · `Native AOT` · `0 B/token decode` · `In-process` · `OpenAI-compatible` ·
-`Microsoft.Extensions.AI` · `No Python` · `No GPU` · `No native binary` · `No data egress` ·
-`AGPL-3.0 / commercial`
+`Pure .NET 10` · `Native AOT` · `0 B/token decode` · `In-process` · `On-device (Android)` ·
+`OpenAI-compatible` · `Microsoft.Extensions.AI` · `No Python` · `No GPU` · `No native binary` ·
+`No data egress` · `AGPL-3.0 / commercial`
 
 ---
 
@@ -41,6 +42,7 @@ No data egress.
 - C# tool calling (constrained decoding)
 - Guaranteed JSON + **JSON-Schema** & **regex** constrained output
 - ReAct loop · critic loop · circuit breaker · summarizing memory
+- Sampler suite: top-nσ · typical · Mirostat · XTC · **DRY anti-loop**
 
 **4 · In-process RAG**
 - Built-in cosine vector store, zero-dependency
@@ -100,7 +102,7 @@ No data egress.
 
 | Live heap, Qwen-3B Q4_K_M | Alloc / token | GPT-2 vs PyTorch | Native CLI | Embedding parity | Test suite |
 |:--:|:--:|:--:|:--:|:--:|:--:|
-| **220 MB** | **1 byte** | **byte-parity** | **7.8 MB** | **cosine ≈ 1.0** | **1139 / 0** |
+| **220 MB** | **1 byte** | **byte-parity** | **7.8 MB** | **cosine ≈ 1.0** | **1388 / 0** |
 
 ## Footer
 
@@ -123,7 +125,11 @@ Dual-licensed: AGPL-3.0-or-later / commercial.
 >
 > **Top hero band:** the wordmark "Overfit" with the tagline *"Local AI for .NET — run, fine-tune, serve
 > and talk to real LLMs entirely in-process, on the CPU."* Below it a row of small pill badges: `No Python`,
-> `No GPU`, `No native binary`, `No data egress`, `OpenAI-compatible`, `Native AOT`, `0 B/token`.
+> `No GPU`, `No native binary`, `No data egress`, `On-device (Android)`, `OpenAI-compatible`, `Native AOT`, `0 B/token`.
+>
+> **Optional right-side motif:** a modern smartphone rendered in the same violet-blue line style, showing a
+> minimal chat bubble mid-stream — the "an LLM running on your phone, no cloud" idea, kept small so the card
+> grid stays the hero.
 >
 > **Center:** a 4×3 grid of twelve equal cards, each with a simple line icon and a short title:
 > 1. *LLM inference* (chip) — "Qwen · Llama · Mistral · Mixtral · MoE",

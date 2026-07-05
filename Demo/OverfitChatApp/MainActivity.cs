@@ -14,7 +14,10 @@ using Android.Views;
 using Android.Views.Animations;
 using Android.Widget;
 using DevOnBike.Overfit.LanguageModels;
+using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Loading;
+
+using DevOnBike.Overfit.LanguageModels.Whisper;
 
 namespace DevOnBike.OverfitChat
 {
@@ -32,6 +35,8 @@ namespace DevOnBike.OverfitChat
     public class MainActivity : Activity
     {
         private const int RequestPickModel = 42;
+        private const int RequestRecordPermission = 43;
+        private const int RequestPickWhisper = 44;
         private const int MaxMessageChars = 200;
 
         private AnimatedGradientView _gradient = null!;
@@ -42,8 +47,16 @@ namespace DevOnBike.OverfitChat
         private ScrollView _scroll = null!;
         private EditText _input = null!;
         private Button _send = null!;
+        private Button _mic = null!;
         private TextView _counter = null!;
         private TextView _subtitle = null!;
+
+        // Voice input: on-device Whisper speech-to-text (nothing leaves the phone).
+        private VoiceRecorder? _recorder;
+        private WhisperTranscriber? _whisper;
+        private volatile bool _transcribing;
+        private Android.Animation.ObjectAnimator? _micPulse;
+        private readonly Android.OS.Handler _recHandler = new(Android.OS.Looper.MainLooper!);
 
         // Welcome-screen controls — the model loads HERE; we only enter chat once it's ready.
         private LinearLayout _modelSelectField = null!;
@@ -51,14 +64,25 @@ namespace DevOnBike.OverfitChat
         private TextView _welcomeStatus = null!;
         private TextView _welcomeAddLink = null!;
         private ProgressBar _welcomeSpinner = null!;
+        private readonly List<Android.Animation.Animator> _logoAnim = new(); // welcome-screen looping logo
 
         private OverfitClient? _client;
+        // Sampling preset chosen in the ⚙ dialog: 0 = Precise (greedy), 1 = Balanced (top-nσ), 2 = Creative (min-p).
+        // DRY anti-loop is applied on every preset. Default Balanced; re-applied to the client on each model load.
+        private int _samplingMode = 1;
         private ModelInfo? _modelInfo;
         private volatile bool _busy;
+        private bool _inChat; // true while the chat screen is shown (drives Back → welcome instead of exit)
 
         // After this much idle time the model is unloaded (frees ~RAM) and the user returns to model select.
         private const int IdleUnloadMs = 30_000;
         private readonly Android.OS.Handler _idleHandler = new(Android.OS.Looper.MainLooper!);
+
+        // Live on-device CPU/RAM/tok-per-sec readout shown in the header subtitle while the model generates.
+        private readonly Android.OS.Handler _statsHandler = new(Android.OS.Looper.MainLooper!);
+        private readonly CpuRamSampler _sampler = new();
+        private int _genTokens;          // streamed tokens this turn (one onText callback ≈ one token)
+        private long _genFirstTokenMs;   // timestamp of the first token, so tok/s excludes the prefill wait
 
         // Models live as individual *.gguf files here (the bundled SmolLM2 + any the user added).
         private string ModelsDir => System.IO.Path.Combine(GetExternalFilesDir(null)!.AbsolutePath, "models");
@@ -189,9 +213,19 @@ namespace DevOnBike.OverfitChat
 
         private void ShowWelcome()
         {
+            _inChat = false;
+            DisableChatBackHandling();
             var col = new LinearLayout(this) { Orientation = Orientation.Vertical };
             col.SetGravity(GravityFlags.Center);
             col.SetPadding(Dp(36), 0, Dp(36), 0);
+
+            var mark = new ImageView(this);
+            mark.SetImageResource(OverfitChatApp.Resource.Drawable.welcome_logo);
+            mark.SetAdjustViewBounds(true);
+            var markLp = new LinearLayout.LayoutParams(Dp(132), Dp(132));
+            markLp.SetMargins(0, 0, 0, Dp(10));
+            col.AddView(mark, markLp);
+            AnimateWelcomeLogo(mark);
 
             var logo = new ShimmerTextView(this) { Text = "OverThink" };
             logo.SetTextColor(Color.White);
@@ -262,7 +296,7 @@ namespace DevOnBike.OverfitChat
             stLp.SetMargins(Dp(24), Dp(14), Dp(24), 0);
             col.AddView(_welcomeStatus, stLp);
 
-            _welcomeAddLink = new TextView(this) { Text = "＋  Add a model from file" };
+            _welcomeAddLink = new TextView(this) { Text = "＋  Add .gguf model from file" };
             _welcomeAddLink.SetTextColor(Color.ParseColor("#A78BFA"));
             _welcomeAddLink.TextSize = 14f;
             _welcomeAddLink.Gravity = GravityFlags.Center;
@@ -273,6 +307,23 @@ namespace DevOnBike.OverfitChat
                 ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent);
             addLp.SetMargins(0, Dp(14), 0, 0);
             col.AddView(_welcomeAddLink, addLp);
+
+            // Voice input (on-device Whisper) is temporarily hidden from the UI while it's being polished.
+            // The whole pipeline still works — re-enable by uncommenting this link (and the About mention
+            // below). Without a Whisper model present the 🎤 button in chat stays hidden (UpdateMicVisibility),
+            // so with no loading entry-point the mic never appears — exactly the "not for now" state.
+            //
+            // var voiceLink = new TextView(this) { Text = "＋  Add .bin voice model (Whisper)" };
+            // voiceLink.SetTextColor(Color.ParseColor("#A78BFA"));
+            // voiceLink.TextSize = 13f;
+            // voiceLink.Gravity = GravityFlags.Center;
+            // voiceLink.SetPadding(Dp(12), Dp(8), Dp(12), Dp(8));
+            // voiceLink.Clickable = true;
+            // voiceLink.Click += (_, _) => PickWhisperModel();
+            // var voiceLp = new LinearLayout.LayoutParams(
+            //     ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent);
+            // voiceLp.SetMargins(0, Dp(6), 0, 0);
+            // col.AddView(voiceLink, voiceLp);
 
             var about = new TextView(this) { Text = "About  ·  GitHub" };
             about.SetTextColor(Color.ParseColor("#A78BFA"));
@@ -300,8 +351,54 @@ namespace DevOnBike.OverfitChat
                 ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.MatchParent));
         }
 
+        // Gives the welcome logo a gentle "alive" feel over the animated gradient: a soft breathing scale, a
+        // slow vertical bob, and a lazy sway rotation. Each is its OWN infinite ObjectAnimator (not wrapped in
+        // an AnimatorSet — those don't reliably keep infinite children looping across all devices), so the mark
+        // animates forever while the model-selection screen is up. Different periods keep the loops from lining
+        // up into an obvious repeat. Entrance is a quick overshoot fade+scale. Cancelled when we leave.
+        private void AnimateWelcomeLogo(View mark)
+        {
+            StopWelcomeLogo();
+
+            // Entrance.
+            mark.Alpha = 0f;
+            mark.ScaleX = 0.7f;
+            mark.ScaleY = 0.7f;
+            mark.Animate()!.Alpha(1f).ScaleX(1f).ScaleY(1f).SetDuration(650)!
+                .SetInterpolator(new OvershootInterpolator(1.6f))!.Start();
+
+            void Loop(string prop, float a, float b, long ms)
+            {
+                var an = Android.Animation.ObjectAnimator.OfFloat(mark, prop, a, b);
+                an.SetDuration(ms);
+                an.RepeatCount = Android.Animation.ValueAnimator.Infinite;
+                an.RepeatMode = Android.Animation.ValueAnimatorRepeatMode.Reverse;
+                an.SetInterpolator(new Android.Views.Animations.AccelerateDecelerateInterpolator());
+                an.StartDelay = 650; // let the entrance finish first
+                an.Start();
+                _logoAnim.Add(an);
+            }
+
+            Loop("scaleX", 1f, 1.06f, 2200);
+            Loop("scaleY", 1f, 1.06f, 2200);
+            Loop("translationY", 0f, -Dp(9), 2800);
+            Loop("rotation", -5f, 5f, 5200);
+        }
+
+        private void StopWelcomeLogo()
+        {
+            foreach (var an in _logoAnim)
+            {
+                an.Cancel();
+            }
+            _logoAnim.Clear();
+        }
+
         private void ShowChat()
         {
+            StopWelcomeLogo();
+            _inChat = true;
+            EnableChatBackHandling();
             var column = new LinearLayout(this) { Orientation = Orientation.Vertical };
 
             column.AddView(BuildChatHeader());
@@ -345,10 +442,67 @@ namespace DevOnBike.OverfitChat
             bar.AddView(titles, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1f));
 
             bar.AddView(IconButton("?", ShowAbout));
+            bar.AddView(IconButton("⚙", ShowSamplingDialog));
             bar.AddView(IconButton("ⓘ", ShowModelInfo));
             bar.AddView(IconButton("⟳", () => ShowWelcome()));
 
             return bar;
+        }
+
+        // ⚙ "Response style": three presets over the sampler, each with the DRY anti-loop ON (small on-device
+        // models loop verbatim without it). Applied to _client.Options, so it takes effect from the next turn.
+        private void ShowSamplingDialog()
+        {
+            var labels = new[] { "Precise", "Balanced", "Creative" };
+            var options = new[]
+            {
+                "Precise — deterministic, fewest surprises",
+                "Balanced — a little variety (top-nσ)",
+                "Creative — most varied (min-p)",
+            };
+            AlertDialog? dlg = null;
+            dlg = new AlertDialog.Builder(this)!
+                .SetTitle("Response style")!
+                .SetSingleChoiceItems(options, _samplingMode, (_, e) =>
+                {
+                    ApplySampling(e.Which);
+                    Toast.MakeText(this, "Style: " + labels[e.Which], ToastLength.Short)!.Show();
+                    dlg?.Dismiss();
+                })!
+                .SetNegativeButton("Close", (_, _) => { })!
+                .Show();
+        }
+
+        // Builds the SamplingOptions for the chosen preset and installs it on the client (preserving the other
+        // GenerationOptions fields). DRY (Don't-Repeat-Yourself) is on for all three — it penalises would-be
+        // verbatim repetitions before sampling, so it breaks loops even under the deterministic "Precise" preset.
+        private void ApplySampling(int mode)
+        {
+            _samplingMode = mode;
+            var client = _client;
+            if (client is null)
+            {
+                return;
+            }
+
+            const float dryMul = 0.8f, dryBase = 1.75f;
+            const int dryAllowed = 2, dryLastN = 256;
+
+            var sampling = mode switch
+            {
+                2 => new SamplingOptions(
+                    SamplingStrategy.MinP, temperature: 1.0f, topK: 0, topP: 1.0f, seed: 0,
+                    minP: 0.05f, dryMultiplier: dryMul, dryBase: dryBase, dryAllowedLength: dryAllowed, dryPenaltyLastN: dryLastN),
+                1 => new SamplingOptions(
+                    SamplingStrategy.TopNSigma, temperature: 0.7f, topK: 0, topP: 1.0f, seed: 0,
+                    nSigma: 1.0f, dryMultiplier: dryMul, dryBase: dryBase, dryAllowedLength: dryAllowed, dryPenaltyLastN: dryLastN),
+                _ => new SamplingOptions(
+                    SamplingStrategy.Greedy, temperature: 1.0f, topK: 0, topP: 1.0f, seed: 0,
+                    dryMultiplier: dryMul, dryBase: dryBase, dryAllowedLength: dryAllowed, dryPenaltyLastN: dryLastN),
+            };
+
+            var o = client.Options;
+            client.Options = new GenerationOptions(o.MaxNewTokens, o.MaxContextLength, sampling, o.StopOnEndOfTextToken, o.EndOfTextTokenId);
         }
 
         private View BuildChatScroll()
@@ -368,6 +522,17 @@ namespace DevOnBike.OverfitChat
 
             var row = new LinearLayout(this) { Orientation = Orientation.Horizontal };
             row.SetGravity(GravityFlags.CenterVertical);
+
+            _mic = new Button(this) { Text = "🎤" };
+            _mic.SetTextColor(Color.White);
+            _mic.TextSize = 17f;
+            _mic.SetAllCaps(false);
+            _mic.Background = OvalFill(Color.Argb(54, 255, 255, 255));
+            var micLp = new LinearLayout.LayoutParams(Dp(50), Dp(50));
+            micLp.SetMargins(0, 0, Dp(8), 0);
+            _mic.Click += (_, _) => OnMicTapped();
+            row.AddView(_mic, micLp);
+            UpdateMicVisibility(); // only show 🎤 once a Whisper model is available
 
             _input = new EditText(this) { Hint = "Message…" };
             _input.SetTextColor(Color.White);
@@ -444,6 +609,9 @@ namespace DevOnBike.OverfitChat
             _input.Text = string.Empty;
             SetComposerEnabled(false);
             _idleHandler.RemoveCallbacksAndMessages(null);
+            _genTokens = 0;
+            _genFirstTokenMs = 0;
+            StartStatsUpdater();
 
             AddUserBubble(text);
             var update = AddStreamingAssistantBubble();
@@ -456,6 +624,10 @@ namespace DevOnBike.OverfitChat
                 {
                     client.Send(text, onText: token =>
                     {
+                        if (System.Threading.Interlocked.Increment(ref _genTokens) == 1)
+                        {
+                            _genFirstTokenMs = Android.OS.SystemClock.ElapsedRealtime();
+                        }
                         sb.Append(token);
                         RunOnUiThread(() => update(sb.ToString()));
                     });
@@ -468,15 +640,61 @@ namespace DevOnBike.OverfitChat
                 }
                 finally
                 {
+                    var toks = _genTokens;
+                    var genMs = _genFirstTokenMs > 0 ? Android.OS.SystemClock.ElapsedRealtime() - _genFirstTokenMs : 0;
+                    var tps = genMs > 0 && toks > 1 ? (toks - 1) * 1000.0 / genMs : 0;
+                    var (_, rssMb) = _sampler.Sample();
+                    AppLog.Write($"LLM gen: {toks} tok, {tps:F1} tok/s, RSS {rssMb} MB");
                     RunOnUiThread(() =>
                     {
                         _busy = false;
+                        StopStatsUpdater();
                         _gradient.Resume();
                         SetComposerEnabled(true);
                         ScheduleIdleUnload();
                     });
                 }
             });
+        }
+
+        // Live CPU/RAM readout in the header subtitle while generating — "it's really running on your phone".
+        private void StartStatsUpdater()
+        {
+            _sampler.Sample(); // prime the CPU delta baseline (first reading would otherwise be 0)
+            _statsHandler.RemoveCallbacksAndMessages(null);
+            _statsHandler.PostDelayed(UpdateStats, 600);
+        }
+
+        private void UpdateStats()
+        {
+            if (!_busy)
+            {
+                return;
+            }
+            var (cores, rssMb) = _sampler.Sample();
+
+            var tps = 0.0;
+            var first = _genFirstTokenMs;
+            if (first > 0)
+            {
+                var secs = (Android.OS.SystemClock.ElapsedRealtime() - first) / 1000.0;
+                var toks = _genTokens - 1; // measure from the first token (prefill excluded)
+                if (secs > 0 && toks > 0)
+                {
+                    tps = toks / secs;
+                }
+            }
+
+            _subtitle.Text = tps > 0
+                ? $"⚡ {tps:F1} tok/s · {cores:F1} cores · {rssMb / 1024.0:F1} GB"
+                : $"⚡ {cores:F1} cores · {rssMb / 1024.0:F1} GB";
+            _statsHandler.PostDelayed(UpdateStats, 600);
+        }
+
+        private void StopStatsUpdater()
+        {
+            _statsHandler.RemoveCallbacksAndMessages(null);
+            _subtitle.Text = _modelInfo is { } mi ? mi.Name : "ready";
         }
 
         // Disable the input + send button while the model is generating (and dim them), re-enable after.
@@ -486,6 +704,11 @@ namespace DevOnBike.OverfitChat
             _input.Alpha = enabled ? 1f : 0.55f;
             _send.Enabled = enabled;
             _send.Alpha = enabled ? 1f : 0.45f;
+            if (_mic is not null)
+            {
+                _mic.Enabled = enabled;
+                _mic.Alpha = enabled ? 1f : 0.45f;
+            }
         }
 
         private void AddUserBubble(string text)
@@ -578,6 +801,39 @@ namespace DevOnBike.OverfitChat
         protected override void OnActivityResult(int requestCode, Result resultCode, Intent? data)
         {
             base.OnActivityResult(requestCode, resultCode, data);
+
+            if (requestCode == RequestPickWhisper && resultCode == Result.Ok && data?.Data is { } wuri)
+            {
+                var wname = GetDisplayName(wuri) ?? "whisper.bin";
+                System.IO.Directory.CreateDirectory(WhisperDir);
+                var wdest = System.IO.Path.Combine(WhisperDir, SafeFileName(wname, ".bin"));
+                Toast.MakeText(this, "Adding voice model…", ToastLength.Short)!.Show();
+                System.Threading.Tasks.Task.Run(() =>
+                {
+                    try
+                    {
+                        using (var input = ContentResolver!.OpenInputStream(wuri))
+                        using (var output = System.IO.File.Create(wdest))
+                        {
+                            input!.CopyTo(output);
+                        }
+                        _whisper = null; // pick up the new model on next transcription
+                        RunOnUiThread(() =>
+                        {
+                            UpdateMicVisibility(); // the 🎤 button can appear now that a model exists
+                            Toast.MakeText(this, "Voice model added — tap 🎤 to talk.", ToastLength.Short)!.Show();
+                        });
+                    }
+                    catch (Exception ex)
+                    {
+                        AppLog.Write("Whisper model copy failed", ex);
+                        RunOnUiThread(() =>
+                            Toast.MakeText(this, "Couldn't add model: " + ex.Message, ToastLength.Short)!.Show());
+                    }
+                });
+                return;
+            }
+
             if (requestCode == RequestPickModel && resultCode == Result.Ok && data?.Data is { } uri)
             {
                 var name = GetDisplayName(uri) ?? "model.gguf";
@@ -612,14 +868,26 @@ namespace DevOnBike.OverfitChat
             {
                 // quantize:false keeps Q4_K resident (measured ~4× faster on-device than the Q8 requant path);
                 // 4096 context + sliding window so long multi-turn chats don't error on "context full".
+                // RAM vs speed, chosen by model size. quantize:false = every weight F32 → ~8× the Q4_K file
+                // size in RAM, but the F32 matmul is faster on mobile (it beats the quantized kernels under
+                // Mono/CoreCLR's weaker codegen). quantize:true = Q4_K/Q6_K mmap'd zero-copy (low, reclaimable
+                // working set) + Q8 for the rest. So keep F32 for models small enough to fit comfortably, and
+                // switch big models to the quantized/mmap path so they don't OOM the phone.
+                var fileBytes = new System.IO.FileInfo(path).Length;
+                var quantize = fileBytes >= 550_000_000; // ~>0.7B Q4_K → mmap/quantized; smaller → fast F32
+
+                // maxNewTokens is a SAFETY cap, not the expected length — a well-behaved chat model stops at its
+                // end-of-turn token well before this. 160 was too low and chopped longer answers mid-sentence.
                 var client = OverfitClient.LoadGguf(
-                    path, maxContextLength: 4096, mmap: true, quantize: false, maxNewTokens: 160, slidingWindow: true);
+                    path, maxContextLength: 4096, mmap: true, quantize: quantize, maxNewTokens: 512, slidingWindow: true);
+                AppLog.Write($"Model load: {System.IO.Path.GetFileName(path)} ({fileBytes / (1024 * 1024)} MB, quantize={quantize})");
                 var info = BuildInfo(path, client, displayName);
                 RunOnUiThread(() =>
                 {
                     _client?.Dispose();
                     _client = client;
                     _modelInfo = info;
+                    ApplySampling(_samplingMode); // wire the chosen preset (incl. DRY) into the fresh client
                     Prefs.Edit()!.PutString("last_model_path", path)!.Apply();
                     ShowChat();
                 });
@@ -733,6 +1001,7 @@ namespace DevOnBike.OverfitChat
             _client.Dispose();
             _client = null;
             _modelInfo = null;
+            _whisper = null; // free the speech model's RAM too
             ShowWelcome();
         }
 
@@ -759,6 +1028,314 @@ namespace DevOnBike.OverfitChat
                 new System.IO.FileInfo(path).Length);
         }
 
+        // ─────────────────────────── voice input (on-device Whisper) ───────────────────────────
+
+        private enum MicState
+        {
+            Idle,
+            Recording,
+            Transcribing
+        }
+
+        private string WhisperDir => System.IO.Path.Combine(GetExternalFilesDir(null)!.AbsolutePath, "whisper");
+
+        // The first whisper.cpp ggml model the user has added (null if none yet).
+        private string? WhisperModelPath()
+        {
+            try
+            {
+                if (System.IO.Directory.Exists(WhisperDir))
+                {
+                    var bins = System.IO.Directory.GetFiles(WhisperDir, "*.bin");
+                    if (bins.Length > 0)
+                    {
+                        Array.Sort(bins);
+                        return bins[0];
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                AppLog.Write("WhisperModelPath failed", ex);
+            }
+            return null;
+        }
+
+        // Master switch for the whole voice-input feature. Off for now while it's polished: the loading
+        // entry-points (welcome link + About mention) are commented out and this keeps the 🎤 button hidden
+        // even if a Whisper model was left on the device by earlier testing. Flip to true (and uncomment the
+        // two loading UI spots) to bring voice back — all the transcription code stays intact.
+        private const bool VoiceInputEnabled = false;
+
+        // The mic button only appears once voice input is enabled AND a Whisper speech model is present —
+        // no point showing a voice button that can't transcribe.
+        private void UpdateMicVisibility()
+        {
+            if (_mic is null)
+            {
+                return;
+            }
+            var show = VoiceInputEnabled && WhisperModelPath() is not null;
+            _mic.Visibility = show ? ViewStates.Visible : ViewStates.Gone;
+        }
+
+        private void OnMicTapped()
+        {
+            if (_transcribing)
+            {
+                return;
+            }
+
+            // Second tap = stop + transcribe.
+            if (_recorder is { IsRecording: true })
+            {
+                StopAndTranscribe();
+                return;
+            }
+
+            // No speech model yet → offer to add one (no network, nothing bundled).
+            if (WhisperModelPath() is null)
+            {
+                PromptAddWhisperModel();
+                return;
+            }
+
+            // Microphone permission (runtime).
+            if (CheckSelfPermission(Android.Manifest.Permission.RecordAudio) != Permission.Granted)
+            {
+                RequestPermissions(new[] { Android.Manifest.Permission.RecordAudio }, RequestRecordPermission);
+                return;
+            }
+
+            StartRecording();
+        }
+
+        private void StartRecording()
+        {
+            try
+            {
+                _recorder ??= new VoiceRecorder();
+                _recorder.Start();
+                _idleHandler.RemoveCallbacksAndMessages(null); // don't unload mid-recording
+                SetMicState(MicState.Recording);
+            }
+            catch (Exception ex)
+            {
+                AppLog.Write("Recording start failed", ex);
+                Toast.MakeText(this, "Couldn't start recording: " + ex.Message, ToastLength.Short)!.Show();
+                SetMicState(MicState.Idle);
+            }
+        }
+
+        private void StopAndTranscribe()
+        {
+            float[] samples;
+            try
+            {
+                samples = _recorder!.Stop();
+            }
+            catch (Exception ex)
+            {
+                AppLog.Write("Recording stop failed", ex);
+                SetMicState(MicState.Idle);
+                return;
+            }
+
+            // Ignore an accidental quick tap (<0.4 s of audio).
+            if (samples.Length < (VoiceRecorder.SampleRate * 2) / 5)
+            {
+                Toast.MakeText(this, "Too short — tap 🎤, speak, then tap ■.", ToastLength.Short)!.Show();
+                SetMicState(MicState.Idle);
+                return;
+            }
+
+            _transcribing = true;
+            SetMicState(MicState.Transcribing);
+
+            var modelPath = WhisperModelPath()!;
+            System.Threading.Tasks.Task.Run(() =>
+            {
+                try
+                {
+                    // Lazy-load the transcriber once; reused across utterances.
+                    var sw = System.Diagnostics.Stopwatch.StartNew();
+                    _whisper ??= WhisperTranscriber.Load(modelPath);
+                    var loadMs = sw.ElapsedMilliseconds;
+                    var text = _whisper.Transcribe(samples, language: "en").Trim();
+                    sw.Stop();
+                    AppLog.Write(
+                        $"Whisper: {samples.Length / (double)VoiceRecorder.SampleRate:F1}s audio, "
+                        + $"load {loadMs}ms, total {sw.ElapsedMilliseconds}ms -> \"{text}\"");
+                    RunOnUiThread(() => InsertTranscript(text));
+                }
+                catch (Exception ex)
+                {
+                    AppLog.Write("Transcription failed", ex);
+                    RunOnUiThread(() =>
+                        Toast.MakeText(this, "Transcription failed: " + ex.Message, ToastLength.Short)!.Show());
+                }
+                finally
+                {
+                    RunOnUiThread(() =>
+                    {
+                        _transcribing = false;
+                        SetMicState(MicState.Idle);
+                        ScheduleIdleUnload();
+                    });
+                }
+            });
+        }
+
+        // Appends the recognised text into the composer (capped at the message limit), ready to edit/send.
+        private void InsertTranscript(string text)
+        {
+            if (string.IsNullOrEmpty(text))
+            {
+                Toast.MakeText(this, "Didn't catch that — try again.", ToastLength.Short)!.Show();
+                return;
+            }
+
+            var existing = _input.Text ?? string.Empty;
+            var combined = string.IsNullOrEmpty(existing) ? text : existing.TrimEnd() + " " + text;
+            if (combined.Length > MaxMessageChars)
+            {
+                combined = combined.Substring(0, MaxMessageChars);
+            }
+            _input.Text = combined;
+            _input.SetSelection(_input.Text!.Length);
+        }
+
+        private void SetMicState(MicState state)
+        {
+            _recHandler.RemoveCallbacksAndMessages(null);
+            StopMicPulse();
+
+            switch (state)
+            {
+                case MicState.Recording:
+                    _mic.Text = "■";
+                    _mic.Enabled = true;
+                    _mic.Alpha = 1f;
+                    _mic.Background = OvalFill(Color.ParseColor("#EF4444"));
+                    // Can't send (or type) while recording.
+                    _send.Enabled = false;
+                    _send.Alpha = 0.4f;
+                    _input.Enabled = false;
+                    StartMicPulse();
+                    UpdateRecHint();
+                    break;
+                case MicState.Transcribing:
+                    _mic.Text = "…";
+                    _mic.Enabled = false;
+                    _mic.Alpha = 0.6f;
+                    _mic.Background = OvalFill(Color.Argb(54, 255, 255, 255));
+                    _send.Enabled = false;
+                    _send.Alpha = 0.4f;
+                    _input.Enabled = false;
+                    _input.Hint = "Transcribing…";
+                    break;
+                default: // Idle
+                    _mic.Text = "🎤";
+                    _mic.Enabled = true;
+                    _mic.Alpha = 1f;
+                    _mic.Background = OvalFill(Color.Argb(54, 255, 255, 255));
+                    _send.Enabled = true;
+                    _send.Alpha = 1f;
+                    _input.Enabled = true;
+                    _input.Hint = "Message…";
+                    break;
+            }
+        }
+
+        // Pulsing scale on the mic button while recording — a clear "we're listening" cue.
+        private void StartMicPulse()
+        {
+            _micPulse = Android.Animation.ObjectAnimator.OfPropertyValuesHolder(_mic,
+                Android.Animation.PropertyValuesHolder.OfFloat("scaleX", 1f, 1.18f)!,
+                Android.Animation.PropertyValuesHolder.OfFloat("scaleY", 1f, 1.18f)!)!;
+            _micPulse.SetDuration(560);
+            _micPulse.RepeatCount = Android.Animation.ValueAnimator.Infinite;
+            _micPulse.RepeatMode = Android.Animation.ValueAnimatorRepeatMode.Reverse;
+            _micPulse.Start();
+        }
+
+        private void StopMicPulse()
+        {
+            _micPulse?.Cancel();
+            _micPulse = null;
+            if (_mic is not null)
+            {
+                _mic.ScaleX = 1f;
+                _mic.ScaleY = 1f;
+            }
+        }
+
+        // Silence-based auto-stop (endpointing): how long after speech ends before we cut, and a hard cap.
+        private const double EndpointSilenceSeconds = 1.2;
+        private const double MaxRecordSeconds = 30.0;
+
+        // Live "● Recording m:ss" while capturing + auto-stop once the user stops talking.
+        private void UpdateRecHint()
+        {
+            if (_recorder is not { IsRecording: true } rec)
+            {
+                return;
+            }
+
+            var s = (int)rec.Seconds;
+            _input.Hint = $"●  Recording  {s / 60}:{s % 60:D2}  —  tap ■ to stop";
+
+            // Stop automatically ~1.2 s after the speech tails off (only once we've actually heard speech, so
+            // leading silence doesn't trigger it), or at the hard cap.
+            var endBySilence = rec.SpeechDetected && rec.SilenceSeconds >= EndpointSilenceSeconds && rec.Seconds >= 0.8;
+            if (endBySilence || rec.Seconds >= MaxRecordSeconds)
+            {
+                StopAndTranscribe();
+                return;
+            }
+
+            _recHandler.PostDelayed(UpdateRecHint, 250);
+        }
+
+        private void PromptAddWhisperModel()
+        {
+            new AlertDialog.Builder(this)!
+                .SetTitle("Voice input")!
+                .SetMessage(
+                    "Voice input transcribes your speech entirely on-device with Whisper — fully offline, "
+                    + "nothing is uploaded.\n\nIt needs a Whisper speech model: a whisper.cpp ggml .bin file "
+                    + "(e.g. ggml-tiny.bin, ~75 MB). Add one from your files?")!
+                .SetPositiveButton("Add model file", (_, _) => PickWhisperModel())!
+                .SetNegativeButton("Cancel", (_, _) => { })!
+                .Show();
+        }
+
+        private void PickWhisperModel()
+        {
+            var intent = new Intent(Intent.ActionOpenDocument);
+            intent.AddCategory(Intent.CategoryOpenable!);
+            intent.SetType("*/*");
+            StartActivityForResult(Intent.CreateChooser(intent, "Pick a Whisper ggml .bin"), RequestPickWhisper);
+        }
+
+        public override void OnRequestPermissionsResult(
+            int requestCode, string[] permissions, Permission[] grantResults)
+        {
+            base.OnRequestPermissionsResult(requestCode, permissions, grantResults);
+            if (requestCode == RequestRecordPermission)
+            {
+                if (grantResults.Length > 0 && grantResults[0] == Permission.Granted)
+                {
+                    StartRecording();
+                }
+                else
+                {
+                    Toast.MakeText(this, "Microphone permission is needed for voice input.",
+                        ToastLength.Short)!.Show();
+                }
+            }
+        }
+
         private const string GitHubUrl = "https://github.com/DevOnBike/Overfit";
 
         private void ShowAbout()
@@ -769,6 +1346,10 @@ namespace DevOnBike.OverfitChat
                 + "It's powered by Overfit: an open-source, pure-C# / .NET deep-learning & inference engine "
                 + "(zero-allocation CPU inference, GGUF models, no Python runtime).\n\n"
                 + "Pick any GGUF model and chat with streaming tokens, fully offline.";
+            // Voice input (on-device Whisper) is temporarily hidden from the UI while it's being polished;
+            // when re-enabled, restore this line: "Voice input (optional): add a Whisper speech model
+            // (a whisper.cpp ggml .bin file) from the start screen to enable the 🎤 button — speech is
+            // transcribed entirely on your device and the audio is never uploaded."
 
             new AlertDialog.Builder(this)!
                 .SetTitle("About OverThink")!
@@ -868,9 +1449,60 @@ namespace DevOnBike.OverfitChat
             return uri.LastPathSegment;
         }
 
+        // Single-Activity with screen-swapping (no fragment/activity back-stack): Back from the chat screen
+        // should return to the model-select (welcome) screen, not exit the app. Modern Android (API 33+) routes
+        // Back through the predictive-back dispatcher and does NOT call OnBackPressed, so on the chat screen we
+        // register an OnBackInvokedCallback (→ welcome) and unregister it on welcome (so Back there exits, the
+        // default). OnBackPressed is kept for API < 33 devices.
+        private Java.Lang.Object? _backCallback;
+
+        private void EnableChatBackHandling()
+        {
+            if (!OperatingSystem.IsAndroidVersionAtLeast(33) || _backCallback is not null)
+            {
+                return;
+            }
+            var cb = new BackToWelcomeCallback(() => ShowWelcome());
+            OnBackInvokedDispatcher!.RegisterOnBackInvokedCallback(0 /* PRIORITY_DEFAULT */, cb);
+            _backCallback = cb;
+        }
+
+        private void DisableChatBackHandling()
+        {
+            if (!OperatingSystem.IsAndroidVersionAtLeast(33) || _backCallback is not Android.Window.IOnBackInvokedCallback cb)
+            {
+                return;
+            }
+            OnBackInvokedDispatcher!.UnregisterOnBackInvokedCallback(cb);
+            _backCallback = null;
+        }
+
+        public override void OnBackPressed()
+        {
+            if (_inChat)
+            {
+                ShowWelcome(); // legacy path (API < 33)
+                return;
+            }
+            base.OnBackPressed();
+        }
+
+        private sealed class BackToWelcomeCallback : Java.Lang.Object, Android.Window.IOnBackInvokedCallback
+        {
+            private readonly Action _action;
+            public BackToWelcomeCallback(Action action) => _action = action;
+            public void OnBackInvoked() => _action();
+        }
+
         protected override void OnDestroy()
         {
             _idleHandler.RemoveCallbacksAndMessages(null);
+            _recHandler.RemoveCallbacksAndMessages(null);
+            _statsHandler.RemoveCallbacksAndMessages(null);
+            StopMicPulse();
+            _recorder?.Cancel();
+            _recorder = null;
+            _whisper = null;
             _client?.Dispose();
             _client = null;
             base.OnDestroy();
@@ -942,6 +1574,24 @@ namespace DevOnBike.OverfitChat
                 new[] { Color.ParseColor("#7C3AED").ToArgb(), Color.ParseColor("#2563EB").ToArgb() });
             d.SetShape(ShapeType.Oval);
             return d;
+        }
+
+        private GradientDrawable OvalFill(Color fill)
+        {
+            var d = new GradientDrawable();
+            d.SetShape(ShapeType.Oval);
+            d.SetColor(fill);
+            return d;
+        }
+
+        private static string SafeFileName(string name, string ext)
+        {
+            var safe = string.Join("_", name.Split(System.IO.Path.GetInvalidFileNameChars()));
+            if (!safe.EndsWith(ext, StringComparison.OrdinalIgnoreCase))
+            {
+                safe += ext;
+            }
+            return safe;
         }
     }
 

@@ -46,7 +46,7 @@ on today versus what is still hardening. (Model-by-model support is in [Supporte
 | Tier | Capabilities |
 |---|---|
 | **Stable** — validated end-to-end, build a PoC on it | LocalAgent ASP.NET demo (chat · RAG · tools · JSON · metrics · Docker) · GGUF chat (Qwen 2/3, Llama, Mistral, Phi-3.5/4, Gemma-2, Mixtral, Bielik) · in-process RAG + `VectorStore` + **persistent index** (`PersistentVectorStore`) · guaranteed JSON (grammar **and** JSON-Schema subset) · OpenAI-compatible server (`overfit serve`, multi-session pool via `--sessions N`) · `Microsoft.Extensions.AI` adapter (`IChatClient` / `IEmbeddingGenerator`) · MCP tools profile · Whisper STT (tiny/base, EN + PL) · BERT embeddings (MiniLM / BGE / E5) · `overfit doctor` model inspector |
-| **Preview** — works and tested, newer / heavier / advanced | CPU QLoRA fine-tuning *(advanced moat)* · local preset-voice TTS · large MoE models (Qwen1.5-MoE, Mixtral-8x7B) · serving benchmark (`overfit bench`) · interpretability hooks (activation capture + logit lens) · XGBoost tabular scoring (read-only predictor, parity-validated vs XGBoost 3.3.0, zero-alloc) |
+| **Preview** — works and tested, newer / heavier / advanced | CPU QLoRA fine-tuning *(advanced moat)* · local preset-voice TTS · large MoE models (Qwen1.5-MoE, Mixtral-8x7B) · serving benchmark (`overfit bench`) · interpretability hooks (activation capture + logit lens) · XGBoost tabular scoring (read-only predictor, parity-validated vs XGBoost 3.3.0, zero-alloc) · offline Q4_K weight repack (`overfit repack`) for ~1.6× faster prefill at no extra RAM |
 | **Experimental** — opt-in / gated / incomplete | Voice cloning (consent + watermark gated) · whole-matrix Q4_K attention (`OVERFIT_REPACK_ATTN`, off by default) · multilingual / XLM-R (SentencePiece) embedders *(not yet)* · Qwen3-MoE & other new-arch loaders *(not yet)* |
 
 Every claim above maps to a runnable test, benchmark, demo, or CI guard — see [`docs/claim-to-test.md`](docs/claim-to-test.md) (the audit trail for regulated teams).
@@ -213,8 +213,16 @@ and the decode worker pool **parks when idle**, so a serving container at rest s
 overfit serve qwen2.5-3b --port 11434              # one self-contained binary; nothing leaves the box
 overfit serve qwen2.5-3b --port 11434 --sessions 4 # 4 concurrent sessions (shared weights, N× KV cache)
 overfit doctor C:\models\model.gguf                # inspect a GGUF: arch, quant, tokenizer, chat template, supported?
+overfit repack C:\models\qwen2.5-3b.q4km.gguf      # one-time: pre-repack Q4_K weights → faster prefill, no extra RAM
 overfit score model.json --input rows.csv          # score a CSV with a trained XGBoost model (JSON), pure-managed, zero-alloc
 ```
+
+`overfit repack` is a one-time offline step for Q4_K (`Q4_K_M`) models: it converts the matmul weights to the
+kernel's interleaved layout and writes a memory-mapped `<model>.repack` sidecar next to the GGUF. On the next
+load the sidecar is auto-discovered and mapped in, so prompt processing runs the register-tiled kernel **by
+default** — measured ~1.6× faster time-to-first-token on Qwen-3B — at **no extra RAM** (it is mmap'd, not
+copied) and with no change to what the model generates. Delete the sidecar to revert. Non-Q4_K models are
+unaffected.
 
 `overfit score` runs a model trained elsewhere (XGBoost `booster.save_model("model.json")`) over a CSV of
 feature rows — header auto-detected, an empty cell or `nan`/`na`/`?` is a missing value, `--margin` emits raw
@@ -274,6 +282,20 @@ docker run -p 8080:8080 -v /host/models:/models <your-dockerhub-user>/overfit /m
 free-hosting options, and model-on-boot.
 
 ---
+
+### 7. Test — and self-improve — agent skills, locally
+
+Prompts and agent skills are code, so Overfit lets you **evaluate them like code** — offline, deterministically
+(greedy/seeded → byte-reproducible), at zero per-eval API cost, with a rubric grader whose JSON is *guaranteed
+valid*. A small dataset runs a skill **ON vs OFF** on a local model; deterministic C# checks answer "did it do the
+basics?", a schema-locked local judge answers "is it good?", and the report's **lift** (pass-rate ON − OFF) is the
+real signal — a near-zero lift means the bare model already does it, so the skill can be retired. Trigger accuracy
+is graded deterministically via constrained tool-selection. On top of that, **SkillOpt** self-improves a skill's
+instructions in text space (no weights touched): an optimizer model proposes bounded edits from the failures, and
+each edit is kept **only when it strictly raises a held-out score** — so the loop can improve a prompt but never
+regress it. All of it rides on primitives you already have (local generation, `SkillEvaluator`, guaranteed JSON).
+See [`Sources/Main/LanguageModels/Skills/README.md`](Sources/Main/LanguageModels/Skills/README.md),
+[docs/skill-eval.md](docs/skill-eval.md) and `Demo/SkillEvalConsole`.
 
 ## What you can build today
 
@@ -555,7 +577,7 @@ for that.
 
 - **Inference** — GGUF (Q4_K_M / Q6_K / Q8_0 / Q5_0 / Q5_K / F32 / F16 / BF16, memory-mapped); Qwen2.5, Llama-2/3.x, Mistral, Mixtral & Qwen-MoE; GPT-2 / GPT-1 (byte-parity vs PyTorch). KV-cache + optional Q8 KV; ~220 MB heap / 1 B-per-token for a 3B model.
 - **Loaders** — GGUF, HuggingFace safetensors (sharded), Overfit `.bin`, ONNX (linear + DAG). 100% Python-free; tokenizers read straight from the GGUF.
-- **Agentic & structured output** — tool calling, guaranteed JSON, **JSON-Schema & regex constrained decoding**, ReAct / critic / circuit-breaker / summarizing memory, composable sampling.
+- **Agentic & structured output** — tool calling, guaranteed JSON, **JSON-Schema & regex constrained decoding**, ReAct / critic / circuit-breaker / summarizing memory, and a full **sampler suite** (temperature · top-k/p · min-p · top-nσ · locally-typical · Mirostat v1/v2 · XTC) plus a **DRY anti-repetition** guard that breaks verbatim generation loops even under greedy decode.
 - **RAG** — in-process vector store; MiniLM / BGE / E5 embeddings (bit-parity vs HuggingFace); multilingual via the chat model's own embeddings; **RAG Stability Harness** (recall / paraphrase / false-premise / lint, gated in CI).
 - **Integration** — **OpenAI-compatible server** (`/v1/chat/completions` + SSE, `/v1/embeddings`, `/v1/models`); **MCP server** (`overfit mcp` — local `ask` / `rag_query` / `transcribe` tools for Claude Code & co., [`docs/mcp.md`](docs/mcp.md)); **Microsoft.Extensions.AI** adapter; **`overfit` CLI** (pull / list / chat / serve / mcp) shipped three ways — `dotnet tool install -g DevOnBike.Overfit.Cli`, a Native-AOT binary, and a ~34 MB Docker image ([`docs/docker.md`](docs/docker.md)); ASP.NET starter template.
 - **Training** — **QLoRA CPU fine-tuning** (frozen Q4_K base incl. FFN + per-head attention), gradient checkpointing, data-parallel trainer, Conv/BatchNorm/LSTM, CRNN + CTC (OCR), LR schedules.

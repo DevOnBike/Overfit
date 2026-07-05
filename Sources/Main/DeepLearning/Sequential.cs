@@ -178,9 +178,11 @@ namespace DevOnBike.Overfit.DeepLearning
 
             if (currentInput.Length % shapeProvider.InferenceInputSize != 0)
             {
+#pragma warning disable RS0030 // Type.Name = compile-time-safe type name for a diagnostic, not runtime reflection (AOT-safe)
                 throw new ArgumentException(
                     $"Input length for module {module.GetType().Name} is not divisible by " +
                     $"InferenceInputSize={shapeProvider.InferenceInputSize}.");
+#pragma warning restore RS0030
             }
 
             var batchSize = currentInput.Length / shapeProvider.InferenceInputSize;

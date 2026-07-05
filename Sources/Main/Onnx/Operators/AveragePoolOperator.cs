@@ -3,7 +3,6 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using System.Linq;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.DeepLearning.Abstractions;
 using DevOnBike.Overfit.Onnx.Schema;
@@ -70,7 +69,16 @@ namespace DevOnBike.Overfit.Onnx.Operators
                 throw new OverfitRuntimeException("AveragePool: ceil_mode=1 not supported.");
             }
 
-            if (dilations.Any(d => d != 1))
+            var hasDilation = false;
+            foreach (var d in dilations)
+            {
+                if (d != 1)
+                {
+                    hasDilation = true;
+                    break;
+                }
+            }
+            if (hasDilation)
             {
                 throw new OverfitRuntimeException(
                     $"AveragePool: dilations [{string.Join(",", dilations)}] not supported.");

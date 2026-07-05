@@ -47,7 +47,7 @@ dotnet test ./Tests/Tests.csproj -c Release --collect:"XPlat Code Coverage" --re
 dotnet run -c Release --project Sources/Benchmark -- --filter "*SingleInferenceBenchmark*"
 .\Sources\Benchmark\run.cmd                                      # runs all benchmarks (--filter *)
 
-dotnet publish ./Sources/AotSmokeTest/AotSmokeTest.csproj -c Release -r linux-x64 -p:PublishAot=true -p:TreatWarningsAsErrors=true  # real AOT guard (requires C++ toolchain locally)
+dotnet publish ./Tests/AotSmokeTest/AotSmokeTest.csproj -c Release -r linux-x64 -p:PublishAot=true -p:TreatWarningsAsErrors=true  # real AOT guard (requires C++ toolchain locally)
 .\update-code-headers.cmd                                        # applies file-header template (dotnet format / IDE0073)
 .\cleanup.cmd                                                    # purge bin/obj/.vs caches
 ```
@@ -75,7 +75,7 @@ Two independent layers guard the library against trim/AOT regressions:
    - `System.Activator`
    - `Array.Copy` (use `Span<T>.CopyTo`)
    - Raw `ArrayPool<T>.Shared` (use `PooledBuffer<T>` or `PooledArray`)
-2. **`Sources/AotSmokeTest`** is a thin console exe that the `aot-guard` CI job publishes under `PublishAot=true` + `TreatWarningsAsErrors=true`. Libraries cannot be Native-AOT compiled directly (no entry point), so the smoketest is the real AOT consumer — ILCompiler actually runs, IL2026 / IL3050 / IL31xx warnings on reachable code are promoted to errors, and the resulting native binary is executed as a smoke check. Extend `Sources/AotSmokeTest/Program.cs` cautiously: each new touched type or method widens AOT verification scope but may surface latent trim warnings that block publish until the library is fixed.
+2. **`Tests/AotSmokeTest`** is a thin console exe that the `aot-guard` CI job publishes under `PublishAot=true` + `TreatWarningsAsErrors=true`. Libraries cannot be Native-AOT compiled directly (no entry point), so the smoketest is the real AOT consumer — ILCompiler actually runs, IL2026 / IL3050 / IL31xx warnings on reachable code are promoted to errors, and the resulting native binary is executed as a smoke check. Extend `Tests/AotSmokeTest/Program.cs` cautiously: each new touched type or method widens AOT verification scope but may surface latent trim warnings that block publish until the library is fixed.
 
 Use explicit `for`/`foreach` over `Span<T>`, delegates over reflection, explicit
 `new` over `Activator`. This rule applies to `Sources/Main` only — tests and

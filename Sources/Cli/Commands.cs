@@ -8,13 +8,15 @@ using System.Net;
 using DevOnBike.Overfit.Audio;
 using DevOnBike.Overfit.Audio.Tts;
 using DevOnBike.Overfit.Audio.Tts.Orpheus;
+using DevOnBike.Overfit.Diagnostics;
 using DevOnBike.Overfit.LanguageModels;
+using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Embeddings;
 using DevOnBike.Overfit.LanguageModels.Loading;
 using DevOnBike.Overfit.LanguageModels.Whisper;
 using DevOnBike.Overfit.Mcp;
-using DevOnBike.Overfit.Runtime;
 using DevOnBike.Overfit.Redaction;
+using DevOnBike.Overfit.Runtime;
 using DevOnBike.Overfit.Server;
 using DevOnBike.Overfit.Serving;
 using DevOnBike.Overfit.Trees;
@@ -304,6 +306,47 @@ namespace DevOnBike.Overfit.Cli
         /// warnings. Read-only (parses metadata + tensor headers; does not load weights) — answers the #1
         /// adoption question, "why doesn't my model work / is the tokenizer + template detected".
         /// </summary>
+        public static int Repack(string model, string? output)
+        {
+            var path = ModelCache.Resolve(model);
+            if (path is null)
+            {
+                Console.Error.WriteLine($"Model '{model}' not found in {ModelCache.Dir}.");
+                Console.Error.WriteLine($"Download it first:  overfit pull {model}   (or pass a .gguf path directly)");
+                return 1;
+            }
+
+            // Default sidecar path is what the loader auto-discovers: <model>.repack next to the GGUF.
+            var outPath = output ?? path + ".repack";
+
+            Console.WriteLine($"Repacking Q4_K matmul weights of {Path.GetFileName(path)} → block_q4_Kx8 …");
+            int count;
+            var sw = ValueStopwatch.StartNew();
+            try
+            {
+                count = RepackedWeightsFile.BuildFromGguf(path, outPath);
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Repack failed: {ex.Message}");
+                return 1;
+            }
+
+            if (count == 0)
+            {
+                Console.WriteLine("No repackable Q4_K matmul weights found (model is not Q4_K, or shapes don't tile).");
+                Console.WriteLine("Nothing to accelerate — the sidecar was written empty and can be deleted.");
+                return 0;
+            }
+
+            var mb = new FileInfo(outPath).Length / (1024.0 * 1024.0);
+            Console.WriteLine($"Wrote {count} tensors ({mb:F0} MB) → {outPath}  in {sw.GetElapsedTime().TotalSeconds:F1}s");
+            Console.WriteLine(
+                "It is auto-loaded next to the model: prefill then uses the register-tiled kernel by default "
+                + "(~1.6× faster time-to-first-token), memory-mapped so it costs no extra RAM.");
+            return 0;
+        }
+
         public static int Doctor(string model)
         {
             var path = ModelCache.Resolve(model);
@@ -588,7 +631,7 @@ namespace DevOnBike.Overfit.Cli
             }
 
             var outputs = new float[(long)rows.Count * groups];
-            var sw = System.Diagnostics.Stopwatch.StartNew();
+            var sw = ValueStopwatch.StartNew();
             if (margin)
             {
                 // Raw, pre-transform margins (XGBoost output_margin=True).
@@ -601,7 +644,6 @@ namespace DevOnBike.Overfit.Cli
             {
                 model.PredictBatchParallel(flat, rows.Count, outputs);
             }
-            sw.Stop();
 
             using var writer = outputPath is null ? null : new StreamWriter(outputPath);
             void Emit(string text)
@@ -622,10 +664,10 @@ namespace DevOnBike.Overfit.Cli
                 Emit(FormatRow(outputs.AsSpan(r * groups, groups)));
             }
 
-            var nsPerRow = sw.Elapsed.TotalMilliseconds * 1e6 / rows.Count;
+            var nsPerRow = sw.GetElapsedTime().TotalMilliseconds * 1e6 / rows.Count;
             Console.Error.WriteLine(
                 $"Scored {rows.Count:N0} rows · {model.NumTrees} trees · {model.Objective} · "
-                + $"{model.NumGroups} output(s) · {sw.Elapsed.TotalMilliseconds:F1} ms ({nsPerRow:F0} ns/row)"
+                + $"{model.NumGroups} output(s) · {sw.GetElapsedTime().TotalMilliseconds:F1} ms ({nsPerRow:F0} ns/row)"
                 + (outputPath is null ? string.Empty : $" → {outputPath}"));
             return 0;
         }
@@ -1189,7 +1231,66 @@ namespace DevOnBike.Overfit.Cli
             return result;
         }
 
-        public static int Chat(string model)
+        // Maps the CLI sampling flags to a single SamplingOptions strategy. 0 = off for each knob; if any
+        // truncation knob is set the temperature defaults to 1.0 (else the engine would run greedy and skip it).
+        private static SamplingOptions BuildSampling(
+            float temperature, int topK, float topP, float minP, float topNSigma, float typicalP)
+        {
+            var anyTrunc = topK > 0 || (topP > 0f && topP < 1f) || minP > 0f || topNSigma > 0f
+                || (typicalP > 0f && typicalP < 1f);
+            if (temperature <= 0f && !anyTrunc)
+            {
+                return SamplingOptions.Greedy;
+            }
+
+            var t = temperature > 0f ? temperature : 1.0f;
+            if (topNSigma > 0f)
+            {
+                return SamplingOptions.WithTopNSigma(topNSigma, t);
+            }
+            if (typicalP > 0f && typicalP < 1f)
+            {
+                return SamplingOptions.WithTypicalP(typicalP, t);
+            }
+            if (minP > 0f)
+            {
+                return SamplingOptions.WithMinP(minP, t);
+            }
+            if (topK > 0 && topP > 0f && topP < 1f)
+            {
+                return new SamplingOptions(SamplingStrategy.TopKTopP, t, topK, topP, seed: 0);
+            }
+            if (topP > 0f && topP < 1f)
+            {
+                return new SamplingOptions(SamplingStrategy.TopP, t, 0, topP, seed: 0);
+            }
+            if (topK > 0)
+            {
+                return new SamplingOptions(SamplingStrategy.TopK, t, topK, 1f, seed: 0);
+            }
+            return new SamplingOptions(SamplingStrategy.Temperature, t, 0, 1f, seed: 0);
+        }
+
+        private static string DescribeSampling(SamplingOptions s) => s.Strategy switch
+        {
+            SamplingStrategy.Greedy => "greedy (deterministic)",
+            SamplingStrategy.TopNSigma => $"top-nσ n={s.NSigma} · temp {s.Temperature}",
+            SamplingStrategy.TypicalP => $"typical-p {s.TypicalP} · temp {s.Temperature}",
+            SamplingStrategy.MinP => $"min-p {s.MinP} · temp {s.Temperature}",
+            SamplingStrategy.TopKTopP => $"top-k {s.TopK} + top-p {s.TopP} · temp {s.Temperature}",
+            SamplingStrategy.TopP => $"top-p {s.TopP} · temp {s.Temperature}",
+            SamplingStrategy.TopK => $"top-k {s.TopK} · temp {s.Temperature}",
+            _ => $"temperature {s.Temperature}",
+        };
+
+        public static int Chat(
+            string model,
+            float temperature = 0f,
+            int topK = 0,
+            float topP = 0f,
+            float minP = 0f,
+            float topNSigma = 0f,
+            float typicalP = 0f)
         {
             var path = ModelCache.Resolve(model);
             if (path is null)
@@ -1213,6 +1314,12 @@ namespace DevOnBike.Overfit.Cli
                 Console.Error.WriteLine("or a model whose hidden size is a multiple of 256 (e.g. qwen2.5-3b).");
                 return 1;
             }
+
+            var sampling = BuildSampling(temperature, topK, topP, minP, topNSigma, typicalP);
+            var o = client.Options;
+            client.Options = new GenerationOptions(
+                o.MaxNewTokens, o.MaxContextLength, sampling, o.StopOnEndOfTextToken, o.EndOfTextTokenId);
+            Console.WriteLine($"Sampling: {DescribeSampling(sampling)}");
 
             client.AddSystem("You are a concise, helpful assistant running locally in pure .NET.");
             Console.WriteLine("Ready. Type a message; /reset clears the conversation, /exit quits.");

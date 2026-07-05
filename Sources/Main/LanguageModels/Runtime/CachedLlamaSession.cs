@@ -45,6 +45,14 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         private readonly float[] _scoreScratch;
         private readonly Random _random;
 
+        // DRY (Don't-Repeat-Yourself) anti-loop: a rolling history of the tokens THIS session generated, plus
+        // reusable Z-algorithm scratch. ApplyDry penalises would-be verbatim repetitions on the logits before
+        // sampling — bounded to the last DryHistoryCap tokens so the scratch stays fixed-size (zero per-token alloc).
+        private const int DryHistoryCap = 512;
+        private readonly List<int> _generatedTokens = new(DryHistoryCap);
+        private readonly int[] _dryRev = new int[DryHistoryCap];
+        private readonly int[] _dryZ = new int[DryHistoryCap];
+
         private bool _disposed;
         private bool _slidingWindow;
         private int _evictBlock;
@@ -146,6 +154,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         {
             ThrowIfDisposed();
             _cache.Reset();
+            _generatedTokens.Clear();
         }
 
         /// <summary>
@@ -279,6 +288,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
             DecodeProfiler.BeginToken();
             constraint?.ApplyMask(_logits.AsSpan(0, VocabularySize));
+            ApplyDry(in sampling);
 
             var profSample = DecodeProfiler.Start();
             var token = TokenSampler.Sample(
@@ -286,9 +296,55 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             DecodeProfiler.Stop(DecodeProfiler.Component.Sampler, profSample);
 
             constraint?.Accept(token);
+            TrackGenerated(token);
             DecodeToken(token);
             DecodeProfiler.EndToken();
             return token;
+        }
+
+        /// <summary>
+        /// Applies the DRY (Don't-Repeat-Yourself) penalty to the current logits before sampling: subtracts a
+        /// length-scaled penalty from any token that would extend a verbatim repetition of the recent output.
+        /// Acts on the logits (not the sampler), so it constrains greedy and stochastic decode alike, and reuses
+        /// fixed scratch for the Z-algorithm — zero per-token allocation. No-op when DryMultiplier ≤ 0.
+        /// </summary>
+        private void ApplyDry(in SamplingOptions sampling)
+        {
+            if (sampling.DryMultiplier <= 0f || _generatedTokens.Count < 2)
+            {
+                return;
+            }
+
+            var count = _generatedTokens.Count;
+            var lastN = sampling.DryPenaltyLastN;
+            var start = lastN > 0 && count > lastN ? count - lastN : 0;
+            var m = count - start;
+            if (m < 2 || m > DryHistoryCap)
+            {
+                return;
+            }
+
+            // Zero-alloc window over the list's backing store; the DRY core reuses _dryRev/_dryZ for the Z-algorithm.
+            var window = System.Runtime.InteropServices.CollectionsMarshal.AsSpan(_generatedTokens).Slice(start, m);
+            Sampling.SamplingPipeline.Dry.Apply(
+                _logits.AsSpan(0, VocabularySize),
+                window,
+                sampling.DryMultiplier,
+                sampling.DryBase,
+                sampling.DryAllowedLength,
+                _dryRev.AsSpan(0, m),
+                _dryZ.AsSpan(0, m));
+        }
+
+        /// <summary>Appends a generated token to the DRY history, dropping the oldest once the cap is hit so the
+        /// window (and thus the reusable scratch) stays bounded. No-op cost when DRY is unused beyond the append.</summary>
+        private void TrackGenerated(int token)
+        {
+            if (_generatedTokens.Count >= DryHistoryCap)
+            {
+                _generatedTokens.RemoveAt(0);
+            }
+            _generatedTokens.Add(token);
         }
 
         /// <summary>

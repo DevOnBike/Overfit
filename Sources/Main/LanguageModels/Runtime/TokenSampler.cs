@@ -18,6 +18,12 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
     {
         private const float MinimumTemperature = 1e-6f;
 
+        // Nucleus / typical sets are tiny in practice, so top-p / typical-p partial-sort just the top candidates
+        // (size-k min-heap, O(V·log k)) instead of the whole vocabulary (O(V·log V)) — a ~10× cut on a 150k
+        // vocab. If the surviving set is unexpectedly larger than this cap, they fall back to a full sort so the
+        // result is always exact. Internal (not const) so tests can shrink it to exercise the fallback path.
+        internal static int NucleusPartialCap = 1024;
+
         public static int Sample(
             ReadOnlySpan<float> logits,
             in SamplingOptions options,
@@ -96,6 +102,12 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
                 case SamplingStrategy.MinP when options.MinP > 0f:
                     return SelectMinP(logits, options.MinP, temperature, indexScratch, scoreScratch);
+
+                case SamplingStrategy.TopNSigma when options.NSigma > 0f:
+                    return SelectTopNSigma(logits, options.NSigma, indexScratch, scoreScratch);
+
+                case SamplingStrategy.TypicalP when options.TypicalP < 1f:
+                    return SelectTypicalP(logits, options.TypicalP, temperature, indexScratch, scoreScratch);
 
                 default:
                     PrepareAllScores(logits, indexScratch, scoreScratch);
@@ -266,6 +278,208 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             return 1;
         }
 
+        // Top-nσ: keep tokens with logit ≥ max − n·σ (σ = std-dev of the finite logits). Acts on raw logits,
+        // so it needs no temperature and no sort — a single-threshold pass like Min-P.
+        private static int SelectTopNSigma(
+            ReadOnlySpan<float> logits, float nSigma, Span<int> indexScratch, Span<float> scoreScratch)
+        {
+            var count = 0;
+            var max = float.NegativeInfinity;
+            var sum = 0.0;
+            for (var i = 0; i < logits.Length; i++)
+            {
+                var v = logits[i];
+                if (float.IsNegativeInfinity(v))
+                {
+                    continue;
+                }
+                count++;
+                sum += v;
+                if (v > max)
+                {
+                    max = v;
+                }
+            }
+            if (count == 0)
+            {
+                return FallbackToArgMax(logits, indexScratch, scoreScratch);
+            }
+
+            var mean = sum / count;
+            var varSum = 0.0;
+            for (var i = 0; i < logits.Length; i++)
+            {
+                var v = logits[i];
+                if (float.IsNegativeInfinity(v))
+                {
+                    continue;
+                }
+                var d = v - mean;
+                varSum += d * d;
+            }
+            var threshold = max - (nSigma * (float)Math.Sqrt(varSum / count));
+
+            var kept = 0;
+            for (var token = 0; token < logits.Length; token++)
+            {
+                if (logits[token] >= threshold)
+                {
+                    indexScratch[kept] = token;
+                    scoreScratch[kept] = logits[token];
+                    kept++;
+                }
+            }
+            return kept == 0 ? FallbackToArgMax(logits, indexScratch, scoreScratch) : kept;
+        }
+
+        // Locally typical sampling: keep the tokens whose surprise (−ln p) is closest to the entropy until
+        // their cumulative probability ≥ p. Sorts by deviation (via the existing heap sort on a negated key),
+        // then restores the survivors' logits from the original span so the terminal draw softmaxes them.
+        private static int SelectTypicalP(
+            ReadOnlySpan<float> logits, float typicalP, float temperature,
+            Span<int> indexScratch, Span<float> scoreScratch)
+        {
+            var n = logits.Length;
+
+            var max = float.NegativeInfinity;
+            for (var i = 0; i < n; i++)
+            {
+                if (logits[i] > max)
+                {
+                    max = logits[i];
+                }
+            }
+            if (float.IsNegativeInfinity(max))
+            {
+                return FallbackToArgMax(logits, indexScratch, scoreScratch);
+            }
+
+            var inverseTemperature = 1.0 / temperature;
+            var sum = 0.0;
+            for (var i = 0; i < n; i++)
+            {
+                if (!float.IsNegativeInfinity(logits[i]))
+                {
+                    sum += Math.Exp((logits[i] - max) * inverseTemperature);
+                }
+            }
+            if (sum <= 0.0)
+            {
+                return FallbackToArgMax(logits, indexScratch, scoreScratch);
+            }
+
+            var entropy = 0.0;
+            for (var i = 0; i < n; i++)
+            {
+                if (float.IsNegativeInfinity(logits[i]))
+                {
+                    continue;
+                }
+                var p = Math.Exp((logits[i] - max) * inverseTemperature) / sum;
+                if (p > 0.0)
+                {
+                    entropy -= p * Math.Log(p);
+                }
+            }
+
+            // Sort key = −deviation, so a descending sort orders tokens by ascending typicality deviation.
+            for (var i = 0; i < n; i++)
+            {
+                indexScratch[i] = i;
+                if (float.IsNegativeInfinity(logits[i]))
+                {
+                    scoreScratch[i] = float.NegativeInfinity;
+                    continue;
+                }
+                var p = Math.Exp((logits[i] - max) * inverseTemperature) / sum;
+                var dev = Math.Abs(-Math.Log(p) - entropy);
+                scoreScratch[i] = (float)(-dev);
+            }
+
+            var cap = Math.Min(n, NucleusPartialCap);
+            PartialSortDescendingInPlace(indexScratch[..n], scoreScratch[..n], n, cap);
+
+            var cumulative = 0.0;
+            var count = 0;
+            var reached = false;
+            for (var j = 0; j < cap; j++)
+            {
+                var token = indexScratch[j];
+                if (float.IsNegativeInfinity(logits[token]))
+                {
+                    break; // masked tokens sort last; none of the real tail is beyond here
+                }
+                count++;
+                cumulative += Math.Exp((logits[token] - max) * inverseTemperature) / sum;
+                if (cumulative >= typicalP)
+                {
+                    reached = true;
+                    break;
+                }
+            }
+            if (count == 0)
+            {
+                return FallbackToArgMax(logits, indexScratch, scoreScratch);
+            }
+
+            // Kept set is complete when we hit the target, saw the whole vocab, or ran out of finite tokens
+            // within the cap; otherwise the typical set spills past the cap → fall back to a full sort (rare).
+            if (reached || cap == n || count < cap)
+            {
+                for (var j = 0; j < count; j++)
+                {
+                    scoreScratch[j] = logits[indexScratch[j]];
+                }
+                return count;
+            }
+            return SelectTypicalPFull(logits, typicalP, temperature, entropy, max, sum, inverseTemperature, indexScratch, scoreScratch);
+        }
+
+        private static int SelectTypicalPFull(
+            ReadOnlySpan<float> logits, float typicalP, float temperature, double entropy, float max, double sum,
+            double inverseTemperature, Span<int> indexScratch, Span<float> scoreScratch)
+        {
+            var n = logits.Length;
+            for (var i = 0; i < n; i++)
+            {
+                indexScratch[i] = i;
+                if (float.IsNegativeInfinity(logits[i]))
+                {
+                    scoreScratch[i] = float.NegativeInfinity;
+                    continue;
+                }
+                var p = Math.Exp((logits[i] - max) * inverseTemperature) / sum;
+                scoreScratch[i] = (float)(-Math.Abs(-Math.Log(p) - entropy));
+            }
+            SortDescending(indexScratch[..n], scoreScratch[..n]);
+
+            var cumulative = 0.0;
+            var count = 0;
+            for (var j = 0; j < n; j++)
+            {
+                var token = indexScratch[j];
+                if (float.IsNegativeInfinity(logits[token]))
+                {
+                    break;
+                }
+                count++;
+                cumulative += Math.Exp((logits[token] - max) * inverseTemperature) / sum;
+                if (cumulative >= typicalP)
+                {
+                    break;
+                }
+            }
+            if (count == 0)
+            {
+                return FallbackToArgMax(logits, indexScratch, scoreScratch);
+            }
+            for (var j = 0; j < count; j++)
+            {
+                scoreScratch[j] = logits[indexScratch[j]];
+            }
+            return count;
+        }
+
         private static int SelectTopK(
             ReadOnlySpan<float> logits,
             int topK,
@@ -338,19 +552,63 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             Span<int> indexScratch,
             Span<float> scoreScratch)
         {
-            PrepareAllScores(
-                logits,
-                indexScratch,
-                scoreScratch);
+            var n = logits.Length;
 
-            SortDescending(
-                indexScratch[..logits.Length],
-                scoreScratch[..logits.Length]);
+            var max = float.NegativeInfinity;
+            for (var i = 0; i < n; i++)
+            {
+                if (logits[i] > max)
+                {
+                    max = logits[i];
+                }
+            }
+            if (float.IsNegativeInfinity(max))
+            {
+                return FallbackToArgMax(logits, indexScratch, scoreScratch);
+            }
 
-            return NucleusFromSorted(
-                scoreScratch[..logits.Length],
-                topP,
-                temperature);
+            var inverseTemperature = 1.0 / temperature;
+            var sum = 0.0;
+            for (var i = 0; i < n; i++)
+            {
+                if (!float.IsNegativeInfinity(logits[i]))
+                {
+                    sum += Math.Exp((logits[i] - max) * inverseTemperature);
+                }
+            }
+            if (sum <= 0.0)
+            {
+                return FallbackToArgMax(logits, indexScratch, scoreScratch);
+            }
+
+            PrepareAllScores(logits, indexScratch, scoreScratch);
+            var cap = Math.Min(n, NucleusPartialCap);
+            PartialSortDescendingInPlace(indexScratch[..n], scoreScratch[..n], n, cap);
+
+            // The top `cap` logits are now sorted descending; walk their cumulative probability.
+            var cumulative = 0.0;
+            for (var j = 0; j < cap; j++)
+            {
+                cumulative += Math.Exp((scoreScratch[j] - max) * inverseTemperature) / sum;
+                if (cumulative >= topP)
+                {
+                    return j + 1;
+                }
+            }
+
+            if (cap == n)
+            {
+                return n; // saw the whole vocab; all survive
+            }
+            return SelectTopPFull(logits, topP, temperature, indexScratch, scoreScratch); // nucleus exceeds cap (rare)
+        }
+
+        private static int SelectTopPFull(
+            ReadOnlySpan<float> logits, float topP, float temperature, Span<int> indexScratch, Span<float> scoreScratch)
+        {
+            PrepareAllScores(logits, indexScratch, scoreScratch);
+            SortDescending(indexScratch[..logits.Length], scoreScratch[..logits.Length]);
+            return NucleusFromSorted(scoreScratch[..logits.Length], topP, temperature);
         }
 
         private static int NucleusFromSorted(
@@ -454,6 +712,60 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             }
 
             return tokenIndexes[^1];
+        }
+
+        // Arranges the k highest-scored elements into [0, k) in DESCENDING score order (elements beyond k are
+        // left unspecified). O(count·log k) via a size-k min-heap — far cheaper than a full sort when k ≪ count,
+        // which is the normal case for a nucleus / typical set over a large vocabulary.
+        private static void PartialSortDescendingInPlace(Span<int> indexes, Span<float> scores, int count, int k)
+        {
+            if (k >= count)
+            {
+                SortDescending(indexes[..count], scores[..count]);
+                return;
+            }
+
+            // Build a min-heap over the first k, then let any larger element beyond k evict the current minimum.
+            for (var i = k / 2 - 1; i >= 0; i--)
+            {
+                SiftDownMin(indexes, scores, k, i);
+            }
+            for (var i = k; i < count; i++)
+            {
+                if (scores[i] > scores[0])
+                {
+                    (scores[0], scores[i]) = (scores[i], scores[0]);
+                    (indexes[0], indexes[i]) = (indexes[i], indexes[0]);
+                    SiftDownMin(indexes, scores, k, 0);
+                }
+            }
+            SortDescending(indexes[..k], scores[..k]);
+        }
+
+        private static void SiftDownMin(Span<int> indexes, Span<float> scores, int length, int root)
+        {
+            while (true)
+            {
+                var smallest = root;
+                var left = 2 * root + 1;
+                var right = 2 * root + 2;
+
+                if (left < length && scores[left] < scores[smallest])
+                {
+                    smallest = left;
+                }
+                if (right < length && scores[right] < scores[smallest])
+                {
+                    smallest = right;
+                }
+                if (smallest == root)
+                {
+                    return;
+                }
+
+                Swap(indexes, scores, root, smallest);
+                root = smallest;
+            }
         }
 
         private static void SortDescending(

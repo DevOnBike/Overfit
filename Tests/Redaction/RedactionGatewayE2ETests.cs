@@ -48,7 +48,10 @@ namespace DevOnBike.Overfit.Tests.Redaction
                 while (upstream.IsListening)
                 {
                     HttpListenerContext c;
-                    try { c = upstream.GetContext(); }
+                    try
+                    {
+                        c = upstream.GetContext();
+                    }
                     catch { break; }
 
                     // Guard the whole response: the test's finally{} stops the listener, which can dispose this
@@ -76,7 +79,9 @@ namespace DevOnBike.Overfit.Tests.Redaction
                     }
                 }
             })
-            { IsBackground = true };
+            {
+                IsBackground = true
+            };
             upstreamThread.Start();
 
             var gatewayPort = FreePort();
@@ -132,9 +137,17 @@ namespace DevOnBike.Overfit.Tests.Redaction
             }
             finally
             {
-                try { gateway.Kill(entireProcessTree: true); } catch { }
+                try
+                {
+                    gateway.Kill(entireProcessTree: true);
+                }
+                catch { }
                 upstream.Stop();
-                try { File.Delete(auditPath); } catch { }
+                try
+                {
+                    File.Delete(auditPath);
+                }
+                catch { }
             }
         }
 

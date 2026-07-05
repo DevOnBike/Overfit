@@ -3,8 +3,11 @@
 # Needs: the upload keystore (run generate-upload-key.ps1 first) + JDK/.NET android workload already set up.
 
 param(
-    [string]$Keystore = (Join-Path $PSScriptRoot 'overthink-upload.keystore'),
-    [string]$Alias    = 'overthink'
+    [string]$Keystore    = (Join-Path $PSScriptRoot 'overthink-upload.keystore'),
+    [string]$Alias       = 'overthink',
+    # Android versionCode. MUST be strictly higher than any AAB already uploaded to ANY Play track
+    # (internal/closed/prod share one versionCode space). Bump it on every upload: 2, 3, 4, ...
+    [int]   $VersionCode = 2
 )
 
 $ErrorActionPreference = 'Stop'
@@ -26,19 +29,31 @@ $storePass = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.Interop
 $keyPass   = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($keySecure))
 if ([string]::IsNullOrEmpty($keyPass)) { $keyPass = $storePass }
 
-Write-Host 'Building signed AAB (AOT — this takes a few minutes) ...'
+# Hand the passwords to the build through environment indirection (the `env:` prefix that
+# .NET-for-Android understands) instead of putting them literally on the command line. A literal
+# -p:AndroidSigningStorePass=<pw> gets re-parsed by PowerShell -> dotnet -> MSBuild -> jarsigner,
+# so any special character ($, ", ;, space, !) silently corrupts the password and jarsigner fails
+# with a bare "exited with code 1". Via env: the raw string reaches jarsigner untouched.
+$env:OVERTHINK_STOREPASS = $storePass
+$env:OVERTHINK_KEYPASS   = $keyPass
+
+Write-Host "Building signed AAB (versionCode=$VersionCode, AOT — this takes a few minutes) ..."
 dotnet publish $proj -c Release -f net10.0-android `
     -p:AndroidPackageFormat=aab `
+    -p:ApplicationVersion=$VersionCode `
     -p:RunAOTCompilation=true `
     -p:AndroidSdkDirectory=$sdk `
     -p:AcceptAndroidSDKLicenses=true `
     -p:AndroidKeyStore=true `
     -p:AndroidSigningKeyStore=$Keystore `
     -p:AndroidSigningKeyAlias=$Alias `
-    -p:AndroidSigningStorePass=$storePass `
-    -p:AndroidSigningKeyPass=$keyPass
+    -p:AndroidSigningStorePass=env:OVERTHINK_STOREPASS `
+    -p:AndroidSigningKeyPass=env:OVERTHINK_KEYPASS
 
-if ($LASTEXITCODE -ne 0) { throw "Build failed (exit $LASTEXITCODE)." }
+$code = $LASTEXITCODE
+$env:OVERTHINK_STOREPASS = $null
+$env:OVERTHINK_KEYPASS   = $null
+if ($code -ne 0) { throw "Build failed (exit $code)." }
 
 $aab = Get-ChildItem (Join-Path $PSScriptRoot 'bin\Release\net10.0-android') -Recurse -Filter '*-Signed.aab' |
        Select-Object -First 1

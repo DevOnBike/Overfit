@@ -66,8 +66,9 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
         public int LayerCount => _model.LayerCount;
 
         /// <summary>Fine-tune on the contents of a text file. See <see cref="FineTune"/>.</summary>
-        public IReadOnlyList<float> FineTuneOnFile(string textPath, Action<int, int, float>? onStep = null)
-            => FineTune(File.ReadAllText(textPath), onStep);
+        public IReadOnlyList<float> FineTuneOnFile(
+            string textPath, Action<int, int, float>? onStep = null, string? checkpointPath = null, bool resume = false)
+            => FineTune(File.ReadAllText(textPath), onStep, checkpointPath, resume);
 
         /// <summary>
         /// Fine-tune the adapter on <paramref name="text"/>. The text is tokenized and split into
@@ -75,8 +76,17 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
         /// training step, repeated for <see cref="QLoRAOptions.Epochs"/> passes. The frozen 4-bit base is
         /// never modified. Returns the per-step loss history; <paramref name="onStep"/> is invoked as
         /// <c>(epoch, globalStep, loss)</c> for progress reporting.
+        ///
+        /// <para><b>Checkpoint / resume.</b> Pass <paramref name="checkpointPath"/> to persist a resumable
+        /// checkpoint — the adapter (also a normal loadable <c>.lora</c> at that path) plus a sidecar
+        /// <c>&lt;path&gt;.opt</c> holding the Adam state (m/v + step) and the training position. It's written
+        /// every <see cref="QLoRAOptions.CheckpointEvery"/> steps (and at the end), atomically (temp+rename) so
+        /// a kill can't corrupt it. Call again with <paramref name="resume"/>=true (SAME text + options) to
+        /// pick up EXACTLY where it left off — momentum intact, not just the weights. This is what makes a long
+        /// / overnight (e.g. on-device) fine-tune survive interruption.</para>
         /// </summary>
-        public IReadOnlyList<float> FineTune(string text, Action<int, int, float>? onStep = null)
+        public IReadOnlyList<float> FineTune(
+            string text, Action<int, int, float>? onStep = null, string? checkpointPath = null, bool resume = false)
         {
             if (string.IsNullOrWhiteSpace(text))
             {
@@ -97,12 +107,33 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
                 Epsilon = _opt.AdamEpsilon,
             };
 
-            var history = new List<float>(chunks.Count * _opt.Epochs);
+            var startEpoch = 0;
+            var startChunk = 0;
             var step = 0;
-            for (var epoch = 0; epoch < _opt.Epochs; epoch++)
+
+            // Resume: restore adapter weights + optimizer state + position (SAME text/options assumed).
+            if (resume && checkpointPath is not null
+                && File.Exists(checkpointPath) && File.Exists(OptPath(checkpointPath)))
             {
-                foreach (var chunk in chunks)
+                _model.LoadAdapter(checkpointPath);
+                using var r = new BinaryReader(File.OpenRead(OptPath(checkpointPath)));
+                if (r.ReadInt32() != CheckpointVersion)
                 {
+                    throw new OverfitRuntimeException($"Unrecognised checkpoint format at '{OptPath(checkpointPath)}'.");
+                }
+                startEpoch = r.ReadInt32();
+                startChunk = r.ReadInt32();
+                step = r.ReadInt32();
+                optimizer.LoadState(r);
+            }
+
+            var history = new List<float>(chunks.Count * _opt.Epochs);
+            for (var epoch = startEpoch; epoch < _opt.Epochs; epoch++)
+            {
+                var firstChunk = epoch == startEpoch ? startChunk : 0;
+                for (var ci = firstChunk; ci < chunks.Count; ci++)
+                {
+                    var chunk = chunks[ci];
                     var input = chunk[..^1];
                     var target = chunk[1..];
 
@@ -115,8 +146,20 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
                     optimizer.Step();
 
                     history.Add(loss);
-                    onStep?.Invoke(epoch, step++, loss);
+                    onStep?.Invoke(epoch, step, loss);
+                    step++;
+
+                    if (checkpointPath is not null && _opt.CheckpointEvery > 0 && step % _opt.CheckpointEvery == 0)
+                    {
+                        SaveCheckpoint(checkpointPath, optimizer, epoch, ci + 1, step);
+                    }
                 }
+            }
+
+            // Final checkpoint — position past the last epoch so a resume sees the run as complete.
+            if (checkpointPath is not null)
+            {
+                SaveCheckpoint(checkpointPath, optimizer, _opt.Epochs, 0, step);
             }
             return history;
         }
@@ -135,6 +178,32 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
 
         /// <summary>Loads an adapter saved by <see cref="SaveAdapter"/> into this model (same GGUF + options).</summary>
         public void LoadAdapter(string path) => _model.LoadAdapter(path);
+
+        // ── checkpoint ──
+
+        private const int CheckpointVersion = 1;
+
+        private static string OptPath(string checkpointPath) => checkpointPath + ".opt";
+
+        // Writes the adapter (a normal loadable .lora) + a sidecar <path>.opt (version, position, Adam state).
+        // Both go through temp+rename so an interruption mid-write can't leave a corrupt checkpoint.
+        private void SaveCheckpoint(string checkpointPath, Adam optimizer, int epoch, int nextChunk, int step)
+        {
+            var advTmp = checkpointPath + ".tmp";
+            _model.SaveAdapter(advTmp);
+            File.Move(advTmp, checkpointPath, overwrite: true);
+
+            var optTmp = OptPath(checkpointPath) + ".tmp";
+            using (var w = new BinaryWriter(File.Create(optTmp)))
+            {
+                w.Write(CheckpointVersion);
+                w.Write(epoch);
+                w.Write(nextChunk);
+                w.Write(step);
+                optimizer.SaveState(w);
+            }
+            File.Move(optTmp, OptPath(checkpointPath), overwrite: true);
+        }
 
         // ── helpers ──
 

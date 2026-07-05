@@ -3,6 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.IO;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -187,6 +188,63 @@ namespace DevOnBike.Overfit.Optimizers
         public void ResetTime()
         {
             _t = 0;
+        }
+
+        /// <summary>
+        /// Serialises the optimizer state — the step counter and every parameter's Adam moments (m, v) — so a
+        /// training run can resume EXACTLY (not just from the weights). Restore with <see cref="LoadState"/>
+        /// into an optimizer rebuilt over the SAME parameters (same count + element counts, same order).
+        /// </summary>
+        public void SaveState(BinaryWriter writer)
+        {
+            ArgumentNullException.ThrowIfNull(writer);
+            writer.Write(_t);
+            writer.Write(_states.Length);
+            foreach (var s in _states)
+            {
+                writer.Write(s.Size);
+                writer.Write(MemoryMarshal.AsBytes(s.M.GetView().AsSpan()[..s.Size]));
+                writer.Write(MemoryMarshal.AsBytes(s.V.GetView().AsSpan()[..s.Size]));
+            }
+        }
+
+        /// <summary>Restores state written by <see cref="SaveState"/>. Throws if the parameter shape doesn't
+        /// match the optimizer it's being loaded into.</summary>
+        public void LoadState(BinaryReader reader)
+        {
+            ArgumentNullException.ThrowIfNull(reader);
+            _t = reader.ReadInt32();
+            var count = reader.ReadInt32();
+            if (count != _states.Length)
+            {
+                throw new OverfitRuntimeException(
+                    $"Optimizer checkpoint has {count} parameters but this optimizer has {_states.Length} — rebuild it over the same parameters before resuming.");
+            }
+
+            foreach (var s in _states)
+            {
+                var size = reader.ReadInt32();
+                if (size != s.Size)
+                {
+                    throw new OverfitRuntimeException($"Optimizer checkpoint parameter size mismatch ({size} vs {s.Size}).");
+                }
+                ReadExactly(reader, MemoryMarshal.AsBytes(s.M.GetView().AsSpan()[..size]));
+                ReadExactly(reader, MemoryMarshal.AsBytes(s.V.GetView().AsSpan()[..size]));
+            }
+        }
+
+        private static void ReadExactly(BinaryReader reader, Span<byte> dst)
+        {
+            var read = 0;
+            while (read < dst.Length)
+            {
+                var n = reader.Read(dst[read..]);
+                if (n <= 0)
+                {
+                    throw new OverfitRuntimeException("Optimizer checkpoint is truncated.");
+                }
+                read += n;
+            }
         }
 
         private static void ClearGradParallel(ParamState state, int size)

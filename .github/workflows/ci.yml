@@ -116,20 +116,18 @@ jobs:
     - name: Publish AotSmokeTest under Native AOT
       # TreatWarningsAsErrors promotes the trim/AOT analyzer warnings (IL2026 / IL3050 / IL2xxx /
       # IL3xxx) to errors — that is the point of this guard, and a genuine AOT regression still fails it.
-      # Two carve-outs, both unrelated to AOT/trim safety:
       #   * GenerateDocumentationFile=false — the smoke test does not need XML docs; this drops the
       #     CS15xx doc-comment warning family (e.g. CS1574 unresolved cref).
-      #   * WarningsNotAsErrors — exempts the IDisposableAnalyzers (IDISP*) diagnostics, which are
-      #     intentional, heeded-but-not-fatal style warnings across the library (see CLAUDE.md).
-      # NOTE: semicolons in an MSBuild -p: value MUST be escaped as %3B, or MSBuild parses each id as
-      # a separate (invalid) switch.
+      # The project's own advisory analyzers (OVERFIT* perf rules, IDISP* disposable style) are exempted
+      # centrally via <WarningsNotAsErrors> in Directory.Build.props — do NOT re-add a -p:WarningsNotAsErrors
+      # here: a global -p OVERRIDES (does not merge with) the props value and would drop the OVERFIT carve-out,
+      # re-failing the guard on ~1000 perf suggestions unrelated to AOT.
       run: |
-        dotnet publish ./Sources/AotSmokeTest/AotSmokeTest.csproj \
+        dotnet publish ./Tests/AotSmokeTest/AotSmokeTest.csproj \
           -c Release -r linux-x64 \
           -p:PublishAot=true \
           -p:TreatWarningsAsErrors=true \
           -p:GenerateDocumentationFile=false \
-          -p:WarningsNotAsErrors=IDISP001%3BIDISP002%3BIDISP003%3BIDISP004%3BIDISP005%3BIDISP006%3BIDISP007%3BIDISP008%3BIDISP009%3BIDISP010%3BIDISP011%3BIDISP012%3BIDISP013%3BIDISP014%3BIDISP015%3BIDISP016%3BIDISP017 \
           -o ./aot-publish
     - name: Run AOT-compiled smoketest binary
       run: ./aot-publish/AotSmokeTest
@@ -138,7 +136,8 @@ jobs:
     # OpenAI server + System.Text.Json source-gen) AND of Sources/Main via OverfitClient. Publishing it
     # under PublishAot=true with TreatWarningsAsErrors=true makes ILCompiler run end-to-end over that whole
     # reachable graph, so any IL2026 / IL3050 / IL31xx trim/AOT regression on the serve/chat path fails CI
-    # (same IDISP + doc carve-outs as the smoketest above — unrelated to AOT/trim safety).
+    # (OVERFIT*/IDISP* advisory analyzers exempted centrally in Directory.Build.props — unrelated to AOT/trim
+    # safety; see the smoketest step above for why a -p:WarningsNotAsErrors must NOT be re-added here).
     - name: Publish overfit CLI under Native AOT
       run: |
         dotnet publish ./Sources/Cli/Cli.csproj \
@@ -146,7 +145,6 @@ jobs:
           -p:PublishAot=true \
           -p:TreatWarningsAsErrors=true \
           -p:GenerateDocumentationFile=false \
-          -p:WarningsNotAsErrors=IDISP001%3BIDISP002%3BIDISP003%3BIDISP004%3BIDISP005%3BIDISP006%3BIDISP007%3BIDISP008%3BIDISP009%3BIDISP010%3BIDISP011%3BIDISP012%3BIDISP013%3BIDISP014%3BIDISP015%3BIDISP016%3BIDISP017 \
           -o ./aot-publish-cli
     - name: Run AOT-compiled overfit CLI (smoke)
       # `list` exercises the CLI end-to-end (System.CommandLine parse → command action → model-store scan)

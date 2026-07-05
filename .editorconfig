@@ -186,3 +186,18 @@ dotnet_diagnostic.OVERFIT001.severity = warning
 # serving benefit. Kept visible as IDE suggestions; re-escalate if TTS latency is ever productised.
 [Sources/Main/Audio/Tts/{Snac,Orpheus}/**.cs]
 dotnet_diagnostic.OVERFIT001.severity = suggestion
+
+# ── Generated code (obj/) — MUST stay the LAST section that overlaps *.cs ─────────────────────────────
+# editorconfig applies the LAST matching section per key, so this wins RS0030 for obj/ files. It lives at
+# the very end ON PURPOSE: an earlier placement (mid-file, right after the global RS0030 rule) silently
+# scoped EVERY following diagnostic — CA2014, IDISP*, and all OVERFIT severities incl. OVERFIT008=error —
+# to obj/ only, which demoted OVERFIT008 to its analyzer-default warning on real code and broke the
+# analyzer-guard CI job. Keep new global [*.cs] rules ABOVE this block.
+#
+# The SDK AssemblyInfo / System.Text.Json JsonSerializerContext / GlobalUsings under obj/ are not ours and
+# legitimately use System.Reflection, so scope the banned-API rule off for generated files (BannedApiAnalyzers
+# 3.3.4 skipped them automatically; 5.6.0 analyses them). The STJ source-gen context itself is analysed under
+# a synthetic path no section matches — that residual RS0030 warning is handled via <WarningsNotAsErrors> in
+# Directory.Build.props. Real .cs code still gets RS0030 = error from the [*.cs] section at the top.
+[**/obj/**]
+dotnet_diagnostic.RS0030.severity = none

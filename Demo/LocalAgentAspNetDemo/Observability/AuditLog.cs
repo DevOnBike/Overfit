@@ -34,7 +34,10 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.Observability
             }
 
             _writer = new StreamWriter(
-                new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.Read)) { AutoFlush = true };
+                new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.Read))
+            {
+                AutoFlush = true
+            };
             logger.LogInformation("Audit log: {Path} (append-only JSONL, metadata only — no prompt/response content).",
                 Path.GetFullPath(path));
         }

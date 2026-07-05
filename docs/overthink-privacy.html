@@ -34,6 +34,13 @@
   <p>The app does not send your messages, prompts, or generated text anywhere. Inference is fully
   offline / on-device.</p>
 
+  <h2>2a. Voice input (microphone)</h2>
+  <p>If you use the optional voice-input button, the app records audio from the microphone and transcribes
+  your speech to text <strong>entirely on your device</strong> using a local Whisper speech model. The audio
+  is held only in memory for the duration of the transcription, is <strong>never written to disk and never
+  uploaded</strong>, and is discarded immediately afterwards. The microphone is used only while you are
+  actively recording. The speech model is a file you add yourself; it is not downloaded by the app.</p>
+
   <h2>3. Model files</h2>
   <p>You may load model files (GGUF) of your choice from your device using the system file picker. A selected
   model is copied into the app’s private storage so the app can load it. Models stay on your device and are
@@ -47,9 +54,11 @@
   whether and what to send.</p>
 
   <h2>5. Permissions</h2>
-  <p>The app requests no sensitive permissions: no location, contacts, camera, microphone, or internet-based
-  data collection. Model selection uses Android’s Storage Access Framework, so no broad storage permission is
-  required.</p>
+  <p>The app requests no location, contacts, camera, or internet-based data collection. The only sensitive
+  permission is the <strong>microphone</strong>, used solely for the optional on-device voice input described
+  in section 2a (audio is transcribed locally and never uploaded); it is requested only when you first use
+  that feature, and the app works fully without granting it. Model selection uses Android’s Storage Access
+  Framework, so no broad storage permission is required.</p>
 
   <h2>6. Children</h2>
   <p>The app is not directed at children and does not knowingly collect data from anyone.</p>

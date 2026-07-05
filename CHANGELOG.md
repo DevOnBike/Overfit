@@ -14,9 +14,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 Pre-release suffixes (e.g. `10.1.0-beta.1`) are used for surface changes that need real-world validation before the public release. Pre-releases are pushed to NuGet with the `-beta`, `-rc`, or `-preview` SemVer suffix.
 
-## [Unreleased]
+## [10.0.29] - 2026-07-05
 
-_(nothing yet)_
+_The `frodo` branch: an on-device Android chat app, an advanced sampler suite, offline prefill acceleration, a local skill-eval harness, and CI-guard hardening._
+
+### Added
+
+- **OverThink — an on-device Android chat app** (`Demo/OverfitChatApp`). A native .NET-for-Android build runs a GGUF model **entirely on the phone**: streaming tokens, an animated mesh-gradient UI, a GGUF file-picker, a ⚙ "Response style" preset dialog (Precise / Balanced / Creative, each with the DRY anti-loop on), and a 30 s idle model-unload. Fully offline — nothing leaves the device. ~3.8 tok/s for a 0.5B Q4_K on a mid-range phone. The on-device decode work is documented as an honest negative in `Demo/OverfitChatApp/README.md`: Mono's ARM runtime has no SIMD intrinsics, so decode is **dequant-bound, not dot-bound** — a correct (QEMU + self-test-validated) NEON SDOT kernel does *not* move tok/s, AOT buys ~20%, and the remaining gap to llama.cpp is the managed-mobile tax, not a missing kernel.
+- **Full sampler suite** (`SamplingPipeline`, composable/opt-in): **top-nσ** (scale-adaptive `max − n·σ` logit truncation), **locally-typical** (entropy-matched surprise), **XTC** (exclude-top-choices), **Mirostat v1/v2** (stateful μ feedback), and **DRY** (Don't-Repeat-Yourself, Z-algorithm over the recent window). `top-nσ` and `locally-typical` are also on the zero-alloc `TokenSampler` / `SamplingOptions` hot path (`WithTopNSigma`, `WithTypicalP`) and the `overfit chat` CLI (`--top-n-sigma`, `--typical-p`). **DRY is wired into the decode engine** (`CachedLlamaSession`) with a rolling generated-token history + reusable Z-scratch (zero per-token allocation): it penalises would-be verbatim repetitions on the logits **before** sampling, so it breaks generation loops **even under greedy decode** — the single biggest output-quality lever for the small models that run on-device. Gates: `SamplerSuiteTests`, `TokenSamplerTruncatorTests`.
+- **`overfit repack`** — offline Q4_K weight-repack CLI (see Performance).
+- **Local skill-eval harness** (`Sources/Main/LanguageModels/Skills/Evaluation/`) — `SkillEvaluator` + `OverfitSkillRunner` run an agent skill/prompt **ON vs OFF** on a local model (deterministic greedy/seed, zero API cost), graded by a `CheckRegistry` of model-free predicates plus a schema-locked `RubricGrader`, and reported as pass-rate + ON/OFF **lift** + trigger accuracy — a reproducible prompt-regression gate. A first `SkillOptimizer` selects prompt variants on that score. Docs: `docs/skill-eval.md`.
+- **Adam checkpoint/restore** (`AdamCheckpointTests`) — moment (m/v) state save + resume for interrupted CPU fine-tunes.
+- **Whisper long-audio windowing** (`WhisperTrimWindowTests`) — trim-window handling past the 30 s encoder frame.
+
+### Performance
+
+- **Offline Q4_K prefill repack (`overfit repack`) → ~1.6× faster time-to-first-token at zero extra RAM.** A register-tiled Q4_K prefill GEMM (`Q4KGemvKernel.GemmTiled`, tinyBLAS-style `block_q4_Kx8`, AVX2/FMA) decodes each super-block once and reuses it across a tile of columns — measured **2.76× single-thread / 3.80× parallel** on the projection GEMM and **~1.61× end-to-end prefill** (Amdahl-capped: it accelerates the Q4_K FFN only; decode stays on the DRAM-bound weight-stationary path). `overfit repack <model.gguf>` writes a `<model>.repack` sidecar in the tiled layout; the loader memory-maps it and enables the tiled path **by default at zero heap cost**. The sidecar bytes are byte-identical to the runtime repack, so output is unchanged. ARM-safe (the tiled path is AVX2-gated; a sidecar on ARM transparently falls back). Gates: `Q4KTiledGemmParityTests`, `RepackedWeightsFileTests`, `RepackedSidecarEngineE2ETests`, `BatchedQuantProjectionTiledDispatchTests`.
+- **top-p / locally-typical sampling now partial-sorts.** The nucleus/typical set is tiny, so a size-k min-heap partial sort (O(V·log k)) replaces the full O(V·log V) vocabulary sort, with an exact full-sort fallback. On a peaked decode distribution this cut the sampler's share of a decode step from ~50–60% to a few percent (~20× on the sort itself). Exact-result and parity-pinned (`TopPTypicalPartialSortParityTests`); measured on the real model (`TypicalPRealModelDecodeTests`).
+
+### Fixed
+
+- **Native-AOT `aot-guard` CI job is green under BannedApiAnalyzers 5.6.0.** The AOT publish's blunt `TreatWarningsAsErrors=true` was promoting the project's own advisory analyzers — ~1000 `OVERFIT*` perf *suggestions* and `RS0030` on System.Text.Json's **generated** serializer context — to errors, none of them Native-AOT-safety signals. Exempted them centrally via `<WarningsNotAsErrors>` in `Directory.Build.props`, so only the framework `IL2026` / `IL3050` / `IL31xx` trim/AOT diagnostics stay fatal (which is the guard's actual purpose).
+- **`analyzer-guard` CI job is green.** An `.editorconfig` `[**/obj/**]` section had been placed mid-file, silently scoping every rule after it — CA2014, `IDISP*`, and **all** OVERFIT severities including `OVERFIT008 = error` — to `obj/` files only. `OVERFIT008` therefore fell back to a warning on real code, so the guard's deliberate-violation tripwire stopped failing the build. Moved the generated-code section to the end of `.editorconfig` so it wins RS0030 for `obj/` without hijacking the global `[*.cs]` block.
+
+### Changed
+
+- **`AotSmokeTest` moved from `Sources/` to `Tests/AotSmokeTest`** — it is a Native-AOT-publish CI harness, not shipped source. The xUnit `Tests` project excludes it from its compile glob; CI, the solution, and the AOT docs were updated to the new path.
+- Repo-root planning docs (`ideas.md`, `launch-copy.md`, `overfit_perf_decode_analysis.md`) moved under `docs/`.
 
 ## [10.0.25] - 2026-06-12
 

@@ -1,7 +1,7 @@
 <Project>
     <PropertyGroup>
-        <Version>10.0.28</Version>
-        <FileVersion>10.0.28</FileVersion>
+        <Version>10.0.29</Version>
+        <FileVersion>10.0.29</FileVersion>
         <InformationalVersion>release+id</InformationalVersion>
         <Authors>DevOnBike</Authors>
         <Company>Sharp IT</Company>
@@ -9,6 +9,23 @@
         <NuGetAudit>true</NuGetAudit>
         <NuGetAuditMode>all</NuGetAuditMode>
         <WarningsAsErrors>$(WarningsAsErrors);NU1901;NU1902;NU1903;NU1904;CS4014</WarningsAsErrors>
+
+        <!-- The project's OWN advisory analyzers are NOT Native-AOT-safety signals: OVERFIT* are perf-style
+             suggestions (per-call allocs, string-building, etc.) and IDISP* are disposable-hygiene style
+             warnings. The `aot-guard` CI job publishes under TreatWarningsAsErrors=true so that the framework's
+             IL2026 / IL3050 / IL31xx trim/AOT warnings become hard errors — but that blunt switch would also
+             promote ~1000 OVERFIT suggestions + the IDISP warnings to errors and fail the guard for reasons
+             unrelated to AOT. Exempting them here (a no-op for normal builds, which don't treat warnings as
+             errors) keeps ONLY the IL* trim/AOT diagnostics fatal under the guard. OVERFIT008 / OVERFIT015 are
+             deliberately omitted — they are error-severity hard conventions and must stay fatal (the
+             analyzer-guard CI job's tripwire depends on OVERFIT008 firing).
+             RS0030 is also here for one narrow reason: the System.Text.Json source-generated
+             OverfitJsonContext legitimately uses System.Reflection internally (the AOT-safe source-gen path)
+             and is analysed under a synthetic path no .editorconfig section matches, so RS0030 falls back to
+             its default Warning there and TreatWarningsAsErrors would promote it. Exempting the *warning*
+             does NOT weaken RS0030 on real code, which stays error-severity via the [*.cs] editorconfig
+             section (a genuine error, not a promoted warning, so WarningsNotAsErrors cannot downgrade it). -->
+        <WarningsNotAsErrors>$(WarningsNotAsErrors);RS0030;OVERFIT001;OVERFIT002;OVERFIT003;OVERFIT004;OVERFIT005;OVERFIT006;OVERFIT007;OVERFIT009;OVERFIT010;OVERFIT011;OVERFIT012;OVERFIT013;OVERFIT014;OVERFIT016;OVERFIT017;OVERFIT018;OVERFIT019;OVERFIT020;OVERFIT900;IDISP001;IDISP002;IDISP003;IDISP004;IDISP005;IDISP006;IDISP007;IDISP008;IDISP009;IDISP010;IDISP011;IDISP012;IDISP013;IDISP014;IDISP015;IDISP016;IDISP017</WarningsNotAsErrors>
 
         <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
         <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>

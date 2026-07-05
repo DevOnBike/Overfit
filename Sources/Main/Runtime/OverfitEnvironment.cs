@@ -32,6 +32,12 @@ namespace DevOnBike.Overfit.Runtime
         /// <summary>Set to 1/true for the whole-matrix Q4_K attention decode path (experimental, off by default).</summary>
         public const string RepackAttn = "OVERFIT_REPACK_ATTN";
 
+        /// <summary>Set to 1/true to route the Q4_K PREFILL projections through the register-tiled 8×NR GEMM
+        /// (<c>Q4KGemvKernel.GemmTiled</c>) instead of the weight-stationary kernel. ~3× faster per projection
+        /// under real parallelism (measured), but repacks the weight (adds ~model RAM) so it is experimental /
+        /// off by default.</summary>
+        public const string TiledPrefill = "OVERFIT_TILED_PREFILL";
+
         /// <summary>KV-cache element type — e.g. <c>q8</c> for the int8 KV cache (default F32).</summary>
         public const string KvDType = "OVERFIT_KV_DTYPE";
 

@@ -45,9 +45,11 @@ namespace DevOnBike.Overfit.LanguageModels.Contracts
         /// <paramref name="evictBlock"/> = how many tokens to drop per eviction (0 ⇒ a sensible
         /// default). Throws <see cref="OverfitRuntimeException"/> on sessions that don't support it.
         /// </summary>
+#pragma warning disable RS0030 // Type.Name = compile-time-safe type name for a diagnostic, not runtime reflection (AOT-safe)
         void EnableSlidingWindow(int evictBlock = 0)
             => throw new OverfitRuntimeException(
                 $"{GetType().Name} does not support sliding-window eviction.");
+#pragma warning restore RS0030
 
         /// <summary>
         /// Generates the next token under a decode-time <paramref name="constraint"/> (e.g. JSON-mode):
@@ -56,10 +58,12 @@ namespace DevOnBike.Overfit.LanguageModels.Contracts
         /// when a non-null constraint is supplied (a null constraint always defers to the plain path).
         /// </summary>
         int GenerateNextToken(in SamplingOptions sampling, ITokenConstraint? constraint)
+#pragma warning disable RS0030 // Type.Name = compile-time-safe type name for a diagnostic, not runtime reflection (AOT-safe)
             => constraint is null
                 ? GenerateNextToken(in sampling)
                 : throw new OverfitRuntimeException(
                     $"{GetType().Name} does not support constrained generation.");
+#pragma warning restore RS0030
 
         int Generate(
             ReadOnlySpan<int> promptTokens,

@@ -35,7 +35,10 @@ namespace DevOnBike.Overfit.Tests.Redaction
                 while (upstream.IsListening)
                 {
                     HttpListenerContext c;
-                    try { c = upstream.GetContext(); }
+                    try
+                    {
+                        c = upstream.GetContext();
+                    }
                     catch { break; }
 
                     try
@@ -64,7 +67,9 @@ namespace DevOnBike.Overfit.Tests.Redaction
                     }
                 }
             })
-            { IsBackground = true };
+            {
+                IsBackground = true
+            };
             upstreamThread.Start();
 
             var gatewayPort = FreePort();
@@ -86,7 +91,9 @@ namespace DevOnBike.Overfit.Tests.Redaction
                     // bind race / listener torn down at test end — never crash the test host from this thread.
                 }
             })
-            { IsBackground = true };
+            {
+                IsBackground = true
+            };
             gatewayThread.Start();
 
             var baseUrl = $"http://127.0.0.1:{gatewayPort}";

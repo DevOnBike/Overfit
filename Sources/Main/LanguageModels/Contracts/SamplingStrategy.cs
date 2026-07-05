@@ -18,6 +18,20 @@ namespace DevOnBike.Overfit.LanguageModels.Contracts
         /// then sample (with temperature) from the survivors. A scale-adaptive alternative to
         /// Top-P that widens on confident steps and narrows on flat ones.
         /// </summary>
-        MinP = 5
+        MinP = 5,
+
+        /// <summary>
+        /// Top-nσ: keep tokens whose logit ≥ <c>max − NSigma·σ</c> (σ = std-dev of the logits). Acts on the
+        /// raw pre-softmax logits, so it stays stable across temperature — a strong, scale-adaptive truncator
+        /// that trims the low-probability tail where hallucinations live.
+        /// </summary>
+        TopNSigma = 6,
+
+        /// <summary>
+        /// Locally typical sampling: keep the tokens whose surprise (<c>−ln p</c>) is closest to the
+        /// distribution's entropy, until their cumulative probability ≥ <c>TypicalP</c>. Favours "typical"
+        /// continuations over merely the most probable ones.
+        /// </summary>
+        TypicalP = 7
     }
 }

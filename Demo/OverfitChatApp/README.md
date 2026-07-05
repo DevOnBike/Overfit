@@ -93,6 +93,46 @@ Open **Overfit** from the launcher, or:
 
 ---
 
+## Share it directly (sideload APK — no Google Play)
+
+The fastest way to get OverThink to people without the Play review/testing gates: build a **signed APK** and hand
+it out (a GitHub Release, a Drive/WeTransfer link, email). Recipients install it directly. No auto-updates, and
+they must allow "install unknown apps", but it's immediate.
+
+### 1. Build the shareable APK
+
+```powershell
+cd Demo/OverfitChatApp
+.\make-apk.ps1                 # AOT — best on-device speed, ~10 min build
+# .\make-apk.ps1 -Aot:$false   # fast build, slower first-token on the phone
+```
+
+Enter the keystore password (Enter on the key prompt if you used one password). It prints the path, e.g.
+`bin\Release\net10.0-android\android-arm64\com.devonbike.overthink-Signed.apk` (~104 MB — the bundled model is
+inside). Needs the upload keystore first (`generate-upload-key.ps1`). Signing with the upload key is fine for
+sideloading (Play App Signing only matters for Play). Rename it to something friendly, e.g.
+`OverThink-v10.0.28.apk`.
+
+### 2. Attach it to a GitHub Release
+
+1. **github.com/DevOnBike/Overfit → Releases → Draft a new release.**
+2. **Choose a tag** → a new one, e.g. `overthink-v10.0.28` → *Create new tag on publish*, target `main`.
+3. **Title:** `OverThink v10.0.28 (Android APK)`.
+4. **Description** (example):
+   > On-device AI chat — offline, pure .NET. **Android APK, sideload.**
+   > 1. Download `OverThink-v10.0.28.apk`. 2. On the phone tap the file → allow "Install unknown apps" for your
+   > browser/file manager → Install. The built-in mini-model works out of the box; add a bigger GGUF in-app.
+5. **Drag the `.apk` into the "Attach binaries" box** (upload ~104 MB — GitHub allows up to 2 GB per release
+   asset, unlike the 100 MB *repo-file* limit).
+6. **Publish release**, then share the release URL (or the direct asset link).
+
+### Caveats
+
+- **No auto-update** — a new version means a new APK; bump `versionCode`/the name each time.
+- **Don't commit the APK to the repo** (over the 100 MB file limit) — it lives only as a release asset. Keystore
+  and passwords stay out of the repo too (a password manager + `.gitignore`).
+- **arm64 Android only.** No iOS build (no native .NET-iOS port of this app).
+
 ## Publishing to Google Play
 
 High-level path (one-time setup, then repeat steps 4–6 per release):

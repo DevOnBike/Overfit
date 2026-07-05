@@ -5,6 +5,7 @@
 
 using System.Runtime.InteropServices;
 using DevOnBike.Overfit.Audio.Tts.Snac;
+using DevOnBike.Overfit.Diagnostics;
 using DevOnBike.Overfit.LanguageModels;
 using DevOnBike.Overfit.LanguageModels.Contracts;
 
@@ -134,7 +135,7 @@ namespace DevOnBike.Overfit.Audio.Tts.Orpheus
             using var session = _llm.Engine.CreateSession();
             session.Prefill(promptTokens);
 
-            var genSw = System.Diagnostics.Stopwatch.StartNew();
+            var genSw = ValueStopwatch.StartNew();
             var generatedCount = 0;
             var codes = new List<int>();
             var accepted = 0;
@@ -161,8 +162,8 @@ namespace DevOnBike.Overfit.Audio.Tts.Orpheus
                 }
             }
 
-            genSw.Stop();
-            Console.WriteLine($"  gen: {generatedCount} tok in {genSw.Elapsed.TotalSeconds:F1}s = {generatedCount / genSw.Elapsed.TotalSeconds:F1} tok/s (preset / inference engine)");
+            var genSeconds = genSw.GetElapsedTime().TotalSeconds;
+            Console.WriteLine($"  gen: {generatedCount} tok in {genSeconds:F1}s = {generatedCount / genSeconds:F1} tok/s (preset / inference engine)");
             return codes;
         }
 

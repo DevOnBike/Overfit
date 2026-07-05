@@ -337,8 +337,10 @@ namespace DevOnBike.Overfit.Tensors
             else
             {
                 // Fallback for other types. Currently Overfit only uses this path for float.
+#pragma warning disable RS0030 // typeof(T).Name = compile-time-safe type name for a diagnostic, not runtime reflection (AOT-safe)
                 throw new OverfitRuntimeException(
                     $"AddInPlace is only implemented for float tensors. Type: {typeof(T).Name}");
+#pragma warning restore RS0030
             }
         }
     }

@@ -35,11 +35,33 @@ var chatModel = new Argument<string>("model")
 {
     Description = "A model name in the local store, or a path to a .gguf file.",
 };
+var chatTemp = new Option<float>("--temp", "-t")
+{
+    Description = "Sampling temperature. 0 (default) = greedy/deterministic; 0.2–0.4 factual; 0.7–1.0 creative.",
+};
+var chatTopK = new Option<int>("--top-k") { Description = "Keep only the K highest-probability tokens (0 = off)." };
+var chatTopP = new Option<float>("--top-p") { Description = "Nucleus sampling: keep the smallest set with cumulative probability ≥ P (1 = off)." };
+var chatMinP = new Option<float>("--min-p") { Description = "Min-P: keep tokens with probability ≥ minP × P(top) (0 = off). Scale-adaptive tail-trim." };
+var chatTopNSigma = new Option<float>("--top-n-sigma") { Description = "Top-nσ: keep tokens with logit ≥ max − n·σ (0 = off). Strong anti-hallucination tail-trim." };
+var chatTypicalP = new Option<float>("--typical-p") { Description = "Locally typical sampling: keep tokens near the entropy up to cumulative prob P (1 = off)." };
 var chatCommand = new Command("chat", "Chat with a local model interactively.")
 {
     chatModel,
+    chatTemp,
+    chatTopK,
+    chatTopP,
+    chatMinP,
+    chatTopNSigma,
+    chatTypicalP,
 };
-chatCommand.SetAction(parseResult => Commands.Chat(parseResult.GetValue(chatModel)!));
+chatCommand.SetAction(parseResult => Commands.Chat(
+    parseResult.GetValue(chatModel)!,
+    parseResult.GetValue(chatTemp),
+    parseResult.GetValue(chatTopK),
+    parseResult.GetValue(chatTopP),
+    parseResult.GetValue(chatMinP),
+    parseResult.GetValue(chatTopNSigma),
+    parseResult.GetValue(chatTypicalP)));
 
 var serveModel = new Argument<string>("model")
 {
@@ -309,6 +331,24 @@ var doctorCommand = new Command("doctor",
 };
 doctorCommand.SetAction(parseResult => Commands.Doctor(parseResult.GetValue(doctorModel)!));
 
+// ── repack: offline pre-repack Q4_K weights to a sidecar → faster, RAM-free prefill by default. ──
+var repackModel = new Argument<string>("model")
+{
+    Description = "Model alias or path to a .gguf. Its repackable Q4_K matmul weights are converted to block_q4_Kx8.",
+};
+var repackOutput = new Option<string?>("--output", "-o")
+{
+    Description = "Sidecar output path; default is <model>.repack next to the GGUF (where the loader auto-discovers it).",
+};
+var repackCommand = new Command("repack",
+    "Pre-repack a Q4_K model to a memory-mapped sidecar — enables the faster register-tiled prefill by default at no extra RAM.")
+{
+    repackModel,
+    repackOutput,
+};
+repackCommand.SetAction(parseResult => Commands.Repack(
+    parseResult.GetValue(repackModel)!, parseResult.GetValue(repackOutput)));
+
 // ── score: run a trained XGBoost model (JSON) over a CSV of feature rows, pure-managed, zero-egress. ──
 var scoreModel = new Argument<string>("model")
 {
@@ -425,6 +465,7 @@ var rootCommand = new RootCommand("Overfit — run local LLMs, RAG and agents in
     chatCommand,
     serveCommand,
     doctorCommand,
+    repackCommand,
     mcpCommand,
     ttsCommand,
     voiceCommand,

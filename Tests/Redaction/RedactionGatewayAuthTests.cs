@@ -43,7 +43,9 @@ namespace DevOnBike.Overfit.Tests.Redaction
                     // bind race / listener torn down at test end — never crash the test host from this thread.
                 }
             })
-            { IsBackground = true };
+            {
+                IsBackground = true
+            };
             gatewayThread.Start();
 
             var baseUrl = $"http://127.0.0.1:{gatewayPort}";

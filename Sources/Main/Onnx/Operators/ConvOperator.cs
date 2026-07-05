@@ -3,7 +3,6 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using System.Linq;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.DeepLearning.Abstractions;
 using DevOnBike.Overfit.Onnx.Schema;
@@ -48,7 +47,16 @@ namespace DevOnBike.Overfit.Onnx.Operators
                     $"Conv group={group}: grouped/depthwise convolution not yet supported.");
             }
 
-            if (dilations.Any(dv => dv != 1))
+            var hasDilation = false;
+            foreach (var dv in dilations)
+            {
+                if (dv != 1)
+                {
+                    hasDilation = true;
+                    break;
+                }
+            }
+            if (hasDilation)
             {
                 throw new OverfitRuntimeException(
                     $"Conv dilations=[{string.Join(",", dilations)}]: dilated conv not yet supported.");

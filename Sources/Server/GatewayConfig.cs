@@ -122,28 +122,64 @@ namespace DevOnBike.Overfit.Server
 
     public sealed class GatewayConfigFile
     {
-        [JsonPropertyName("upstream")] public string? Upstream { get; set; }
-        [JsonPropertyName("rules")] public RulesConfig? Rules { get; set; }
-        [JsonPropertyName("policy")] public PolicyConfig? Policy { get; set; }
+        [JsonPropertyName("upstream")]
+        public string? Upstream
+        {
+            get; set;
+        }
+        [JsonPropertyName("rules")]
+        public RulesConfig? Rules
+        {
+            get; set;
+        }
+        [JsonPropertyName("policy")]
+        public PolicyConfig? Policy
+        {
+            get; set;
+        }
 
         /// <summary>Gateway-issued client keys callers must present. Prefer the env var for real secrets.</summary>
-        [JsonPropertyName("clientKeys")] public List<string>? ClientKeys { get; set; }
+        [JsonPropertyName("clientKeys")]
+        public List<string>? ClientKeys
+        {
+            get; set;
+        }
 
         /// <summary>Scan model responses and mask any model-generated secrets/PII (non-streaming). Default off.</summary>
-        [JsonPropertyName("scanResponses")] public bool ScanResponses { get; set; }
+        [JsonPropertyName("scanResponses")]
+        public bool ScanResponses
+        {
+            get; set;
+        }
     }
 
     public sealed class RulesConfig
     {
         [JsonPropertyName("international")] public bool International { get; set; } = true;
-        [JsonPropertyName("polish")] public bool Polish { get; set; }
-        [JsonPropertyName("custom")] public List<CustomRuleConfig>? Custom { get; set; }
+        [JsonPropertyName("polish")]
+        public bool Polish
+        {
+            get; set;
+        }
+        [JsonPropertyName("custom")]
+        public List<CustomRuleConfig>? Custom
+        {
+            get; set;
+        }
 
         /// <summary>Opt-in generic high-entropy secret detector (catches keys no named pattern enumerates).</summary>
-        [JsonPropertyName("entropyDetector")] public bool EntropyDetector { get; set; }
+        [JsonPropertyName("entropyDetector")]
+        public bool EntropyDetector
+        {
+            get; set;
+        }
 
         /// <summary>Regex patterns for known-good values that must never be redacted (own domain, test data).</summary>
-        [JsonPropertyName("allowlist")] public List<string>? Allowlist { get; set; }
+        [JsonPropertyName("allowlist")]
+        public List<string>? Allowlist
+        {
+            get; set;
+        }
     }
 
     public sealed class CustomRuleConfig
@@ -154,8 +190,16 @@ namespace DevOnBike.Overfit.Server
 
     public sealed class PolicyConfig
     {
-        [JsonPropertyName("default")] public string? Default { get; set; }
-        [JsonPropertyName("categories")] public Dictionary<string, string>? Categories { get; set; }
+        [JsonPropertyName("default")]
+        public string? Default
+        {
+            get; set;
+        }
+        [JsonPropertyName("categories")]
+        public Dictionary<string, string>? Categories
+        {
+            get; set;
+        }
     }
 
     [JsonSerializable(typeof(GatewayConfigFile))]

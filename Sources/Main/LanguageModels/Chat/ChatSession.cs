@@ -5,6 +5,7 @@
 
 using System.Runtime.InteropServices;
 using System.Text;
+using DevOnBike.Overfit.Diagnostics;
 using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Runtime;
 
@@ -184,13 +185,12 @@ namespace DevOnBike.Overfit.LanguageModels.Chat
             var written = _tokenizer.Encode(promptText, promptTokens);
             _session.Reset(promptTokens.AsSpan(0, written));
 
-            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+            var stopwatch = ValueStopwatch.StartNew();
             var reply = Generate(promptTokens.AsSpan(0, written), in options, onText, constraint, out var generatedTokens);
-            stopwatch.Stop();
             LastStats = new GenerationStats(
                 promptTokens: written,
                 generatedTokens: generatedTokens,
-                elapsedNanoseconds: stopwatch.Elapsed.Ticks * 100,   // 1 tick = 100 ns
+                elapsedNanoseconds: stopwatch.GetElapsedTime().Ticks * 100,   // 1 tick = 100 ns
                 allocatedBytes: 0,
                 usedKeyValueCache: true);
 

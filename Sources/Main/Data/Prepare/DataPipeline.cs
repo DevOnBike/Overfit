@@ -49,7 +49,9 @@ namespace DevOnBike.Overfit.Data.Prepare
 
                 if (current.Features.GetView().GetDim(0) != current.Targets.GetView().GetDim(0))
                 {
+#pragma warning disable RS0030 // Type.Name = compile-time-safe type name for a diagnostic, not runtime reflection (AOT-safe)
                     throw new OverfitRuntimeException($"[{layer.GetType().Name}] Desynchronized dimensions: Features={current.Features.GetView().GetDim(0)} rows, Targets={current.Targets.GetView().GetDim(0)} rows.");
+#pragma warning restore RS0030
                 }
 
             }

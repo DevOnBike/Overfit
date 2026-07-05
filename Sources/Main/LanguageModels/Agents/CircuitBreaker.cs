@@ -3,7 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using System.Diagnostics;
+using DevOnBike.Overfit.Diagnostics;
 
 namespace DevOnBike.Overfit.LanguageModels.Agents
 {
@@ -32,7 +32,7 @@ namespace DevOnBike.Overfit.LanguageModels.Agents
             ArgumentNullException.ThrowIfNull(iterate);
             ArgumentNullException.ThrowIfNull(isAccepted);
 
-            var stopwatch = Stopwatch.StartNew();
+            var stopwatch = ValueStopwatch.StartNew();
             var last = default(T)!;
             var done = 0;
             for (var i = 0; i < maxIterations; i++)
@@ -42,16 +42,16 @@ namespace DevOnBike.Overfit.LanguageModels.Agents
 
                 if (isAccepted(last))
                 {
-                    return new CircuitBreakerResult<T>(last, done, stopwatch.Elapsed, CircuitBreakerOutcome.Accepted);
+                    return new CircuitBreakerResult<T>(last, done, stopwatch.GetElapsedTime(), CircuitBreakerOutcome.Accepted);
                 }
 
-                if (maxElapsed is { } cap && stopwatch.Elapsed > cap)
+                if (maxElapsed is { } cap && stopwatch.GetElapsedTime() > cap)
                 {
-                    return new CircuitBreakerResult<T>(last, done, stopwatch.Elapsed, CircuitBreakerOutcome.Timeout);
+                    return new CircuitBreakerResult<T>(last, done, stopwatch.GetElapsedTime(), CircuitBreakerOutcome.Timeout);
                 }
             }
 
-            return new CircuitBreakerResult<T>(last, done, stopwatch.Elapsed, CircuitBreakerOutcome.MaxIterations);
+            return new CircuitBreakerResult<T>(last, done, stopwatch.GetElapsedTime(), CircuitBreakerOutcome.MaxIterations);
         }
     }
 }

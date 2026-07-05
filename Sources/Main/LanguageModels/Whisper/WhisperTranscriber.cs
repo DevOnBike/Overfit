@@ -19,7 +19,20 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
     /// </summary>
     public sealed class WhisperTranscriber
     {
-        private const int SamplesPerWindow = MelSpectrogram.SampleRate * 30; // 30 s
+        private const int SamplesPerWindow = MelSpectrogram.SampleRate * 30; // 30 s (Whisper's max window)
+
+        // Lower bound on the processed window so very short clips still give the conv stem enough frames.
+        // Anti-loop: a short clip can make Whisper re-emit the same phrase instead of stopping. If the decoded
+        // tail is an exact back-to-back repeat of period >= this many tokens, drop the duplicate and stop. Big
+        // enough not to fire on natural short repeats ("New York, New York" = period 2).
+        private const int MinRepeatPeriod = 3;
+
+        private const int MinSamples = MelSpectrogram.SampleRate; // 1 s floor
+        // Trailing silence kept after the audio. Whisper uses the post-speech silence as its "audio ended" cue
+        // to emit the end-of-transcript token; trim it too tight and the decoder never stops and loops to
+        // maxNewTokens (repetition hallucination). ~1 s of zeros is enough for EOT while still cutting the
+        // encoder's frame count far below the full 30 s window.
+        private const int TrailingSamples = MelSpectrogram.SampleRate * 3 / 2; // 1.5 s
 
         private readonly WhisperModel _model;
         private readonly MelSpectrogram _mel;
@@ -58,17 +71,43 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
 
         /// <summary>Transcribes mono 16 kHz <paramref name="samples"/> → text.</summary>
         public string Transcribe(ReadOnlySpan<float> samples, string language = "en", int maxNewTokens = 224)
+            => Transcribe(samples, language, maxNewTokens, padToFullWindow: false);
+
+        /// <summary>
+        /// Core transcription. By default the encoder runs over only the audio actually present (rounded up to
+        /// the 1 s floor + a little trailing room, capped at 30 s) instead of always padding to a full 30 s
+        /// window. The encoder cost is dominated by self-attention, which is O(nCtx²) in the frame count, so a
+        /// 3 s clip costs ~(3/30)² of a full window — a large speed-up for short utterances (voice input). This
+        /// matches whisper.cpp's "process the real length" behaviour; it is NOT bit-identical to the 30 s-padded
+        /// path (self-attention sees fewer frames), but the log-mel of the trimmed window equals the prefix of
+        /// the padded one and the transcript is unchanged for normal clips. <paramref name="padToFullWindow"/>
+        /// forces the legacy full-30 s behaviour (internal, for A/B parity/perf tests).
+        /// </summary>
+        internal string Transcribe(ReadOnlySpan<float> samples, string language, int maxNewTokens, bool padToFullWindow)
         {
-            // Pad/trim to a single 30 s window (Whisper's fixed input length); the window is reused across calls.
-            var window = _window.AsSpan();
+            int windowLen;
+            if (padToFullWindow)
+            {
+                windowLen = SamplesPerWindow;
+            }
+            else
+            {
+                var present = Math.Min(samples.Length, SamplesPerWindow);
+                windowLen = Math.Min(SamplesPerWindow, Math.Max(present + TrailingSamples, MinSamples));
+            }
+
+            // The 30 s buffer is reused across calls; we only clear + fill (and run the mel/encoder over) the
+            // first windowLen samples — the rest is left untouched and never read.
+            var window = _window.AsSpan(0, windowLen);
             window.Clear();
-            samples.Slice(0, Math.Min(samples.Length, SamplesPerWindow)).CopyTo(window);
+            samples.Slice(0, Math.Min(samples.Length, windowLen)).CopyTo(window);
 
             var mel = _mel.LogMel(window, out var frames);
             var encoderOut = _encoder.Encode(mel, frames, out var nCtx);
 
             var prompt = BuildPrompt(language);
-            var produced = _decoder.DecodeCached(encoderOut, nCtx, prompt, _tokenizer.EndOfTranscript, maxNewTokens);
+            var produced = _decoder.DecodeCached(
+                encoderOut, nCtx, prompt, _tokenizer.EndOfTranscript, maxNewTokens, MinRepeatPeriod);
             return _tokenizer.Decode(produced).Trim();
         }
 

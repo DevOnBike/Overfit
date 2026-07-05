@@ -31,11 +31,11 @@ Two independent guards:
 - `Array.Copy` — use `Span<T>.CopyTo` instead.
 - Raw `ArrayPool<T>.Shared` — use `PooledBuffer<T>` (scoped via `using`) or `PooledBuffer<T>.RentArray` + `ReturnArray` (class-lifetime).
 
-**2. Actual Native AOT publish, checked in CI.** `Sources/AotSmokeTest` is a thin console exe referencing `DevOnBike.Overfit`. The `aot-guard` job in `.github/workflows/ci.yml` publishes it under `-p:PublishAot=true -p:TreatWarningsAsErrors=true` on Ubuntu and then runs the produced native binary. Libraries cannot be Native-AOT compiled directly (no entry point), so the smoketest is the real AOT consumer — ILCompiler actually runs, IL2026 / IL3050 / IL31xx warnings on reachable code become errors, and a non-zero exit from the binary fails the job.
+**2. Actual Native AOT publish, checked in CI.** `Tests/AotSmokeTest` is a thin console exe referencing `DevOnBike.Overfit`. The `aot-guard` job in `.github/workflows/ci.yml` publishes it under `-p:PublishAot=true -p:TreatWarningsAsErrors=true` on Ubuntu and then runs the produced native binary. Libraries cannot be Native-AOT compiled directly (no entry point), so the smoketest is the real AOT consumer — ILCompiler actually runs, IL2026 / IL3050 / IL31xx warnings on reachable code become errors, and a non-zero exit from the binary fails the job.
 
 Tests and benchmarks are unconstrained — LINQ is fine there.
 
-Use explicit `for` / `foreach` over `Span<T>`, delegates over reflection, explicit `new` over `Activator`. If your library change touches a code path reachable from `AotSmokeTest/Program.cs` and introduces a trim warning, the CI publish will fail — either fix the warning in the library or scope a `[RequiresDynamicCode]` / `[RequiresUnreferencedCode]` attribute (sparingly).
+Use explicit `for` / `foreach` over `Span<T>`, delegates over reflection, explicit `new` over `Activator`. If your library change touches a code path reachable from `Tests/AotSmokeTest/Program.cs` and introduces a trim warning, the CI publish will fail — either fix the warning in the library or scope a `[RequiresDynamicCode]` / `[RequiresUnreferencedCode]` attribute (sparingly).
 
 ## Tests
 
