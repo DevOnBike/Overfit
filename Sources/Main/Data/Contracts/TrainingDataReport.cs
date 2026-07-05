@@ -56,7 +56,7 @@ namespace DevOnBike.Overfit.Data.Contracts
             get
             {
                 var count = 0;
-                
+
                 foreach (var f in FeatureReports)
                 {
                     if (f.IsConstant)
@@ -64,7 +64,7 @@ namespace DevOnBike.Overfit.Data.Contracts
                         count++;
                     }
                 }
-                
+
                 return count;
             }
         }
@@ -75,12 +75,12 @@ namespace DevOnBike.Overfit.Data.Contracts
             get
             {
                 var total = 0;
-                
+
                 foreach (var f in FeatureReports)
                 {
                     total += f.NonFiniteCount;
                 }
-                
+
                 return total;
             }
         }
