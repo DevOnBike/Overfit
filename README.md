@@ -19,7 +19,13 @@ security, compliance, latency, deployment, or supply-chain constraints.
 ```bash
 dotnet add package DevOnBike.Overfit            # the library
 dotnet tool install -g DevOnBike.Overfit.Cli    # the CLI + OpenAI-compatible server (overfit serve)
+dotnet new install DevOnBike.Overfit.Templates  # then: dotnet new overfit-chat → a local-LLM chat app in 60s
 ```
+
+Overfit implements **`Microsoft.Extensions.AI`** (`IChatClient` / `IEmbeddingGenerator`), so you can drop a
+local model into the official .NET AI template or Semantic Kernel by swapping **one line** — no Ollama, no
+Docker, no cloud key: `builder.Services.AddChatClient(overfit.AsChatClient());`
+([guide](docs/microsoft-extensions-ai.md)).
 
 ---
 
@@ -579,7 +585,7 @@ for that.
 - **Loaders** — GGUF, HuggingFace safetensors (sharded), Overfit `.bin`, ONNX (linear + DAG). 100% Python-free; tokenizers read straight from the GGUF.
 - **Agentic & structured output** — tool calling, guaranteed JSON, **JSON-Schema & regex constrained decoding**, ReAct / critic / circuit-breaker / summarizing memory, and a full **sampler suite** (temperature · top-k/p · min-p · top-nσ · locally-typical · Mirostat v1/v2 · XTC) plus a **DRY anti-repetition** guard that breaks verbatim generation loops even under greedy decode.
 - **RAG** — in-process vector store; MiniLM / BGE / E5 embeddings (bit-parity vs HuggingFace); multilingual via the chat model's own embeddings; **RAG Stability Harness** (recall / paraphrase / false-premise / lint, gated in CI).
-- **Integration** — **OpenAI-compatible server** (`/v1/chat/completions` + SSE, `/v1/embeddings`, `/v1/models`); **MCP server** (`overfit mcp` — local `ask` / `rag_query` / `transcribe` tools for Claude Code & co., [`docs/mcp.md`](docs/mcp.md)); **Microsoft.Extensions.AI** adapter; **`overfit` CLI** (pull / list / chat / serve / mcp) shipped three ways — `dotnet tool install -g DevOnBike.Overfit.Cli`, a Native-AOT binary, and a ~34 MB Docker image ([`docs/docker.md`](docs/docker.md)); ASP.NET starter template.
+- **Integration** — **OpenAI-compatible server** (`/v1/chat/completions` + SSE, `/v1/embeddings`, `/v1/models`); **MCP server** (`overfit mcp` — local `ask` / `rag_query` / `transcribe` tools for Claude Code & co., [`docs/mcp.md`](docs/mcp.md)); **Microsoft.Extensions.AI** adapter — a local model as a standard `IChatClient` / `IEmbeddingGenerator`, drop-in for the .NET AI template & Semantic Kernel ([`docs/microsoft-extensions-ai.md`](docs/microsoft-extensions-ai.md)); **`dotnet new overfit-chat`** project template; **`overfit` CLI** (pull / list / chat / serve / mcp) shipped three ways — `dotnet tool install -g DevOnBike.Overfit.Cli`, a Native-AOT binary, and a ~34 MB Docker image ([`docs/docker.md`](docs/docker.md)); ASP.NET starter template.
 - **Training** — **QLoRA CPU fine-tuning** (frozen Q4_K base incl. FFN + per-head attention), gradient checkpointing, data-parallel trainer, Conv/BatchNorm/LSTM, CRNN + CTC (OCR), LR schedules.
 - **Multimodal & audio** — **Whisper speech-to-text** in pure C#; from-scratch MP3 / WAV decoders; OCR.
 - **Engineering** — Native-AOT (one ~7.8 MB self-contained binary, AVX2 codegen so the AOT binary / Docker image decodes at JIT parity); zero-allocation hot paths (decode 0 B/token AND prefill 0 B/request); **in-repo Roslyn perf analyzer** (10 rules, error-severity in kernels, CI guard-of-the-guard); AOT guard in CI; anomaly detection.

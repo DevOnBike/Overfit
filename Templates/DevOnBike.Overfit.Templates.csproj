@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    `dotnet new` template pack for Overfit. Ships template CONTENT only (no build output) — the content
+    projects reference the published DevOnBike.Overfit NuGet packages, so a scaffolded app restores and
+    runs standalone. This project is intentionally OUTSIDE Overfit.sln so the solution never tries to
+    build the template content (which references packages, not the local Main.csproj).
+
+      dotnet pack Templates/DevOnBike.Overfit.Templates.csproj -c Release
+      dotnet new install ./Templates/bin/Release/DevOnBike.Overfit.Templates.10.0.29.nupkg
+      dotnet new overfit-chat -o MyChatApp
+  -->
+
+  <PropertyGroup>
+    <PackageType>Template</PackageType>
+    <PackageId>DevOnBike.Overfit.Templates</PackageId>
+    <Title>Overfit project templates (local LLM for .NET)</Title>
+    <Authors>DevOnBike</Authors>
+    <Description>`dotnet new` templates for building local-LLM apps with Overfit — a pure-.NET, in-process, on-device LLM runtime (no Python, no Ollama, no cloud). Includes `overfit-chat`: a Minimal API streaming-chat app that exposes a local GGUF model as a standard Microsoft.Extensions.AI IChatClient.</Description>
+    <PackageTags>dotnet-new;templates;llm;ai;local-llm;on-device;ichatclient;microsoft-extensions-ai;gguf;native-aot;overfit</PackageTags>
+    <Copyright>Copyright (c) 2026 DevOnBike</Copyright>
+    <RepositoryUrl>https://github.com/DevOnBike/Overfit</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <!-- Version intentionally omitted: inherited from the repo-wide <Version> in ../Directory.Build.props
+         (auto-imported), so this package always ships in lockstep with the rest of the release. -->
+
+    <TargetFramework>net10.0</TargetFramework>
+    <IncludeContentInPack>true</IncludeContentInPack>
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <ContentTargetFolders>content</ContentTargetFolders>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <NoDefaultExcludes>true</NoDefaultExcludes>
+    <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
+    <NoWarn>$(NoWarn);NU5128</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Content Include="content\**\*" Exclude="content\**\bin\**;content\**\obj\**" />
+    <Compile Remove="**\*" />
+  </ItemGroup>
+
+</Project>
