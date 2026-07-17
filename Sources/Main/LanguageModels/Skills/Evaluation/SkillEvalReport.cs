@@ -42,8 +42,16 @@ namespace DevOnBike.Overfit.LanguageModels.Skills.Evaluation
         }
 
         /// <summary>The skill's real value: <see cref="PassRateOn"/> − <see cref="PassRateOff"/>. Near zero
-        /// means the bare model already does this — a candidate to retire.</summary>
+        /// means the bare model already does this — a candidate to retire. Report it with
+        /// <see cref="Significance"/>: on a 10–20-case set a lift this size is often one lucky case.</summary>
         public double Lift => PassRateOn - PassRateOff;
+
+        /// <summary>Error bars on <see cref="Lift"/> — the 95% interval and an exact McNemar p-value over the
+        /// discordant pairs. <c>null</c> only for an empty report.</summary>
+        public LiftSignificance? Significance
+        {
+            get;
+        }
 
         /// <summary>Fraction of cases where the skill (de)activated as expected (<c>ShouldTrigger</c>).</summary>
         public double TriggerAccuracy
@@ -64,25 +72,40 @@ namespace DevOnBike.Overfit.LanguageModels.Skills.Evaluation
             var on = 0;
             var off = 0;
             var trigger = 0;
+            var helped = 0;   // discordant: the skill turned a fail into a pass
+            var hurt = 0;     // discordant: the skill turned a pass into a fail
             for (var i = 0; i < cases.Count; i++)
             {
-                if (cases[i].OnPass)
+                var c = cases[i];
+                if (c.OnPass)
                 {
                     on++;
                 }
-                if (cases[i].OffPass)
+                if (c.OffPass)
                 {
                     off++;
                 }
-                if (cases[i].TriggerCorrect)
+                if (c.TriggerCorrect)
                 {
                     trigger++;
+                }
+
+                // Concordant cases (both pass / both fail) carry no information about the skill and cancel out
+                // of the paired difference — only these two counts drive the p-value.
+                if (c.OnPass && !c.OffPass)
+                {
+                    helped++;
+                }
+                else if (!c.OnPass && c.OffPass)
+                {
+                    hurt++;
                 }
             }
 
             PassRateOn = on / (double)cases.Count;
             PassRateOff = off / (double)cases.Count;
             TriggerAccuracy = trigger / (double)cases.Count;
+            Significance = LiftSignificance.Compute(helped, hurt, cases.Count);
         }
     }
 }

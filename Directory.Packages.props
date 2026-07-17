@@ -6,13 +6,22 @@
     <PackageVersion Include="coverlet.collector" Version="10.0.1" />
     <PackageVersion Include="IDisposableAnalyzers" Version="4.0.8" />
     <PackageVersion Include="MathNet.Numerics" Version="5.0.0" />
-    <PackageVersion Include="Microsoft.CodeAnalysis.Analyzers" Version="5.3.0" />
+    <!-- 5.6.0 VERIFIED SAFE 2026-07-05 (SDK 10.0.110 / Roslyn 5.0): no CS9057, and the tripwire still fails
+         the build with error OVERFIT008 — i.e. the analyzer stays alive. This package ships the RS* rules FOR
+         analyzer authors; unlike Microsoft.CodeAnalysis.CSharp below it does NOT set the Roslyn API the
+         analyzer compiles against, so it is not bound by the SDK's compiler version. -->
+    <PackageVersion Include="Microsoft.CodeAnalysis.Analyzers" Version="5.6.0" />
     <PackageVersion Include="Microsoft.CodeAnalysis.BannedApiAnalyzers" Version="5.6.0" />
     <!-- MUST be <= the SDK compiler's Roslyn version (currently 5.0.0 on .NET SDK 10.0.1xx) — a NEWER
          reference makes the compiler silently REJECT the whole analyzer (CS9057: every OVERFIT rule
          stops running while the build still "succeeds"). Verify after any bump: build Main and grep
-         for CS9057, then tripwire-check that a rule still fires. -->
+         for CS9057, then tripwire-check that a rule still fires.
+         RE-CONFIRMED 2026-07-05: bumping this to 5.6.0 reproduced the failure exactly — CS9057, build still
+         "Kompilacja powiodła się", and a deliberate Parallel.For violation went UNREPORTED (all 20 OVERFIT
+         rules silently off). Expect this package to show as permanently "outdated"; that is INTENTIONAL, not
+         debt. Bump it only when the SDK's own Roslyn version moves up. -->
     <PackageVersion Include="Microsoft.CodeAnalysis.CSharp" Version="5.0.0" />
+    <PackageVersion Include="Microsoft.Agents.AI" Version="1.13.0" />
     <PackageVersion Include="Microsoft.Extensions.AI.Abstractions" Version="10.8.0" />
     <PackageVersion Include="Microsoft.Extensions.AI.Evaluation" Version="10.8.0" />
     <PackageVersion Include="Microsoft.Extensions.AI.Evaluation.Quality" Version="10.8.0" />
@@ -20,7 +29,7 @@
     <PackageVersion Include="Microsoft.ML.OnnxRuntime" Version="1.27.1" />
     <PackageVersion Include="Microsoft.ML.OnnxTransformer" Version="5.0.0" />
     <PackageVersion Include="Microsoft.SourceLink.GitHub" Version="10.0.301" />
-    <PackageVersion Include="OpenTelemetry.Extensions.Hosting" Version="1.16.0" />
+    <PackageVersion Include="OpenTelemetry.Extensions.Hosting" Version="1.17.0" />
     <PackageVersion Include="OpenTelemetry.Exporter.Prometheus.AspNetCore" Version="1.15.3-beta.1" />
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.8.1" />
     <PackageVersion Include="Moq" Version="4.20.72" />

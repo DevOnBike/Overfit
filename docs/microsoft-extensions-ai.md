@@ -60,9 +60,33 @@ await foreach (var update in chat.GetStreamingResponseAsync("Write a haiku about
 }
 ```
 
+## Microsoft Agent Framework — a local model behind Microsoft's agent SDK
+
+[Microsoft Agent Framework](https://learn.microsoft.com/agent-framework/overview/) (`Microsoft.Agents.AI`) is the
+successor that merged **Semantic Kernel and AutoGen** into one SDK. It builds agents on top of any
+`IChatClient` — so Overfit is a model provider for it with **no adapter code**:
+
+```csharp
+IChatClient chat = overfit.AsChatClient();
+AIAgent agent = new ChatClientAgent(chat, instructions: "You are a concise assistant.");
+
+var response = await agent.RunAsync("What is the capital of France?");
+```
+
+That's the whole integration: **a Microsoft Agent Framework agent whose model runs in your process, on the CPU,
+offline.** No Ollama, no Docker, no cloud key.
+
+> **Verified, not asserted.** [`Demo/AgentFrameworkDemo`](../Demo/AgentFrameworkDemo) runs exactly this against
+> `Microsoft.Agents.AI` **1.13.0** on a Qwen2.5-0.5B GGUF, and is built by CI so the claim can't rot:
+> `dotnet run --project Demo/AgentFrameworkDemo -- model.gguf`
+>
+> Scope of the check: agent construction + `RunAsync`. Tool calling and multi-agent workflows route through the
+> same `IChatClient` and should follow, but they have not been measured here — so they are not claimed.
+
 ## Semantic Kernel
 
-Semantic Kernel consumes `IChatClient` directly, so Overfit plugs straight in:
+Semantic Kernel also consumes `IChatClient`, so Overfit plugs straight in — but note SK is now **superseded by
+Agent Framework** (above), which is where new work should go:
 
 ```csharp
 var kernelBuilder = Kernel.CreateBuilder();

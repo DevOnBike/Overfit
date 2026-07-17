@@ -6,6 +6,7 @@
 using System.Text;
 using System.Text.Json;
 using DevOnBike.Overfit.LanguageModels.Constraints;
+using DevOnBike.Overfit.Schemas;
 
 namespace DevOnBike.Overfit.LanguageModels.Skills.Optimization
 {
@@ -19,10 +20,9 @@ namespace DevOnBike.Overfit.LanguageModels.Skills.Optimization
     /// </summary>
     public sealed class OverfitSkillEditor : ISkillEditor
     {
-        private const string EditSchema =
-            "{\"type\":\"object\",\"additionalProperties\":false,"
-            + "\"properties\":{\"reasoning\":{\"type\":\"string\"},\"revised_instructions\":{\"type\":\"string\"}},"
-            + "\"required\":[\"reasoning\",\"revised_instructions\"]}";
+        // Authored as Schemas/SkillEditor.json and woven in as a const at build time (see Main.csproj
+        // EmbedJsonSchemas) — edit the .json, not this.
+        private const string EditSchema = OverfitSchemas.SkillEditor;
 
         private readonly OverfitClient _optimizer;
         private readonly int _maxFailuresShown;
