@@ -89,27 +89,36 @@ namespace DevOnBike.Overfit.Licensing
                 }
             }
 
+            WriteToConsole(message, color);
+
+            Debug.WriteLine(message);
+        }
+
+        /// <summary>
+        /// Console write, colourised where the platform supports it. Split out of the caller so the
+        /// Android case is a guard clause rather than a branch wrapping the whole colour path — the
+        /// caller still reaches its Debug.WriteLine either way.
+        /// </summary>
+        private static void WriteToConsole(string message, ConsoleColor color)
+        {
             // Console color is unsupported on Android (no console) — write plain there.
             if (OperatingSystem.IsAndroid())
             {
                 Console.WriteLine(message);
+                return;
             }
-            else
+
+            var originalColor = Console.ForegroundColor;
+
+            try
             {
-                var originalColor = Console.ForegroundColor;
-
-                try
-                {
-                    Console.ForegroundColor = color;
-                    Console.WriteLine(message);
-                }
-                finally
-                {
-                    Console.ForegroundColor = originalColor;
-                }
+                Console.ForegroundColor = color;
+                Console.WriteLine(message);
             }
-
-            Debug.WriteLine(message);
+            finally
+            {
+                Console.ForegroundColor = originalColor;
+            }
         }
     }
 }

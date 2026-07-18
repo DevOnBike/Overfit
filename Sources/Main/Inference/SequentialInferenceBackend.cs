@@ -1,10 +1,12 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Inference.Contracts;
+
+using DevOnBike.Overfit.Diagnostics;
 
 namespace DevOnBike.Overfit.Inference
 {
@@ -55,6 +57,7 @@ namespace DevOnBike.Overfit.Inference
             get;
         }
 
+        [OverfitHotPath]
         public void Run(
             ReadOnlySpan<float> input,
             Span<float> output)

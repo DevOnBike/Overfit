@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -726,11 +726,7 @@ namespace DevOnBike.Overfit.Runtime
                 // descriptor reads below see the dispatcher's writes.
                 var index = Interlocked.Increment(ref _nextChunk.Value) - 1;
 
-                if (index < _chunkCount)
-                {
-                    ExecuteChunk(index);
-                }
-                else
+                if (index >= _chunkCount)
                 {
                     // UNREACHABLE under correct SemaphoreSlim semantics:
                     // Release(chunkCount - 1) yields exactly chunkCount - 1
@@ -747,7 +743,10 @@ namespace DevOnBike.Overfit.Runtime
                     //
                     // Debug builds surface the invariant violation immediately.
                     Debug.Fail($"OverfitParallel: claim index {index} >= chunkCount {_chunkCount}.");
+                    continue;
                 }
+
+                ExecuteChunk(index);
             }
         }
 

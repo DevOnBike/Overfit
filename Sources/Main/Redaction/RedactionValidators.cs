@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -130,15 +130,16 @@ namespace DevOnBike.Overfit.Redaction
                 if (char.IsDigit(c))
                 {
                     remainder = ((remainder * 10) + (c - '0')) % 97;
+                    continue;
                 }
-                else if (c is >= 'A' and <= 'Z')
+
+                if (c is >= 'A' and <= 'Z')
                 {
                     remainder = ((remainder * 100) + (c - 'A' + 10)) % 97;
+                    continue;
                 }
-                else
-                {
-                    return false;
-                }
+
+                return false;
             }
 
             return remainder == 1;
