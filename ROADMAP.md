@@ -51,6 +51,37 @@ primitives (autograd, agentic stack, MEAI adapter, the XGBoost predictor).
    on primitives we already have (local generation, scoring, guaranteed-JSON edits, the ReAct/ChatSession stack) — it
    is orchestration, not new kernels. Complements QLoRA (weight-space) with a fully on-prem text-space moat. Caveat:
    edit/scoring quality wants a 7B+ local optimizer model. Origin: arXiv:2605.23904 (SkillOpt, Microsoft, 2026).
+
+   **★ SIZED 2026-07-18 — one real bug found and FIXED; the population question is still open.**
+   Ran an equal-budget A/B (150 model calls per arm, shared ON-only scoring so neither arm pays the other's
+   implementation overhead): hill-climbing (today's `SkillOptimizer`, population 1) vs population(4) + tournament
+   + elitism. Qwen2.5-0.5B as the runner, Qwen2.5-3B as the editor, capitals task, deterministic grader
+   (correct AND ≤ 4 words).
+   - **First run: 0 % vs 0 %, both instructions unchanged — a broken experiment, not a tie.** Diagnosis:
+     the fitness landscape was fine (seed → *"The capital of France is Paris."* correctly fails; a good
+     instruction → *"Paris"* passes), but the **mutation operator was the bottleneck**. A 0.5B editor echoed the
+     user's *question* back instead of writing an instruction; the 3B editor wrote valid English but in the
+     **wrong direction**: *"Answer in the format 'The [subject] is [answer]'"* — i.e. it codified the failing
+     answer as the desired format.
+   - **Root cause: `CaseFailure` carried (Prompt, Output) but no REASON**, so the editor saw an answer that reads
+     perfectly fine and had zero gradient information. Adding one sentence flipped it instantly:
+     *"Answer the question in at most 4 words."* **FIXED** — `CaseFailure.Reason` (optional ⇒ non-breaking),
+     populated from the failed `GradeCheck` id + note, surfaced to the editor as `-> WHY WRONG:`, guarded by
+     `CaseFailureReasonTests`.
+   - **Re-run after the fix: 0 % → 75 % for BOTH arms.** The fix is validated end-to-end; **the population-vs-
+     hill-climbing question is NOT answered** — the task saturates at 75 % within ~13 calls (the 4th validation
+     fact is simply unknown to a 0.5B, a model-capability ceiling no prompt can lift), leaving no headroom for a
+     search-strategy difference to appear. Suggestive but unmeasured: hill-climbing burned 137 of 150 calls after
+     its single accept, the editor having stopped producing novel candidates.
+   - **Next sizing (before building anything population-shaped):** a task with real headroom — harder cases, more
+     of them, a 3B+ runner so facts are not the limiter.
+   - **Do NOT generify the Evolutionary `float` interfaces to `T` for this.** `Mutate(ReadOnlySpan<T>, Span<T>)`
+     means "perturb elementwise into a preallocated same-size buffer"; a text mutation is `string → string`,
+     variable length, one expensive LLM call — the type parameter is not the obstacle, the contract shape is
+     (and Gaussian/SBX arithmetic on text is meaningless regardless of `T`). `ISelectionOperator` (indices) and
+     `IFitnessShaper` (fitness values) are already genome-agnostic and reusable as-is. The one place a generic
+     would genuinely pay is `IEliteArchive<TGenome>` — storage, not math — and only once duplication actually
+     appears. Write a parallel text path (~150 lines) instead of refactoring a shipped public API.
 3. **`overfit score` as a server endpoint.** The XGBoost predictor ships as a library + `overfit score` CLI; expose it
    over the OpenAI-compatible server (or a small dedicated route) for tabular scoring as a service. Small, reuses the
    hardened server + zero-alloc predictor.

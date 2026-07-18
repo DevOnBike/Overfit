@@ -3,6 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Text;
 using DevOnBike.Overfit.LanguageModels.Skills.Evaluation;
 
 namespace DevOnBike.Overfit.LanguageModels.Skills.Optimization
@@ -111,10 +112,38 @@ namespace DevOnBike.Overfit.LanguageModels.Skills.Optimization
                 var c = report.Cases[i];
                 if (!c.OnPass)
                 {
-                    failures.Add(new CaseFailure(c.Case.Prompt, c.OnResult.Output));
+                    failures.Add(new CaseFailure(c.Case.Prompt, c.OnResult.Output, DescribeFailedChecks(c.OnChecks)));
                 }
             }
             return failures;
+        }
+
+        /// <summary>
+        /// Turns the failed checks into one line the editor can act on. Without this the editor only sees
+        /// (prompt, output) — an answer that usually looks correct — and edits in the wrong direction; the failed
+        /// check id + note is the entire gradient signal. See <see cref="CaseFailure"/> for the measured effect.
+        /// </summary>
+        private static string DescribeFailedChecks(IReadOnlyList<GradeCheck> checks)
+        {
+            var sb = new StringBuilder();
+            for (var i = 0; i < checks.Count; i++)
+            {
+                var check = checks[i];
+                if (check.Pass)
+                {
+                    continue;
+                }
+                if (sb.Length > 0)
+                {
+                    sb.Append("; ");
+                }
+                sb.Append("failed check '").Append(check.Id).Append('\'');
+                if (!string.IsNullOrWhiteSpace(check.Notes))
+                {
+                    sb.Append(" (").Append(check.Notes).Append(')');
+                }
+            }
+            return sb.ToString();
         }
     }
 }
