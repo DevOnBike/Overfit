@@ -73,8 +73,29 @@ primitives (autograd, agentic stack, MEAI adapter, the XGBoost predictor).
      fact is simply unknown to a 0.5B, a model-capability ceiling no prompt can lift), leaving no headroom for a
      search-strategy difference to appear. Suggestive but unmeasured: hill-climbing burned 137 of 150 calls after
      its single accept, the editor having stopped producing novel candidates.
-   - **Next sizing (before building anything population-shaped):** a task with real headroom — harder cases, more
-     of them, a 3B+ runner so facts are not the limiter.
+   - **SIZING #2 (2026-07-18) — task WITH headroom. Plain population LOSES. ⛔ do not build GA-on-prompts.**
+     Rebuilt the experiment to remove sizing #1's ceiling: 3B runner (facts no longer the limiter), FOUR
+     independent format constraints (correct · lowercase · no punctuation · ≤3 words), **continuous fitness**
+     (fraction of constraints met ⇒ a real multi-step gradient), 6 train + 6 val, equal 200-call budget, failures
+     carrying reasons.
+     | arm | result | budget behaviour |
+     |---|---|---|
+     | hill-climbing (pop 1) | 20.8 % → 79.2 % (call 19) → **87.5 %** (call 32) | 2 accepts, then 13 straight rejects |
+     | population(4) + tournament + elitism | **87.5 %** | 45 calls just to seed; **12 generations, zero improvement** |
+
+     The climb was genuinely multi-step this time, so the landscape *could* have discriminated — and population
+     still did not win, while being **worse per call** (87.5 % at call 32 vs 45 calls merely to seed).
+     **Why: the whole population converged to identical fitness (88 % × 4).** Tournament + elitism with no
+     diversity pressure filled every slot with variants fitness cannot tell apart — and diversity was the entire
+     justification for going population-shaped. Without it, it is 4× redundant hill-climbing at 4× the cost.
+     (Measured: fitness identical. Not measured: whether the *texts* were identical — plateau vs true clone
+     collapse. The practical conclusion is the same.)
+     **Implication:** plain GA on prompt text is not worth building. The only variant left standing is
+     **MAP-Elites**, whose cells are keyed by a BEHAVIOUR descriptor rather than fitness, so diversity is
+     structural — exactly the failure mode observed here. But that is now the third hypothesis in this family, so
+     **size it first**: show that prompt behaviour descriptors (e.g. verbosity × accuracy) actually have
+     resolution, otherwise MAP-Elites degenerates the same way. Caveats: n=1 task, 1 seed, population 4, mutation
+     only (no crossover).
    - **Do NOT generify the Evolutionary `float` interfaces to `T` for this.** `Mutate(ReadOnlySpan<T>, Span<T>)`
      means "perturb elementwise into a preallocated same-size buffer"; a text mutation is `string → string`,
      variable length, one expensive LLM call — the type parameter is not the obstacle, the contract shape is

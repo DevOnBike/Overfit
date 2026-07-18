@@ -82,6 +82,7 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
         private bool _hasFitness;
         private bool _hasPendingPopulation;
         private bool _disposed;
+        private bool _initialized;
 
         /// <summary>
         ///     Creates a separable CMA-ES strategy.
@@ -287,11 +288,14 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
             {
                 _mean[j] = min + (range * NextUnitFloat());
             }
+
+            _initialized = true;
         }
 
         public void Ask(Span<float> populationMatrix)
         {
             ThrowIfDisposed();
+            ThrowIfNotInitialized();
 
             var expectedLength = PopulationSize * ParameterCount;
 
@@ -650,6 +654,9 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
 
             _hasGaussianSpare = false;
             _gaussianSpare = 0f;
+
+            // A restored checkpoint carries a real distribution mean, so it counts as initialised.
+            _initialized = true;
         }
 
         private static void WriteFloats(BinaryWriter writer, ReadOnlySpan<float> values)
@@ -725,6 +732,21 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
         private void ThrowIfDisposed()
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
+        }
+
+        /// <summary>
+        /// Guards the silent-failure mode: without <see cref="Initialize"/> the distribution mean is all zeros, so
+        /// the run is driven by sampling noise alone. That does not crash — it just converges badly, which is far
+        /// harder to notice than an exception.
+        /// </summary>
+        private void ThrowIfNotInitialized()
+        {
+            if (!_initialized)
+            {
+                throw new OverfitRuntimeException(
+                    $"{nameof(SeparableCmaEsStrategy)} was not initialised. Call {nameof(Initialize)}() to seed the "
+                    + $"distribution mean, or {nameof(Load)}() to restore a saved run, before {nameof(Ask)}().");
+            }
         }
     }
 }

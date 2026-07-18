@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -8,6 +8,7 @@ using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Text.Json;
 using DevOnBike.Overfit.Diagnostics;
+using DevOnBike.Overfit.Exceptions;
 
 namespace DevOnBike.Overfit.Cli
 {
@@ -59,12 +60,12 @@ namespace DevOnBike.Overfit.Cli
 
             if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
             {
-                throw new InvalidOperationException($"Repo '{repo}' is gated or private. Accept its terms on huggingface.co and set HF_TOKEN.");
+                throw new OverfitRuntimeException($"Repo '{repo}' is gated or private. Accept its terms on huggingface.co and set HF_TOKEN.");
             }
 
             if (response.StatusCode == HttpStatusCode.NotFound)
             {
-                throw new InvalidOperationException($"HuggingFace repo '{repo}' was not found.");
+                throw new OverfitRuntimeException($"HuggingFace repo '{repo}' was not found.");
             }
 
             response.EnsureSuccessStatusCode();
@@ -87,7 +88,7 @@ namespace DevOnBike.Overfit.Cli
             }
             if (ggufs.Count == 0)
             {
-                throw new InvalidOperationException($"Repo '{repo}' has no .gguf files.");
+                throw new OverfitRuntimeException($"Repo '{repo}' has no .gguf files.");
             }
 
             if (explicitFile is not null)
@@ -100,7 +101,7 @@ namespace DevOnBike.Overfit.Cli
                     }
                 }
 
-                throw new InvalidOperationException($"No .gguf matching '{explicitFile}' in '{repo}'. Available:\n  " + string.Join("\n  ", ggufs));
+                throw new OverfitRuntimeException($"No .gguf matching '{explicitFile}' in '{repo}'. Available:\n  " + string.Join("\n  ", ggufs));
             }
 
             if (pattern is not null)
@@ -305,7 +306,7 @@ namespace DevOnBike.Overfit.Cli
                 if (!string.Equals(actual, expectedSha256, StringComparison.OrdinalIgnoreCase))
                 {
                     File.Delete(tmp);
-                    throw new InvalidOperationException(
+                    throw new OverfitRuntimeException(
                         $"SHA-256 mismatch for '{file}' — the download is corrupt and was discarded.\n" +
                         $"  expected: {expectedSha256}\n  actual:   {actual}");
                 }

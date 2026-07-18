@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup>
         <TargetFramework>net10.0</TargetFramework>
@@ -162,7 +162,6 @@
     <Target Name="BanMultipleTopLevelTypesGuard" BeforeTargets="CoreCompile">
         <BanMultipleTopLevelTypes Files="@(Compile)" />
     </Target>
-
     <!-- Codegen: every **/Schemas/*.json becomes a const on OverfitSchemas (see JudgeSchema's doc comment for
          why this is codegen and not an <EmbeddedResource>). -->
     <UsingTask TaskName="EmbedJsonSchemas" TaskFactory="RoslynCodeTaskFactory"

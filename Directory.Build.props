@@ -1,4 +1,4 @@
-<Project>
+﻿<Project>
     <PropertyGroup>
         <Version>10.0.30</Version>
         <FileVersion>10.0.30</FileVersion>
@@ -25,7 +25,12 @@
              its default Warning there and TreatWarningsAsErrors would promote it. Exempting the *warning*
              does NOT weaken RS0030 on real code, which stays error-severity via the [*.cs] editorconfig
              section (a genuine error, not a promoted warning, so WarningsNotAsErrors cannot downgrade it). -->
-        <WarningsNotAsErrors>$(WarningsNotAsErrors);RS0030;OVERFIT001;OVERFIT002;OVERFIT003;OVERFIT004;OVERFIT005;OVERFIT006;OVERFIT007;OVERFIT009;OVERFIT010;OVERFIT011;OVERFIT012;OVERFIT013;OVERFIT014;OVERFIT016;OVERFIT017;OVERFIT018;OVERFIT019;OVERFIT020;OVERFIT900;IDISP001;IDISP002;IDISP003;IDISP004;IDISP005;IDISP006;IDISP007;IDISP008;IDISP009;IDISP010;IDISP011;IDISP012;IDISP013;IDISP014;IDISP015;IDISP016;IDISP017</WarningsNotAsErrors>
+        <!-- Do NOT add an ID here that .editorconfig promotes to `error` anywhere: this maps to
+             -warnaserror-:ID, which reverts the diagnostic to warning EVEN in directories where
+             .editorconfig says error, silently neutering the per-directory ratchet. Measured 2026-07-19:
+             OVERFIT001/002/009 (error in Kernels+Intrinsics) and OVERFIT900 (error repo-wide) were all
+             inert for this reason; removing them from this list cost 0 new errors. -->
+        <WarningsNotAsErrors>$(WarningsNotAsErrors);RS0030;OVERFIT003;OVERFIT004;OVERFIT005;OVERFIT006;OVERFIT007;OVERFIT010;OVERFIT011;OVERFIT012;OVERFIT013;OVERFIT014;OVERFIT016;OVERFIT017;OVERFIT018;OVERFIT019;OVERFIT020;IDISP001;IDISP002;IDISP003;IDISP004;IDISP005;IDISP006;IDISP007;IDISP008;IDISP009;IDISP010;IDISP011;IDISP012;IDISP013;IDISP014;IDISP015;IDISP016;IDISP017</WarningsNotAsErrors>
 
         <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
         <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>

@@ -51,6 +51,7 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
 
         private float _bestFitness;
         private bool _disposed;
+        private bool _initialized;
         private bool _hasFitness;
 
         /// <summary>
@@ -199,11 +200,13 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
             _hasFitness = false;
             _bestFitness = float.NaN;
             Generation = 0;
+            _initialized = true;
         }
 
         public void Ask(Span<float> populationMatrix)
         {
             ThrowIfDisposed();
+            ThrowIfNotInitialized();
 
             var population = _workspace.Population.GetView().AsReadOnlySpan();
 
@@ -551,6 +554,9 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
                 ReadInts(reader, _workspace.Ranking);
                 ReadInts(reader, _workspace.EliteIndices.AsSpan(0, _eliteCount));
             }
+
+            // A restored checkpoint carries a real population, so it counts as initialised.
+            _initialized = true;
         }
 
         private static void WriteFloats(BinaryWriter writer, ReadOnlySpan<float> values)
@@ -588,6 +594,21 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
         private void ThrowIfDisposed()
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
+        }
+
+        /// <summary>
+        /// Guards the silent-failure mode: without <see cref="Initialize"/> the whole population is all zeros, so
+        /// crossover has nothing to recombine and the run depends entirely on mutation. That does not crash — it
+        /// just converges badly, which is far harder to notice than an exception.
+        /// </summary>
+        private void ThrowIfNotInitialized()
+        {
+            if (!_initialized)
+            {
+                throw new OverfitRuntimeException(
+                    $"{nameof(GenerationalGeneticAlgorithm)} was not initialised. Call {nameof(Initialize)}() to seed "
+                    + $"the population, or {nameof(Load)}() to restore a saved run, before {nameof(Ask)}().");
+            }
         }
     }
 }
