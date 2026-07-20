@@ -17,7 +17,7 @@ namespace DevOnBike.Overfit.Data.Prepare
         private readonly int _numTrees;
         private readonly int _maxDepth;
         private bool _fitted;
-        private int[] _keptIndices;
+        private int[]? _keptIndices;
 
         public ShapSelectionLayer(
             int targetFeatureCount = 0,
@@ -58,7 +58,8 @@ namespace DevOnBike.Overfit.Data.Prepare
             return new PipelineContext(filteredFeatures, context.Targets);
         }
 
-        private int[] Fit(FastTensor<float> features, FastTensor<float> targets)
+        /// <summary>Returns null when no feature clears the selection bar — the caller treats that as "keep all".</summary>
+        private int[]? Fit(FastTensor<float> features, FastTensor<float> targets)
         {
             var cols = features.GetView().GetDim(1);
 
@@ -147,5 +148,17 @@ namespace DevOnBike.Overfit.Data.Prepare
             _fitted = false;
             _keptIndices = null;
         }
+
+        /// <summary>
+        /// State that only exists after <c>Fit</c>. Reading it earlier used to dereference null; this turns
+        /// "transform before fit" into a named error instead of a NullReferenceException from inside a loop.
+        /// </summary>
+        private T RequireFitted<T>(T? value, string field)
+            where T : class
+        {
+            return value ?? throw new OverfitRuntimeException(
+                $"{nameof(ShapSelectionLayer)}.{field} is not available — call Fit before Transform.");
+        }
+
     }
 }

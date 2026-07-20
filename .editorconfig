@@ -89,6 +89,21 @@ dotnet_diagnostic.OVERFIT010.severity = suggestion
 # Backlog at introduction: LanguageModels 163, Audio 35, Ops 34, Data 13, Onnx 14, DeepLearning 12.
 dotnet_diagnostic.OVERFIT021.severity = suggestion
 
+# OVERFIT022 (direct recursion) — NASA Power of 10 rule 1. ERROR EVERYWHERE, deliberately: a .NET
+# StackOverflowException cannot be caught, so unbounded recursion is an uncatchable kill of the HOST
+# application, and Overfit's whole premise is running inside someone else's process. Every recursive site
+# in Sources/Main therefore carries an explicit `#pragma warning disable OVERFIT022` whose comment states
+# the BOUND that makes it safe (a checked depth cap, or a structural log2(n) argument). If you cannot write
+# that sentence, the recursion is not safe and needs an explicit stack/worklist instead.
+dotnet_diagnostic.OVERFIT022.severity = error
+
+# OVERFIT023 (loop with no exit condition in its header) — NASA Power of 10 rule 2. ERROR EVERYWHERE, same
+# contract as OVERFIT022: an unbounded loop hangs the HOST process with no exception, no stack trace and no
+# log line, which is the hardest failure of all to diagnose. Every `while (true)` in Sources/Main carries a
+# `#pragma warning disable OVERFIT023` whose comment starts with "BOUND:" and names what terminates it.
+dotnet_diagnostic.OVERFIT023.severity = error
+
+
 dotnet_diagnostic.OVERFIT011.severity = suggestion
 dotnet_diagnostic.OVERFIT012.severity = suggestion
 dotnet_diagnostic.OVERFIT013.severity = suggestion
@@ -225,5 +240,11 @@ dotnet_diagnostic.RS0030.severity = none
 #   3. The rule ID must NOT appear in <WarningsNotAsErrors> in Directory.Build.props. That maps to
 #      -warnaserror-:ID, which reverts the diagnostic to warning EVEN WHERE .editorconfig sets error —
 #      defeating this whole section. (This is why OVERFIT008/015 are absent from that list.)
-[Sources/Main/{Core,Exceptions,Inference,Parameters,Randomization,Serving}/**.cs]
+[Sources/Main/{Anomalies,Core,Exceptions,Inference,Parameters,Randomization,Serving,Statistical,Tensors}/**.cs]
 dotnet_diagnostic.OVERFIT021.severity = error
+
+# OVERFIT022 (recursion) — ERROR on the paths that parse untrusted, externally-authored input, where an
+# uncatchable stack overflow would kill the embedding host. Existing bounded sites carry a #pragma naming
+# their depth cap; this stops NEW unbounded recursion from entering these directories.
+[Sources/Main/LanguageModels/{Loading,Constraints}/**.cs]
+dotnet_diagnostic.OVERFIT022.severity = error

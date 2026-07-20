@@ -36,6 +36,20 @@ as the next step. Reading is fine (`git status/diff/log`, `gh run list/view`, `g
 Stop at a clean/staged working tree, report exact commands or UI steps for the user, and verify after
 they've run them.
 
+## Filesystem boundary outside the repo (hard rule)
+
+Destructive filesystem operations are confined to this repository (`D:\Overfit`). **Never delete, move,
+rename or overwrite anything on the system drive or elsewhere outside the repo — `C:\` in particular —
+without the user's explicit permission for that specific path.** This covers `rm`/`Remove-Item`,
+`mv`/`Move-Item`, `git mv` outside the tree, redirecting output over an existing file, and `Write` to a
+path you did not create. Model fixtures live outside the repo (`C:\gpt2\`, `C:\qwen3b\`, `C:\gemma`,
+whisper/embedding models) and are large, hand-collected and NOT reproducible from this repo — losing one
+costs a multi-GB re-download at best.
+
+Reading outside the repo is fine (loading fixtures, inspecting logs), as is writing to a temp directory
+you created. If a task genuinely needs a delete or move outside the repo, **ask first and name the exact
+path** — the user will say yes or no. Asking costs one message; an unrecoverable delete costs a lot more.
+
 ## Common commands
 
 ```powershell

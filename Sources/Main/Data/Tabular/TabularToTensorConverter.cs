@@ -99,7 +99,8 @@ namespace DevOnBike.Overfit.Data.Tabular
                     }
                 }
 
-                tSpan[i] = System.Convert.ToSingle(GetValue(data[i], _schema.Target.Name));
+                tSpan[i] = System.Convert.ToSingle(GetValue(data[i], (_schema.Target ?? throw new OverfitRuntimeException(
+                        "TableSchema.Target is not set — a target column is required to build label tensors.")).Name));
             }
 
             return (features, targets);

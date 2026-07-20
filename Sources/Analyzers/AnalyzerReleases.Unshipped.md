@@ -26,4 +26,6 @@ OVERFIT018 | Performance | Warning | readonly field of a mutable struct — defe
 OVERFIT019 | Performance | Warning | Non-capturing lambda without `static` — guard against future accidental captures
 OVERFIT020 | Performance | Warning | Primitive-array parameter that never escapes could be a ReadOnlySpan<T>/Span<T> (accepts slices/stackalloc without copy)
 OVERFIT021 | Style | Warning | else / else if — use a guard clause + early return, continue, a ternary, or a switch expression
+OVERFIT022 | Reliability | Warning | Direct recursion — unbounded stack depth; StackOverflowException is uncatchable in .NET
+OVERFIT023 | Reliability | Warning | Loop with no exit condition in its header (while(true) / for(;;)) — state the bound
 OVERFIT900 | Performance | Error | A per-call OVERFIT rule fired inside an [OverfitHotPath] member/type — escalated to a build error

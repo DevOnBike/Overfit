@@ -14,7 +14,7 @@ namespace DevOnBike.Overfit.Data.Prepare
         private readonly DropStrategy _strategy;
         private readonly float _threshold;
         private bool _fitted;
-        private int[] _keptIndices;
+        private int[]? _keptIndices;
 
         public CorrelationFilterLayer(
             float threshold = 0.95f,
@@ -45,7 +45,7 @@ namespace DevOnBike.Overfit.Data.Prepare
                 _fitted = true;
             }
 
-            if (_keptIndices.Length == cols)
+            if (RequireFitted(_keptIndices, nameof(_keptIndices)).Length == cols)
             {
                 return context;
             }
@@ -86,7 +86,7 @@ namespace DevOnBike.Overfit.Data.Prepare
                 meanSpan[c] = sum / rows;
             }
 
-            float[] targetCorrelations = null;
+            float[]? targetCorrelations = null;
 
             if (_strategy == DropStrategy.KeepHigherTargetCorrelation)
             {
@@ -227,5 +227,17 @@ namespace DevOnBike.Overfit.Data.Prepare
             _keptIndices = null;
             _fitted = false;
         }
+
+        /// <summary>
+        /// State that only exists after <c>Fit</c>. Reading it earlier used to dereference null; this turns
+        /// "transform before fit" into a named error instead of a NullReferenceException from inside a loop.
+        /// </summary>
+        private T RequireFitted<T>(T? value, string field)
+            where T : class
+        {
+            return value ?? throw new OverfitRuntimeException(
+                $"{nameof(CorrelationFilterLayer)}.{field} is not available — call Fit before Transform.");
+        }
+
     }
 }

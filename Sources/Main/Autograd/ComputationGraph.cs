@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -101,20 +101,20 @@ namespace DevOnBike.Overfit.Autograd
         public void Record(
             OpCode code,
             AutogradNode output,
-            AutogradNode a,
-            AutogradNode b = null,
+            AutogradNode? a,   // null for ops whose inputs live in NodeContext (e.g. StackTimesteps)
+            AutogradNode? b = null,
             int i0 = 0,
             int i1 = 0,
             int i2 = 0,
             int i3 = 0,
             int i4 = 0,
-            AutogradNode c0 = null,
-            AutogradNode c1 = null,
-            AutogradNode c2 = null,
-            AutogradNode c3 = null,
-            AutogradNode c4 = null,
+            AutogradNode? c0 = null,
+            AutogradNode? c1 = null,
+            AutogradNode? c2 = null,
+            AutogradNode? c3 = null,
+            AutogradNode? c4 = null,
             int contextCount = 0,
-            AutogradNode[] nodeContext = null)
+            AutogradNode[]? nodeContext = null)
         {
             if (!IsRecording)
             {
@@ -301,88 +301,92 @@ namespace DevOnBike.Overfit.Autograd
             _opCount2![(int)op.Code]++;
         }
 
+        // INVARIANT: the opcode determines which operands are populated — Record() fills exactly the fields
+        // its OpCode needs, and each case below reads only those. The `!` assertions encode that pairing;
+        // a null here would mean Record and this switch disagree about an opcode, which is a bug in the
+        // tape, not a runtime condition to check for.
         private void ExecuteBackwardInner(in TapeOp op)
         {
             switch (op.Code)
             {
                 case OpCode.Add:
-                    TensorMath.AddBackward(op.A, op.B, op.Output);
+                    TensorMath.AddBackward(op.A!, op.B!, op.Output);
                     break;
 
                 case OpCode.Subtract:
-                    TensorMath.SubtractBackward(op.A, op.B, op.Output);
+                    TensorMath.SubtractBackward(op.A!, op.B!, op.Output);
                     break;
 
                 case OpCode.AddBias:
-                    TensorMath.AddBiasBackward(op.A, op.B, op.Output);
+                    TensorMath.AddBiasBackward(op.A!, op.B!, op.Output);
                     break;
 
                 case OpCode.MatMul:
-                    TensorMath.MatMulBackward(op.A, op.B, op.Output);
+                    TensorMath.MatMulBackward(op.A!, op.B!, op.Output);
                     break;
 
                 case OpCode.Linear:
-                    TensorMath.LinearBackward(op.A, op.B, op.C0, op.Output);
+                    TensorMath.LinearBackward(op.A!, op.B!, op.C0!, op.Output);
                     break;
 
                 case OpCode.ReLU:
-                    TensorMath.ReluBackward(op.A, op.Output);
+                    TensorMath.ReluBackward(op.A!, op.Output);
                     break;
 
                 case OpCode.Dropout:
-                    TensorMath.DropoutBackward(op.A, op.B, op.Output);
+                    TensorMath.DropoutBackward(op.A!, op.B!, op.Output);
                     break;
 
                 case OpCode.MseLoss:
-                    TensorMath.MSELossBackward(op.A, op.B, op.Output);
+                    TensorMath.MSELossBackward(op.A!, op.B!, op.Output);
                     break;
 
                 case OpCode.SoftmaxCrossEntropy:
-                    TensorMath.SoftmaxCrossEntropyBackward(op.A, op.B, op.Output, op.C0);
+                    TensorMath.SoftmaxCrossEntropyBackward(op.A!, op.B!, op.Output, op.C0!);
                     break;
 
                 case OpCode.Conv2D:
                     TensorMath.UnpackConvParams(op.I4, out var convK, out var convPad, out var convStride);
-                    TensorMath.Conv2DBackward(this, op.A, op.B, op.Output, op.C0, op.I0, op.I1, op.I2, op.I3, convK, convPad, convStride);
+                    TensorMath.Conv2DBackward(this, op.A!, op.B!, op.Output, op.C0!, op.I0, op.I1, op.I2, op.I3, convK, convPad, convStride);
                     break;
 
                 case OpCode.DepthwiseConv2D:
                     TensorMath.UnpackConvParams(op.I0, out var dwK, out var dwPad, out var dwStride);
                     TensorMath.DepthwiseConv2DBackward(
-                        this, op.A, op.B, op.Output, op.C0,
-                        op.A.Shape.D1, op.A.Shape.D2, op.A.Shape.D3, dwK, dwPad, dwStride);
+                        this, op.A!, op.B!, op.Output, op.C0!,
+                        op.A!.Shape.D1, op.A!.Shape.D2, op.A!.Shape.D3, dwK, dwPad, dwStride);
                     break;
 
                 case OpCode.MaxPool2D:
-                    TensorMath.MaxPool2DBackward(op.A, op.B, op.Output);
+                    TensorMath.MaxPool2DBackward(op.A!, op.B!, op.Output);
                     break;
 
                 case OpCode.GlobalAveragePool2D:
-                    TensorMath.GlobalAvgPool2DBackward(op.A, op.Output, op.I0, op.I1, op.I2);
+                    TensorMath.GlobalAvgPool2DBackward(op.A!, op.Output, op.I0, op.I1, op.I2);
                     break;
 
                 case OpCode.BatchNorm2D:
-                    TensorMath.BatchNorm2DBackward(op.A, op.Output, op.C0, op.C1, op.C2, op.C3);
+                    TensorMath.BatchNorm2DBackward(op.A!, op.Output, op.C0!, op.C1!, op.C2!, op.C3!);
                     break;
 
                 case OpCode.BatchNorm1D:
-                    TensorMath.BatchNorm1DBackward(op.A, op.Output, op.C0, op.C1, op.C2, op.C3);
+                    TensorMath.BatchNorm1DBackward(op.A!, op.Output, op.C0!, op.C1!, op.C2!, op.C3!);
                     break;
 
                 case OpCode.LayerNorm:
-                    TensorMath.LayerNormBackward(op.A, op.Output, op.C0, op.C1, op.C2, op.C3);
+                    TensorMath.LayerNormBackward(op.A!, op.Output, op.C0!, op.C1!, op.C2!, op.C3!);
                     break;
 
                 case OpCode.Embedding:
-                    TensorMath.EmbeddingBackward(op.A, op.Output, op.IntData);
+                    TensorMath.EmbeddingBackward(op.A!, op.Output, op.IntData!);
                     break;
 
                 case OpCode.ScaledDotProductAttention:
                     TensorMath.ScaledDotProductAttentionBackward(
-                        op.A,        // q
-                        op.B,        // k
-                        op.C0,       // v
-                        op.C1,       // attnWeights (GraphAuxiliary)
+                        op.A!,        // q
+                        op.B!,        // k
+                        op.C0!,       // v
+                        op.C1!,       // attnWeights (GraphAuxiliary)
                         op.Output,
                         op.I0,       // seqLen
                         op.I1,       // dk
@@ -390,80 +394,80 @@ namespace DevOnBike.Overfit.Autograd
                     break;
 
                 case OpCode.Gelu:
-                    TensorMath.GeluBackward(op.A, op.Output);
+                    TensorMath.GeluBackward(op.A!, op.Output);
                     break;
 
                 case OpCode.SiLU:
-                    TensorMath.SiLUBackward(op.A, op.Output);
+                    TensorMath.SiLUBackward(op.A!, op.Output);
                     break;
 
                 case OpCode.RmsNorm:
-                    TensorMath.RmsNormBackward(op.A, op.Output, op.C0, op.C1);
+                    TensorMath.RmsNormBackward(op.A!, op.Output, op.C0!, op.C1!);
                     break;
 
                 case OpCode.Rope:
-                    TensorMath.RopeBackward(op.A, op.Output, op.C0, op.C1, op.I0 == 1);
+                    TensorMath.RopeBackward(op.A!, op.Output, op.C0!, op.C1!, op.I0 == 1);
                     break;
 
                 case OpCode.ExpandKvHeads:
-                    TensorMath.ExpandKvHeadsBackward(op.A, op.Output, op.I0, op.I1);
+                    TensorMath.ExpandKvHeadsBackward(op.A!, op.Output, op.I0, op.I1);
                     break;
 
                 case OpCode.Transpose01:
-                    TensorMath.Transpose01Backward(op.A, op.Output);
+                    TensorMath.Transpose01Backward(op.A!, op.Output);
                     break;
 
                 case OpCode.Reshape:
-                    TensorMath.ReshapeBackward(op.A, op.Output);
+                    TensorMath.ReshapeBackward(op.A!, op.Output);
                     break;
 
                 case OpCode.TransposeLastTwo:
-                    TensorMath.TransposeLastTwoBackward(op.A, op.Output);
+                    TensorMath.TransposeLastTwoBackward(op.A!, op.Output);
                     break;
 
                 case OpCode.Sigmoid:
-                    TensorMath.SigmoidBackward(op.A, op.Output);
+                    TensorMath.SigmoidBackward(op.A!, op.Output);
                     break;
 
                 case OpCode.Tanh:
-                    TensorMath.TanhBackward(op.A, op.Output);
+                    TensorMath.TanhBackward(op.A!, op.Output);
                     break;
 
                 case OpCode.Multiply:
-                    TensorMath.MultiplyBackward(op.A, op.B, op.Output);
+                    TensorMath.MultiplyBackward(op.A!, op.B!, op.Output);
                     break;
 
                 case OpCode.GateSlice:
-                    TensorMath.GateSliceBackward(op.A, op.Output, op.I1, op.I0);
+                    TensorMath.GateSliceBackward(op.A!, op.Output, op.I1, op.I0);
                     break;
 
                 case OpCode.TimestepSlice:
-                    TensorMath.TimestepSliceBackward(op.A, op.Output, op.I0, op.I1, op.I2);
+                    TensorMath.TimestepSliceBackward(op.A!, op.Output, op.I0, op.I1, op.I2);
                     break;
 
                 case OpCode.StackTimesteps:
-                    TensorMath.StackTimestepsBackward(op.NodeContext, op.Output, op.I0, op.I1, op.I2);
+                    TensorMath.StackTimestepsBackward(op.NodeContext!, op.Output, op.I0, op.I1, op.I2);
                     break;
 
                 case OpCode.RepeatVector:
-                    TensorMath.RepeatVectorBackward(op.A, op.Output, op.I0, op.I1);
+                    TensorMath.RepeatVectorBackward(op.A!, op.Output, op.I0, op.I1);
                     break;
 
                 case OpCode.FusedLSTMStep:
-                    TensorMath.FusedLSTMStepBackward(op.A, op.B, op.Output, op.NodeContext);
+                    TensorMath.FusedLSTMStepBackward(op.A!, op.B!, op.Output, op.NodeContext!);
                     break;
 
                 case OpCode.DirectionalLoss:
-                    TensorMath.DirectionalLossBackward(op.A, op.B, op.Output, BitConverter.Int32BitsToSingle(op.I0));
+                    TensorMath.DirectionalLossBackward(op.A!, op.B!, op.Output, BitConverter.Int32BitsToSingle(op.I0));
                     break;
 
                 case OpCode.AddInPlace:
-                    if (op.A.RequiresGrad)
+                    if (op.A!.RequiresGrad)
                     {
                         TensorPrimitives.Add(
-                            op.A.GradView.AsSpan(),
+                            op.A!.GradView.AsSpan(),
                             op.Output.GradView.AsReadOnlySpan(),
-                            op.A.GradView.AsSpan());
+                            op.A!.GradView.AsSpan());
                     }
 
                     break;
@@ -487,24 +491,24 @@ namespace DevOnBike.Overfit.Autograd
                 // Dispose by ownership — no hardcoded OpCode switch needed.
                 //
                 // op.Output  → GraphTemporary  (activation output of this op)
-                // op.B, C0-C4 → GraphAuxiliary (e.g., maxIndices, probsNode, mean/invStd)
+                // op.B!, C0-C4 → GraphAuxiliary (e.g., maxIndices, probsNode, mean/invStd)
                 //               or Parameter   (gamma/beta nodes) → do NOT dispose
                 //               or null
-                // op.A       → output of previous TapeOp, disposed by its own entry → skip
+                // op.A!       → output of previous TapeOp, disposed by its own entry → skip
                 //
                 // By routing all allocation through graph factory methods (Etap 3),
                 // every node has Ownership set correctly at birth. Reset() trusts it.
                 DisposeIfGraphOwned(op.Output);
-                DisposeIfGraphOwned(op.B);
-                DisposeIfGraphOwned(op.C0);
-                DisposeIfGraphOwned(op.C1);
-                DisposeIfGraphOwned(op.C2);
-                DisposeIfGraphOwned(op.C3);
-                DisposeIfGraphOwned(op.C4);
+                DisposeIfGraphOwned(op.B!);
+                DisposeIfGraphOwned(op.C0!);
+                DisposeIfGraphOwned(op.C1!);
+                DisposeIfGraphOwned(op.C2!);
+                DisposeIfGraphOwned(op.C3!);
+                DisposeIfGraphOwned(op.C4!);
 
-                if (op.NodeContext != null)
+                if (op.NodeContext! != null)
                 {
-                    foreach (var node in op.NodeContext)
+                    foreach (var node in op.NodeContext!)
                     {
                         DisposeIfGraphOwned(node);
                     }
@@ -618,7 +622,7 @@ namespace DevOnBike.Overfit.Autograd
             // Re-run the segment forward (recording) on a throwaway sub-graph against the SAME input +
             // parameter nodes, so backprop accumulates dL/dinput and dL/dparams into the shared main nodes.
             using var bwd = new ComputationGraph(op.I0);
-            var subOut = segment(bwd, op.A);
+            var subOut = segment(bwd, op.A!);   // Checkpoint always records its input as operand A
             op.Output.GradView.AsReadOnlySpan().CopyTo(subOut.GradView.AsSpan());
             bwd.BackwardFromGrad(subOut);
         }

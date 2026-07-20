@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -12,16 +12,16 @@ namespace DevOnBike.Overfit.Data.Prepare
     public sealed class RobustScalingLayer : IDataLayer
     {
         private readonly bool _centerByMedian;
-        private readonly HashSet<int> _columnIndices;
+        private readonly HashSet<int>? _columnIndices;
         private readonly HashSet<int> _excludedColumns;
         private readonly float _fallbackIqr;
         private bool _fitted;
-        private float[] _iqrs;
-        private float[] _medians;
+        private float[]? _iqrs;
+        private float[]? _medians;
 
         public RobustScalingLayer(
-            HashSet<int> columnIndices = null,
-            HashSet<int> excludedColumns = null,
+            HashSet<int>? columnIndices = null,
+            HashSet<int>? excludedColumns = null,
             float fallbackIqr = 1f,
             bool centerByMedian = true)
         {
@@ -86,13 +86,13 @@ namespace DevOnBike.Overfit.Data.Prepare
 
                 bufferSpan.Sort();
 
-                _medians[c] = InterpolatePercentile(bufferSpan, rows, 0.5f);
+                RequireFitted(_medians, nameof(_medians))[c] = InterpolatePercentile(bufferSpan, rows, 0.5f);
 
                 var q1 = InterpolatePercentile(bufferSpan, rows, 0.25f);
                 var q3 = InterpolatePercentile(bufferSpan, rows, 0.75f);
                 var iqr = q3 - q1;
 
-                _iqrs[c] = iqr > 0f ? iqr : _fallbackIqr;
+                RequireFitted(_iqrs, nameof(_iqrs))[c] = iqr > 0f ? iqr : _fallbackIqr;
             }
 
             _fitted = true;
@@ -107,8 +107,8 @@ namespace DevOnBike.Overfit.Data.Prepare
                     continue;
                 }
 
-                var median = _medians[c];
-                var iqr = _iqrs[c];
+                var median = RequireFitted(_medians, nameof(_medians))[c];
+                var iqr = RequireFitted(_iqrs, nameof(_iqrs))[c];
                 var invIqr = 1f / iqr;
 
                 if (_centerByMedian)
@@ -167,8 +167,8 @@ namespace DevOnBike.Overfit.Data.Prepare
 
             return new ScalerParams
             {
-                Medians = (float[])_medians.Clone(),
-                Iqrs = (float[])_iqrs.Clone()
+                Medians = (float[])RequireFitted(_medians, nameof(_medians)).Clone(),
+                Iqrs = (float[])RequireFitted(_iqrs, nameof(_iqrs)).Clone()
             };
         }
 
@@ -192,5 +192,17 @@ namespace DevOnBike.Overfit.Data.Prepare
             _iqrs = null;
             _fitted = false;
         }
+
+        /// <summary>
+        /// State that only exists after <c>Fit</c>. Reading it earlier used to dereference null; this turns
+        /// "transform before fit" into a named error instead of a NullReferenceException from inside a loop.
+        /// </summary>
+        private T RequireFitted<T>(T? value, string field)
+            where T : class
+        {
+            return value ?? throw new OverfitRuntimeException(
+                $"{nameof(RobustScalingLayer)}.{field} is not available — call Fit before Transform.");
+        }
+
     }
 }

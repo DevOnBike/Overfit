@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -22,9 +22,9 @@ namespace DevOnBike.Overfit.Ops
     /// </summary>
     internal sealed class Conv2DWorkspace : IDisposable
     {
-        private TensorStorage<float> _colBuffer;
-        private TensorStorage<float> _dColBuffer;
-        private TensorStorage<float> _partialWeightGradientBuffer;
+        private TensorStorage<float>? _colBuffer;
+        private TensorStorage<float>? _dColBuffer;
+        private TensorStorage<float>? _partialWeightGradientBuffer;
 
         private int _workerCount;
         private int _colLength;
@@ -65,7 +65,7 @@ namespace DevOnBike.Overfit.Ops
             get
             {
                 ThrowIfDisposed();
-                return _colBuffer.AsSpan();
+                return RequireAllocated(_colBuffer, nameof(_colBuffer)).AsSpan();
             }
         }
 
@@ -75,7 +75,7 @@ namespace DevOnBike.Overfit.Ops
             get
             {
                 ThrowIfDisposed();
-                return _dColBuffer.AsSpan();
+                return RequireAllocated(_dColBuffer, nameof(_dColBuffer)).AsSpan();
             }
         }
 
@@ -85,7 +85,7 @@ namespace DevOnBike.Overfit.Ops
             get
             {
                 ThrowIfDisposed();
-                return _partialWeightGradientBuffer.AsSpan();
+                return RequireAllocated(_partialWeightGradientBuffer, nameof(_partialWeightGradientBuffer)).AsSpan();
             }
         }
 
@@ -130,7 +130,7 @@ namespace DevOnBike.Overfit.Ops
         {
             ThrowIfDisposed();
             ValidateWorkerId(workerId);
-            return _partialWeightGradientBuffer
+            return RequireAllocated(_partialWeightGradientBuffer, nameof(_partialWeightGradientBuffer))
                 .AsSpan()
                 .Slice(workerId * _partialWeightGradientLength, _partialWeightGradientLength);
         }
@@ -138,7 +138,7 @@ namespace DevOnBike.Overfit.Ops
         public void ClearPartialWeightGradients()
         {
             ThrowIfDisposed();
-            _partialWeightGradientBuffer.AsSpan().Clear();
+            RequireAllocated(_partialWeightGradientBuffer, nameof(_partialWeightGradientBuffer)).AsSpan().Clear();
         }
 
         public void Dispose()
@@ -167,5 +167,17 @@ namespace DevOnBike.Overfit.Ops
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
         }
+
+        /// <summary>
+        /// Buffers are allocated by EnsureCapacity, not by the constructor, so they are null until the first
+        /// use. ThrowIfDisposed cannot express that to the compiler; this names the invariant and turns a
+        /// use-before-EnsureCapacity into a clear error rather than a NullReferenceException.
+        /// </summary>
+        private static TensorStorage<float> RequireAllocated(TensorStorage<float>? buffer, string field)
+        {
+            return buffer ?? throw new OverfitRuntimeException(
+                $"Conv2DWorkspace.{field} is not allocated — EnsureCapacity must run before use.");
+        }
+
     }
 }

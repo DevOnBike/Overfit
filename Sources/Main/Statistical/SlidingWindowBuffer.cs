@@ -108,15 +108,14 @@ namespace DevOnBike.Overfit.Statistical
             if (slotsToEnd == _windowSize)
             {
                 ringSpan.Slice(_head * _featureCount, _windowFloats).CopyTo(destination);
+                return;
             }
-            else
-            {
-                var block1 = slotsToEnd * _featureCount;
-                var block2 = _windowFloats - block1;
 
-                ringSpan.Slice(_head * _featureCount, block1).CopyTo(destination);
-                ringSpan.Slice(0, block2).CopyTo(destination.Slice(block1));
-            }
+            var block1 = slotsToEnd * _featureCount;
+            var block2 = _windowFloats - block1;
+
+            ringSpan.Slice(_head * _featureCount, block1).CopyTo(destination);
+            ringSpan.Slice(0, block2).CopyTo(destination.Slice(block1));
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]

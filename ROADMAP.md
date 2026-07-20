@@ -1,4 +1,4 @@
-# Overfit Roadmap
+﻿# Overfit Roadmap
 
 Zero-allocation, pure C# deep-learning framework targeting high-performance CPU inference and small/medium language model inference on .NET 10+.
 
@@ -32,6 +32,48 @@ Zero-allocation, pure C# deep-learning framework targeting high-performance CPU 
 | **ReAct agent loop** | ✅ `ReActAgent` driver over `ChatSession` + `ToolCallConstraint`; auto-registers a synthetic `finish({answer:...})` tool. Loop verified by 6 unit tests via the testable `RunLoop` hook; e2e [LongFact] needs a 7B+ instruction-tuned model (Q4-3B too weak under constrained decoding). |
 | **Critic loop + circuit breaker + summarising memory** | ✅ All four LangGraph agentic primitives shipped: `CriticLoop` (generate→critique→revise), `CircuitBreaker` (generic capped-loop), `SummarizingChatSession` (auto-compact long convos), + `ChatSession.AddUser`/`AddAssistant` history seeding. 12 unit tests. |
 | GPU backend | ❌ Not started |
+
+---
+
+## ▶ NEXT UP AFTER RELEASE — finish the `else` sweep (OVERFIT021)
+
+**Status: 21 of 322 done, ~301 left.** `else` / `else if` is banned in `Sources/Main` by the in-repo Roslyn
+analyzer **OVERFIT021** (`Sources/Analyzers/ElseClauseAnalyzer.cs`). It is *not* an MSBuild task and *not* a
+`BannedSymbols.txt` entry — that file bans **API symbols**, and `else` is a language keyword, so it cannot be
+expressed there. An MSBuild-task variant with an `ElseDebt.txt` ledger was built and then deleted in favour of
+the analyzer (real syntax tree, IDE squiggles, per-directory severity).
+
+**Rollout is a ratchet:** `suggestion` repo-wide, `error` for directories already at zero — the scoped section
+at the **end** of `.editorconfig`. Clean a directory, add it to that list, and the ban locks in for it.
+
+- ✅ **Done (9 dirs, 21 sites):** `Anomalies, Core, Diagnostics, Exceptions, Inference, Licensing, Maths,
+  Parameters, Randomization, Redaction, Runtime, Serving, Statistical, Tensors, Tokenization, Training, Trees`
+- ⬜ **Left:** `LanguageModels` 163, `Audio` 35, `Ops` 34, `Onnx` 14, `Data` 13, `DeepLearning` 12,
+  `Evolutionary` 10, `Kernels` 6, `Intrinsics` 4, `Autograd` 4, `Optimizers` 6, rest small
+
+### Cost is measured, not assumed — `Sources/Benchmark/ElseRefactorBenchmark.cs`
+
+| rewrite | ratio |
+|---|---|
+| `if/else` → ternary | 1.01 |
+| `else if` chain → `continue` guards | 1.00 |
+| invert to rare-branch-first + `continue` | 1.01 |
+| extract method, **JIT inlines it** | 1.01 |
+| extract method, **JIT does NOT inline it** | **2.25×** |
+
+So in-place rewrites are free and **the only real risk is extracting a method**. `try/finally` bodies are
+*never* inlined; large bodies and lambdas usually block it too. In hot paths (`LanguageModels`, `Ops`,
+`Kernels`, `Intrinsics`) extract only after confirming the JIT inlines it — otherwise leave the `else` as debt.
+
+### Two traps this sweep already hit — do not rediscover them
+
+1. **A guard-clause `return` can silently skip trailing code.** In `OverfitLicense` the first rewrite moved the
+   Android case to `return`, which skipped the `Debug.WriteLine` *after* the branch. These sites cannot be
+   scripted: `else` may only be removed once you have read the whole method and confirmed the branch really
+   does always exit.
+2. **`.editorconfig` scoping.** A `[section]` header scopes everything below it (so directory sections belong at
+   the end of the file), the glob must be `<dir>/**.cs` not `<dir>/**/*.cs`, and an ID listed in
+   `<WarningsNotAsErrors>` reverts `error` back to warning even where `.editorconfig` promotes it.
 
 ---
 

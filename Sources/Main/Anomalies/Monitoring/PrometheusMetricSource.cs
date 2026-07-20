@@ -43,7 +43,7 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
 
         public PrometheusMetricSource(
             PrometheusMetricSourceConfig config,
-            HttpClient httpClient = null)
+            HttpClient? httpClient = null)
         {
             ArgumentNullException.ThrowIfNull(config);
             _config = config;

@@ -196,6 +196,11 @@ namespace DevOnBike.Overfit.Maths
                 }
 
                 // Recurse into the smaller partition; loop on the larger one to bound recursion depth.
+                // Recurse into the SMALLER partition and loop on the larger one: the recursive side is at
+                // most half the range each time, so stack depth is bounded by log2(n) regardless of how
+                // adversarial the input ordering is. This is the standard guard against quicksort's O(n)
+                // worst-case depth, and it is why this site is safe to keep recursive.
+#pragma warning disable OVERFIT022 // Bounded: recurses only into the smaller half, depth <= log2(n).
                 if (j - lo < hi - i)
                 {
                     IndirectQuickSort(indices, values, lo, j, ascending);
@@ -204,6 +209,7 @@ namespace DevOnBike.Overfit.Maths
                 }
 
                 IndirectQuickSort(indices, values, i, hi, ascending);
+#pragma warning restore OVERFIT022
                 hi = j;
             }
         }
@@ -236,7 +242,10 @@ namespace DevOnBike.Overfit.Maths
         {
             var root = start;
 
+            // BOUND: <= log2(heapSize). `root` moves to a child each pass, and `left >= heapSize` returns.
+#pragma warning disable OVERFIT023
             while (true)
+#pragma warning restore OVERFIT023
             {
                 var left = (root << 1) + 1;
 

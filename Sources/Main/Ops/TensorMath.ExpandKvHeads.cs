@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -29,7 +29,7 @@ namespace DevOnBike.Overfit.Ops
         /// and <c>[kvHeads, T·d]</c> alike. <paramref name="groupSize"/> = 1 is a plain copy (MHA).
         /// </summary>
         public static AutogradNode ExpandKvHeads(
-            ComputationGraph graph,
+            ComputationGraph? graph,
             AutogradNode input,
             int kvHeads,
             int groupSize)

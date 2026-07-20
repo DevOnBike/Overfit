@@ -66,13 +66,11 @@ namespace DevOnBike.Overfit.Statistical
             {
                 Span<float> columnScratch = stackalloc float[windowSize];
                 ExtractCore(window, windowSize, featureCount, output, columnScratch);
+                return;
             }
-            else
-            {
-                // CHANGE: Using PooledBuffer!
-                using var rented = new PooledBuffer<float>(windowSize);
-                ExtractCore(window, windowSize, featureCount, output, rented.Span);
-            }
+
+            using var rented = new PooledBuffer<float>(windowSize);
+            ExtractCore(window, windowSize, featureCount, output, rented.Span);
         }
 
         private static void ExtractCore(

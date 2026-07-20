@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -112,7 +112,7 @@ namespace DevOnBike.Overfit.DeepLearning
         ///   x = LN1(x + Attention(x))
         ///   x = LN2(x + FFN(x))
         /// </summary>
-        public AutogradNode Forward(ComputationGraph graph, AutogradNode input)
+        public AutogradNode Forward(ComputationGraph? graph, AutogradNode input)
         {
             if (input.Shape.D2 != _dModel)
             {
@@ -128,7 +128,7 @@ namespace DevOnBike.Overfit.DeepLearning
             return ForwardPostLN(graph, input);
         }
 
-        private AutogradNode ForwardPreLN(ComputationGraph graph, AutogradNode x)
+        private AutogradNode ForwardPreLN(ComputationGraph? graph, AutogradNode x)
         {
             // x = x + Attention(LN1(x))  — Add is ON TAPE so gradient flows correctly.
             var ln1Out = Norm1.Forward(graph, x);
@@ -141,7 +141,7 @@ namespace DevOnBike.Overfit.DeepLearning
             return TensorMath.Add(graph, x2, ffnOut);
         }
 
-        private AutogradNode ForwardPostLN(ComputationGraph graph, AutogradNode x)
+        private AutogradNode ForwardPostLN(ComputationGraph? graph, AutogradNode x)
         {
             // x = LN1(x + Attention(x))
             var attnOut = Attention.Forward(graph, x);

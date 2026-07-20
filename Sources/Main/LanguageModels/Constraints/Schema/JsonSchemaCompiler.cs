@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -27,7 +27,7 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints.Schema
             using var doc = JsonDocument.Parse(schemaJson);
             var nodes = new List<JsonSchemaNode>();
             var tries = new List<JsonStringTrie>();
-            CompileNode(doc.RootElement, nodes, tries);
+            CompileNode(doc.RootElement, nodes, tries, depth: 0);
 
             // A shared all-types node for values under keys not declared in the schema (additional
             // properties when not forbidden) — see CompiledJsonSchema.UnconstrainedNodeIndex.
@@ -39,8 +39,22 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints.Schema
 
         // Appends the compiled node(s) for `el` and returns this node's index. Reserves its own slot first
         // so recursively-compiled children get later indices (a parent may reference its children).
-        private static int CompileNode(JsonElement el, List<JsonSchemaNode> nodes, List<JsonStringTrie> tries)
+        /// <summary>
+        /// Maximum schema nesting depth. A JSON schema is caller-supplied and may be machine-generated or
+        /// come straight from an untrusted source, and nested `properties` / `items` recurse once per level.
+        /// A .NET StackOverflowException cannot be caught, so an over-deep schema would kill the host process
+        /// instead of being reported as a bad schema. Hand-written schemas rarely exceed 5-6 levels.
+        /// </summary>
+        private const int MaxSchemaDepth = 32;
+
+        private static int CompileNode(JsonElement el, List<JsonSchemaNode> nodes, List<JsonStringTrie> tries, int depth)
         {
+            if (depth > MaxSchemaDepth)
+            {
+                throw new OverfitFormatException(
+                    $"JSON schema nests more than {MaxSchemaDepth} levels deep — refusing to recurse further.");
+            }
+
             var idx = nodes.Count;
             nodes.Add(default);
 
@@ -62,7 +76,9 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints.Schema
                 var names = new List<string>();
                 foreach (var p in props.EnumerateObject())
                 {
-                    var childIndex = CompileNode(p.Value, nodes, tries);
+#pragma warning disable OVERFIT022 // Bounded: MaxSchemaDepth (32) is checked on entry and throws a catchable OverfitFormatException.
+                    var childIndex = CompileNode(p.Value, nodes, tries, depth + 1);
+#pragma warning restore OVERFIT022
                     dict[p.Name] = childIndex;
                     names.Add(p.Name);
                 }
@@ -131,7 +147,9 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints.Schema
 
             if (isObject && el.TryGetProperty("items", out var items) && items.ValueKind == JsonValueKind.Object)
             {
-                itemsIndex = CompileNode(items, nodes, tries);
+#pragma warning disable OVERFIT022 // Bounded: MaxSchemaDepth (32) is checked on entry and throws a catchable OverfitFormatException.
+                itemsIndex = CompileNode(items, nodes, tries, depth + 1);
+#pragma warning restore OVERFIT022
                 if (types == JsonSchemaType.None)
                 {
                     types = JsonSchemaType.Array;

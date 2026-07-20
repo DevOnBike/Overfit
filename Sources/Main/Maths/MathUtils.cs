@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -27,8 +27,10 @@ namespace DevOnBike.Overfit.Maths
             return TensorPrimitives.IndexOfMax(values);
         }
 
+        // Null on every new thread until the property below seeds it — that is what [ThreadStatic]
+        // lazy initialisation means, so the annotation must say so.
         [ThreadStatic]
-        private static Random _rng;
+        private static Random? _rng;
 
         /// <summary>
         ///     Gets a thread-safe <see cref="Random" /> instance, lazily initialized with a unique seed.

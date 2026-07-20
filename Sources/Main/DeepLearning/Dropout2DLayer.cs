@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -31,8 +31,13 @@ namespace DevOnBike.Overfit.DeepLearning
         public void Train() => IsTraining = true;
         public void Eval() => IsTraining = false;
 
-        public AutogradNode Forward(ComputationGraph graph, AutogradNode input)
-            => graph.Dropout2D(input, _probability, IsTraining);
+        public AutogradNode Forward(ComputationGraph? graph, AutogradNode input)
+        {
+            // Training-only path — see DropoutLayer.Forward.
+            ArgumentNullException.ThrowIfNull(graph);
+
+            return graph.Dropout2D(input, _probability, IsTraining);
+        }
 
         public void ForwardInference(ReadOnlySpan<float> input, Span<float> output)
             => input.CopyTo(output);   // dropout is identity at inference

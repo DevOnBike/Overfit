@@ -588,7 +588,11 @@ namespace DevOnBike.Overfit.Runtime
                 }
 
                 // Calling thread participates — greedy drain (safe under _decodeGate).
+                // BOUND: _decodeChunkCount. Interlocked.Increment advances a shared counter every pass, so
+                // the index strictly increases and the `index >= _decodeChunkCount` break is always reached.
+#pragma warning disable OVERFIT023
                 while (true)
+#pragma warning restore OVERFIT023
                 {
                     var index = Interlocked.Increment(ref _decodeNextChunk.Value) - 1;
                     if (index >= _decodeChunkCount)
@@ -639,7 +643,13 @@ namespace DevOnBike.Overfit.Runtime
         private static void DecodeWorkerLoop()
         {
             var seen = 0L;
+
+            // BOUND: none by design — this is a daemon worker that parks until the process exits. It runs on
+            // a background thread (IsBackground = true), so it cannot keep the process alive; the "hang" this
+            // rule guards against is a foreground loop that never yields a result, which this is not.
+#pragma warning disable OVERFIT023
             while (true)
+#pragma warning restore OVERFIT023
             {
                 // PURE hot spin — no Sleep/Yield backoff. SpinWait.SpinOnce() escalates to
                 // Sleep(1) within ~20 calls, which is fatal here: the gaps between the ~180
@@ -717,7 +727,11 @@ namespace DevOnBike.Overfit.Runtime
 
         private static void WorkerLoop()
         {
+            // BOUND: none by design — daemon worker, parks on _startSemaphore until the process exits. Runs on
+            // a background thread, so it never blocks shutdown.
+#pragma warning disable OVERFIT023
             while (true)
+#pragma warning restore OVERFIT023
             {
                 _startSemaphore.Wait();
 

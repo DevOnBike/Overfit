@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -112,7 +112,7 @@ namespace DevOnBike.Overfit.DeepLearning
         /// Forward pass: X → Q,K,V projections → SDPA → output projection.
         /// Input X: [B, T, d_model]. Output: [B, T, d_model].
         /// </summary>
-        public AutogradNode Forward(ComputationGraph graph, AutogradNode input)
+        public AutogradNode Forward(ComputationGraph? graph, AutogradNode input)
         {
             var batchSize = input.Shape.D0;
             var seqLen = input.Shape.D1;
@@ -136,7 +136,7 @@ namespace DevOnBike.Overfit.DeepLearning
             var v = ProjectBatched(graph, input, _wvNode, batchSize, seqLen, _dModel, _dv);
 
             // SDPA → [B, T, dv]
-            var attnOut = TensorMath.ScaledDotProductAttention(graph, q, k, v, _causalMask);
+            var attnOut = TensorMath.ScaledDotProductAttention(graph!, q, k, v, _causalMask);
 
             // Output projection: [B, T, dv] @ Wo → [B, T, d_model] + bias
             var projected = ProjectBatched(graph, attnOut, _woNode, batchSize, seqLen, _dv, _dModel);
@@ -220,7 +220,7 @@ namespace DevOnBike.Overfit.DeepLearning
         /// Reshapes to [B*T, dIn], multiplies, reshapes back.
         /// </summary>
         private static AutogradNode ProjectBatched(
-            ComputationGraph graph,
+            ComputationGraph? graph,
             AutogradNode input,
             AutogradNode weight,
             int batchSize,
@@ -229,6 +229,8 @@ namespace DevOnBike.Overfit.DeepLearning
             int dOut)
         {
             // Flatten [B, T, dIn] → [B*T, dIn]
+            ArgumentNullException.ThrowIfNull(graph);
+
             var flat = graph.Reshape(input, batchSize * seqLen, dIn);
 
             // [B*T, dIn] @ [dIn, dOut] → [B*T, dOut]
@@ -248,13 +250,15 @@ namespace DevOnBike.Overfit.DeepLearning
         }
 
         private static AutogradNode AddBiasBatched(
-            ComputationGraph graph,
+            ComputationGraph? graph,
             AutogradNode input,
             AutogradNode bias,
             int batchSize,
             int seqLen,
             int dModel)
         {
+            ArgumentNullException.ThrowIfNull(graph);
+
             var inS = input.DataView.AsReadOnlySpan();
             var bS = bias.DataView.AsReadOnlySpan();
             // Arena-backed (graph.Reset() reclaims it); every element is overwritten below so no clear needed.

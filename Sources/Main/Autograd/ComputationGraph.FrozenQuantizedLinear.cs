@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -66,7 +66,8 @@ namespace DevOnBike.Overfit.Autograd
         /// </summary>
         private void FrozenQuantizedLinearBackward(in TapeOp op)
         {
-            var input = op.A;
+            // FrozenQuantizedLinear always records its input as operand A (see the Record call).
+            var input = op.A!;
             if (!input.RequiresGrad)
             {
                 return;

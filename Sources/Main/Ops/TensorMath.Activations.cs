@@ -16,7 +16,7 @@ namespace DevOnBike.Overfit.Ops
         // ====================================================================
 
         /// <summary>Compatibility shim — delegates to <see cref="ComputationGraph.Relu"/> (PR5-7b).</summary>
-        public static AutogradNode ReLU(ComputationGraph graph, AutogradNode input)
+        public static AutogradNode ReLU(ComputationGraph? graph, AutogradNode input)
             => graph != null
                 ? graph.Relu(input)
                 : ComputationGraph.ReluOp(null, input);
@@ -64,7 +64,7 @@ namespace DevOnBike.Overfit.Ops
         // SIGMOID
         // ====================================================================
 
-        public static AutogradNode Sigmoid(ComputationGraph graph, AutogradNode input)
+        public static AutogradNode Sigmoid(ComputationGraph? graph, AutogradNode input)
         {
             var output = AllocateNode(graph, input.Shape, input.RequiresGrad, clearMemory: false);
             TensorPrimitives.Sigmoid(input.DataView.AsReadOnlySpan(), output.DataView.AsSpan());
@@ -105,7 +105,7 @@ namespace DevOnBike.Overfit.Ops
         // TANH
         // ====================================================================
 
-        public static AutogradNode Tanh(ComputationGraph graph, AutogradNode input)
+        public static AutogradNode Tanh(ComputationGraph? graph, AutogradNode input)
         {
             var output = AllocateNode(graph, input.Shape, input.RequiresGrad, clearMemory: false);
             TensorPrimitives.Tanh(input.DataView.AsReadOnlySpan(), output.DataView.AsSpan());
@@ -146,7 +146,7 @@ namespace DevOnBike.Overfit.Ops
         // DROPOUT
         // ====================================================================
 
-        public static AutogradNode Dropout(ComputationGraph graph, AutogradNode input, float probability, bool isTraining)
+        public static AutogradNode Dropout(ComputationGraph? graph, AutogradNode input, float probability, bool isTraining)
         {
             var output = AllocateNode(graph, input.Shape, input.RequiresGrad, clearMemory: false);
 
@@ -195,7 +195,7 @@ namespace DevOnBike.Overfit.Ops
         /// elementwise <see cref="DropoutBackward"/> (the mask is channel-constant but the backward
         /// <c>dx = dy⊙mask</c> is mask-shape-agnostic).
         /// </summary>
-        public static AutogradNode Dropout2D(ComputationGraph graph, AutogradNode input, float probability, bool isTraining)
+        public static AutogradNode Dropout2D(ComputationGraph? graph, AutogradNode input, float probability, bool isTraining)
         {
             var output = AllocateNode(graph, input.Shape, input.RequiresGrad, clearMemory: false);
 

@@ -17,7 +17,7 @@ namespace DevOnBike.Overfit.Ops
         // BATCH NORM 1D
         // ====================================================================
 
-        public static AutogradNode BatchNorm1D(ComputationGraph graph, AutogradNode input, AutogradNode gamma, AutogradNode beta, TensorStorage<float> runningMean, TensorStorage<float> runningVar, float momentum, float eps, bool isTraining)
+        public static AutogradNode BatchNorm1D(ComputationGraph? graph, AutogradNode input, AutogradNode gamma, AutogradNode beta, TensorStorage<float> runningMean, TensorStorage<float> runningVar, float momentum, float eps, bool isTraining)
         {
             int N = input.Shape.D0, C = input.Shape.D1;
 
@@ -176,7 +176,7 @@ namespace DevOnBike.Overfit.Ops
         /// affine (γ, β per channel) + running-mean/var (EMA) used at inference.
         /// </summary>
         public static AutogradNode BatchNorm2D(
-            ComputationGraph graph, AutogradNode input, AutogradNode gamma, AutogradNode beta,
+            ComputationGraph? graph, AutogradNode input, AutogradNode gamma, AutogradNode beta,
             TensorStorage<float> runningMean, TensorStorage<float> runningVar, float momentum, float eps, bool isTraining)
         {
             int N = input.Shape.D0, C = input.Shape.D1, H = input.Shape.D2, W = input.Shape.D3;

@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -792,12 +792,18 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
             }
         }
 
-        private static AutogradNode BuildEffectiveWeight(ComputationGraph graph, ModuleAdapter adapter)
+        private static AutogradNode BuildEffectiveWeight(ComputationGraph? graph, ModuleAdapter adapter)
         {
+            // LoRA weight assembly is training-only; a null graph here is a caller error.
+            ArgumentNullException.ThrowIfNull(graph);
+
             // W_eff = W_base(frozen) + (A @ B). graph.Linear treats A@B as an
             // ordinary matmul; backward flows W_eff -> A@B -> A and B.
             var zeroBias = graph.CreateAuxiliary(new TensorShape(adapter.OutDim), clearMemory: true);
             var ab = graph.Linear(adapter.ANode, adapter.BNode, zeroBias);   // [inDim, outDim]
+            // WBaseNode is assigned when the adapter is built; reaching here without it is a wiring bug.
+            ArgumentNullException.ThrowIfNull(adapter.WBaseNode);
+
             return graph.Add(adapter.WBaseNode, ab);
         }
 

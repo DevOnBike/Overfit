@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+ï»¿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -38,7 +38,7 @@ namespace DevOnBike.Overfit.DeepLearning.Abstractions
         /// <param name="graph">The computation graph to record operations for Autograd. Can be <c>null</c> for inference.</param>
         /// <param name="input">The input tensor node.</param>
         /// <returns>The resulting output tensor node.</returns>
-        AutogradNode Forward(ComputationGraph graph, AutogradNode input);
+        AutogradNode Forward(ComputationGraph? graph, AutogradNode input);
 
         /// <summary>
         ///     Extremely fast, 0-allocation forward pass for inference (Batch = 1).
@@ -71,7 +71,7 @@ namespace DevOnBike.Overfit.DeepLearning.Abstractions
         ///         Default implementation is a no-op. Modules that maintain caches derived from
         ///         <see cref="Parameters"/> (for example, <c>LinearLayer</c>'s transposed-weight
         ///         buffer used by <see cref="ForwardInference"/>) must override this method and
-        ///         invalidate those caches lazily — without allocating — so the next inference
+        ///         invalidate those caches lazily â€” without allocating â€” so the next inference
         ///         call rebuilds them on demand.
         ///     </para>
         ///     <para>
@@ -80,7 +80,7 @@ namespace DevOnBike.Overfit.DeepLearning.Abstractions
         ///     </para>
         ///     <para>
         ///         <see cref="Load(BinaryReader)"/> and <see cref="Train"/> are NOT required to
-        ///         call this method — they already invalidate their own caches through their
+        ///         call this method â€” they already invalidate their own caches through their
         ///         existing protocols.
         ///     </para>
         /// </remarks>

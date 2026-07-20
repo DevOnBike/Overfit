@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -194,7 +194,7 @@ namespace DevOnBike.Overfit.DeepLearning
         /// For single sequence: pass int[1 * seqLen] with batchSize=1.
         /// </summary>
         public AutogradNode Forward(
-            ComputationGraph graph,
+            ComputationGraph? graph,
             int[] tokenIds,
             int batchSize,
             int seqLen)

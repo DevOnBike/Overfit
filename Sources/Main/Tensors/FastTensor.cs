@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -285,20 +285,18 @@ namespace DevOnBike.Overfit.Tensors
             var targetSpan = materializedTensor.AsSpan();
             var index = 0;
 
-            if (view.Rank == 2)
-            {
-                for (var i = 0; i < view.GetDim(0); i++)
-                {
-                    for (var j = 0; j < view.GetDim(1); j++)
-                    {
-                        targetSpan[index++] = view[i, j];
-                    }
-                }
-            }
-            else
+            if (view.Rank != 2)
             {
                 throw new NotImplementedException(
                     "todo: Kopiowanie nieciągłych widoków > 2D nie jest zaimplementowane.");
+            }
+
+            for (var i = 0; i < view.GetDim(0); i++)
+            {
+                for (var j = 0; j < view.GetDim(1); j++)
+                {
+                    targetSpan[index++] = view[i, j];
+                }
             }
 
             return materializedTensor;
@@ -321,27 +319,25 @@ namespace DevOnBike.Overfit.Tensors
                     "Tensory muszą mieć ten sam rozmiar do operacji In-Place.");
             }
 
-            if (typeof(T) == typeof(float))
+            // Currently Overfit only uses this path for float.
+            if (typeof(T) != typeof(float))
             {
-                var targetFloat = MemoryMarshal.Cast<T, float>(
-                    target);
-
-                var sourceFloat = MemoryMarshal.Cast<T, float>(
-                    source);
-
-                TensorPrimitives.Add(
-                    targetFloat,
-                    sourceFloat,
-                    targetFloat);
-            }
-            else
-            {
-                // Fallback for other types. Currently Overfit only uses this path for float.
 #pragma warning disable RS0030 // typeof(T).Name = compile-time-safe type name for a diagnostic, not runtime reflection (AOT-safe)
                 throw new OverfitRuntimeException(
                     $"AddInPlace is only implemented for float tensors. Type: {typeof(T).Name}");
 #pragma warning restore RS0030
             }
+
+            var targetFloat = MemoryMarshal.Cast<T, float>(
+                target);
+
+            var sourceFloat = MemoryMarshal.Cast<T, float>(
+                source);
+
+            TensorPrimitives.Add(
+                targetFloat,
+                sourceFloat,
+                targetFloat);
         }
     }
 }

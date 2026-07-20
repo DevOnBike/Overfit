@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -170,14 +170,9 @@ namespace DevOnBike.Overfit.Anomalies.Adaptive
             }
 
             // Sustained elevated-but-not-critical = false-positive pressure (base miscalibration).
-            if (score.Score >= _policy.AlertThreshold && score.Score < _policy.CriticalThreshold)
-            {
-                state.FalsePositiveStreak++;
-            }
-            else
-            {
-                state.FalsePositiveStreak = 0;
-            }
+            var elevatedNotCritical = score.Score >= _policy.AlertThreshold && score.Score < _policy.CriticalThreshold;
+
+            state.FalsePositiveStreak = elevatedNotCritical ? state.FalsePositiveStreak + 1 : 0;
 
             if (state.Adapter is null
                 && state.FalsePositiveStreak >= _policy.AdaptAfterStreak

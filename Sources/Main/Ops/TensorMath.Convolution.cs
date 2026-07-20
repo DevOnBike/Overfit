@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -18,7 +18,7 @@ namespace DevOnBike.Overfit.Ops
         // ====================================================================
 
         public static AutogradNode Conv2D(
-            ComputationGraph graph,
+            ComputationGraph? graph,
             AutogradNode input,
             AutogradNode weights,
             int inC,
@@ -28,7 +28,7 @@ namespace DevOnBike.Overfit.Ops
             int k,
             int padding = 0,
             int stride = 1,
-            AutogradNode bias = null)
+            AutogradNode? bias = null)
         {
             var outH = (h + 2 * padding - k) / stride + 1;
             var outW = (w + 2 * padding - k) / stride + 1;
@@ -51,7 +51,7 @@ namespace DevOnBike.Overfit.Ops
             // single image without recording a tape), we create a local workspace for the
             // duration of the call. The local path allocates but isn't on the training
             // hot path; it's the cost of decoupling inference from graph state.
-            Conv2DWorkspace localWorkspace = null;
+            Conv2DWorkspace? localWorkspace = null;
             Conv2DWorkspace workspace;
 
             if (graph is not null)
@@ -169,7 +169,8 @@ namespace DevOnBike.Overfit.Ops
             if (biasNeedsGrad)
             {
                 var outGrad = output.GradView.AsReadOnlySpan();
-                var biasGrad = bias.GradView.AsSpan();
+                // biasNeedsGrad is only true when bias is non-null (see where it is computed).
+                var biasGrad = bias!.GradView.AsSpan();
                 for (var n = 0; n < batchSize; n++)
                 {
                     for (var oc = 0; oc < outC; oc++)

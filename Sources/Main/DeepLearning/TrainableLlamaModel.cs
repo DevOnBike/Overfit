@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -141,8 +141,10 @@ namespace DevOnBike.Overfit.DeepLearning
         /// <summary>Forward over a token sequence → logits <c>[T, vocab]</c>, recording the tape.
         /// <paramref name="useCheckpoint"/> runs each block under gradient checkpointing (≈2 blocks of
         /// activations live at once instead of all N) — the memory lever for big models.</summary>
-        public AutogradNode Forward(ComputationGraph graph, int[] tokenIds, bool useCheckpoint)
+        public AutogradNode Forward(ComputationGraph? graph, int[] tokenIds, bool useCheckpoint)
         {
+            ArgumentNullException.ThrowIfNull(graph);
+
             DisposeScratch();
             var T = tokenIds.Length;
 
@@ -258,7 +260,11 @@ namespace DevOnBike.Overfit.DeepLearning
             var next = nextB.Span;
 
             var p = 0;
+
+            // BOUND: tokens.Count. `p` is incremented once per pass and the loop exits at tokens.Count - 1.
+#pragma warning disable OVERFIT023
             while (true)
+#pragma warning restore OVERFIT023
             {
                 _embed.DequantizeRow(tokens[p], hidden);
                 for (var l = 0; l < nL; l++)
@@ -319,7 +325,11 @@ namespace DevOnBike.Overfit.DeepLearning
             var rng = new Random(seed);
 
             var p = 0;
+
+            // BOUND: tokens.Count. `p` is incremented once per pass and the loop exits at tokens.Count - 1.
+#pragma warning disable OVERFIT023
             while (true)
+#pragma warning restore OVERFIT023
             {
                 _embed.DequantizeRow(tokens[p], hidden);
                 for (var l = 0; l < nL; l++)

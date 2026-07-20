@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -32,7 +32,7 @@ namespace DevOnBike.Overfit.Ops
         /// <see cref="ParallelThreshold"/> total elements; each row is independent.
         /// </summary>
         public static AutogradNode RmsNorm(
-            ComputationGraph graph,
+            ComputationGraph? graph,
             AutogradNode input,
             AutogradNode gamma,
             float eps = 1e-6f)
