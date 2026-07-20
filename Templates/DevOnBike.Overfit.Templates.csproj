@@ -19,6 +19,8 @@
     <Description>`dotnet new` templates for building local-LLM apps with Overfit — a pure-.NET, in-process, on-device LLM runtime (no Python, no Ollama, no cloud). Includes `overfit-chat`: a Minimal API streaming-chat app that exposes a local GGUF model as a standard Microsoft.Extensions.AI IChatClient.</Description>
     <PackageTags>dotnet-new;templates;llm;ai;local-llm;on-device;ichatclient;microsoft-extensions-ai;gguf;native-aot;overfit</PackageTags>
     <Copyright>Copyright (c) 2026 DevOnBike</Copyright>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageLicenseFile>LICENSE.md</PackageLicenseFile>
     <RepositoryUrl>https://github.com/DevOnBike/Overfit</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <!-- Version intentionally omitted: inherited from the repo-wide <Version> in ../Directory.Build.props
@@ -37,6 +39,13 @@
   <ItemGroup>
     <Content Include="content\**\*" Exclude="content\**\bin\**;content\**\obj\**" />
     <Compile Remove="**\*" />
+  </ItemGroup>
+
+  <!-- Package-level readme + license (NuGet page), NOT template content: PackagePath="\" puts them at the
+       package root, so they do not become files the scaffolded app inherits. -->
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+    <None Include="..\LICENSE.md" Pack="true" PackagePath="\" />
   </ItemGroup>
 
 </Project>
