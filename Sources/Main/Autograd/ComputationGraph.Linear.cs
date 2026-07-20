@@ -44,7 +44,8 @@ namespace DevOnBike.Overfit.Autograd
             {
                 LinearKernels.ForwardBatched(inS, wS, outS, N, K, M);
             }
-            else
+
+            if ((long)N * K * M >= LinearKernels.ForwardBatchedThreshold)
             {
                 unsafe
                 {

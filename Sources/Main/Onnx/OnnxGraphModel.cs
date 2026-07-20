@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -80,12 +80,11 @@ namespace DevOnBike.Overfit.Onnx
                     var left = _buffers[node.InputSlots[0]].AsSpan();
                     var right = _buffers[node.InputSlots[1]].AsSpan();
                     addLayer.ForwardInference(left, right, outBuf);
+                    continue;
                 }
-                else
-                {
-                    var inBuf = _buffers[node.InputSlots[0]].AsSpan();
-                    node.Module.ForwardInference(inBuf, outBuf);
-                }
+
+                var inBuf = _buffers[node.InputSlots[0]].AsSpan();
+                node.Module.ForwardInference(inBuf, outBuf);
             }
 
             // Last node's output slot → caller's output span.

@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -52,17 +52,9 @@ namespace DevOnBike.Overfit.Onnx.Operators
 
             // transB=1 → weight is [out, in], must transpose to Overfit's [in, out]
             // transB=0 → weight is already [in, out]
-            int inFeatures, outFeatures;
-            if (transB == 1)
-            {
-                outFeatures = (int)weightTensor.Dims[0];
-                inFeatures = (int)weightTensor.Dims[1];
-            }
-            else
-            {
-                inFeatures = (int)weightTensor.Dims[0];
-                outFeatures = (int)weightTensor.Dims[1];
-            }
+            // transB=1 → weight is [out, in]; transB=0 → already [in, out].
+            var outFeatures = (int)(transB == 1 ? weightTensor.Dims[0] : weightTensor.Dims[1]);
+            var inFeatures = (int)(transB == 1 ? weightTensor.Dims[1] : weightTensor.Dims[0]);
 
             var weightData = OnnxImporter.DecodeFloatTensor(weightTensor);
 

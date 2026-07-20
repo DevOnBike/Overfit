@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -61,13 +61,17 @@ namespace DevOnBike.Overfit.Data.Normalizers
 
             localM2 = TensorPrimitives.SumOfSquares(diffs);
 
-            if (_count == 0)
+            // Capture before the first branch sets _count = n2, or a later if (_count != 0) would fire.
+            var wasEmpty = _count == 0;
+
+            if (wasEmpty)
             {
                 _count = n2;
                 _mean = localMean;
                 _m2 = localM2;
             }
-            else
+
+            if (!wasEmpty)
             {
                 var newCount = _count + n2;
                 var delta = localMean - _mean;

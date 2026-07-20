@@ -119,7 +119,8 @@ namespace DevOnBike.Overfit.Data.Prepare
                         val = (val - median) * invIqr;
                     }
                 }
-                else
+
+                if (!_centerByMedian)
                 {
                     for (var r = 0; r < rows; r++)
                     {

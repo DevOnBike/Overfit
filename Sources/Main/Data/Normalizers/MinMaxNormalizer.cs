@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -124,14 +124,15 @@ namespace DevOnBike.Overfit.Data.Normalizers
                 TensorPrimitives.Max(data, 0f, data);
                 TensorPrimitives.Min(data, _clipMax, data);
             }
-            else if (ClipToRange)
+
+            if (!_hasClipMax)
             {
                 TensorPrimitives.Max(data, _frozenMin, data);
-                TensorPrimitives.Min(data, _frozenMax, data);
-            }
-            else
-            {
-                TensorPrimitives.Max(data, _frozenMin, data);
+
+                if (ClipToRange)
+                {
+                    TensorPrimitives.Min(data, _frozenMax, data);
+                }
             }
 
             TensorPrimitives.Subtract(data, _frozenMin, data);

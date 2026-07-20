@@ -108,7 +108,8 @@ namespace DevOnBike.Overfit.Data.Prepare
                     _lowThresholds[c] = float.MinValue;
                     _highThresholds[c] = float.MaxValue;
                 }
-                else
+
+                if (lowVal < highVal)
                 {
                     _lowThresholds[c] = lowVal;
                     _highThresholds[c] = highVal;
@@ -133,14 +134,7 @@ namespace DevOnBike.Overfit.Data.Prepare
                 for (var r = 0; r < rows; r++)
                 {
                     ref var val = ref span[r * cols + c];
-                    if (val < lowVal)
-                    {
-                        val = lowVal;
-                    }
-                    else if (val > highVal)
-                    {
-                        val = highVal;
-                    }
+                    val = Math.Clamp(val, lowVal, highVal);
                 }
             }
         }

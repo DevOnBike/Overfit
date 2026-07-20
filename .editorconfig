@@ -240,7 +240,7 @@ dotnet_diagnostic.RS0030.severity = none
 #   3. The rule ID must NOT appear in <WarningsNotAsErrors> in Directory.Build.props. That maps to
 #      -warnaserror-:ID, which reverts the diagnostic to warning EVEN WHERE .editorconfig sets error —
 #      defeating this whole section. (This is why OVERFIT008/015 are absent from that list.)
-[Sources/Main/{Anomalies,Core,Exceptions,Inference,Parameters,Randomization,Serving,Statistical,Tensors}/**.cs]
+[Sources/Main/{Anomalies,Autograd,Core,Data,Evolutionary,Exceptions,Inference,Optimizers,Parameters,Randomization,Serving,Statistical,Tensors}/**.cs]
 dotnet_diagnostic.OVERFIT021.severity = error
 
 # OVERFIT022 (recursion) — ERROR on the paths that parse untrusted, externally-authored input, where an

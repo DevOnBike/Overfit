@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -145,28 +145,28 @@ namespace DevOnBike.Overfit.Optimizers
                         lr,
                         wd);
                 }
-            }
-            else
-            {
-                foreach (var state in _states)
-                {
-                    if (!state.RequiresGrad)
-                    {
-                        continue;
-                    }
 
-                    StepAdamState(
-                        state,
-                        b1,
-                        b2,
-                        b1Inv,
-                        b2Inv,
-                        invBc1,
-                        invBc2,
-                        eps,
-                        lr,
-                        wd);
+                return;
+            }
+
+            foreach (var state in _states)
+            {
+                if (!state.RequiresGrad)
+                {
+                    continue;
                 }
+
+                StepAdamState(
+                    state,
+                    b1,
+                    b2,
+                    b1Inv,
+                    b2Inv,
+                    invBc1,
+                    invBc2,
+                    eps,
+                    lr,
+                    wd);
             }
         }
 
@@ -174,14 +174,13 @@ namespace DevOnBike.Overfit.Optimizers
         {
             foreach (var state in _states)
             {
-                if (ParallelZeroGrad && state.Size >= ParallelElementThreshold)
-                {
-                    ClearGradParallel(state, state.Size);
-                }
-                else
+                if (!(ParallelZeroGrad && state.Size >= ParallelElementThreshold))
                 {
                     state.ZeroGrad();
+                    continue;
                 }
+
+                ClearGradParallel(state, state.Size);
             }
         }
 
@@ -637,11 +636,10 @@ namespace DevOnBike.Overfit.Optimizers
                 if (_param != null)
                 {
                     _param.ZeroGrad();
+                    return;
                 }
-                else
-                {
-                    _node!.ZeroGrad();
-                }
+
+                _node!.ZeroGrad();
             }
 
             public bool RequiresGrad =>

@@ -211,12 +211,11 @@ namespace DevOnBike.Overfit.Autograd
                 {
                     _opTicks ??= new long[OpCodeCount];
                     _opCount2 ??= new int[OpCodeCount];
+                    return;
                 }
-                else
-                {
-                    _opTicks = null;
-                    _opCount2 = null;
-                }
+
+                _opTicks = null;
+                _opCount2 = null;
             }
         }
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -335,7 +335,8 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
             {
                 ApplyAdamStep();
             }
-            else
+
+            if (!_useAdam)
             {
                 ApplySgdStep();
             }
@@ -451,14 +452,8 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
             var isNegative = (bestLocalIndex & 1) == 1;
             var noise = _noiseTable.GetSlice(_noiseOffsets[pairIndex], paramCount);
 
-            if (isNegative)
-            {
-                TensorPrimitives.MultiplyAdd(noise, -_sigma, _mu, _bestParameters);
-            }
-            else
-            {
-                TensorPrimitives.MultiplyAdd(noise, _sigma, _mu, _bestParameters);
-            }
+            var signedSigma = isNegative ? -_sigma : _sigma;
+            TensorPrimitives.MultiplyAdd(noise, signedSigma, _mu, _bestParameters);
 
             _bestFitness = bestLocalFitness;
         }
@@ -537,7 +532,8 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
                 _rngState = NormalizeSeed(reader.ReadUInt32());
                 _hasPendingPopulation = reader.ReadBoolean();
             }
-            else
+
+            if (schemaVersion < 3)
             {
                 // Legacy schema v2 had no RNG state and no pending Ask/Tell state.
                 // We restore a deterministic fallback state so the strategy remains usable,
@@ -563,7 +559,8 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
                     _noiseOffsets[i] = reader.ReadInt32();
                 }
             }
-            else
+
+            if (schemaVersion < 3)
             {
                 Array.Clear(_noiseOffsets, 0, _noiseOffsets.Length);
             }

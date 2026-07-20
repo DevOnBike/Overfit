@@ -89,7 +89,8 @@ namespace DevOnBike.Overfit.Data.Prepare
                     taken++;
                 }
             }
-            else
+
+            if (_targetFeatureCount <= 0)
             {
                 foreach (var x in importanceRanking)
                 {
