@@ -1,4 +1,4 @@
-# DevOnBike.Overfit.Analyzers
+﻿# DevOnBike.Overfit.Analyzers
 
 In-repo **Roslyn performance analyzers** for `Sources/Main` — the third guard layer next to
 `BannedSymbols.txt` (named APIs, RS0030) and the MSBuild structural guards (jagged arrays,
@@ -24,6 +24,15 @@ nothing ships); tests and benchmarks are deliberately NOT covered.
 | `OVERFIT012` | Finalizer declared (`~T()`) — finalizable objects allocate slower and survive ≥2 GC generations; `IDisposable` + `GC.SuppressFinalize` instead (`#48a`) | ✅ shipped |
 | `OVERFIT013` | `.Count` read on `ConcurrentQueue`/`ConcurrentBag` (segment-walking + sync) — use `IsEmpty` or an approximate `Interlocked` counter (`#80`) | ✅ shipped |
 | `OVERFIT014` | `a.ToLower() == b.ToLower()` / `.ToUpper()` comparison — allocates a throwaway string per side; use `string.Equals(a, b, StringComparison.OrdinalIgnoreCase)` (`#46o`) | ✅ shipped |
+| `OVERFIT016` | Large struct (est. > 64 B) passed by value — pass as `in` to avoid the per-call copy | ✅ shipped |
+| `OVERFIT017` | Struct whose fields are all readonly is not declared `readonly struct` — every member access on a `readonly`/`in` reference makes a defensive copy | ✅ shipped |
+| `OVERFIT018` | `readonly` field of a MUTABLE struct type — defensive copy per access, and mutations are silently lost | ✅ shipped |
+| `OVERFIT019` | Non-capturing lambda not marked `static` — guards against a future edit accidentally introducing a capture (which would start allocating a closure per call) | ✅ shipped |
+| `OVERFIT020` | Primitive-array parameter that provably never escapes — `ReadOnlySpan<T>`/`Span<T>` accepts slices and `stackalloc` without a copy | ✅ shipped |
+| `OVERFIT021` | `else` / `else if` — invert into a guard clause + early return, `continue` in loops, a ternary, or a switch expression. **Readability rule, not perf** (measured: ternary/continue/inversion are free; only method EXTRACTION can cost, 2.25× when the JIT declines to inline). Ratchet: `suggestion` repo-wide, `error` per swept directory | 🟡 rollout |
+| `OVERFIT022` | **Direct recursion** (NASA Power of 10 rule 1). A `StackOverflowException` CANNOT be caught in .NET — it kills the host process — so recursion over externally-authored input is an uncatchable crash. **`error` repo-wide**; every legitimate site carries `#pragma warning disable OVERFIT022` whose comment states the BOUND that makes it safe (a checked depth cap, or a structural log2(n) argument) | ✅ shipped |
+| `OVERFIT023` | **Loop with no exit condition in its header** — `while (true)` / `for (;;)` / `do…while(true)` (NASA rule 2). An unbounded loop hangs the host with no exception, no stack trace and no log line. **`error` repo-wide**, same contract: suppress with a comment starting `BOUND:` naming what terminates it | ✅ shipped |
+| `OVERFIT900` | A per-call rule fired inside a member/type marked `[OverfitHotPath]` — the per-member form of the per-directory severity ratchet. Always an error; the message names the underlying rule id | ✅ shipped |
 
 ## Extended catalog (grounded in `docs/performance-patterns.md`, 110 patterns)
 
