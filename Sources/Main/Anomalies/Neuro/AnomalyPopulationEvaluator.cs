@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -28,7 +28,7 @@ namespace DevOnBike.Overfit.Anomalies.Neuro
         private readonly int _hidden;
         private readonly AnomalyFitnessOptions _options;
 
-        /// <param name="features">Flat samples: <paramref name="sampleCount"/> × <paramref name="inputs"/>.</param>
+        /// <param name="features">Flat samples, laid out row-major: one row per window.</param>
         /// <param name="labels">1 = anomaly, 0 = normal.</param>
         /// <param name="inputs">Features per window.</param>
         /// <param name="hidden">Hidden units in the scorer.</param>

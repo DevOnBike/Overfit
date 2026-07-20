@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -24,6 +24,9 @@ namespace DevOnBike.Overfit.Anomalies.Neuro
         /// <param name="genome">Candidate parameters, laid out per <see cref="AnomalyMlp"/>.</param>
         /// <param name="features">Flat samples: <paramref name="sampleCount"/> × <paramref name="inputs"/>.</param>
         /// <param name="labels">1 = anomaly, 0 = normal; length <paramref name="sampleCount"/>.</param>
+        /// <param name="sampleCount">Number of labelled windows.</param>
+        /// <param name="inputs">Features per window.</param>
+        /// <param name="hidden">Hidden units in the scorer.</param>
         /// <param name="options">Objective and its knobs.</param>
         public static float Evaluate(
             ReadOnlySpan<float> genome,
