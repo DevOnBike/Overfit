@@ -5,6 +5,7 @@
 
 using System.Text.Json;
 using DevOnBike.Overfit.LanguageModels.Constraints;
+using DevOnBike.Overfit.Schemas;
 
 namespace DevOnBike.Overfit.LanguageModels.Skills.Evaluation
 {
@@ -22,11 +23,10 @@ namespace DevOnBike.Overfit.LanguageModels.Skills.Evaluation
     /// </summary>
     public sealed class RubricGrader : ISkillGrader
     {
-        // additionalProperties:false + all-required keeps the small-model judge on-rails.
-        private const string RubricSchema =
-            "{\"type\":\"object\",\"additionalProperties\":false,"
-            + "\"properties\":{\"overall_pass\":{\"type\":\"boolean\"},\"score\":{\"type\":\"integer\"},"
-            + "\"reason\":{\"type\":\"string\"}},\"required\":[\"overall_pass\",\"score\",\"reason\"]}";
+        // additionalProperties:false + all-required keeps the small-model judge on-rails. Authored as
+        // Schemas/RubricGrader.json and woven in as a const at build time (see Main.csproj EmbedJsonSchemas) —
+        // edit the .json, not this.
+        private const string RubricSchema = OverfitSchemas.RubricGrader;
 
         private readonly OverfitClient _judge;
         private readonly string _rubric;

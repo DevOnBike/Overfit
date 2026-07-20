@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -22,21 +22,14 @@ namespace DevOnBike.Overfit.Tensors.Core
         {
             ArgumentNullException.ThrowIfNull(template);
 
-            TensorStorage<T> result;
-
-            if (template._isBorrowedMemory)
+            if (template._isBorrowedMemory && template._buffer is null)
             {
-                if (template._buffer is null)
-                {
-                    throw new OverfitRuntimeException("Template storage is marked as borrowed memory but has no arena.");
-                }
+                throw new OverfitRuntimeException("Template storage is marked as borrowed memory but has no arena.");
+            }
 
-                result = new TensorStorage<T>(template._buffer, template.Length);
-            }
-            else
-            {
-                result = new TensorStorage<T>(template.Length, clearMemory);
-            }
+            var result = template._isBorrowedMemory
+                ? new TensorStorage<T>(template._buffer!, template.Length)
+                : new TensorStorage<T>(template.Length, clearMemory);
 
             if (template._isBorrowedMemory && clearMemory)
             {

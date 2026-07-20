@@ -19,6 +19,7 @@
 //                    OpenAI client/SDK at this base URL; the in-process .NET runtime serves it.
 
 using System.Diagnostics;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using DevOnBike.Overfit.Demo.LocalAgent.Agent;
 using DevOnBike.Overfit.Demo.LocalAgent.Chat;
@@ -59,9 +60,7 @@ namespace DevOnBike.Overfit.Demo.LocalAgent
             // not safe for multi-user concurrent conversations. For multi-tenant, swap to a per-tenant
             // client-pool / session-per-request.
             var isGguf = modelPath.EndsWith(".gguf", StringComparison.OrdinalIgnoreCase);
-            var modelDisplay = isGguf
-                ? Path.GetFileName(modelPath)
-                : $"{Path.GetFileName(modelPath.TrimEnd('\\', '/'))} (safetensors)";
+            var modelDisplay = isGguf ? Path.GetFileName(modelPath) : $"{Path.GetFileName(modelPath.TrimEnd('\\', '/'))} (safetensors)";
 
             // Log which model is being loaded — the environment name distinguishes the default English demo
             // from the Bielik Polish preset. A bootstrap logger because this runs before the host is built.
@@ -202,6 +201,7 @@ namespace DevOnBike.Overfit.Demo.LocalAgent
 
                 var reply = client.Send(req.Message);
                 var stats = client.Chat.LastStats;
+
                 metrics.RecordGeneration("chat", stats);
 
                 return Results.Ok(new ChatReply(
@@ -294,6 +294,7 @@ namespace DevOnBike.Overfit.Demo.LocalAgent
                 }
 
                 var result = agent.RunToolCall(client, req.Message);
+
                 httpContext.Items["audit.tool"] = result.ToolName;   // audit which C# tool the model invoked
                 metrics.RecordGeneration("agent", client.Chat.LastStats);
                 metrics.RecordToolCall(result.ToolName);
@@ -325,7 +326,7 @@ namespace DevOnBike.Overfit.Demo.LocalAgent
                     // required / enum fields); without it, just guaranteed well-formed JSON.
                     json = agent.RunJson(client, req.Message, req.Schema).Json;
                 }
-                catch (System.Text.Json.JsonException ex)
+                catch (JsonException ex)
                 {
                     return Results.Problem(detail: $"Invalid 'schema' (not valid JSON-Schema): {ex.Message}",
                         statusCode: StatusCodes.Status400BadRequest);

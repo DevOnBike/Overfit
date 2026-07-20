@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -162,37 +162,8 @@ namespace DevOnBike.Overfit.Training
 
             ClearMasterGradients();
 
-            var workers = _workers;
-            var losses = new float[workers.Length];
-            if (workers.Length > 1)
-            {
-                var inline = _runWorkerOpsInline;
-                OverfitParallel.For(0, workers.Length, w =>
-                {
-                    // Keep each replica's inner kernels single-threaded so the replicas own the
-                    // parallelism — N replicas × intra-op pool would oversubscribe and serialize on
-                    // the pool lock. Restore the flag so the pool thread is left as we found it.
-                    var previous = OverfitParallel.SuppressParallelismOnCurrentThread;
-
-                    if (inline)
-                    {
-                        OverfitParallel.SuppressParallelismOnCurrentThread = true;
-                    }
-                    try
-                    {
-                        losses[w] = trainWorker(w);
-                    }
-                    finally
-                    {
-                        OverfitParallel.SuppressParallelismOnCurrentThread = previous;
-                    }
-                });
-            }
-            else
-            {
-                // Single replica: keep intra-op parallelism — it is the only parallelism available.
-                losses[0] = trainWorker(0);
-            }
+            var losses = new float[_workers.Length];
+            RunReplicas(losses, trainWorker);
 
             AverageWorkerGradientsIntoMaster();
 
@@ -218,6 +189,45 @@ namespace DevOnBike.Overfit.Training
             {
                 _master[p].GradSpan.Clear();
             }
+        }
+
+        /// <summary>
+        /// Runs one training step across the replicas. Split out of <see cref="Step"/> so the
+        /// single-replica case is a guard clause instead of an else-branch wrapping the whole
+        /// parallel body.
+        /// </summary>
+        private void RunReplicas(float[] losses, Func<int, float> trainWorker)
+        {
+            var workers = _workers;
+
+            if (workers.Length <= 1)
+            {
+                // Single replica: keep intra-op parallelism — it is the only parallelism available.
+                losses[0] = trainWorker(0);
+                return;
+            }
+
+            var inline = _runWorkerOpsInline;
+            OverfitParallel.For(0, workers.Length, w =>
+            {
+                // Keep each replica's inner kernels single-threaded so the replicas own the
+                // parallelism — N replicas × intra-op pool would oversubscribe and serialize on
+                // the pool lock. Restore the flag so the pool thread is left as we found it.
+                var previous = OverfitParallel.SuppressParallelismOnCurrentThread;
+
+                if (inline)
+                {
+                    OverfitParallel.SuppressParallelismOnCurrentThread = true;
+                }
+                try
+                {
+                    losses[w] = trainWorker(w);
+                }
+                finally
+                {
+                    OverfitParallel.SuppressParallelismOnCurrentThread = previous;
+                }
+            });
         }
 
         private void AverageWorkerGradientsIntoMaster()

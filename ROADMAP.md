@@ -1,4 +1,4 @@
-# Overfit Roadmap
+﻿# Overfit Roadmap
 
 Zero-allocation, pure C# deep-learning framework targeting high-performance CPU inference and small/medium language model inference on .NET 10+.
 
@@ -35,6 +35,48 @@ Zero-allocation, pure C# deep-learning framework targeting high-performance CPU 
 
 ---
 
+## ▶ NEXT UP AFTER RELEASE — finish the `else` sweep (OVERFIT021)
+
+**Status: 21 of 322 done, ~301 left.** `else` / `else if` is banned in `Sources/Main` by the in-repo Roslyn
+analyzer **OVERFIT021** (`Sources/Analyzers/ElseClauseAnalyzer.cs`). It is *not* an MSBuild task and *not* a
+`BannedSymbols.txt` entry — that file bans **API symbols**, and `else` is a language keyword, so it cannot be
+expressed there. An MSBuild-task variant with an `ElseDebt.txt` ledger was built and then deleted in favour of
+the analyzer (real syntax tree, IDE squiggles, per-directory severity).
+
+**Rollout is a ratchet:** `suggestion` repo-wide, `error` for directories already at zero — the scoped section
+at the **end** of `.editorconfig`. Clean a directory, add it to that list, and the ban locks in for it.
+
+- ✅ **Done (9 dirs, 21 sites):** `Anomalies, Core, Diagnostics, Exceptions, Inference, Licensing, Maths,
+  Parameters, Randomization, Redaction, Runtime, Serving, Statistical, Tensors, Tokenization, Training, Trees`
+- ⬜ **Left:** `LanguageModels` 163, `Audio` 35, `Ops` 34, `Onnx` 14, `Data` 13, `DeepLearning` 12,
+  `Evolutionary` 10, `Kernels` 6, `Intrinsics` 4, `Autograd` 4, `Optimizers` 6, rest small
+
+### Cost is measured, not assumed — `Sources/Benchmark/ElseRefactorBenchmark.cs`
+
+| rewrite | ratio |
+|---|---|
+| `if/else` → ternary | 1.01 |
+| `else if` chain → `continue` guards | 1.00 |
+| invert to rare-branch-first + `continue` | 1.01 |
+| extract method, **JIT inlines it** | 1.01 |
+| extract method, **JIT does NOT inline it** | **2.25×** |
+
+So in-place rewrites are free and **the only real risk is extracting a method**. `try/finally` bodies are
+*never* inlined; large bodies and lambdas usually block it too. In hot paths (`LanguageModels`, `Ops`,
+`Kernels`, `Intrinsics`) extract only after confirming the JIT inlines it — otherwise leave the `else` as debt.
+
+### Two traps this sweep already hit — do not rediscover them
+
+1. **A guard-clause `return` can silently skip trailing code.** In `OverfitLicense` the first rewrite moved the
+   Android case to `return`, which skipped the `Debug.WriteLine` *after* the branch. These sites cannot be
+   scripted: `else` may only be removed once you have read the whole method and confirmed the branch really
+   does always exit.
+2. **`.editorconfig` scoping.** A `[section]` header scopes everything below it (so directory sections belong at
+   the end of the file), the glob must be `<dir>/**.cs` not `<dir>/**/*.cs`, and an ID listed in
+   `<WarningsNotAsErrors>` reverts `error` back to warning even where `.editorconfig` promotes it.
+
+---
+
 ## Agentic / interop / vision backlog (2026-06-21)
 
 Deferred ideas captured while shipping the XGBoost tabular predictor; ranked, on-moat, all build on existing
@@ -51,6 +93,58 @@ primitives (autograd, agentic stack, MEAI adapter, the XGBoost predictor).
    on primitives we already have (local generation, scoring, guaranteed-JSON edits, the ReAct/ChatSession stack) — it
    is orchestration, not new kernels. Complements QLoRA (weight-space) with a fully on-prem text-space moat. Caveat:
    edit/scoring quality wants a 7B+ local optimizer model. Origin: arXiv:2605.23904 (SkillOpt, Microsoft, 2026).
+
+   **★ SIZED 2026-07-18 — one real bug found and FIXED; the population question is still open.**
+   Ran an equal-budget A/B (150 model calls per arm, shared ON-only scoring so neither arm pays the other's
+   implementation overhead): hill-climbing (today's `SkillOptimizer`, population 1) vs population(4) + tournament
+   + elitism. Qwen2.5-0.5B as the runner, Qwen2.5-3B as the editor, capitals task, deterministic grader
+   (correct AND ≤ 4 words).
+   - **First run: 0 % vs 0 %, both instructions unchanged — a broken experiment, not a tie.** Diagnosis:
+     the fitness landscape was fine (seed → *"The capital of France is Paris."* correctly fails; a good
+     instruction → *"Paris"* passes), but the **mutation operator was the bottleneck**. A 0.5B editor echoed the
+     user's *question* back instead of writing an instruction; the 3B editor wrote valid English but in the
+     **wrong direction**: *"Answer in the format 'The [subject] is [answer]'"* — i.e. it codified the failing
+     answer as the desired format.
+   - **Root cause: `CaseFailure` carried (Prompt, Output) but no REASON**, so the editor saw an answer that reads
+     perfectly fine and had zero gradient information. Adding one sentence flipped it instantly:
+     *"Answer the question in at most 4 words."* **FIXED** — `CaseFailure.Reason` (optional ⇒ non-breaking),
+     populated from the failed `GradeCheck` id + note, surfaced to the editor as `-> WHY WRONG:`, guarded by
+     `CaseFailureReasonTests`.
+   - **Re-run after the fix: 0 % → 75 % for BOTH arms.** The fix is validated end-to-end; **the population-vs-
+     hill-climbing question is NOT answered** — the task saturates at 75 % within ~13 calls (the 4th validation
+     fact is simply unknown to a 0.5B, a model-capability ceiling no prompt can lift), leaving no headroom for a
+     search-strategy difference to appear. Suggestive but unmeasured: hill-climbing burned 137 of 150 calls after
+     its single accept, the editor having stopped producing novel candidates.
+   - **SIZING #2 (2026-07-18) — task WITH headroom. Plain population LOSES. ⛔ do not build GA-on-prompts.**
+     Rebuilt the experiment to remove sizing #1's ceiling: 3B runner (facts no longer the limiter), FOUR
+     independent format constraints (correct · lowercase · no punctuation · ≤3 words), **continuous fitness**
+     (fraction of constraints met ⇒ a real multi-step gradient), 6 train + 6 val, equal 200-call budget, failures
+     carrying reasons.
+     | arm | result | budget behaviour |
+     |---|---|---|
+     | hill-climbing (pop 1) | 20.8 % → 79.2 % (call 19) → **87.5 %** (call 32) | 2 accepts, then 13 straight rejects |
+     | population(4) + tournament + elitism | **87.5 %** | 45 calls just to seed; **12 generations, zero improvement** |
+
+     The climb was genuinely multi-step this time, so the landscape *could* have discriminated — and population
+     still did not win, while being **worse per call** (87.5 % at call 32 vs 45 calls merely to seed).
+     **Why: the whole population converged to identical fitness (88 % × 4).** Tournament + elitism with no
+     diversity pressure filled every slot with variants fitness cannot tell apart — and diversity was the entire
+     justification for going population-shaped. Without it, it is 4× redundant hill-climbing at 4× the cost.
+     (Measured: fitness identical. Not measured: whether the *texts* were identical — plateau vs true clone
+     collapse. The practical conclusion is the same.)
+     **Implication:** plain GA on prompt text is not worth building. The only variant left standing is
+     **MAP-Elites**, whose cells are keyed by a BEHAVIOUR descriptor rather than fitness, so diversity is
+     structural — exactly the failure mode observed here. But that is now the third hypothesis in this family, so
+     **size it first**: show that prompt behaviour descriptors (e.g. verbosity × accuracy) actually have
+     resolution, otherwise MAP-Elites degenerates the same way. Caveats: n=1 task, 1 seed, population 4, mutation
+     only (no crossover).
+   - **Do NOT generify the Evolutionary `float` interfaces to `T` for this.** `Mutate(ReadOnlySpan<T>, Span<T>)`
+     means "perturb elementwise into a preallocated same-size buffer"; a text mutation is `string → string`,
+     variable length, one expensive LLM call — the type parameter is not the obstacle, the contract shape is
+     (and Gaussian/SBX arithmetic on text is meaningless regardless of `T`). `ISelectionOperator` (indices) and
+     `IFitnessShaper` (fitness values) are already genome-agnostic and reusable as-is. The one place a generic
+     would genuinely pay is `IEliteArchive<TGenome>` — storage, not math — and only once duplication actually
+     appears. Write a parallel text path (~150 lines) instead of refactoring a shipped public API.
 3. **`overfit score` as a server endpoint.** The XGBoost predictor ships as a library + `overfit score` CLI; expose it
    over the OpenAI-compatible server (or a small dedicated route) for tabular scoring as a service. Small, reuses the
    hardened server + zero-alloc predictor.
@@ -346,8 +440,8 @@ Read the full llama.cpp source tree to map what they have that Overfit doesn't. 
 **SHIPPABLE in pure C# (≤2 weeks each, candidate post-launch additions):**
 
 - [ ] **Q2_K / Q3_K dequant + decode** — mathematically straightforward K-quants (block scale + 2-/3-bit indices), ~2 days each. Unlocks the lower end of Ollama's K-quant matrix (Q4_K_M / Q6_K already shipped).
-- [ ] **Mirostat v1 / v2 samplers** — stateful (running `mu`), needs threading through `ISlmSession`. Queued from the 2026-05-25 plan; perplexity-targeted decoding.
-- [ ] **Typical-p / XTC / Top-n-sigma / DRY** — pure-math sampler additions; ~1 day each.
+- [x] **Mirostat v1 / v2 samplers** — DONE (`Sampling/MirostatSampler.cs`, stateful μ feedback; opt-in via the `SamplingPipeline`, which is where stateful/terminal samplers live).
+- [x] **Typical-p / XTC / Top-n-sigma / DRY** — DONE. All four in `SamplingPipeline`; **top-nσ + typical-p also on the zero-alloc `TokenSampler`/`SamplingOptions` hot path** (`WithTopNSigma`, `WithTypicalP`) and the `overfit chat` CLI (`--top-n-sigma`, `--typical-p`). **DRY is wired into the decode engine** (`CachedLlamaSession`, rolling history + reusable Z-scratch, applied to logits *before* sampling → breaks loops even under greedy). Perf note: top-p/typical-p partial-sort (min-heap, exact) cut the sampler from ~50-60% of a decode step to a few percent.
 - [ ] **Infill / FIM sampler** — prefix/middle/suffix token masking for code-completion-style models; ~1 week.
 - [ ] **LoRA adapter loading + composition** — Overfit has *training* LoRA (custom); loading external `.gguf` LoRA adapters and composing multiple at runtime is ~3-5 days.
 - [ ] **RoPE scaling variants** — Yarn (NTK-by-parts) / DynamicNTK / AliBi / per-section. Algebraic variants on the existing RoPE kernel, ~1-2 days each. Unlocks long-context Qwen/Llama variants.
@@ -357,7 +451,7 @@ Read the full llama.cpp source tree to map what they have that Overfit doesn't. 
 
 - [ ] **GBNF (Generic BNF) grammar engine** — context-free parser + DFA construction + token-trie matching. Real work (~3-4 weeks). Overfit currently has JSON-mode + ToolCallConstraint (covers 90% of structured-output use). Build only if user demand surfaces for arbitrary grammars.
 - [ ] **One vision-language model stack** (LLaVA / Qwen2-VL / Pixtral) — CLIP image encoder + projection + LLM fusion + tokenizer surgery. ~2-4 weeks for a single model. Doubles the addressable workload (image+text).
-- [ ] **Whisper-tiny / -base ASR port** — separate `whisper.cpp` ecosystem, same conv+transformer pattern as our CRNN+BERT stack. ~1-2 weeks for a working speech-to-text. Strongest "in-process .NET multimodal" story if combined with VLM.
+- [x] **Whisper-tiny / -base ASR port** — DONE and validated end-to-end on the real `ggml-tiny.bin` + `jfk.wav` (perfect transcript, pure .NET CPU). `WhisperTranscriber.Load(ggml).TranscribeFile(wav, "en")`; log-mel front-end + encoder + decoder in `LanguageModels/Whisper/` + `Audio/`. Optional polish left: KV-cache decode, >30s windowing, MP3 adapter.
 - [ ] **State-space / Mamba / RWKV** — recurrent-state arch; structurally different (SSM ops, scan). Defer unless a specific user model demands it.
 - [ ] **Multi-token-prediction (MTP) + speculative rollback** — Qwen3.5 / Gemma3N draft heads. Tree-based verification + rollback cache. Defer.
 
@@ -400,7 +494,18 @@ The previous ROADMAP wording ("honest ceiling 2-2.5×, not parity") reflected th
 
 ### Phase 1 (~1 week) — parity with llama.cpp (~28 tok/s)
 
-- [ ] **1a. MHA consolidation** (2-3 days, **highest-confidence single lever**) — collapse `MultiHeadAttentionLayer`'s per-head `Wq/Wk/Wv/Wo[i]` ([dModel × dHead] each, 16 of them) into one combined matrix per projection (`[dModel × dModel]`). A single contiguous GEMV [2048 × 2048] with sequential writeback prefetches ~10× better than 16 × [2048 × 128] fragmented per-head GEMVs (per-head fragmentation thrashes the L2). This is **Lever D** from the existing ROADMAP attention-layout analysis, with the BW efficiency estimate 55 % → ~75 %. **Expected**: +50 % tok/s (17 → ~25-26). Breaking API change for per-head accessors; LoRA hooks need migration; converters for existing checkpoints stay backward-compatible (concat on load).
+- [x] **1a. MHA consolidation — BUILT, MEASURED, ~NEUTRAL. ⛔ DO NOT REPEAT.** The premise was: collapse the
+  per-head `Wq/Wk/Wv/Wo[i]` ([dModel × dHead] × 16) into one `[dModel × dModel]` per projection so a single
+  contiguous GEMV prefetches ~10× better than 16 fragmented per-head ones — projected BW efficiency 55 % → 75 %,
+  **+50 % tok/s**. It was implemented (2026-06-15) as **whole-matrix Q4_K attention** (M2 loader plumbing of
+  whole-matrix handles + M3 whole-Q/whole-O GEMV with split-heads-after). Result: **E2E coherent but +1-2 % —
+  effectively neutral.** It now sits behind `OVERFIT_REPACK_ATTN`, **default OFF**.
+  **Why the projection was wrong — the lesson:** the isolated micro-bench *did* show 2.36× (parallel,
+  bandwidth-bound), and that number was real. **Amdahl ate it:** the Q/O projections are a small slice of a
+  decode step; FFN + LM-head dominate and are already **at the DRAM floor**. A 2.36× on ~5 % of the work is ~0.
+  Discovery along the way: Q4_K_M files are *mixed* (V=Q6_K, Q/K/O=Q4_K).
+  ⇒ **Do not re-derive this from the layout analysis.** Any future attention-layout lever must first be sized
+  against its share of the decode step, not against its own micro-bench.
 - [x] **1b. Q8 KV cache — DONE + wired 2026-06-05.** `KvCacheDType.Q8` stores each cached K/V vector as
   per-vector symmetric int8 + one F32 scale (`Q8KvQuant`) — ~4× smaller KV storage and attention read traffic.
   Opt-in via `CreateSession(ctx, KvCacheDType.Q8)` or `OVERFIT_KV_DTYPE=q8` (default F32 unchanged, bit-identical,
@@ -416,16 +521,68 @@ The previous ROADMAP wording ("honest ceiling 2-2.5×, not parity") reflected th
 
 ### Phase 2 (~1 week) — overtake llama.cpp by 15-25 % (~32-34 tok/s)
 
-- [ ] **2a. Custom AVX2 dequant-fused GEMV** (3-4 days) via `System.Runtime.Intrinsics.X86.Avx2`. Hand-write the Q4_K_M decode kernel so the dequant step and the multiply-add live in one pipeline — no intermediate F32 buffer, `Vector256<float>` + FMA + horizontal sum in registers. This is llama.cpp's primary weapon for Q4_K_M decode. Managed intrinsics are AOT-compatible (no P/Invoke). **Expected**: +15 % tok/s on the Q4_K_M path.
-- [ ] **2b. L2-aware blocking + register-tiled GEMV** (2-3 days) — detect L2 size at startup (`GetLogicalProcessorInformationEx` on Windows, `sysconf` on Linux), block the per-token matmul to half of L2 (e.g. 128 KB on a 1 MB-per-core L2). Unroll 4-8 output rows, keep accumulators in `Vector256<float>` registers, stream weights, vector residentny. **Expected**: +5-10 % tok/s.
+- [x] **2a. Custom AVX2 dequant-fused GEMV — DONE and BOUNDED.** Shipped as the repacked 8×8 Q4_K GEMV
+  (dequant + FMA in one pipeline, no intermediate F32 buffer). `OVERFIT_REPACK_GEMV=1` measured **+30 %**
+  (Qwen-3B 18.7 → 24.4 tok/s). **The kernel now runs at ≈84 % of the cold-DRAM ceiling — there is no ALU
+  headroom left**; VNNI and AVX-512 ports were tried and measured **≈0** (memory-bound, not compute-bound).
+- [~] **2b. L2-aware blocking + register-tiled GEMV — SPLIT VERDICT, mostly answered.**
+  **Register tiling: DONE for PREFILL** — the tinyBLAS-style `Q4KGemvKernel.GemmTiled` (`block_q4_Kx8`,
+  AVX2/FMA) measured 2.76× single-thread / 3.80× parallel on the projection GEMM → **~1.61× end-to-end TTFT**,
+  shipped with an offline `overfit repack` sidecar (default-on, zero extra RAM).
+  **Cache blocking: measured NEGATIVE and reverted** — K-blocking + A-packing on the im2col GEMM regressed, and
+  the *simple* register-blocked GEMM beat the cache-blocked one. Detecting L2 to block against it is therefore
+  **not** a live lever on this shape.
+  Remaining slice: register-tiling the single-token *decode* GEMV — but decode is DRAM-bound (see 2a's 84 %
+  ceiling), so expect ≈0 there too. Size it before building it.
 
 **Phase 2 total**: ~33-34 tok/s = **+20-25 % vs llama.cpp**. Pure-managed throughout.
 
 ### Phase 3 (~1-2 weeks) — structural advantage llama.cpp can't easily replicate (~40-50 tok/s on realistic prompts)
 
-- [ ] **3. Adaptive early-exit / layer-skip**. For typical chat tokens (fillers, function words, common follow-ups) the model often "knows the answer" after K of N layers — measurable as low entropy on an intermediate logit projection. Add a tiny early-exit head per few layers; if entropy < threshold → return early. **Average computation −30-40 %** on realistic prompts; **harder tokens get full forward** (no quality cliff). Trade-off: ~1-2 % perplexity drift, tunable threshold. **llama.cpp's pipeline is fixed-depth** — they can't do this without bigger surgery. This is where pure-managed graph control becomes an *advantage*. **Expected**: +30-50 % tok/s on realistic chat workload, less on worst-case.
+- [x] **3. Adaptive early-exit / layer-skip — MEASURED 2026-07-05, PREMISE FALSIFIED. ⛔ DO NOT BUILD.**
+  The claim was: for typical chat tokens the model "knows the answer" after K of N layers → exit on low
+  intermediate entropy → **−30-40 % compute / +30-50 % tok/s**, and a moat (llama.cpp's pipeline is fixed-depth).
+  **Sized first with the shipped logit lens** (`CachedLlamaInferenceEngine.LogitLens` + `GetLayerActivation`,
+  bit-exact at the last layer) — no new machinery needed, ~5 minutes of compute. Qwen2.5-3B Q4_K_M, 36 layers,
+  160 generated tokens across 4 prompt styles (factual / explanatory / code / narrative), probing every 4th layer.
 
-**Phase 3 total**: 40-50 tok/s on realistic prompts = **~1.5-1.8× llama.cpp** on chat workloads (lower on synthetic benchmarks that have no easy tokens).
+  **(a) The model does NOT decide early.** top-1@layer == final top-1:
+  | layer | depth | match |
+  |---:|---:|---:|
+  | 19 | 56 % | 3.7 % |
+  | 23 | 67 % | 4.4 % |
+  | 27 | 78 % | **18.1 %** |
+  | 31 | 89 % | **47.5 %** |
+
+  The residual stream keeps changing the argmax until the last ~10 % of the stack.
+
+  **(b) The real rule (trigger must be entropy — at runtime you don't know the final token):**
+  | entropy T | exited | correct | **WRONG** | avg layers saved |
+  |---:|---:|---:|---:|---:|
+  | 0.05 | 16.9 % | 81.5 % | 3.1 % | **4.6 %** |
+  | 0.25 | 35.0 % | 67.9 % | 11.3 % | 7.7 % |
+  | 0.50 | 45.6 % | 64.4 % | **16.3 %** | 9.9 % |
+  | 1.00 | 65.6 % | 55.2 % | **29.4 %** | 14.8 % |
+
+  **−30-40 % is unreachable at ANY threshold** (max 14.8 %, at 29.4 % corrupted tokens). Buying even 10 %
+  costs 16.3 % wrong tokens. The safest setting yields **4.6 %** — and its 3.1 % wrong already exceeds the
+  "~1-2 % perplexity drift" the item budgeted. Entropy is also a poor proxy: even at T=0.05 only 81.5 % of
+  confident exits agree with the full stack. Confidence ≠ correctness at intermediate layers.
+
+  **Honest scope of the refutation:** this measures the RAW logit lens. The item proposed a *trained* early-exit
+  head (a tuned lens), which reads intermediate states better and would beat these numbers. But (a) shows the
+  information largely isn't in the residual yet — a better readout cannot invent it — and a trained-head variant
+  is a far bigger project than the 1-2 weeks budgeted here. Sample: 160 tokens / 4 prompts / 1 model / no chat
+  template / every 4th layer; small, but the trend is monotonic and steep enough that a finer grid won't rescue it.
+
+  ⇒ **Decode throughput is CLOSED.** Every lever in this plan is now measured: 1a +1-2 %, 2a done (≈84 % of the
+  cold-DRAM ceiling), 2b cache-blocking negative, AVX-512/VNNI ≈0, and Phase 3 ≈4.6 %. The residual ~1.13×
+  gap to llama.cpp is a memory-access-efficiency property, not a missing kernel.
+
+~~**Phase 3 total**: 40-50 tok/s on realistic prompts = **~1.5-1.8× llama.cpp** on chat workloads.~~
+**RETRACTED 2026-07-05 — measured, not achievable.** The ceiling is ~4.6 % compute saved at a quality cost
+already beyond budget (see the item above). This projection was built on an untested premise ("the model knows
+the answer early"); the model decides in the last ~10 % of the stack. Nothing in this plan reaches 40-50 tok/s.
 
 ### Validation gates
 
@@ -435,9 +592,24 @@ Every phase must pass:
 3. Multi-thread suite stays green (no contention regression from kernel changes).
 4. AOT publish guard passes (`dotnet publish -c Release -r linux-x64`).
 
-### Order of attack
+### Order of attack — REWRITTEN 2026-07-05 (the original said "start with 1a"; 1a is now falsified)
 
-Start with **1a (MHA consolidation)** — it has the largest single contribution, the math is documented, and the validation is cheap (one benchmark run). If 1a delivers the projected +50 %, the rest are extensions; if it falls short, the gap diagnosis needs revisiting before investing in 1b/2/3.
+**Decode tok/s is effectively exhausted. Do not open this plan expecting an easy win.** Scoreboard after the
+sprint: 1a **built → +1-2 %, shelved**; 1b **done** (value is RAM/long-context, not tok/s); 2a **done → +30 %,
+now at ≈84 % of the cold-DRAM ceiling**; 2b **register tiling done for prefill (1.61× TTFT), cache blocking
+measured negative**. FFN + LM-head sit **at the DRAM floor**; attention is ~1.5× off its floor but the lever
+that would close it is exactly the neutral 1a. The residual gap to llama.cpp is **~1.13× and UNIFORM across
+context length** — a memory-access-efficiency property, not a missing kernel. AVX-512/VNNI: ≈0.
+
+**Phase 3 (adaptive early-exit) was the last untried lever — it was measured on 2026-07-05 and refuted**
+(≈4.6 % compute saved at acceptable quality; the model decides in the last ~10 % of the stack). **There is no
+known high-ROI decode lever left.** Treat any new proposal here as guilty until sized.
+
+**Rule earned the hard way (Winograd −79 %, AVX-512 ≈0, OverfitPool ≈0, whole-matrix attention +1-2 %, Phase-3
+early-exit ≈4.6 %):** size a lever against **its share of the decode step** before building it. A micro-bench
+speedup on 5 % of the work is 0 % end-to-end. Every one of those five looked compelling in isolation — and the
+last one was refuted in **~5 minutes of compute** using an already-shipped primitive (the logit lens), versus
+the 1-2 weeks it was budgeted. **Sizing is cheap; building on an unsized premise is not.**
 
 ---
 
@@ -1365,6 +1537,57 @@ trainable LoRA + RMSNorm/RoPE/SwiGLU/GQA). Multi-session (~3–5).
 ---
 
 ## Performance backlog
+
+### ★ Decode worker headroom — BUG FOUND + FIXED 2026-07-05 (+61…+76 % on small machines)
+
+Went in to test **thread pinning / affinity** (hypothesis: the scheduler and SMT siblings cost us; llama.cpp
+pins). **Pinning was refuted — and the measurement found something much bigger.**
+
+Pinning *alone* HURTS: 16 physical cores / 16 workers = **14.46** tok/s vs 32 logical / 16 workers = **24.94**.
+But every config where `workers == available CPUs` landed on ~14 regardless of core count, SMT, or CCD. The
+cause is not topology — **the decode pool SPINS, so with zero spare CPU the dispatcher is starved.**
+
+| CPUs | workers | headroom | tok/s |   | CPUs | workers | headroom | tok/s |
+|---:|---:|---:|---:|---|---:|---:|---:|---:|
+| 32 | 31 | 1 | **23.02** |  | 32 | **32** | **0** | **14.73** |
+| 16 phys | 8 | 8 | **26.11** |  | 16 phys | **16** | **0** | **14.46** |
+| 8 phys | 4 | 4 | 20.51 |  | 8 phys | **8** | **0** | 13.75 |
+
+The cliff is exactly at `headroom == 0`; **one free core is the difference between 23.02 and 14.73.**
+
+**The bug:** the default was `Math.Min(procCount, 10)`, so **every box with ≤10 logical CPUs defaulted INTO the
+cliff** (`workers == procCount`). Fixed to `Math.Min(Math.Max(1, procCount - 1), 10)`. Faithfully re-measured
+(affinity limits real CPUs; `OVERFIT_PARALLEL_WORKERS` simulates `procCount`, because
+`Environment.ProcessorCount` is cached at startup and does NOT see a later affinity mask — a first "verification"
+that ignored this produced a nonsensical 1.87 tok/s and was thrown out):
+
+| CPUs | old default | new default | gain |
+|---:|---:|---:|---:|
+| 4 | 5.91 | **9.62** | **+63 %** |
+| 8 | 11.69 | **18.83** | **+61 %** |
+| 10 | 12.13 | **21.38** | **+76 %** |
+| 32 | 24.94 | 26.29 | unchanged logic |
+
+Guarded by `DecodeWorkerHeadroomTests`. **This one line beats every lever in the decode plan** (1a +1-2 %,
+Phase 3 +4.6 %, 2a +30 %). ⚠️ **Suspicion to check: OverThink on Android** — 8 cores ⇒ old default 8 workers ⇒
+headroom 0. The 3.8 tok/s figure may be partly this.
+
+### Huge pages / TLB — CLOSED 2026-07-05, do not pursue
+
+Hypothesis: a 2 GB DRAM-bound model pressures the TLB, so large pages / `madvise(MADV_HUGEPAGE)` should help.
+**Two independent reasons it dies:** (1) Windows does not support large pages for **file mappings** (only private
+commits) and the weights are mmap'd — `MADV_HUGEPAGE` is Linux-only; (2) the data says cache/TLB is not the
+bottleneck anyway — the **96 MB V-Cache CCD measured 13.75 tok/s vs 13.96 on the 32 MB CCD** (identical). A 2 GB
+model dwarfs any L3, so enlarging pages or cache changes nothing.
+
+### Worker auto-tuning — deliberately NOT built
+
+The generalisable law has a mechanism and is now one line in `ResolveDecodeMaxWorkers` (never take every CPU).
+A per-CPU/per-RAM **lookup table would be overfitting to n=1 machine** (everything above was measured on a single
+Ryzen 9 9950X3D). And there is nothing left to tune: **above the cliff the curve is flat** — 8 workers 25.67 vs
+24 workers 25.84 — because decode is DRAM-bound and ~8 threads already saturate the bus. If a box with
+materially different bandwidth ever shows up, the honest form is an opt-in `overfit tune` that measures once and
+caches a per-machine profile, never a hard-coded table.
 
 ### Training CPU-saturation track
 

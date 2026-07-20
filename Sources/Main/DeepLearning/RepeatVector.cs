@@ -43,7 +43,7 @@ namespace DevOnBike.Overfit.DeepLearning
             }
         }
 
-        public AutogradNode Forward(ComputationGraph graph, AutogradNode input)
+        public AutogradNode Forward(ComputationGraph? graph, AutogradNode input)
         {
             return TensorMath.RepeatVector(graph, input, _seqLen);
         }

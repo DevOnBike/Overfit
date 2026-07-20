@@ -36,6 +36,23 @@ namespace DevOnBike.OverfitBench
         {
             base.OnCreate(savedInstanceState);
 
+            // Config from the launch intent so a sweep can be driven from adb:
+            //   adb shell am start -n com.devonbike.overfitbench/crc.../MainActivity \
+            //       --es pool 1 --es workers 8 --es skipfp16 1
+            // This MUST run before any Overfit type loads — OverfitParallel resolves the decode pool at
+            // static-init and never re-reads it — hence one process = ONE config; force-stop between arms.
+            var pool = Intent?.GetStringExtra("pool");
+            var workers = Intent?.GetStringExtra("workers");
+            if (!string.IsNullOrEmpty(pool))
+            {
+                System.Environment.SetEnvironmentVariable("OVERFIT_BENCH_POOL", pool);
+            }
+            if (!string.IsNullOrEmpty(workers))
+            {
+                System.Environment.SetEnvironmentVariable("OVERFIT_BENCH_WORKERS", workers);
+            }
+            var skipFp16 = Intent?.GetStringExtra("skipfp16") == "1";
+
             // Keep the screen on so a screen-off doesn't recreate the Activity mid-run.
             Window?.AddFlags(WindowManagerFlags.KeepScreenOn);
 
@@ -66,8 +83,12 @@ namespace DevOnBike.OverfitBench
                 {
                     try
                     {
-                        // FP16-resident spike — pure array math, no model needed, runs first.
-                        Fp16GemvBench.Run(Log);
+                        // FP16-resident spike — pure array math, no model needed. Slow, and irrelevant to a
+                        // decode-config sweep, so `--es skipfp16 1` skips it.
+                        if (!skipFp16)
+                        {
+                            Fp16GemvBench.Run(Log);
+                        }
 
                         var filesDir = GetExternalFilesDir(null)?.AbsolutePath
                             ?? throw new System.IO.DirectoryNotFoundException("No external files dir.");

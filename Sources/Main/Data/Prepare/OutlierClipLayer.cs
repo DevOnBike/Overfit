@@ -16,14 +16,14 @@ namespace DevOnBike.Overfit.Data.Prepare
         private readonly float _lowerPercentile;
         private readonly float _upperPercentile;
         private bool _fitted;
-        private float[] _highThresholds;
-        private float[] _lowThresholds;
+        private float[]? _highThresholds;
+        private float[]? _lowThresholds;
 
         public OutlierClipLayer(
             float lowerPercentile = 0.01f,
             float upperPercentile = 0.99f,
-            Dictionary<int, (float Lower, float Upper)> columnOverrides = null,
-            HashSet<int> excludedColumns = null)
+            Dictionary<int, (float Lower, float Upper)>? columnOverrides = null,
+            HashSet<int>? excludedColumns = null)
         {
             if (lowerPercentile < 0f || lowerPercentile >= upperPercentile)
             {
@@ -122,8 +122,8 @@ namespace DevOnBike.Overfit.Data.Prepare
         {
             for (var c = 0; c < cols; c++)
             {
-                var lowVal = _lowThresholds[c];
-                var highVal = _highThresholds[c];
+                var lowVal = RequireFitted(_lowThresholds, nameof(_lowThresholds))[c];
+                var highVal = RequireFitted(_highThresholds, nameof(_highThresholds))[c];
 
                 if (lowVal == float.MinValue && highVal == float.MaxValue)
                 {
@@ -175,5 +175,17 @@ namespace DevOnBike.Overfit.Data.Prepare
             _highThresholds = null;
             _fitted = false;
         }
+
+        /// <summary>
+        /// State that only exists after <c>Fit</c>. Reading it earlier used to dereference null; this turns
+        /// "transform before fit" into a named error instead of a NullReferenceException from inside a loop.
+        /// </summary>
+        private T RequireFitted<T>(T? value, string field)
+            where T : class
+        {
+            return value ?? throw new OverfitRuntimeException(
+                $"{nameof(OutlierClipLayer)}.{field} is not available — call Fit before Transform.");
+        }
+
     }
 }

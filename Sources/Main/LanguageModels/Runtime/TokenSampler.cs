@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -744,7 +744,11 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
         private static void SiftDownMin(Span<int> indexes, Span<float> scores, int length, int root)
         {
+            // BOUND: <= log2(length). Each iteration moves `root` to a child (2*root+1 or +2) or returns,
+            // so the loop descends one heap level per pass and cannot revisit a node.
+#pragma warning disable OVERFIT023
             while (true)
+#pragma warning restore OVERFIT023
             {
                 var smallest = root;
                 var left = 2 * root + 1;
@@ -838,11 +842,15 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 root,
                 largest);
 
+            // Sift-down: `largest` is always a CHILD of `root` (2*root+1 or +2), so each call descends one
+            // heap level. Depth is therefore <= log2(length) — ~18 for a 150k vocabulary, not input-shaped.
+#pragma warning disable OVERFIT022 // Bounded: descends one heap level per call, depth <= log2(length).
             Heapify(
                 indexes,
                 scores,
                 length,
                 largest);
+#pragma warning restore OVERFIT022
         }
 
         private static void Swap(

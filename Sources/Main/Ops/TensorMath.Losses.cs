@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -18,7 +18,7 @@ namespace DevOnBike.Overfit.Ops
 
         /// <summary>Compatibility shim — delegates to <see cref="ComputationGraph.SoftmaxCrossEntropy"/> (PR5-7c).</summary>
         public static AutogradNode SoftmaxCrossEntropy(
-            ComputationGraph graph, AutogradNode logits, AutogradNode target)
+            ComputationGraph? graph, AutogradNode logits, AutogradNode target)
             => graph != null
                 ? graph.SoftmaxCrossEntropy(logits, target)
                 : throw new OverfitRuntimeException(
@@ -47,7 +47,7 @@ namespace DevOnBike.Overfit.Ops
         // MSE LOSS
         // ====================================================================
 
-        public static AutogradNode MSELoss(ComputationGraph graph, AutogradNode prediction, AutogradNode target)
+        public static AutogradNode MSELoss(ComputationGraph? graph, AutogradNode prediction, AutogradNode target)
         {
             var sz = prediction.Shape.Size;
             float mse;
@@ -81,7 +81,7 @@ namespace DevOnBike.Overfit.Ops
         // DIRECTIONAL LOSS
         // ====================================================================
 
-        public static AutogradNode DirectionalLoss(ComputationGraph graph, AutogradNode prediction, AutogradNode target, float gamma = 10f)
+        public static AutogradNode DirectionalLoss(ComputationGraph? graph, AutogradNode prediction, AutogradNode target, float gamma = 10f)
         {
             var sz = prediction.Shape.Size;
             float loss;

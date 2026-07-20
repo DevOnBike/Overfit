@@ -35,8 +35,10 @@ namespace DevOnBike.Overfit.DeepLearning
             _cell.Eval();
         }
 
-        public AutogradNode Forward(ComputationGraph graph, AutogradNode input)
+        public AutogradNode Forward(ComputationGraph? graph, AutogradNode input)
         {
+            ArgumentNullException.ThrowIfNull(graph);
+
             var batch = input.Shape.D0;
             var seqLen = input.Shape.D1;
             var inputSize = input.Shape.D2;
@@ -51,13 +53,14 @@ namespace DevOnBike.Overfit.DeepLearning
 
                 if (_returnSequences)
                 {
-                    allH[t] = h;
+                    // allH is allocated under exactly this condition a few lines above.
+                    allH![t] = h;
                 }
             }
 
             if (_returnSequences)
             {
-                return StackTimesteps(graph, allH, batch, seqLen);
+                return StackTimesteps(graph, allH!, batch, seqLen);
             }
 
             return h;
@@ -98,7 +101,7 @@ namespace DevOnBike.Overfit.DeepLearning
             throw new NotImplementedException("Use the overload providing batchSize and seqLen for LSTMLayer.");
         }
 
-        private static AutogradNode SliceTimestep(ComputationGraph graph, AutogradNode input, int t, int seqLen, int inputSize)
+        private static AutogradNode SliceTimestep(ComputationGraph? graph, AutogradNode input, int t, int seqLen, int inputSize)
         {
             var batch = input.Shape.D0;
             var res = new TensorStorage<float>(batch * inputSize, clearMemory: false);
@@ -122,7 +125,7 @@ namespace DevOnBike.Overfit.DeepLearning
             return output;
         }
 
-        private static AutogradNode StackTimesteps(ComputationGraph graph, AutogradNode[] allH, int batch, int seqLen)
+        private static AutogradNode StackTimesteps(ComputationGraph? graph, AutogradNode[] allH, int batch, int seqLen)
         {
             var hiddenSize = allH[0].Shape.D1;
             var res = new TensorStorage<float>(batch * seqLen * hiddenSize, clearMemory: false);

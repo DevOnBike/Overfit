@@ -1,0 +1,16 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "reasoning": {
+      "type": "string"
+    },
+    "revised_instructions": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "reasoning",
+    "revised_instructions"
+  ]
+}

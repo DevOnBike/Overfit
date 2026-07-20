@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -189,9 +189,33 @@ namespace DevOnBike.Overfit.Runtime
             var raw = Environment.GetEnvironmentVariable(DecodeWorkersEnvVar);
             if (!string.IsNullOrEmpty(raw) && int.TryParse(raw, out var requested) && requested > 0)
             {
+                // Explicit override is honoured as-is (benchmarks sweep past the cliff on purpose).
                 return Math.Min(requested, workers);
             }
-            return Math.Min(workers, 10);
+
+            // Android is big.LITTLE: half the "cores" are efficiency cores that only drag the dispatch. Measured
+            // on-device (Snapdragon 7s Gen 2 = 4 big + 4 little, Qwen2.5-0.5B Q4_K_M, tok/s):
+            //     workers=8 pool=ON 3.40 | workers=4 pool=ON 3.57 | workers=8 pool=OFF 3.49 | workers=4 pool=OFF 3.70
+            // i.e. halving the workers is worth +5…+6 % and stacks with the pool being off (+8.8 % combined).
+            // procCount/2 targets the big cluster on the usual big.LITTLE split (4+4, or 1+3+4). Modest, because
+            // ARM decode is scalar/dequant-bound under Mono and saturates at ~4 effective cores either way — the
+            // desktop cliff below simply does not exist here.
+            if (OperatingSystem.IsAndroid())
+            {
+                return Math.Max(1, workers / 2);
+            }
+
+            // NEVER take every CPU. This pool SPINS, so with workers == available CPUs there is no core left
+            // for the DISPATCHER and throughput collapses — measured on Qwen-3B Q4_K_M (best-of-3, 2026-07-05):
+            //     CPUs  workers  tok/s        CPUs  workers  tok/s
+            //        4        4   5.91           4        3   9.65   (+63%)
+            //        8        8  11.69           8        7  18.78   (+61%)
+            //       10       10  12.13          10        9  21.49   (+77%)
+            //       32       32  14.73          32       31  23.02   (+36%)
+            // The cliff is exactly at headroom == 0 and is independent of SMT and of which CCD the threads land
+            // on (a 96 MB V-Cache CCD measured identical to a 32 MB one — the model dwarfs any L3). The old
+            // `Min(workers, 10)` meant every box with <= 10 logical CPUs defaulted INTO the cliff.
+            return Math.Min(Math.Max(1, workers - 1), 10);
         }
 
         private static int ResolveWorkerCount()
@@ -284,7 +308,18 @@ namespace DevOnBike.Overfit.Runtime
             // of their small matmuls). Set OVERFIT_DECODE_POOL=0/false to opt out. Idle cost is ~0: the pool
             // spins-then-parks (see _decodeParkSemaphore), so there is no idle-CPU reason to disable it.
             var raw = Environment.GetEnvironmentVariable(DecodePoolEnvVar);
-            return !(raw is "0" || string.Equals(raw, "false", StringComparison.OrdinalIgnoreCase));
+            if (!string.IsNullOrEmpty(raw))
+            {
+                return !(raw is "0" || string.Equals(raw, "false", StringComparison.OrdinalIgnoreCase));
+            }
+
+            // ...but OFF by default on Android. Measured on-device (Motorola Edge 50 Fusion, Snapdragon 7s Gen 2,
+            // 4×A78 @2.4GHz + 4×A55 @1.96GHz, Qwen2.5-0.5B Q4_K_M): pool ON→OFF is +2.6…+3.6 % — and it stops the
+            // pool hot-spinning the efficiency cores, which on a battery-powered device is the real argument.
+            // The reason the desktop's big pool win does not transfer: under Mono on ARM there are NO SIMD
+            // intrinsics (AdvSimd64=False, Dp=False → the decode path is SCALAR), so decode is dequant-bound and
+            // tops out at ~4 effective cores no matter how many workers spin. Dispatch is not the bottleneck here.
+            return !OperatingSystem.IsAndroid();
         }
 
         static OverfitParallel()
@@ -553,7 +588,11 @@ namespace DevOnBike.Overfit.Runtime
                 }
 
                 // Calling thread participates — greedy drain (safe under _decodeGate).
+                // BOUND: _decodeChunkCount. Interlocked.Increment advances a shared counter every pass, so
+                // the index strictly increases and the `index >= _decodeChunkCount` break is always reached.
+#pragma warning disable OVERFIT023
                 while (true)
+#pragma warning restore OVERFIT023
                 {
                     var index = Interlocked.Increment(ref _decodeNextChunk.Value) - 1;
                     if (index >= _decodeChunkCount)
@@ -604,7 +643,13 @@ namespace DevOnBike.Overfit.Runtime
         private static void DecodeWorkerLoop()
         {
             var seen = 0L;
+
+            // BOUND: none by design — this is a daemon worker that parks until the process exits. It runs on
+            // a background thread (IsBackground = true), so it cannot keep the process alive; the "hang" this
+            // rule guards against is a foreground loop that never yields a result, which this is not.
+#pragma warning disable OVERFIT023
             while (true)
+#pragma warning restore OVERFIT023
             {
                 // PURE hot spin — no Sleep/Yield backoff. SpinWait.SpinOnce() escalates to
                 // Sleep(1) within ~20 calls, which is fatal here: the gaps between the ~180
@@ -682,7 +727,11 @@ namespace DevOnBike.Overfit.Runtime
 
         private static void WorkerLoop()
         {
+            // BOUND: none by design — daemon worker, parks on _startSemaphore until the process exits. Runs on
+            // a background thread, so it never blocks shutdown.
+#pragma warning disable OVERFIT023
             while (true)
+#pragma warning restore OVERFIT023
             {
                 _startSemaphore.Wait();
 
@@ -691,11 +740,7 @@ namespace DevOnBike.Overfit.Runtime
                 // descriptor reads below see the dispatcher's writes.
                 var index = Interlocked.Increment(ref _nextChunk.Value) - 1;
 
-                if (index < _chunkCount)
-                {
-                    ExecuteChunk(index);
-                }
-                else
+                if (index >= _chunkCount)
                 {
                     // UNREACHABLE under correct SemaphoreSlim semantics:
                     // Release(chunkCount - 1) yields exactly chunkCount - 1
@@ -712,7 +757,10 @@ namespace DevOnBike.Overfit.Runtime
                     //
                     // Debug builds surface the invariant violation immediately.
                     Debug.Fail($"OverfitParallel: claim index {index} >= chunkCount {_chunkCount}.");
+                    continue;
                 }
+
+                ExecuteChunk(index);
             }
         }
 

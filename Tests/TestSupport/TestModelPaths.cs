@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -104,6 +104,22 @@ namespace DevOnBike.Overfit.Tests.TestSupport
 
             public static string RequireGgufPath() => Require(GgufPath, EnvVar,
                 "Orpheus 3B TTS GGUF (isaiahbjork/orpheus-3b-0.1-ft-Q4_K_M-GGUF)");
+        }
+
+        /// <summary>
+        /// Qwen2.5-0.5B Q4_K_M — the smallest real GGUF on the dev box (~490 MB). It shares the Qwen3B
+        /// directory. Used by the fast-suite smoke test: small enough to load inside the normal test budget,
+        /// yet a genuine externally-authored file, so the untrusted-input parse path stays covered by a plain
+        /// `dotnet test` instead of only by [LongFact] tests that are skipped by default.
+        /// </summary>
+        public static class Qwen05B
+        {
+            private const string EnvVar = "OVERFIT_QWEN3B_DIR";
+            public static string Dir => Resolve(EnvVar, @"c:\qwen3b");
+            public static string Q4KmGgufPath => Path.Combine(Dir, "qwen0.5b.q4km.gguf");
+            public static string TokenizerJsonPath => Path.Combine(Dir, "tokenizer.json");
+
+            public static string RequireQ4KmGgufPath() => Require(Q4KmGgufPath, EnvVar, "Qwen2.5-0.5B Q4_K_M GGUF");
         }
 
         public static class Qwen3B

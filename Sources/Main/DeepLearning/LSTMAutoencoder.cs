@@ -121,7 +121,7 @@ namespace DevOnBike.Overfit.DeepLearning
             Reconstruct(1, input, output);
         }
 
-        public AutogradNode Forward(ComputationGraph graph, AutogradNode input)
+        public AutogradNode Forward(ComputationGraph? graph, AutogradNode input)
         {
             var latent = Encode(graph, input);
             return Decode(graph, latent);
@@ -176,13 +176,13 @@ namespace DevOnBike.Overfit.DeepLearning
             _dec2.Dispose();
         }
 
-        public AutogradNode Encode(ComputationGraph graph, AutogradNode input)
+        public AutogradNode Encode(ComputationGraph? graph, AutogradNode input)
         {
             var h1 = _enc1.Forward(graph, input);
             return _enc2.Forward(graph, h1);
         }
 
-        public AutogradNode Decode(ComputationGraph graph, AutogradNode latent)
+        public AutogradNode Decode(ComputationGraph? graph, AutogradNode latent)
         {
             var repeated = _repeat.Forward(graph, latent);
             var h1 = _dec1.Forward(graph, repeated);

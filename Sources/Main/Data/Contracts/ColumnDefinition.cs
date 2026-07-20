@@ -10,7 +10,7 @@ namespace DevOnBike.Overfit.Data.Contracts
         public string Name
         {
             get; set;
-        }
+        } = string.Empty;
         public ColumnType Type
         {
             get; set;

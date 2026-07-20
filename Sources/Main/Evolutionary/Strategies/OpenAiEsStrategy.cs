@@ -44,6 +44,7 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
         private int _adamStep;
         private float _bestFitness;
         private bool _disposed;
+        private bool _initialized;
         private bool _hasFitness;
         private bool _hasPendingPopulation;
 
@@ -256,11 +257,14 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
                 Array.Clear(_v!, 0, _v!.Length);
                 _adamStep = 0;
             }
+
+            _initialized = true;
         }
 
         public void Ask(Span<float> populationMatrix)
         {
             ThrowIfDisposed();
+            ThrowIfNotInitialized();
 
             var expectedLength = PopulationSize * ParameterCount;
             if (populationMatrix.Length != expectedLength)
@@ -577,6 +581,9 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
                 ReadFloats(reader, _m!);
                 ReadFloats(reader, _v!);
             }
+
+            // A restored checkpoint carries a real search centre, so it counts as initialised.
+            _initialized = true;
         }
 
         private static void WriteFloats(BinaryWriter writer, ReadOnlySpan<float> values)
@@ -662,6 +669,21 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
         private void ThrowIfDisposed()
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
+        }
+
+        /// <summary>
+        /// Guards the silent-failure mode: without <see cref="Initialize"/> the search centre is all zeros, so the
+        /// run is driven by noise alone. That does not crash — it just converges badly, and with a fixed seed two
+        /// different objectives can even return a bit-identical best genome. Loud error beats quiet bad results.
+        /// </summary>
+        private void ThrowIfNotInitialized()
+        {
+            if (!_initialized)
+            {
+                throw new OverfitRuntimeException(
+                    $"{nameof(OpenAiEsStrategy)} was not initialised. Call {nameof(Initialize)}() to seed the search "
+                    + $"centre, or {nameof(Load)}() to restore a saved run, before {nameof(Ask)}().");
+            }
         }
     }
 }

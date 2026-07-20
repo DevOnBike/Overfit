@@ -6,6 +6,7 @@
 using System.Text;
 using System.Text.Json;
 using DevOnBike.Overfit.LanguageModels.Constraints;
+using DevOnBike.Overfit.Schemas;
 
 namespace DevOnBike.Overfit.LanguageModels.Skills.Optimization
 {
@@ -19,10 +20,9 @@ namespace DevOnBike.Overfit.LanguageModels.Skills.Optimization
     /// </summary>
     public sealed class OverfitSkillEditor : ISkillEditor
     {
-        private const string EditSchema =
-            "{\"type\":\"object\",\"additionalProperties\":false,"
-            + "\"properties\":{\"reasoning\":{\"type\":\"string\"},\"revised_instructions\":{\"type\":\"string\"}},"
-            + "\"required\":[\"reasoning\",\"revised_instructions\"]}";
+        // Authored as Schemas/SkillEditor.json and woven in as a const at build time (see Main.csproj
+        // EmbedJsonSchemas) — edit the .json, not this.
+        private const string EditSchema = OverfitSchemas.SkillEditor;
 
         private readonly OverfitClient _optimizer;
         private readonly int _maxFailuresShown;
@@ -48,13 +48,25 @@ namespace DevOnBike.Overfit.LanguageModels.Skills.Optimization
               .Append("small, targeted change that would fix the failures below; keep the instructions concise. ")
               .Append("Reply ONLY with JSON: {\"reasoning\": string, \"revised_instructions\": string}.\n\n");
             sb.Append("CURRENT INSTRUCTIONS:\n").Append(currentInstructions).Append("\n\n");
-            sb.Append("FAILURES (prompt -> what the skill produced):\n");
+            sb.Append("FAILURES (prompt -> what the skill produced -> WHY it was judged wrong):\n");
 
             var shown = Math.Min(failures.Count, _maxFailuresShown);
             for (var i = 0; i < shown; i++)
             {
-                sb.Append("- \"").Append(failures[i].Prompt).Append("\" -> \"").Append(failures[i].Output).Append("\"\n");
+                var f = failures[i];
+                sb.Append("- \"").Append(f.Prompt).Append("\" -> \"").Append(f.Output).Append('"');
+
+                // The reason is the only gradient the editor gets. Without it the model sees an output that reads
+                // fine and "fixes" the instruction in the wrong direction (measured — see CaseFailure).
+                if (!string.IsNullOrWhiteSpace(f.Reason))
+                {
+                    sb.Append(" -> WHY WRONG: ").Append(f.Reason);
+                }
+                sb.Append('\n');
             }
+
+            sb.Append("\nEdit the instructions so the WHY-WRONG reasons stop happening. Fix the cause, not the ")
+              .Append("wording of one answer — do NOT turn a failing answer into the required format.\n");
 
             if (rejectedRevisions.Count > 0)
             {

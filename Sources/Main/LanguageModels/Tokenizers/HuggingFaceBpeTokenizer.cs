@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -383,7 +383,7 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
             }
         }
 
-        private static string? FindSplitPattern(JsonElement node)
+        private static string? FindSplitPattern(JsonElement node, int depth = 0)
         {
             var type = node.TryGetProperty("type", out var t) ? t.GetString() : null;
 
@@ -397,7 +397,15 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
             {
                 foreach (var child in seq.EnumerateArray())
                 {
-                    var found = FindSplitPattern(child);
+                    if (depth >= MaxPreTokenizerDepth)
+                    {
+                        throw new OverfitFormatException(
+                            $"tokenizer.json nests pre-tokenizers more than {MaxPreTokenizerDepth} levels deep.");
+                    }
+
+#pragma warning disable OVERFIT022 // Bounded: MaxPreTokenizerDepth checked immediately above; throws catchably.
+                    var found = FindSplitPattern(child, depth + 1);
+#pragma warning restore OVERFIT022
                     if (found is not null)
                     {
                         return found;
@@ -408,6 +416,14 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
             return null;
         }
 
+        /// <summary>
+        /// Maximum nesting depth when walking a <c>tokenizer.json</c> pre-tokenizer tree. The file is
+        /// externally authored (downloaded with the model) and a "Sequence" node may contain further
+        /// "Sequence" nodes without limit, so an unbounded walk turns a crafted file into an uncatchable
+        /// stack overflow in the host process. Real tokenizers nest 1-2 levels.
+        /// </summary>
+        private const int MaxPreTokenizerDepth = 16;
+
         private static bool ReadAddPrefixSpace(JsonElement root)
         {
             if (root.TryGetProperty("pre_tokenizer", out var pre) && FindAddPrefixSpace(pre) is { } v)
@@ -417,7 +433,7 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
             return false;
         }
 
-        private static bool? FindAddPrefixSpace(JsonElement node)
+        private static bool? FindAddPrefixSpace(JsonElement node, int depth = 0)
         {
             var type = node.TryGetProperty("type", out var t) ? t.GetString() : null;
             if (type == "ByteLevel" && node.TryGetProperty("add_prefix_space", out var aps))
@@ -428,7 +444,15 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
             {
                 foreach (var child in seq.EnumerateArray())
                 {
-                    if (FindAddPrefixSpace(child) is { } v)
+                    if (depth >= MaxPreTokenizerDepth)
+                    {
+                        throw new OverfitFormatException(
+                            $"tokenizer.json nests pre-tokenizers more than {MaxPreTokenizerDepth} levels deep.");
+                    }
+
+#pragma warning disable OVERFIT022 // Bounded: MaxPreTokenizerDepth checked immediately above; throws catchably.
+                    if (FindAddPrefixSpace(child, depth + 1) is { } v)
+#pragma warning restore OVERFIT022
                     {
                         return v;
                     }

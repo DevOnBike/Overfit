@@ -1,0 +1,4 @@
+{
+  "name": "overfit",
+  "description": "Run a private LLM inside your own .NET process with Overfit — pure C#, on the CPU, no Python, no Ollama, no cloud. Adds local inference (chat/RAG/embeddings) to an existing project, and builds offline, deterministic, zero-cost eval harnesses for your agent skills and prompts."
+}

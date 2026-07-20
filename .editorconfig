@@ -1,4 +1,4 @@
-root = true
+﻿root = true
 
 [*.cs]
 dotnet_diagnostic.RS0030.severity = error
@@ -78,6 +78,32 @@ dotnet_diagnostic.OVERFIT009.severity = suggestion
 # once it is swept, exactly like 001-009. 010 (growable collections) and 014 (ToLower compare) are
 # allocation rules; 011 (struct dict key), 012 (finalizer), 013 (concurrent .Count) are convention rules.
 dotnet_diagnostic.OVERFIT010.severity = suggestion
+
+# ── OVERFIT021 (else / else if) — RATCHET rollout ──────────────────────────────────────────
+# Readability rule, not perf: prefer a guard clause + early return, `continue` in loops, a ternary,
+# or a switch expression. Introduced 2026-07-18 against 321 existing occurrences in 124 files, so a
+# blanket `error` was not an option — it would have forced one mechanical rewrite across the whole
+# library including hot inference paths, which is precisely the unmeasured behaviour-preserving
+# refactor this repo forbids. So: SUGGESTION everywhere (IDE-visible, non-blocking), ERROR in directories
+# that are already at zero. Sweep a directory -> add it below. Never remove a directory from the list.
+# Backlog at introduction: LanguageModels 163, Audio 35, Ops 34, Data 13, Onnx 14, DeepLearning 12.
+dotnet_diagnostic.OVERFIT021.severity = suggestion
+
+# OVERFIT022 (direct recursion) — NASA Power of 10 rule 1. ERROR EVERYWHERE, deliberately: a .NET
+# StackOverflowException cannot be caught, so unbounded recursion is an uncatchable kill of the HOST
+# application, and Overfit's whole premise is running inside someone else's process. Every recursive site
+# in Sources/Main therefore carries an explicit `#pragma warning disable OVERFIT022` whose comment states
+# the BOUND that makes it safe (a checked depth cap, or a structural log2(n) argument). If you cannot write
+# that sentence, the recursion is not safe and needs an explicit stack/worklist instead.
+dotnet_diagnostic.OVERFIT022.severity = error
+
+# OVERFIT023 (loop with no exit condition in its header) — NASA Power of 10 rule 2. ERROR EVERYWHERE, same
+# contract as OVERFIT022: an unbounded loop hangs the HOST process with no exception, no stack trace and no
+# log line, which is the hardest failure of all to diagnose. Every `while (true)` in Sources/Main carries a
+# `#pragma warning disable OVERFIT023` whose comment starts with "BOUND:" and names what terminates it.
+dotnet_diagnostic.OVERFIT023.severity = error
+
+
 dotnet_diagnostic.OVERFIT011.severity = suggestion
 dotnet_diagnostic.OVERFIT012.severity = suggestion
 dotnet_diagnostic.OVERFIT013.severity = suggestion
@@ -201,3 +227,24 @@ dotnet_diagnostic.OVERFIT001.severity = suggestion
 # Directory.Build.props. Real .cs code still gets RS0030 = error from the [*.cs] section at the top.
 [**/obj/**]
 dotnet_diagnostic.RS0030.severity = none
+
+# OVERFIT021 (else) — directories already at zero occurrences, locked in as errors. Sweep a directory ->
+# add it here. Never remove one.
+#
+# THREE gotchas, each of which silently produced a rule that looked configured but did nothing (all three
+# were hit while wiring this up on 2026-07-18):
+#   1. This section MUST stay at the END of the file. A [section] header scopes EVERY setting below it, so
+#      placing it mid-file re-scoped OVERFIT011-020 + OVERFIT900 to these six directories only.
+#   2. The glob must be `<dir>/**.cs`, NOT `<dir>/**/*.cs`. The latter requires an intermediate directory,
+#      so it silently misses files sitting directly in <dir>.
+#   3. The rule ID must NOT appear in <WarningsNotAsErrors> in Directory.Build.props. That maps to
+#      -warnaserror-:ID, which reverts the diagnostic to warning EVEN WHERE .editorconfig sets error —
+#      defeating this whole section. (This is why OVERFIT008/015 are absent from that list.)
+[Sources/Main/{Anomalies,Core,Exceptions,Inference,Parameters,Randomization,Serving,Statistical,Tensors}/**.cs]
+dotnet_diagnostic.OVERFIT021.severity = error
+
+# OVERFIT022 (recursion) — ERROR on the paths that parse untrusted, externally-authored input, where an
+# uncatchable stack overflow would kill the embedding host. Existing bounded sites carry a #pragma naming
+# their depth cap; this stops NEW unbounded recursion from entering these directories.
+[Sources/Main/LanguageModels/{Loading,Constraints}/**.cs]
+dotnet_diagnostic.OVERFIT022.severity = error

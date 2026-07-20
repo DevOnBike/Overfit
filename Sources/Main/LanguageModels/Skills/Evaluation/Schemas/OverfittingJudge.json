@@ -1,0 +1,81 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "rubric_assessments": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "index": {
+            "type": "integer"
+          },
+          "classification": {
+            "type": "string",
+            "enum": [
+              "outcome",
+              "technique",
+              "vocabulary"
+            ]
+          },
+          "confidence": {
+            "type": "integer"
+          },
+          "reasoning": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "index",
+          "classification",
+          "confidence",
+          "reasoning"
+        ]
+      }
+    },
+    "assertion_assessments": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "index": {
+            "type": "integer"
+          },
+          "classification": {
+            "type": "string",
+            "enum": [
+              "broad",
+              "narrow"
+            ]
+          },
+          "confidence": {
+            "type": "integer"
+          },
+          "reasoning": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "index",
+          "classification",
+          "confidence",
+          "reasoning"
+        ]
+      }
+    },
+    "overall_overfitting_score": {
+      "type": "integer"
+    },
+    "overall_reasoning": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "rubric_assessments",
+    "assertion_assessments",
+    "overall_overfitting_score",
+    "overall_reasoning"
+  ]
+}

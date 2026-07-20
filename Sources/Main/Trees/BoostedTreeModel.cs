@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -204,16 +204,7 @@ namespace DevOnBike.Overfit.Trees
                 while (_left[node] >= 0)
                 {
                     var value = features[_featureIndex[node]];
-                    bool goLeft;
-
-                    if (float.IsNaN(value))
-                    {
-                        goLeft = _defaultLeft[node] != 0;
-                    }
-                    else
-                    {
-                        goLeft = value < _threshold[node];
-                    }
+                    var goLeft = float.IsNaN(value) ? _defaultLeft[node] != 0 : value < _threshold[node];
 
                     node = goLeft ? _left[node] : _right[node];
                 }
@@ -396,16 +387,7 @@ namespace DevOnBike.Overfit.Trees
                     while (ctx.Left[node] >= 0)
                     {
                         var value = features[ctx.FeatureIndex[node]];
-                        bool goLeft;
-
-                        if (float.IsNaN(value))
-                        {
-                            goLeft = ctx.DefaultLeft[node] != 0;
-                        }
-                        else
-                        {
-                            goLeft = value < ctx.Threshold[node];
-                        }
+                        var goLeft = float.IsNaN(value) ? ctx.DefaultLeft[node] != 0 : value < ctx.Threshold[node];
 
                         node = goLeft ? ctx.Left[node] : ctx.Right[node];
                     }

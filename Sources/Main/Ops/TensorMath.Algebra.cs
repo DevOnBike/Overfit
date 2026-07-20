@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -20,7 +20,7 @@ namespace DevOnBike.Overfit.Ops
         // ADD
         // ====================================================================
 
-        public static AutogradNode Add(ComputationGraph graph, AutogradNode left, AutogradNode right)
+        public static AutogradNode Add(ComputationGraph? graph, AutogradNode left, AutogradNode right)
         {
             var requiresGrad = left.RequiresGrad || right.RequiresGrad;
             var output = AllocateNode(graph, left.Shape, requiresGrad, clearMemory: false);
@@ -59,7 +59,7 @@ namespace DevOnBike.Overfit.Ops
         // SUBTRACT
         // ====================================================================
 
-        public static AutogradNode Subtract(ComputationGraph graph, AutogradNode left, AutogradNode right)
+        public static AutogradNode Subtract(ComputationGraph? graph, AutogradNode left, AutogradNode right)
         {
             var requiresGrad = left.RequiresGrad || right.RequiresGrad;
             var output = AllocateNode(graph, left.Shape, requiresGrad, clearMemory: false);
@@ -89,7 +89,7 @@ namespace DevOnBike.Overfit.Ops
         // ADD BIAS
         // ====================================================================
 
-        public static AutogradNode AddBias(ComputationGraph graph, AutogradNode input, AutogradNode bias)
+        public static AutogradNode AddBias(ComputationGraph? graph, AutogradNode input, AutogradNode bias)
         {
             int N = input.Shape.D0, C = input.Shape.D1;
             var requiresGrad = input.RequiresGrad || bias.RequiresGrad;
@@ -186,7 +186,7 @@ namespace DevOnBike.Overfit.Ops
         // MATMUL
         // ====================================================================
 
-        public static AutogradNode MatMul(ComputationGraph graph, AutogradNode left, AutogradNode right)
+        public static AutogradNode MatMul(ComputationGraph? graph, AutogradNode left, AutogradNode right)
         {
             var requiresGrad = left.RequiresGrad || right.RequiresGrad;
             var output = MatMulRaw(graph, left, right, requiresGrad);
@@ -441,7 +441,7 @@ namespace DevOnBike.Overfit.Ops
         // MULTIPLY (ELEMENT-WISE)
         // ====================================================================
 
-        public static AutogradNode Multiply(ComputationGraph graph, AutogradNode a, AutogradNode b)
+        public static AutogradNode Multiply(ComputationGraph? graph, AutogradNode a, AutogradNode b)
         {
             var requiresGrad = a.RequiresGrad || b.RequiresGrad;
             var output = AllocateNode(graph, a.Shape, requiresGrad, clearMemory: false);
@@ -477,7 +477,7 @@ namespace DevOnBike.Overfit.Ops
         /// Null-graph inference path handled in <see cref="ComputationGraph.LinearOp"/>.
         /// </summary>
         public static AutogradNode Linear(
-            ComputationGraph graph,
+            ComputationGraph? graph,
             AutogradNode input,
             AutogradNode weights,
             AutogradNode bias)

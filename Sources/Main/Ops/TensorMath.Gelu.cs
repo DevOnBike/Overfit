@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -50,7 +50,7 @@ namespace DevOnBike.Overfit.Ops
         /// Per element this is ~8-16× faster than the scalar
         /// <c>MathF.Tanh</c> loop the kernel used to run.
         /// </summary>
-        public static AutogradNode Gelu(ComputationGraph graph, AutogradNode input)
+        public static AutogradNode Gelu(ComputationGraph? graph, AutogradNode input)
         {
             var output = AllocateNode(graph, input.Shape, input.RequiresGrad, clearMemory: false);
             var inS = input.DataView.AsReadOnlySpan();

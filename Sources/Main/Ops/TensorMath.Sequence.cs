@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -18,7 +18,7 @@ namespace DevOnBike.Overfit.Ops
         // FUSED LSTM STEP
         // ====================================================================
 
-        public static (AutogradNode hNew, AutogradNode cNew) FusedLSTMStep(ComputationGraph graph, AutogradNode x, AutogradNode hPrev, AutogradNode cPrev, AutogradNode W, AutogradNode U, AutogradNode B)
+        public static (AutogradNode hNew, AutogradNode cNew) FusedLSTMStep(ComputationGraph? graph, AutogradNode x, AutogradNode hPrev, AutogradNode cPrev, AutogradNode W, AutogradNode U, AutogradNode B)
         {
             int batchSize = x.Shape.D0, hS = hPrev.Shape.D1;
             var gD = MatMulRaw(graph, x, W);
@@ -209,7 +209,7 @@ namespace DevOnBike.Overfit.Ops
         // REPEAT VECTOR
         // ====================================================================
 
-        public static AutogradNode RepeatVector(ComputationGraph graph, AutogradNode input, int seqLen)
+        public static AutogradNode RepeatVector(ComputationGraph? graph, AutogradNode input, int seqLen)
         {
             int batch = input.Shape.D0, hS = input.Shape.D1;
             var output = AllocateNode(graph, new TensorShape(batch, seqLen, hS), input.RequiresGrad, clearMemory: false);
@@ -259,7 +259,7 @@ namespace DevOnBike.Overfit.Ops
         // GATE SLICE
         // ====================================================================
 
-        public static AutogradNode GateSlice(ComputationGraph graph, AutogradNode gates, int hiddenSize, int gateIndex)
+        public static AutogradNode GateSlice(ComputationGraph? graph, AutogradNode gates, int hiddenSize, int gateIndex)
         {
             var output = AllocateNode(graph, new TensorShape(gates.Shape.D0, hiddenSize), gates.RequiresGrad, clearMemory: false);
             int batch = gates.Shape.D0, stride = 4 * hiddenSize, offset = gateIndex * hiddenSize;

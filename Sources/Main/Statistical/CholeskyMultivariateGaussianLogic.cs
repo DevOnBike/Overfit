@@ -37,22 +37,20 @@ namespace DevOnBike.Overfit.Statistical
             double logNormConst)
         {
             var dimensions = observation.Length;
-            var mahalanobisDistanceSq = 0.0;
-
+            // Each branch returns directly: a stackalloc cannot outlive its own block, so the small case
+            // has to consume its scratch here rather than falling through to a shared tail.
             if (dimensions <= StackAllocThreshold)
             {
                 Span<float> diff = stackalloc float[dimensions];
                 Span<float> y = stackalloc float[dimensions];
-                mahalanobisDistanceSq = SolveAndGetDistance(observation, mean, L, dimensions, diff, y);
-            }
-            else
-            {
-                using var diffBuf = new PooledBuffer<float>(dimensions);
-                using var yBuf = new PooledBuffer<float>(dimensions);
-                mahalanobisDistanceSq = SolveAndGetDistance(observation, mean, L, dimensions, diffBuf.Span, yBuf.Span);
+                return logNormConst - (0.5 * SolveAndGetDistance(observation, mean, L, dimensions, diff, y));
             }
 
-            return logNormConst - 0.5 * mahalanobisDistanceSq;
+            using var diffBuf = new PooledBuffer<float>(dimensions);
+            using var yBuf = new PooledBuffer<float>(dimensions);
+
+            return logNormConst
+                - (0.5 * SolveAndGetDistance(observation, mean, L, dimensions, diffBuf.Span, yBuf.Span));
         }
 
         private static double SolveAndGetDistance(
@@ -113,22 +111,21 @@ namespace DevOnBike.Overfit.Statistical
                     var lRowJ = lSpan.Slice(j * n, n);
                     var dot = TensorPrimitives.Dot(lRowI.Slice(0, j), lRowJ.Slice(0, j));
 
-                    if (i == j)
-                    {
-                        var pivot = mSpan[i * n + i] - dot;
-
-                        if (pivot <= 0.0)
-                        {
-                            L.Dispose();
-                            throw new ArgumentException($"Covariance matrix is not positive-definite! Negative pivot [{i},{i}] = {pivot:G6}.", nameof(matrix));
-                        }
-
-                        lRowI[i] = MathF.Sqrt(pivot);
-                    }
-                    else
+                    if (i != j)
                     {
                         lRowI[j] = (mSpan[i * n + j] - dot) / lRowJ[j];
+                        continue;
                     }
+
+                    var pivot = mSpan[i * n + i] - dot;
+
+                    if (pivot <= 0.0)
+                    {
+                        L.Dispose();
+                        throw new ArgumentException($"Covariance matrix is not positive-definite! Negative pivot [{i},{i}] = {pivot:G6}.", nameof(matrix));
+                    }
+
+                    lRowI[i] = MathF.Sqrt(pivot);
                 }
             }
 

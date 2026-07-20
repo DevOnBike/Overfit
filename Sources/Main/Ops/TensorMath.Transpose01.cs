@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -20,7 +20,7 @@ namespace DevOnBike.Overfit.Ops
         /// A pure permutation — backward transposes the upstream gradient straight back
         /// (<c>dIn[a,b,·] = dOut[b,a,·]</c>), exact, no tolerance.
         /// </summary>
-        public static AutogradNode Transpose01(ComputationGraph graph, AutogradNode input)
+        public static AutogradNode Transpose01(ComputationGraph? graph, AutogradNode input)
         {
             var a = input.Shape.D0;
             var b = input.Shape.D1;

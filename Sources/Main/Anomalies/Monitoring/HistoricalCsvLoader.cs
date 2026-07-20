@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -74,7 +74,7 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
             var snapshots = new List<MetricSnapshot>();
             skippedRows = 0;
 
-            string line;
+            string? line;
             while ((line = reader.ReadLine()) is not null)
             {
                 if (string.IsNullOrWhiteSpace(line))
@@ -85,11 +85,10 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
                 if (TryParseRow(line, columnIndex, out var snapshot))
                 {
                     snapshots.Add(snapshot);
+                    continue;
                 }
-                else
-                {
-                    skippedRows++;
-                }
+
+                skippedRows++;
             }
 
             snapshots.Sort((a, b) => a.Timestamp.CompareTo(b.Timestamp));

@@ -65,5 +65,11 @@ jobs:
           dotnet pack "$proj" -c Release --no-build -p:RepositoryCommit=${{ github.sha }} -p:ContinuousIntegrationBuild=true --output ./packages $VERSION_ARG
         done
 
+        # Template pack (`dotnet new overfit-chat`). It ships CONTENT only — no compiled output — so it is
+        # packed directly (no --no-build). Its scaffolded content pins the runtime packages to a known-published
+        # version on purpose (a broken `dotnet new` restore is a terrible first impression), so bumping this
+        # package's version does NOT bump the version the generated app references.
+        dotnet pack ./Templates/DevOnBike.Overfit.Templates.csproj -c Release -p:ContinuousIntegrationBuild=true --output ./packages $VERSION_ARG
+
     - name: Push to NuGet.org
       run: dotnet nuget push "./packages/*.nupkg" --api-key ${{ secrets.NUGET_API_KEY }} --source "https://api.nuget.org/v3/index.json" --skip-duplicate

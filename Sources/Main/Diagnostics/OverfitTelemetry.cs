@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -323,11 +323,10 @@ namespace DevOnBike.Overfit.Diagnostics
             if (borrowed)
             {
                 TensorStorageBorrowedCreated.Add(1);
+                return;
             }
-            else
-            {
-                TensorStoragePooledCreated.Add(1);
-            }
+
+            TensorStoragePooledCreated.Add(1);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -343,11 +342,10 @@ namespace DevOnBike.Overfit.Diagnostics
             if (borrowed)
             {
                 TensorStorageBorrowedDisposed.Add(1);
+                return;
             }
-            else
-            {
-                TensorStoragePooledDisposed.Add(1);
-            }
+
+            TensorStoragePooledDisposed.Add(1);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]

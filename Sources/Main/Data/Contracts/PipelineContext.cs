@@ -48,8 +48,11 @@ namespace DevOnBike.Overfit.Data.Contracts
             Features?.Dispose();
             Targets?.Dispose();
 
-            Features = null;
-            Targets = null;
+            // null! — the non-null contract holds for a LIVE instance (the constructor enforces it).
+            // Using them after Dispose is a usage error, so annotating them `?` would push a null check
+            // onto every consumer for no safety gain.
+            Features = null!;
+            Targets = null!;
         }
 
         /// <summary>

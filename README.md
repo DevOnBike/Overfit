@@ -1,4 +1,4 @@
-# Overfit
+﻿# Overfit
 
 **Private LLMs, voice, RAG and agents — entirely in your .NET app. No Python, no cloud, no model server.**
 
@@ -19,7 +19,13 @@ security, compliance, latency, deployment, or supply-chain constraints.
 ```bash
 dotnet add package DevOnBike.Overfit            # the library
 dotnet tool install -g DevOnBike.Overfit.Cli    # the CLI + OpenAI-compatible server (overfit serve)
+dotnet new install DevOnBike.Overfit.Templates  # then: dotnet new overfit-chat → a local-LLM chat app in 60s
 ```
+
+Overfit implements **`Microsoft.Extensions.AI`** (`IChatClient` / `IEmbeddingGenerator`), so you can drop a
+local model into the official .NET AI template or Semantic Kernel by swapping **one line** — no Ollama, no
+Docker, no cloud key: `builder.Services.AddChatClient(overfit.AsChatClient());`
+([guide](docs/microsoft-extensions-ai.md)).
 
 ---
 
@@ -166,9 +172,26 @@ Overfit is built around predictable CPU inference, Native AOT compatibility,
 explicit memory ownership and near-zero per-token allocations on the decode path —
 and, since 10.0.24+, an **allocation-free batched prefill** (0 B per request; it used
 to allocate ~748 MB of GC garbage per 272-token prompt). The discipline is enforced at
-compile time by an in-repo Roslyn analyzer suite (10 rules — per-call allocations are
-build *errors* in the kernels) with a CI tripwire that proves the analyzer itself is
+compile time by an in-repo Roslyn analyzer suite (24 rules — per-call allocations are
+build *errors* in the kernels, and `[OverfitHotPath]` escalates every per-call rule to an
+error inside a marked method) with a CI tripwire that proves the analyzer itself is
 alive ([`Sources/Analyzers/README.md`](Sources/Analyzers/README.md)).
+
+### 5. Bounded parsing of untrusted model files
+
+Overfit runs **inside your process**, so a malformed model file must not be able to take
+your application down. Model files are externally authored — you download a `.gguf` or a
+`tokenizer.json` from a hub and hand it to a parser.
+
+Two failure modes are guarded at compile time, in the spirit of NASA's Power of 10 rules 1
+and 2: unbounded **recursion** (`OVERFIT022`) and loops with **no exit condition in their
+header** (`OVERFIT023`) are build errors across the library. Both are uncatchable in .NET —
+a `StackOverflowException` cannot be caught and kills the host process, and a runaway loop
+hangs it with no exception, no stack trace and no log line. Every remaining site carries an
+explicit suppression stating the bound that makes it safe, so the bound is reviewable rather
+than assumed. Concretely: nested GGUF metadata arrays, `tokenizer.json` pre-tokenizer trees
+and JSON schemas are all depth-capped, and exceeding a cap raises an ordinary, catchable
+`OverfitFormatException` — a bad-file error your code can report, not a process kill.
 
 The goal is not to beat hand-tuned native GPU/AVX runtimes on raw throughput.
 The goal is to make local AI deployable as a normal .NET library in environments
@@ -579,10 +602,10 @@ for that.
 - **Loaders** — GGUF, HuggingFace safetensors (sharded), Overfit `.bin`, ONNX (linear + DAG). 100% Python-free; tokenizers read straight from the GGUF.
 - **Agentic & structured output** — tool calling, guaranteed JSON, **JSON-Schema & regex constrained decoding**, ReAct / critic / circuit-breaker / summarizing memory, and a full **sampler suite** (temperature · top-k/p · min-p · top-nσ · locally-typical · Mirostat v1/v2 · XTC) plus a **DRY anti-repetition** guard that breaks verbatim generation loops even under greedy decode.
 - **RAG** — in-process vector store; MiniLM / BGE / E5 embeddings (bit-parity vs HuggingFace); multilingual via the chat model's own embeddings; **RAG Stability Harness** (recall / paraphrase / false-premise / lint, gated in CI).
-- **Integration** — **OpenAI-compatible server** (`/v1/chat/completions` + SSE, `/v1/embeddings`, `/v1/models`); **MCP server** (`overfit mcp` — local `ask` / `rag_query` / `transcribe` tools for Claude Code & co., [`docs/mcp.md`](docs/mcp.md)); **Microsoft.Extensions.AI** adapter; **`overfit` CLI** (pull / list / chat / serve / mcp) shipped three ways — `dotnet tool install -g DevOnBike.Overfit.Cli`, a Native-AOT binary, and a ~34 MB Docker image ([`docs/docker.md`](docs/docker.md)); ASP.NET starter template.
+- **Integration** — **OpenAI-compatible server** (`/v1/chat/completions` + SSE, `/v1/embeddings`, `/v1/models`); **MCP server** (`overfit mcp` — local `ask` / `rag_query` / `transcribe` tools for Claude Code & co., [`docs/mcp.md`](docs/mcp.md)); **Microsoft.Extensions.AI** adapter — a local model as a standard `IChatClient` / `IEmbeddingGenerator`, drop-in for the .NET AI template & Semantic Kernel ([`docs/microsoft-extensions-ai.md`](docs/microsoft-extensions-ai.md)); **`dotnet new overfit-chat`** project template; **`overfit` CLI** (pull / list / chat / serve / mcp) shipped three ways — `dotnet tool install -g DevOnBike.Overfit.Cli`, a Native-AOT binary, and a ~34 MB Docker image ([`docs/docker.md`](docs/docker.md)); ASP.NET starter template.
 - **Training** — **QLoRA CPU fine-tuning** (frozen Q4_K base incl. FFN + per-head attention), gradient checkpointing, data-parallel trainer, Conv/BatchNorm/LSTM, CRNN + CTC (OCR), LR schedules.
 - **Multimodal & audio** — **Whisper speech-to-text** in pure C#; from-scratch MP3 / WAV decoders; OCR.
-- **Engineering** — Native-AOT (one ~7.8 MB self-contained binary, AVX2 codegen so the AOT binary / Docker image decodes at JIT parity); zero-allocation hot paths (decode 0 B/token AND prefill 0 B/request); **in-repo Roslyn perf analyzer** (10 rules, error-severity in kernels, CI guard-of-the-guard); AOT guard in CI; anomaly detection.
+- **Engineering** — Native-AOT (one ~7.8 MB self-contained binary, AVX2 codegen so the AOT binary / Docker image decodes at JIT parity); zero-allocation hot paths (decode 0 B/token AND prefill 0 B/request); **in-repo Roslyn analyzer suite** (24 rules, error-severity in kernels, CI guard-of-the-guard); AOT guard in CI; anomaly detection.
 
 **Current priorities:**
 

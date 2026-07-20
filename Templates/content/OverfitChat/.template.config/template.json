@@ -1,0 +1,24 @@
+{
+  "$schema": "http://json.schemastore.org/template",
+  "author": "DevOnBike",
+  "classifications": [ "Web", "AI", "LLM", "Local", "Minimal API" ],
+  "identity": "DevOnBike.Overfit.Chat.CSharp",
+  "name": "Overfit local-LLM chat (Minimal API)",
+  "description": "A Minimal API streaming-chat app that loads a local GGUF model in-process with Overfit and exposes it as a standard Microsoft.Extensions.AI IChatClient — no Python, no Ollama, no Docker, no cloud key.",
+  "shortName": "overfit-chat",
+  "tags": {
+    "language": "C#",
+    "type": "project"
+  },
+  "sourceName": "OverfitChat",
+  "preferNameDirectory": true,
+  "symbols": {
+    "ModelPath": {
+      "type": "parameter",
+      "datatype": "string",
+      "defaultValue": "model.gguf",
+      "replaces": "MODEL-PATH",
+      "description": "Path to a local GGUF model file. You can also change it later in appsettings.json."
+    }
+  }
+}

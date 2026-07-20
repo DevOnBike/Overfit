@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -77,7 +77,12 @@ namespace DevOnBike.Overfit.Onnx.Protobuf
             ulong result = 0;
             var shift = 0;
 
+            // BOUND: at most 10 iterations. Two unconditional exits guard the loop even on hostile input —
+            // running past the buffer throws, and `shift >= 64` throws once the varint cannot fit a ulong.
+            // Both are OverfitFormatException, i.e. a reportable bad-file error rather than a hang.
+#pragma warning disable OVERFIT023
             while (true)
+#pragma warning restore OVERFIT023
             {
                 if (_pos >= _data.Length)
                 {

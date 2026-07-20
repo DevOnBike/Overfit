@@ -1,0 +1,15 @@
+{
+  "name": "overfit",
+  "description": "Skills for running a private LLM inside your own .NET process with Overfit — pure C#, on the CPU, no Python, no Ollama, no cloud.",
+  "owner": {
+    "name": "DevOnBike",
+    "url": "https://github.com/DevOnBike/Overfit"
+  },
+  "plugins": [
+    {
+      "name": "overfit",
+      "source": "./plugins/overfit",
+      "description": "Run a private LLM inside your own .NET process with Overfit — pure C#, on the CPU, no Python, no Ollama, no cloud. Adds local inference (chat/RAG/embeddings) to an existing project, and builds offline, deterministic, zero-cost eval harnesses for agent skills and prompts."
+    }
+  ]
+}

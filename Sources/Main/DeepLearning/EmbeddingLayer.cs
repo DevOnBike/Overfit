@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -77,14 +77,14 @@ namespace DevOnBike.Overfit.DeepLearning
         /// <param name="graph">Autograd tape.</param>
         /// <param name="tokenIds">Integer token ids, values in [0, vocabSize).</param>
         /// <returns>AutogradNode of shape [seqLen, embeddingDim].</returns>
-        public AutogradNode Forward(ComputationGraph graph, int[] tokenIds)
+        public AutogradNode Forward(ComputationGraph? graph, int[] tokenIds)
         {
             _embNode ??= Weight.AsNode();
             return TensorMath.Embedding(graph, tokenIds, _embNode);
         }
 
         /// <summary>IModule compatibility — not meaningful for Embedding (needs token ids).</summary>
-        public AutogradNode Forward(ComputationGraph graph, AutogradNode input)
+        public AutogradNode Forward(ComputationGraph? graph, AutogradNode input)
             => throw new OverfitRuntimeException(
                 "EmbeddingLayer.Forward(ComputationGraph, AutogradNode) is not supported. " +
                 "Use Forward(ComputationGraph, int[]) with token id arrays.");

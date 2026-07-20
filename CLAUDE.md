@@ -1,4 +1,4 @@
-# CLAUDE.md
+﻿# CLAUDE.md
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
@@ -35,6 +35,20 @@ Claude is **read-only** on git history and GitHub. Never run `git commit` / `git
 as the next step. Reading is fine (`git status/diff/log`, `gh run list/view`, `gh release view`).
 Stop at a clean/staged working tree, report exact commands or UI steps for the user, and verify after
 they've run them.
+
+## Filesystem boundary outside the repo (hard rule)
+
+Destructive filesystem operations are confined to this repository (`D:\Overfit`). **Never delete, move,
+rename or overwrite anything on the system drive or elsewhere outside the repo — `C:\` in particular —
+without the user's explicit permission for that specific path.** This covers `rm`/`Remove-Item`,
+`mv`/`Move-Item`, `git mv` outside the tree, redirecting output over an existing file, and `Write` to a
+path you did not create. Model fixtures live outside the repo (`C:\gpt2\`, `C:\qwen3b\`, `C:\gemma`,
+whisper/embedding models) and are large, hand-collected and NOT reproducible from this repo — losing one
+costs a multi-GB re-download at best.
+
+Reading outside the repo is fine (loading fixtures, inspecting logs), as is writing to a temp directory
+you created. If a task genuinely needs a delete or move outside the repo, **ask first and name the exact
+path** — the user will say yes or no. Asking costs one message; an unrecoverable delete costs a lot more.
 
 ## Common commands
 
@@ -185,6 +199,26 @@ hand-rolled in `Sources/Main/Onnx/`. Unsupported operators throw a clear
 `NotSupportedException` naming the operator.
 
 ## Performance work — measure, don't assume
+
+**Write the benchmark first, whenever a benchmark makes sense.** Before reasoning about whether a change
+is faster — and *before* asserting anything about it in prose — put the question into
+`Sources/Benchmark` as a BenchmarkDotNet class with the two shapes side by side and
+`[Benchmark(Baseline = true)]` on the old one. A claim about performance that has no benchmark behind it is a
+guess, however confident the reasoning sounds; the ratio column is the only thing that settles it. This is
+cheap for anything expressible as a small A/B (loop shapes, call shapes, allocation strategies, kernel
+variants), so default to writing it rather than arguing. Two traps this repo has already hit, both of which
+produce numbers that look authoritative and are worthless:
+
+- **Wrong job for the workload.** The shared `BenchmarkConfig` pins `InvocationCount=1`/`UnrollFactor=1`,
+  which fits multi-millisecond model runs but leaves a microbenchmark measuring timer noise — a ~15 µs
+  operation produced `RatioSD` 0.44 and a phantom 1.61x regression that was 1.01 once re-run under a
+  microbenchmark job (`[SimpleJob]`, default invocation counts). Check `RatioSD` and BDN's own warnings
+  before believing a ratio.
+- **The scaffolding outweighs the subject.** `ElseRefactorBenchmark` first reported a non-inlined call as
+  *faster* than inlining it, because the synthetic branch body contained a saturating `float`->`long` cast
+  whose cost depends on where it lands. The benchmark was measuring the cast, not the call. If a result is
+  backwards, suspect the benchmark before the runtime — and use `--disasm` plus a variant with the suspect
+  operation removed to settle it.
 
 **Two passes, never one.** Write the correct algorithm first — the clearest expression that gets the math
 right — and pin it with tests (parity against a reference / known-good output, ideally box-independent like

@@ -5,6 +5,7 @@
 
 using System.CommandLine;
 using DevOnBike.Overfit.Cli;
+using DevOnBike.Overfit.Exceptions;
 
 // `overfit` — a single self-contained binary (AOT) for running local LLMs in pure .NET.
 //   overfit pull <model>     download a GGUF model into ~/.overfit/models
@@ -474,4 +475,29 @@ var rootCommand = new RootCommand("Overfit — run local LLMs, RAG and agents in
     gatewayCommand,
 };
 
-return rootCommand.Parse(args).Invoke();
+// Safety net for anything that escapes a command's own handler. Only OverfitException is caught: every one of
+// those is a message we wrote for the user (gated repo, corrupt download, unsupported operator), so a stack trace
+// adds noise and hides the point. Anything else is a bug in Overfit and is deliberately left to crash with its
+// full trace — swallowing those would turn a reportable defect into a silent exit code.
+try
+{
+    return rootCommand.Parse(args).Invoke();
+}
+catch (OverfitException ex)
+{
+    Console.Error.WriteLine($"error: {ex.Message}");
+
+    // Inner exceptions usually carry the actionable detail (the HTTP failure under a load error, etc.).
+    for (var inner = ex.InnerException; inner is not null; inner = inner.InnerException)
+    {
+        Console.Error.WriteLine($"  caused by: {inner.Message}");
+    }
+
+    return 1;
+}
+catch (OperationCanceledException)
+{
+    // Ctrl+C during a long pull or a chat session is a normal exit, not a failure to report.
+    Console.Error.WriteLine("cancelled.");
+    return 130;
+}

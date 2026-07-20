@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -25,9 +25,11 @@ namespace DevOnBike.Overfit.Ops
         /// strided convs fall back to a scalar inner loop.
         /// </summary>
         public static AutogradNode DepthwiseConv2D(
-            ComputationGraph graph, AutogradNode input, AutogradNode kernel,
-            int channels, int h, int w, int k, int padding, int stride, AutogradNode bias)
+            ComputationGraph? graph, AutogradNode input, AutogradNode kernel,
+            int channels, int h, int w, int k, int padding, int stride, AutogradNode? bias)
         {
+            ArgumentNullException.ThrowIfNull(graph);
+
             var n = input.Shape.D0;
             var outH = (h + 2 * padding - k) / stride + 1;
             var outW = (w + 2 * padding - k) / stride + 1;
@@ -42,7 +44,7 @@ namespace DevOnBike.Overfit.Ops
             var kS = kernel.DataView.AsReadOnlySpan();
             var outS = output.DataView.AsSpan();
             var hasBias = bias is not null;
-            var bS = hasBias ? bias.DataView.AsReadOnlySpan() : default;
+            var bS = hasBias ? bias!.DataView.AsReadOnlySpan() : default;
 
             for (var ni = 0; ni < n; ni++)
             {
@@ -130,7 +132,8 @@ namespace DevOnBike.Overfit.Ops
 
             if (biasNeedsGrad)
             {
-                var biasGrad = bias.GradView.AsSpan();
+                // biasNeedsGrad implies bias is non-null (see where it is computed).
+                var biasGrad = bias!.GradView.AsSpan();
                 for (var ni = 0; ni < n; ni++)
                 {
                     for (var c = 0; c < channels; c++)

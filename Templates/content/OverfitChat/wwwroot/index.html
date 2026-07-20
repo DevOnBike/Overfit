@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Overfit — local LLM chat</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font-family: system-ui, sans-serif; max-width: 680px; margin: 40px auto; padding: 0 16px; }
+    h1 { font-size: 1.4rem; margin-bottom: 4px; }
+    p.sub { color: #888; margin-top: 0; }
+    #log { white-space: pre-wrap; border: 1px solid #8884; border-radius: 10px; padding: 14px; min-height: 240px; line-height: 1.45; }
+    form { display: flex; gap: 8px; margin-top: 12px; }
+    input { flex: 1; padding: 11px 12px; border: 1px solid #8886; border-radius: 8px; font-size: 1rem; }
+    button { padding: 11px 18px; border: 0; border-radius: 8px; background: #512BD4; color: #fff; font-size: 1rem; cursor: pointer; }
+    button:disabled { opacity: .5; cursor: default; }
+  </style>
+</head>
+<body>
+  <h1>Overfit — local LLM chat</h1>
+  <p class="sub">Running entirely in this .NET process, on the CPU. No cloud.</p>
+  <div id="log"></div>
+  <form id="f">
+    <input id="m" placeholder="Ask something…" autocomplete="off" />
+    <button id="b">Send</button>
+  </form>
+  <script>
+    const log = document.getElementById('log'), f = document.getElementById('f'),
+          m = document.getElementById('m'), b = document.getElementById('b');
+    f.onsubmit = async e => {
+      e.preventDefault();
+      const q = m.value.trim();
+      if (!q) return;
+      m.value = ''; b.disabled = true;
+      log.textContent += `\n\nYou: ${q}\nAI: `;
+      try {
+        const r = await fetch('/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: q })
+        });
+        const reader = r.body.getReader(), dec = new TextDecoder();
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          log.textContent += dec.decode(value, { stream: true });
+          log.scrollTop = log.scrollHeight;
+        }
+      } catch (err) {
+        log.textContent += `\n[error] ${err}`;
+      } finally {
+        b.disabled = false; m.focus();
+      }
+    };
+  </script>
+</body>
+</html>

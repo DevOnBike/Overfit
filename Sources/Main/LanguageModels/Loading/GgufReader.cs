@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -441,8 +441,30 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             return Encoding.UTF8.GetString(bytes);
         }
 
+        /// <summary>
+        /// Maximum nesting depth for GGUF array values. The format allows an array whose element type is
+        /// itself an array, so a hostile or corrupt file can nest without limit — and each level costs only
+        /// ~12 bytes of file (element type + count) while consuming a stack frame, so a ~100 KB file is enough
+        /// to exhaust the stack. A .NET StackOverflowException cannot be caught, so that would be an
+        /// unrecoverable kill of the HOST process, not a load failure this library can report. Real models
+        /// nest at most one level (arrays of strings / numbers), so this bound is far above anything valid.
+        /// </summary>
+        private const int MaxValueNestingDepth = 8;
+
         private object ReadValue(GgufValueType vtype)
         {
+            return ReadValue(vtype, depth: 0);
+        }
+
+        private object ReadValue(GgufValueType vtype, int depth)
+        {
+            if (depth > MaxValueNestingDepth)
+            {
+                throw new OverfitFormatException(
+                    $"GGUF metadata nests arrays more than {MaxValueNestingDepth} levels deep — refusing to "
+                    + "recurse further. The file is corrupt or hostile.");
+            }
+
             switch (vtype)
             {
                 case GgufValueType.UInt8:
@@ -480,7 +502,9 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                         var arr = new object[(int)count];
                         for (var i = 0; i < arr.Length; i++)
                         {
-                            arr[i] = ReadValue(elemType);
+#pragma warning disable OVERFIT022 // Bounded: MaxValueNestingDepth (8) is checked on entry and throws a catchable OverfitFormatException.
+                            arr[i] = ReadValue(elemType, depth + 1);
+#pragma warning restore OVERFIT022
                         }
                         return arr;
                     }

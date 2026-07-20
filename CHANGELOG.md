@@ -14,9 +14,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 Pre-release suffixes (e.g. `10.1.0-beta.1`) are used for surface changes that need real-world validation before the public release. Pre-releases are pushed to NuGet with the `-beta`, `-rc`, or `-preview` SemVer suffix.
 
-## [10.0.29] - 2026-07-05
+## [10.0.30] - 2026-07-05
 
-_The `frodo` branch: an on-device Android chat app, an advanced sampler suite, offline prefill acceleration, a local skill-eval harness, and CI-guard hardening._
+_The `frodo` branch: an on-device Android chat app, an advanced sampler suite, offline prefill acceleration, a local skill-eval harness, a `dotnet new` template + Microsoft.Extensions.AI drop-in, and CI-guard hardening._
 
 ### Added
 
@@ -24,6 +24,7 @@ _The `frodo` branch: an on-device Android chat app, an advanced sampler suite, o
 - **Full sampler suite** (`SamplingPipeline`, composable/opt-in): **top-nσ** (scale-adaptive `max − n·σ` logit truncation), **locally-typical** (entropy-matched surprise), **XTC** (exclude-top-choices), **Mirostat v1/v2** (stateful μ feedback), and **DRY** (Don't-Repeat-Yourself, Z-algorithm over the recent window). `top-nσ` and `locally-typical` are also on the zero-alloc `TokenSampler` / `SamplingOptions` hot path (`WithTopNSigma`, `WithTypicalP`) and the `overfit chat` CLI (`--top-n-sigma`, `--typical-p`). **DRY is wired into the decode engine** (`CachedLlamaSession`) with a rolling generated-token history + reusable Z-scratch (zero per-token allocation): it penalises would-be verbatim repetitions on the logits **before** sampling, so it breaks generation loops **even under greedy decode** — the single biggest output-quality lever for the small models that run on-device. Gates: `SamplerSuiteTests`, `TokenSamplerTruncatorTests`.
 - **`overfit repack`** — offline Q4_K weight-repack CLI (see Performance).
 - **Local skill-eval harness** (`Sources/Main/LanguageModels/Skills/Evaluation/`) — `SkillEvaluator` + `OverfitSkillRunner` run an agent skill/prompt **ON vs OFF** on a local model (deterministic greedy/seed, zero API cost), graded by a `CheckRegistry` of model-free predicates plus a schema-locked `RubricGrader`, and reported as pass-rate + ON/OFF **lift** + trigger accuracy — a reproducible prompt-regression gate. A first `SkillOptimizer` selects prompt variants on that score. Docs: `docs/skill-eval.md`.
+- **`dotnet new overfit-chat` project template + Microsoft.Extensions.AI drop-in.** A new `DevOnBike.Overfit.Templates` package scaffolds a complete Minimal API streaming-chat app over a local GGUF in ~60 seconds. The whole wiring is two lines — `OverfitClient.LoadGguf(path)` → `builder.Services.AddChatClient(overfit.AsChatClient())` — so a local model is a drop-in `IChatClient` for the official .NET AI template and Semantic Kernel (no Ollama, no Docker, no cloud key). Guide: `docs/microsoft-extensions-ai.md`.
 - **Adam checkpoint/restore** (`AdamCheckpointTests`) — moment (m/v) state save + resume for interrupted CPU fine-tunes.
 - **Whisper long-audio windowing** (`WhisperTrimWindowTests`) — trim-window handling past the 30 s encoder frame.
 

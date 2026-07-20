@@ -4,6 +4,7 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using System.Text;
+using DevOnBike.Overfit.Exceptions;
 using DevOnBike.Overfit.LanguageModels;
 using DevOnBike.Overfit.LanguageModels.Retrieval;
 
@@ -66,7 +67,7 @@ namespace DevOnBike.Overfit.Mcp
 
             if (store.Count == 0)
             {
-                throw new InvalidDataException($"No indexable .txt/.md content found under: {directory}");
+                throw new OverfitRuntimeException($"No indexable .txt/.md content found under: {directory}");
             }
 
             return new McpRagIndex(client, store);
