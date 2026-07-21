@@ -234,13 +234,24 @@ Every perf change is a **hypothesis until measured**. Benchmark before/after wit
 **negative results** honestly — they are the most valuable output: in this codebase
 register-blocking (direct-conv), K-blocking + A-packing (im2col GEMM), Winograd F(2,3) for 3x3 stride-1
 convs (parity-correct cos 1.0 but +79% slower on deepcnn, 119.7→214.4 ms — sequential scalar transforms +
-16 small GEMMs + 16x U/V/M blow-up beat the 2.25x FLOP cut), the AVX-512 decode port, and
-`OverfitPool<T>` all **regressed or tied and were reverted**; the wins were the *opposite* of the
+16 small GEMMs + 16x U/V/M blow-up beat the 2.25x FLOP cut), the AVX-512 decode port, bias support in
+the Q4_K tiled prefill GEMM (`GemmTiled` — a path census showed `bias.IsEmpty` barred 88% of prefill
+dispatches, i.e. all attention Q/K/V, from the tiled kernel; lifting it measured **0.999x, an exact
+tie**, because `ProjectBatchedWeightStationary` already amortises weight decode across the row tile —
+the same thing the tiling does; the "~3x" in the kernel docs is against re-decode-per-row, not against
+weight-stationary), and `OverfitPool<T>` all **regressed or tied and were reverted**; the wins were the *opposite* of the
 "obvious" move (`TensorPrimitives` bulk-SIMD beat a hand micro-kernel; the simple register-blocked
 GEMM beat the cache-blocked one — structure of the data around the technique decides, not the
 technique). Mind the **measurement environment**: a thermally-throttled or loaded box invalidates
 A/B (detect it with a *canary* — re-measure an unchanged code path; if it shifted, the box did, not
 your change). The decode spin-pool assumes dedicated cores, so it is sensitive to background load.
+Two corollaries this repo has paid for. **Cross-process before/after does not work here**: a prefill
+change read as +5% while the untouched decode path in the same run moved +32% — interleave the
+configurations run-by-run in ONE process (ABAB…, not all-A-then-all-B) and time a canary path in
+every sample. **Verify the flag you are A/B-ing is actually live**: `OVERFIT_TILED_PREFILL` is a dead
+flag whenever a `*.gguf.repack` sidecar sits next to the model, because `IsPrepacked` short-circuits
+it — both arms ran an identical mix and the "measurement" was noise. Count the paths taken (a
+temporary counter in the dispatcher) before believing any kernel A/B.
 Never ship, claim, or commit a perf "win" you have not measured on a stable box — and prefer
 measuring over reasoning even when the reasoning feels airtight.
 
