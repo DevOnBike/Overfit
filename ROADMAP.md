@@ -35,21 +35,21 @@ Zero-allocation, pure C# deep-learning framework targeting high-performance CPU 
 
 ---
 
-## ▶ NEXT UP AFTER RELEASE — finish the `else` sweep (OVERFIT021)
+## ✅ DONE — the `else` sweep (OVERFIT021), 322 → 0
 
-**Status: 21 of 322 done, ~301 left.** `else` / `else if` is banned in `Sources/Main` by the in-repo Roslyn
-analyzer **OVERFIT021** (`Sources/Analyzers/ElseClauseAnalyzer.cs`). It is *not* an MSBuild task and *not* a
-`BannedSymbols.txt` entry — that file bans **API symbols**, and `else` is a language keyword, so it cannot be
-expressed there. An MSBuild-task variant with an `ElseDebt.txt` ledger was built and then deleted in favour of
-the analyzer (real syntax tree, IDE squiggles, per-directory severity).
+**Status: COMPLETE (2026-07-21).** `else` / `else if` is banned by the in-repo Roslyn analyzer **OVERFIT021**
+(`Sources/Analyzers/ElseClauseAnalyzer.cs`). It is *not* an MSBuild task and *not* a `BannedSymbols.txt` entry —
+that file bans **API symbols**, and `else` is a language keyword, so it cannot be expressed there. An
+MSBuild-task variant with an `ElseDebt.txt` ledger was built and then deleted in favour of the analyzer (real
+syntax tree, IDE squiggles, per-directory severity).
 
-**Rollout is a ratchet:** `suggestion` repo-wide, `error` for directories already at zero — the scoped section
-at the **end** of `.editorconfig`. Clean a directory, add it to that list, and the ban locks in for it.
+The ratchet is finished and retired: the rule is now **`error` across every project except `Tests`**, wired
+centrally in `Directory.Build.props` rather than per-csproj, so the per-directory allow-list in `.editorconfig`
+is gone. `Tests` stays at `suggestion` (test code is local and disposable). The **only** remaining `else` sites
+in the repo are 6 in `Sources/Benchmark/ElseRefactorBenchmark.cs` — intentional, since the `else` forms are that
+benchmark's measurement subject, and the project is excluded from the analyzer.
 
-- ✅ **Done (9 dirs, 21 sites):** `Anomalies, Core, Diagnostics, Exceptions, Inference, Licensing, Maths,
-  Parameters, Randomization, Redaction, Runtime, Serving, Statistical, Tensors, Tokenization, Training, Trees`
-- ⬜ **Left:** `LanguageModels` 163, `Audio` 35, `Ops` 34, `Onnx` 14, `Data` 13, `DeepLearning` 12,
-  `Evolutionary` 10, `Kernels` 6, `Intrinsics` 4, `Autograd` 4, `Optimizers` 6, rest small
+Verified semantically rather than by grep: the solution builds clean with the rule at `error` globally.
 
 ### Cost is measured, not assumed — `Sources/Benchmark/ElseRefactorBenchmark.cs`
 
@@ -74,6 +74,32 @@ So in-place rewrites are free and **the only real risk is extracting a method**.
 2. **`.editorconfig` scoping.** A `[section]` header scopes everything below it (so directory sections belong at
    the end of the file), the glob must be `<dir>/**.cs` not `<dir>/**/*.cs`, and an ID listed in
    `<WarningsNotAsErrors>` reverts `error` back to warning even where `.editorconfig` promotes it.
+
+---
+
+## ▶ NEXT UP — the cheap CPU-perf levers are exhausted; the open item is a product decision
+
+**Three candidate levers were sized and all three died on measurement (2026-07-21). Do not re-open without
+new evidence.**
+
+1. **`SearchValues` / tokenizer-level work — CLOSED.** A prefill profile (Qwen-3B Q4_K_M, 672-token prompt,
+   median of 5) puts tokenization at **0.04% of time-to-first-token** — 1.8 ms against 4731 ms of prefill
+   forward (366 000 tok/s vs 142 tok/s). Infinite tokenizer speedup buys 0.04%.
+   `Tests/LanguageModels/Diagnostics/PrefillProfileTests.cs`.
+2. **Struct-operator (static-abstract interface) dispatch — CLOSED without building.** The premise does not
+   hold here: `ElementwiseKernels` contains **no delegates** (14 hand-written span loops), the hot parallel
+   paths already use `delegate*<int,int,void*,void>`, and the whole elementwise slice is **0.5% of decode**.
+   The scalar operator shape also cannot express the `TensorPrimitives` fast path, which is itself built on
+   this pattern inside the BCL.
+3. **Bias support in the Q4_K tiled prefill GEMM — BUILT, MEASURED 0.999×, REVERTED.** A path census showed
+   `bias.IsEmpty` barred **88% of Q4_K prefill dispatches** (all attention Q/K/V) from `GemmTiled`. Lifting
+   it was an exact tie, because `ProjectBatchedWeightStationary` already amortises weight decode across the
+   row tile — the same thing the tiling does. The "~3×" in the kernel docs is measured against
+   `ProjectBatched` (re-decode per row), **not** against weight-stationary. Recorded in `CLAUDE.md`.
+
+Decode is ~88% quantized GEMV sitting at the DRAM floor (`ffn 69.3% · attention 19.3% · lm_head 10.3%`), so
+there is no cheap kernel win left. What remains open is **not technical**: the product direction (perf course
+vs. the on-prem commercial track) has been deferred across several sessions and is the actual blocker.
 
 ---
 

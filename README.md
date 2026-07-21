@@ -177,6 +177,15 @@ build *errors* in the kernels, and `[OverfitHotPath]` escalates every per-call r
 error inside a marked method) with a CI tripwire that proves the analyzer itself is
 alive ([`Sources/Analyzers/README.md`](Sources/Analyzers/README.md)).
 
+Readability is held to the same standard: `else` and `else if` are build errors everywhere
+outside the test project (`OVERFIT021`), and the sweep that introduced the rule removed all
+322 occurrences from the library. That was done only after measuring what the refactor costs,
+because a style rule that quietly slows the hot path is not worth having: guard clauses,
+ternaries and loop `continue` are **free** (1.00–1.01×), and the one shape that does cost —
+extracting a branch into a method the JIT then declines to inline — was measured at 2.25× and
+is avoided rather than assumed away ([`Sources/Benchmark/ElseRefactorBenchmark.cs`](Sources/Benchmark/ElseRefactorBenchmark.cs),
+the sole intentional exemption since the `else` forms are its measurement subject).
+
 ### 5. Bounded parsing of untrusted model files
 
 Overfit runs **inside your process**, so a malformed model file must not be able to take
