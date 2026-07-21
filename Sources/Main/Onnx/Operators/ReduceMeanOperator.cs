@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -32,20 +32,27 @@ namespace DevOnBike.Overfit.Onnx.Operators
             // Opset < 18: axes is an attribute.
             long[]? axes = null;
 
-            if (node.Attributes.TryGetValue("axes", out var axesAttr))
+            var hasAxesAttribute = node.Attributes.TryGetValue("axes", out var axesAttr);
+
+            if (hasAxesAttribute)
             {
                 axes = axesAttr.IntArray;
             }
-            else if (node.Inputs.Count >= 2 &&
-                     !string.IsNullOrEmpty(node.Inputs[1]) &&
-                     initializers.TryGetValue(node.Inputs[1], out var axesTensor))
+
+            if (!hasAxesAttribute &&
+                node.Inputs.Count >= 2 &&
+                !string.IsNullOrEmpty(node.Inputs[1]) &&
+                initializers.TryGetValue(node.Inputs[1], out var axesTensor))
             {
                 // Axes are stored as Int64 tensor — read directly without float conversion.
-                if (axesTensor.Int64Data != null && axesTensor.Int64Data.Length > 0)
+                var hasInt64Data = axesTensor.Int64Data != null && axesTensor.Int64Data.Length > 0;
+
+                if (hasInt64Data)
                 {
                     axes = axesTensor.Int64Data;
                 }
-                else if (axesTensor.RawData.Length > 0)
+
+                if (!hasInt64Data && axesTensor.RawData.Length > 0)
                 {
                     // Raw little-endian int64 bytes.
                     var count = axesTensor.RawData.Length / sizeof(long);

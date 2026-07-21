@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -83,12 +83,16 @@ namespace DevOnBike.Overfit.Onnx
                         var inName = onnxNode.Inputs[0];
                         var outName = onnxNode.Outputs[0];
 
-                        if (slotMap.TryGetValue(inName, out var slot))
+                        var hasSlot = slotMap.TryGetValue(inName, out var slot);
+                        var hasInitializer = initializers.TryGetValue(inName, out var initTensor);
+
+                        if (hasSlot)
                         {
                             // Relabels an activation tensor: output reads from the same slot.
                             slotMap[outName] = slot;
                         }
-                        else if (initializers.TryGetValue(inName, out var initTensor))
+
+                        if (!hasSlot && hasInitializer)
                         {
                             // Relabels a CONSTANT: a folded/deduplicated weight or bias routed to its
                             // consumer under a new name (e.g. torch's constant-folding aliases equal biases

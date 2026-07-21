@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -79,7 +79,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 _keys = [];
                 _values = [];
             }
-            else
+
+            if (!(dtype == KvCacheDType.Q8))
             {
                 _keys = new float[elems];
                 _values = new float[elems];
@@ -160,7 +161,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 Array.Clear(_keyScales);
                 Array.Clear(_valueScales);
             }
-            else
+
+            if (!(IsQuantized))
             {
                 Array.Clear(_keys);
                 Array.Clear(_values);
@@ -208,7 +210,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                             _keyScales.AsSpan(scaleBase + count, keep).CopyTo(_keyScales.AsSpan(scaleBase, keep));
                             _valueScales.AsSpan(scaleBase + count, keep).CopyTo(_valueScales.AsSpan(scaleBase, keep));
                         }
-                        else
+
+                        if (!(IsQuantized))
                         {
                             _keys.AsSpan(baseOffset + shift, keepElems).CopyTo(_keys.AsSpan(baseOffset, keepElems));
                             _values.AsSpan(baseOffset + shift, keepElems).CopyTo(_values.AsSpan(baseOffset, keepElems));
@@ -465,7 +468,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             {
                 scales[ScaleOffset(layerIndex, headIndex, position)] = Q8KvQuant.Quantize(vector.Slice(0, hd), q8.AsSpan(offset, hd));
             }
-            else
+
+            if (!(IsQuantized))
             {
                 vector.Slice(0, hd).CopyTo(f32.AsSpan(offset, hd));
             }

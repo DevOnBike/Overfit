@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -36,7 +36,8 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.Infrastructure
                 logger.LogWarning(
                     "API-key auth is OFF — any caller can reach the agent. Set 'ApiKey' (config or env) before exposing it.");
             }
-            else
+
+            if (!(string.IsNullOrWhiteSpace(key)))
             {
                 _keyHash = SHA256.HashData(Encoding.UTF8.GetBytes(key.Trim()));
                 logger.LogInformation("API-key auth is ON — callers must present 'X-API-Key' or 'Authorization: Bearer'.");

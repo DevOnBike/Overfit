@@ -482,11 +482,12 @@ namespace Benchmarks
                         {
                             context.RunOverfitLoop(_innerIterations);
                         }
-                        else if (mode == ModeOnnx)
+                        if (mode == ModeOnnx)
                         {
                             context.RunOnnxLoop(_innerIterations);
                         }
-                        else if (mode == ModeNone)
+
+                        if (mode == ModeNone)
                         {
                             context.Checksum = 0.0;
                         }

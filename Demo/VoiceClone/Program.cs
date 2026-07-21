@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -82,7 +82,7 @@ namespace DevOnBike.Overfit.Demo.VoiceClone
                     return 1;
                 }
             }
-            else if (!synthOnly)
+            if (!synthOnly && folder is null)
             {
                 if (recording is null || !PathExists(recording))
                 {
@@ -236,7 +236,9 @@ namespace DevOnBike.Overfit.Demo.VoiceClone
                 var audioBase = ResolveAudioBase(t.Tokenizer);
                 // Stop at end_of_speech (audioBase+2 = 128258) as well as the text-eos — the canonical prompt makes
                 // the model end the audio with end_of_speech, else it babbles to --max-new after the sentence.
-                int[] generated;
+                // Exhaustive across the fast / non-fast pair below; the compiler cannot prove that across
+                // two separate ifs, and neither generator can run speculatively.
+                int[] generated = [];
                 var genSw = System.Diagnostics.Stopwatch.StartNew();
                 if (a.Has("fast"))
                 {
@@ -246,7 +248,8 @@ namespace DevOnBike.Overfit.Demo.VoiceClone
                     mergedEngine ??= t.BuildMergedEngine(mergeLora: !a.Has("no-lora-merge"));
                     generated = GenerateViaMerged(mergedEngine, promptIds, audioBase, t.EndOfTextTokenId);
                 }
-                else
+
+                if (!(a.Has("fast")))
                 {
                     generated = t.Generate(promptIds, maxNew, t.EndOfTextTokenId,
                         temperature: temperature, topP: topP, repeatPenalty: repeatPenalty, seed: seed,
@@ -393,11 +396,16 @@ namespace DevOnBike.Overfit.Demo.VoiceClone
                     continue;
                 }
                 var key = argv[i][2..];
-                if (i + 1 < argv.Length && !argv[i + 1].StartsWith("--", StringComparison.Ordinal))
+                // Capture BEFORE consuming the value: `argv[++i]` advances i, so re-testing would look at
+                // the NEXT argument and could null out the value that was just parsed.
+                var hasValue = i + 1 < argv.Length && !argv[i + 1].StartsWith("--", StringComparison.Ordinal);
+
+                if (hasValue)
                 {
                     map[key] = argv[++i];
                 }
-                else
+
+                if (!hasValue)
                 {
                     map[key] = null;
                 }

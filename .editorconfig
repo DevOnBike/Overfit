@@ -71,8 +71,8 @@ dotnet_diagnostic.OVERFIT007.severity = suggestion
 # PROMOTED TO ERROR (criteria: zero existing sites + unconditional rule + trivial fix/pragma + high miss-cost):
 # OVERFIT008 — a suppress leak silently breaks data-parallel training (measured 1.8x); like RS0030.
 # OVERFIT015 — CpuFeatures gating is a hard convention; the fix is a one-token change.
-dotnet_diagnostic.OVERFIT008.severity = error
-dotnet_diagnostic.OVERFIT015.severity = error
+# (moved to the [Sources/Main/**.cs] section at the end of this file)
+# (moved to the [Sources/Main/**.cs] section at the end of this file)
 dotnet_diagnostic.OVERFIT009.severity = suggestion
 # Tier A, added 2026-06-13 — start on the bottom rung (suggestion everywhere). Escalate a directory
 # once it is swept, exactly like 001-009. 010 (growable collections) and 014 (ToLower compare) are
@@ -84,10 +84,13 @@ dotnet_diagnostic.OVERFIT010.severity = suggestion
 # or a switch expression. Introduced 2026-07-18 against 321 existing occurrences in 124 files, so a
 # blanket `error` was not an option — it would have forced one mechanical rewrite across the whole
 # library including hot inference paths, which is precisely the unmeasured behaviour-preserving
-# refactor this repo forbids. So: SUGGESTION everywhere (IDE-visible, non-blocking), ERROR in directories
-# that are already at zero. Sweep a directory -> add it below. Never remove a directory from the list.
+# refactor this repo forbids. The sweep is now COMPLETE (322 -> 0 in Sources/Main, and every other project
+# except Tests), so the rule is ERROR repo-wide. Tests are exempted at the END of this file: test code is
+# throwaway and local, and the argument for the ban (shipped library, read by strangers, hot paths) does not
+# apply there. Sources/Benchmark/ElseRefactorBenchmark.cs keeps its `else` behind a #pragma — those forms are
+# the measurement subject that justifies the rule.
 # Backlog at introduction: LanguageModels 163, Audio 35, Ops 34, Data 13, Onnx 14, DeepLearning 12.
-dotnet_diagnostic.OVERFIT021.severity = suggestion
+dotnet_diagnostic.OVERFIT021.severity = error
 
 # OVERFIT022 (direct recursion) — NASA Power of 10 rule 1. ERROR EVERYWHERE, deliberately: a .NET
 # StackOverflowException cannot be caught, so unbounded recursion is an uncatchable kill of the HOST
@@ -95,13 +98,13 @@ dotnet_diagnostic.OVERFIT021.severity = suggestion
 # in Sources/Main therefore carries an explicit `#pragma warning disable OVERFIT022` whose comment states
 # the BOUND that makes it safe (a checked depth cap, or a structural log2(n) argument). If you cannot write
 # that sentence, the recursion is not safe and needs an explicit stack/worklist instead.
-dotnet_diagnostic.OVERFIT022.severity = error
+# (moved to the [Sources/Main/**.cs] section at the end of this file)
 
 # OVERFIT023 (loop with no exit condition in its header) — NASA Power of 10 rule 2. ERROR EVERYWHERE, same
 # contract as OVERFIT022: an unbounded loop hangs the HOST process with no exception, no stack trace and no
 # log line, which is the hardest failure of all to diagnose. Every `while (true)` in Sources/Main carries a
 # `#pragma warning disable OVERFIT023` whose comment starts with "BOUND:" and names what terminates it.
-dotnet_diagnostic.OVERFIT023.severity = error
+# (moved to the [Sources/Main/**.cs] section at the end of this file)
 
 
 dotnet_diagnostic.OVERFIT011.severity = suggestion
@@ -125,7 +128,7 @@ dotnet_diagnostic.OVERFIT020.severity = suggestion
 # fires inside a member or type marked [DevOnBike.Overfit.Diagnostics.OverfitHotPath] is reported as
 # this hard error INSTEAD of its directory-configured severity — the per-member ratchet. Always error;
 # never loosen it (that would defeat the marker). Suppress a justified site with #pragma + a reason.
-dotnet_diagnostic.OVERFIT900.severity = error
+# (moved to the [Sources/Main/**.cs] section at the end of this file)
 
 [Sources/Main/Kernels/**.cs]
 # Allocation rules are ERRORS in pure kernels — per-call allocation is never right here;
@@ -228,8 +231,10 @@ dotnet_diagnostic.OVERFIT001.severity = suggestion
 [**/obj/**]
 dotnet_diagnostic.RS0030.severity = none
 
-# OVERFIT021 (else) — directories already at zero occurrences, locked in as errors. Sweep a directory ->
-# add it here. Never remove one.
+# OVERFIT021 (else) — Sources/Main is FULLY swept (322 -> 0), so the whole tree is the error scope.
+# This replaced a hand-maintained directory list: ten already-clean directories (Diagnostics, Extensions,
+# Licensing, Maths, Properties, Redaction, Runtime, Tokenization, Training, Trees) had been swept but never
+# added to that list, so the ratchet silently did not hold for them. A whole-tree glob cannot drift.
 #
 # THREE gotchas, each of which silently produced a rule that looked configured but did nothing (all three
 # were hit while wiring this up on 2026-07-18):
@@ -240,11 +245,29 @@ dotnet_diagnostic.RS0030.severity = none
 #   3. The rule ID must NOT appear in <WarningsNotAsErrors> in Directory.Build.props. That maps to
 #      -warnaserror-:ID, which reverts the diagnostic to warning EVEN WHERE .editorconfig sets error —
 #      defeating this whole section. (This is why OVERFIT008/015 are absent from that list.)
-[Sources/Main/{Anomalies,Audio,Autograd,Core,Data,DeepLearning,Evolutionary,Exceptions,Inference,Intrinsics,Kernels,Ops,Optimizers,Parameters,Randomization,Serving,Statistical,Tensors}/**.cs]
-dotnet_diagnostic.OVERFIT021.severity = error
 
 # OVERFIT022 (recursion) — ERROR on the paths that parse untrusted, externally-authored input, where an
 # uncatchable stack overflow would kill the embedding host. Existing bounded sites carry a #pragma naming
 # their depth cap; this stops NEW unbounded recursion from entering these directories.
 [Sources/Main/LanguageModels/{Loading,Constraints}/**.cs]
 dotnet_diagnostic.OVERFIT022.severity = error
+
+# OVERFIT021 (else) — Tests are the one exemption: test code is local and disposable, so the ban's rationale
+# (shipped library, read by strangers, hot paths) does not apply. Kept at suggestion so it still shows in the
+# IDE. MUST stay at the END of this file — a [section] header scopes every setting below it.
+[Tests/**.cs]
+dotnet_diagnostic.OVERFIT021.severity = suggestion
+
+# ── Library-only OVERFIT rules ─────────────────────────────────────────────────────────────
+# These were designed for the SHIPPED library: zero-alloc hot paths (OVERFIT008/900), the CpuFeatures
+# convention (015), and the NASA bounded-execution pair (022/023, whose rationale is "Overfit runs inside
+# someone else's process"). Once the analyzer was wired into every project they also started firing in
+# benchmarks and demos, where they are wrong by construction — Sources/Benchmark deliberately calls raw
+# Parallel.For to A/B it against OverfitParallel, and OverfitParallelLegacy is a kept-for-comparison copy.
+# So they are scoped to the library; OVERFIT021 (else) stays repo-wide because readability is not scoped.
+[Sources/Main/**.cs]
+dotnet_diagnostic.OVERFIT008.severity = error
+dotnet_diagnostic.OVERFIT015.severity = error
+dotnet_diagnostic.OVERFIT022.severity = error
+dotnet_diagnostic.OVERFIT023.severity = error
+dotnet_diagnostic.OVERFIT900.severity = error

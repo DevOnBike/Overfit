@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -39,7 +39,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             int inputSize,
             int outputSize)
         {
-            if (weight.IsQ6K)
+            // Resident-format dispatch, classified once so the original first-match order is explicit.
+            var kind = weight.IsQ6K ? 0 : weight.IsQ4K ? 1 : weight.IsQuantized ? 2 : 3;
+
+            if (kind == 0)
             {
                 var w = weight.Quantized6K;
                 var spr = w.SuperBlocksPerRow;
@@ -52,7 +55,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     qBytes.Span.Slice(0, rows * inputSize), scales.Span.Slice(0, rows * spr),
                     sums.Span.Slice(0, groups));
             }
-            else if (weight.IsQ4K)
+            if (kind == 1)
             {
                 var w = weight.Quantized4K;
                 var spr = w.SuperBlocksPerRow;
@@ -68,8 +71,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 // No-bias only (GemmTiled applies none). AVX2/FMA required — the kernel is x86-only, so on ARM
                 // (e.g. the Android app) this falls through to the weight-stationary path even if a sidecar
                 // mmap'd a prepacked layout (IsPrepacked would otherwise bypass the env flag's AVX2 gate).
-                if ((w.IsPrepacked || UseTiledPrefillQ4K) && bias.IsEmpty && w.CanRepack
-                    && CpuFeatures.HasAvx2 && CpuFeatures.HasFma)
+                var tiled = (w.IsPrepacked || UseTiledPrefillQ4K) && bias.IsEmpty && w.CanRepack
+                    && CpuFeatures.HasAvx2 && CpuFeatures.HasFma;
+
+                if (tiled)
                 {
                     DispatchTiledQ4K(
                         input, rows, w, output,
@@ -78,14 +83,14 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 }
                 // Weight-stationary: decode each Q4_K super-block once and reuse across the row tile (bit-identical
                 // to ProjectBatched, measured ~1.3–1.7× on the prefill / speculative-verify batched matmul).
-                else if (UseWeightStationaryQ4K)
+                if (!tiled && UseWeightStationaryQ4K)
                 {
                     Q4KDotKernel.ProjectBatchedWeightStationary(
                         input, rows, w, bias, output,
                         qBytes.Span.Slice(0, rows * inputSize), scales.Span.Slice(0, rows * spr),
                         sums.Span.Slice(0, groups));
                 }
-                else
+                if (!tiled && !UseWeightStationaryQ4K)
                 {
                     Q4KDotKernel.ProjectBatched(
                         input, rows, w, bias, output,
@@ -93,7 +98,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                         sums.Span.Slice(0, groups));
                 }
             }
-            else if (weight.IsQuantized)
+            if (kind == 2)
             {
                 var w = weight.Quantized;
                 var bpr = inputSize / Q8DotKernel.BlockSize;
@@ -103,7 +108,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     input, rows, w, bias, output,
                     qBytes.Span.Slice(0, rows * inputSize), scales.Span.Slice(0, rows * bpr));
             }
-            else
+            if (kind == 3)
             {
                 BatchedProjectionKernel.Project(input, rows, weight.F32, bias, output, inputSize, outputSize);
             }

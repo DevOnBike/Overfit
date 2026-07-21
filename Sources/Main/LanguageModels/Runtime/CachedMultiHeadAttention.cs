@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -121,7 +121,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 _attnScales = new float[(wholeSize + Q4KDotKernel.SuperBlockElements - 1) / Q4KDotKernel.SuperBlockElements];
                 _attnBsums = new short[(wholeSize + Q4KDotKernel.GroupSize - 1) / Q4KDotKernel.GroupSize];
             }
-            else
+
+            if (!(Q4KGemvKernel.AttnEnabled))
             {
                 _qWhole = [];
                 _attnBands = [];
@@ -188,7 +189,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             {
                 output.Slice(0, DModel).Clear();
             }
-            else
+
+            if (!(bo.IsEmpty))
             {
                 bo.Slice(0, DModel).CopyTo(output);
             }
@@ -279,11 +281,11 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     // heads via the decode dispatch (capped / spin-pool per config).
                     OverfitParallel.ForDecode(0, HeadCount, &DecodeHeadQao, contextPtr);
                 }
-                else if (KvHeadCount > 1 && OverfitParallel.WorkerCount > 1)
+                if (!useHeadParallel && KvHeadCount > 1 && OverfitParallel.WorkerCount > 1)
                 {
                     OverfitParallel.For(0, KvHeadCount, &DecodeKvGroup, contextPtr);
                 }
-                else
+                if (!useHeadParallel && !(KvHeadCount > 1 && OverfitParallel.WorkerCount > 1))
                 {
                     DecodeKvGroup(0, KvHeadCount, contextPtr);
                 }
@@ -374,7 +376,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 {
                     OverfitParallel.ForDecode(0, HeadCount, &DecodeHeadWhole, ctxPtr);
                 }
-                else
+
+                if (!(OverfitParallel.WorkerCount > 1))
                 {
                     DecodeHeadWhole(0, HeadCount, ctxPtr);
                 }
@@ -494,7 +497,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 {
                     outRow.Clear();
                 }
-                else
+
+                if (!(bias.IsEmpty))
                 {
                     bias.Slice(0, dModel).CopyTo(outRow);
                 }
@@ -547,7 +551,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 {
                     OverfitParallel.For(0, HeadCount, &ProcessHeadRangeBatched, contextPtr);
                 }
-                else
+
+                if (!(HeadCount > 1 && OverfitParallel.WorkerCount > 1))
                 {
                     ProcessHeadRangeBatched(0, HeadCount, contextPtr);
                 }
@@ -607,7 +612,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 {
                     outRow.Clear();
                 }
-                else
+
+                if (!(attnBias.IsEmpty))
                 {
                     attnBias.Slice(0, dModel).CopyTo(outRow);
                 }
@@ -629,8 +635,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             for (var group = 0; group < KvHeadCount; group++)
             {
                 // K/V weights: GQA shares one KV head per group; MHA uses the head's own.
-                DecodeWeight wk, wv;
-                ReadOnlySpan<float> bk, bv;
+                // Both branches below assign these; `= default` only proves it to the compiler (value types,
+                // immediately overwritten, so the JIT elides the init).
+                DecodeWeight wk = default, wv = default;
+                ReadOnlySpan<float> bk = default, bv = default;
                 if (weights.HasGqa)
                 {
                     ref readonly var kv = ref weights.KvHead(group);
@@ -639,7 +647,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     bk = kv.Bk;
                     bv = kv.Bv;
                 }
-                else
+
+                if (!(weights.HasGqa))
                 {
                     ref readonly var h0 = ref weights.Head(group);
                     wk = h0.Wk;
@@ -665,7 +674,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     cache.WriteValue(layerIndex, group, basePosition + n, vg.Span.Slice(n * headDim, headDim));
                 }
 
-                ReadOnlySpan<float> keys, values;
+                ReadOnlySpan<float> keys = default, values = default;
                 if (cache.IsQuantized)
                 {
                     cache.DequantizeKeyRange(layerIndex, group, fromPosition: 0, length: cacheLength, kf.Span.Slice(0, cacheLength * headDim));
@@ -673,7 +682,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     keys = kf.Span.Slice(0, cacheLength * headDim);
                     values = vf.Span.Slice(0, cacheLength * headDim);
                 }
-                else
+
+                if (!(cache.IsQuantized))
                 {
                     keys = cache.GetKeyReadSpan(layerIndex, group, fromPosition: 0, length: cacheLength);
                     values = cache.GetValueReadSpan(layerIndex, group, fromPosition: 0, length: cacheLength);
@@ -810,8 +820,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     var h = group * groupSize + headInGroup;
                     ref readonly var hw = ref ctx.Weights.Head(h);
 
-                    DecodeWeight wk, wv;
-                    ReadOnlySpan<float> bk, bv;
+                    DecodeWeight wk = default, wv = default;
+                    ReadOnlySpan<float> bk = default, bv = default;
                     if (ctx.UseGqa)
                     {
                         // GQA: every Q head in the group shares one KV head.
@@ -821,7 +831,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                         bk = kv.Bk;
                         bv = kv.Bv;
                     }
-                    else
+
+                    if (!(ctx.UseGqa))
                     {
                         // Standard MHA: each Q head has its own K/V weights.
                         wk = hw.Wk;

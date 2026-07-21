@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -33,11 +33,14 @@ namespace DevOnBike.Overfit.LanguageModels.Skills.Evaluation
 
             foreach (var id in testCase.ExpectedChecks)
             {
-                if (_graders.TryGetValue(id, out var grader))
+                var hasGrader = _graders.TryGetValue(id, out var grader);
+
+                if (hasGrader)
                 {
-                    checks.Add(grader.Grade(testCase, result));
+                    checks.Add(grader!.Grade(testCase, result));
                 }
-                else
+
+                if (!hasGrader)
                 {
                     checks.Add(new GradeCheck(id, false, "no grader registered for this check id"));
                 }

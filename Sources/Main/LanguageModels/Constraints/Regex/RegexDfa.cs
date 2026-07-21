@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -274,7 +274,8 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints.Regex
                     {
                         m = -1;
                     }   // {n,} = n then star
-                    else
+
+                    if (!(Peek() == '}'))
                     {
                         m = ParseInt();
                     }
@@ -297,7 +298,8 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints.Regex
                 {
                     parts.Add(Star(n == 0 ? first : Clone(first), optional: true));   // {n,} → n then star
                 }
-                else if (hasMax)
+
+                if (hasMax && m >= 0)
                 {
                     for (var i = n; i < m; i++)
                     {
@@ -420,7 +422,8 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints.Regex
                         var to = Next();
                         SetRange(ref lo, ref hi, c, to);
                     }
-                    else
+
+                    if (!(Peek() == '-' && Peek(1) is not (']' or '\0')))
                     {
                         SetBit(ref lo, ref hi, c);
                     }
@@ -570,8 +573,10 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints.Regex
                 if (c < 64)
                 {
                     lo |= 1UL << c;
+                    return;
                 }
-                else if (c < 128)
+
+                if (c < 128)
                 {
                     hi |= 1UL << (c - 64);
                 }
@@ -582,8 +587,10 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints.Regex
                 if (c < 64)
                 {
                     lo &= ~(1UL << c);
+                    return;
                 }
-                else if (c < 128)
+
+                if (c < 128)
                 {
                     hi &= ~(1UL << (c - 64));
                 }

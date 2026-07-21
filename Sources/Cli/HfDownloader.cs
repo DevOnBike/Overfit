@@ -240,7 +240,8 @@ namespace DevOnBike.Overfit.Cli
                 await HashExistingAsync(tmp, hasher);
                 Console.WriteLine($"  {file}  already downloaded ({existing / (1024.0 * 1024):F1} MB) — verifying");
             }
-            else
+
+            if (!(existing > 0 && response.StatusCode == HttpStatusCode.RequestedRangeNotSatisfiable))
             {
                 response.EnsureSuccessStatusCode();
 
@@ -250,19 +251,9 @@ namespace DevOnBike.Overfit.Cli
                     existing = 0;   // server ignored the Range (200 OK) → start over from scratch.
                 }
 
-                long total;
-                if (response.Content.Headers.ContentRange?.Length is long full)
-                {
-                    total = full;
-                }
-                else if (resuming)
-                {
-                    total = existing + (response.Content.Headers.ContentLength ?? 0);
-                }
-                else
-                {
-                    total = response.Content.Headers.ContentLength ?? -1;
-                }
+                var total = response.Content.Headers.ContentRange?.Length is long full ? full
+                    : resuming ? existing + (response.Content.Headers.ContentLength ?? 0)
+                    : response.Content.Headers.ContentLength ?? -1;
 
                 if (resuming)
                 {
@@ -313,7 +304,8 @@ namespace DevOnBike.Overfit.Cli
 
                 Console.WriteLine($"  sha256 verified  {actual[..16]}...");
             }
-            else
+
+            if (!(expectedSha256 is not null))
             {
                 Console.WriteLine($"  sha256 {actual[..16]}...  (HF metadata unavailable — not verified)");
             }
@@ -346,7 +338,8 @@ namespace DevOnBike.Overfit.Cli
                 var totalMb = total / (1024.0 * 1024);
                 Console.Write($"\r  {file}  {pct,5:F1}%  ({mb,8:F1} / {totalMb:F1} MB)  {speed,6:F1} MB/s    ");
             }
-            else
+
+            if (!(total > 0))
             {
                 Console.Write($"\r  {file}  {mb,8:F1} MB  {speed,6:F1} MB/s    ");
             }

@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -204,7 +204,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             {
                 RmsNormalize(input, weights.Ln1Gamma, _ln1Output, DModel, LayerNormEpsilon);
             }
-            else
+
+            if (!(weights.Ln1Beta.IsEmpty))
             {
                 SingleTokenLayerNormKernel.Normalize(
                 input, weights.Ln1Gamma, weights.Ln1Beta, _ln1Output, DModel, LayerNormEpsilon);
@@ -237,7 +238,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             {
                 RmsNormalize(_afterAttentionResidual, weights.Ln2Gamma, _ln2Output, DModel, LayerNormEpsilon);
             }
-            else
+
+            if (!(weights.Ln2Beta.IsEmpty))
             {
                 SingleTokenLayerNormKernel.Normalize(
                 _afterAttentionResidual, weights.Ln2Gamma, weights.Ln2Beta, _ln2Output, DModel, LayerNormEpsilon);
@@ -261,7 +263,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             }
             // SwiGLU (Llama/Mistral/Qwen): FfnGate is present.
             // GeLU/ReLU (GPT-1/GPT-2): FfnGate is empty.
-            else if (!weights.FfnGate.IsEmpty)
+            if (!weights.IsMoe && !weights.FfnGate.IsEmpty)
             {
                 // SwiGLU (Llama/Mistral/Qwen): per-weight dispatch — each of
                 // gate/up/down picks its kernel from its resident format
@@ -273,7 +275,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     weights.FfnW2,
                     _feedForwardOutput);
             }
-            else
+            if (!weights.IsMoe && weights.FfnGate.IsEmpty)
             {
                 _feedForward.Decode(
                     _ln2Output,
@@ -416,7 +418,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 {
                     RmsNormalize(inRow, weights.Ln1Gamma, dst, dModel, LayerNormEpsilon);
                 }
-                else
+
+                if (!(weights.Ln1Beta.IsEmpty))
                 {
                     SingleTokenLayerNormKernel.Normalize(inRow, weights.Ln1Gamma, weights.Ln1Beta, dst, dModel, LayerNormEpsilon);
                 }
@@ -444,7 +447,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 {
                     RmsNormalize(aRow, weights.Ln2Gamma, dst, dModel, LayerNormEpsilon);
                 }
-                else
+
+                if (!(weights.Ln2Beta.IsEmpty))
                 {
                     SingleTokenLayerNormKernel.Normalize(aRow, weights.Ln2Gamma, weights.Ln2Beta, dst, dModel, LayerNormEpsilon);
                 }
@@ -458,7 +462,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     weights.MoeSharedGateInp, weights.MoeSharedGate, weights.MoeSharedUp, weights.MoeSharedDown,
                     ffnOut.Span);
             }
-            else
+
+            if (!(weights.IsMoe))
             {
                 _feedForward.DecodeSwiGluBatchedDispatched(
                     ln2.Span, rows, weights.FfnGate, weights.FfnW1, weights.FfnW2, ffnOut.Span);
@@ -542,7 +547,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     output[i] = input[i] * scale;
                 }
             }
-            else
+
+            if (!(gamma.IsEmpty))
             {
                 for (var i = 0; i < dModel; i++)
                 {

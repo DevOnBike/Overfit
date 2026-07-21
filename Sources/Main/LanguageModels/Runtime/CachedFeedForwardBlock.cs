@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -269,8 +269,14 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             // gate + up through the repacked kernel (8 rows/lane, no per-row hsum — ~2× the
             // per-core throughput of the 1-row kernel). Q4_K gate/up only; down stays Q6_K.
             var sGateUp = DecodeProfiler.Start();
-            if (Q4KGemvKernel.Enabled && wGate.IsQ4K && wUp.IsQ4K
-                && wGate.Quantized4K.CanRepack && wUp.Quantized4K.CanRepack)
+            // Classified once so the original first-match order stays explicit:
+            // 0 = repacked 8x8 GEMV, 1 = fused Q4_K gate+up, 2 = generic per-weight dispatch.
+            var gateUpKind = Q4KGemvKernel.Enabled && wGate.IsQ4K && wUp.IsQ4K
+                    && wGate.Quantized4K.CanRepack && wUp.Quantized4K.CanRepack ? 0
+                : wGate.IsQ4K && wUp.IsQ4K ? 1
+                : 2;
+
+            if (gateUpKind == 0)
             {
                 Q4KDotKernel.QuantizeActivationQ8K(
                     hidden.Slice(0, DModel), _q8kInputQuants, _q8kInputScales, _q8kInputBsums);
@@ -285,14 +291,14 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             // gate and up project the SAME hidden. When both are Q4_K (the Q4_K_M FFN
             // case), fuse them: quantize hidden once + one dispatch for both halves
             // (decode FFN is dispatch-overhead bound). Otherwise keep the two-call path.
-            else if (wGate.IsQ4K && wUp.IsQ4K)
+            if (gateUpKind == 1)
             {
                 Q4KDotKernel.ProjectGateUpParallel(
                     hidden, wGate.Quantized4K, wUp.Quantized4K, _gate, _intermediate,
                     _q8kInputQuants, _q8kInputScales, _q8kInputBsums);
                 ApplyGate(_gate, Activation);
             }
-            else
+            if (gateUpKind == 2)
             {
                 // gate = SiLU(hidden @ Wgate)
                 ProjectParallelDispatched(hidden, in wGate, [], _gate, DModel, DFF);
@@ -360,25 +366,28 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             int inputSize,
             int outputSize)
         {
-            if (weight.IsQ6K)
+            // Resident-format dispatch, classified once (see BatchedQuantProjection).
+            var kind = weight.IsQ6K ? 0 : weight.IsQ4K ? 1 : weight.IsQuantized ? 2 : 3;
+
+            if (kind == 0)
             {
                 Q6KDotKernel.ProjectParallel(
                     input, weight.Quantized6K, bias, output,
                     _q8kInputQuants, _q8kInputScales, _q8kInputBsums);
             }
-            else if (weight.IsQ4K)
+            if (kind == 1)
             {
                 Q4KDotKernel.ProjectParallel(
                     input, weight.Quantized4K, bias, output,
                     _q8kInputQuants, _q8kInputScales, _q8kInputBsums);
             }
-            else if (weight.IsQuantized)
+            if (kind == 2)
             {
                 Q8DotKernel.ProjectParallel(
                     input, weight.Quantized, bias, output,
                     _q8InputQuants, _q8InputScales);
             }
-            else
+            if (kind == 3)
             {
                 SingleTokenProjectionKernel.ProjectParallel(
                     input, weight.F32, bias, output, inputSize, outputSize);
@@ -478,7 +487,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             {
                 ApplyGeLU(values);
             }
-            else
+
+            if (!(activation == FeedForwardActivation.GeGLU))
             {
                 ApplySiLU(values);
             }

@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -214,7 +214,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 {
                     DecodeTokenWithoutLogits(promptTokens[i]);
                 }
-                else
+
+                if (!(i < lastIndex))
                 {
                     DecodeToken(promptTokens[i]);
                 }
@@ -471,11 +472,16 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             var probe = false;
             if (gated)
             {
-                if (_specProbeCountdown > 0)
+                // Capture BEFORE decrementing: a second `_specProbeCountdown > 0` test would read the
+                // already-decremented value, so countdown == 1 would both decrement AND probe.
+                var countingDown = _specProbeCountdown > 0;
+
+                if (countingDown)
                 {
                     _specProbeCountdown--;
                 }
-                else
+
+                if (!countingDown)
                 {
                     probe = true;
                     _specProbeCountdown = SpecProbeInterval;
@@ -493,7 +499,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     dn = drafter.Draft(t0, draft);
                 }
             }
-            else if (canSpeculate && (!gated || probe))
+            if (drafter is null && canSpeculate && (!gated || probe))
             {
 #pragma warning disable OVERFIT001 // exact-length contract: PromptLookupDrafter.Draft reads anchor.Length; tiny per-step array
                 var anchor = new int[history.Length + 1];
@@ -557,7 +563,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     committed[1 + j] = draft[j];
                     accepted++;
                 }
-                else
+
+                if (!(token == draft[j]))
                 {
                     correction = token;
                     break;
@@ -767,7 +774,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                         dst[j] += h[j];
                     }
                 }
-                else if (i == tokens.Length - 1)
+                if (pooling != EmbeddingPooling.Mean && i == tokens.Length - 1)
                 {
                     h[..d].CopyTo(dst);
                 }

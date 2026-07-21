@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -67,7 +67,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             {
                 output.Slice(0, outputSize).Clear();
             }
-            else
+
+            if (!(bias.IsEmpty))
             {
                 bias.Slice(0, outputSize).CopyTo(output);
             }
@@ -240,7 +241,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             {
                 outputBand.Clear();
             }
-            else
+
+            if (!(ctx.BiasLength == 0))
             {
                 new ReadOnlySpan<float>(ctx.Bias + chunkStart, count).CopyTo(outputBand);
             }
@@ -310,7 +312,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             {
                 outputSlice.Clear();
             }
-            else
+
+            if (!(bias.IsEmpty))
             {
                 bias.Slice(outputOffset, outputCount).CopyTo(outputSlice);
             }

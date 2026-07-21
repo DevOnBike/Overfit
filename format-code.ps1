@@ -1,10 +1,11 @@
 param (
-    [string]$SolutionPath = ""
+    [string]$SolutionPath = "",
+
+    # CI mode: report formatting drift instead of rewriting files (non-zero exit if anything would change).
+    [switch]$Check
 )
 
-# Terminal configuration (runs after the parameters are declared)
-Set-ExecutionPolicy Unrestricted -Scope Process -Force
-cls
+$ErrorActionPreference = 'Stop'
 
 if ([string]::IsNullOrWhiteSpace($SolutionPath)) {
     $slnFiles = Get-ChildItem -Filter *.sln -File
@@ -15,20 +16,39 @@ if ([string]::IsNullOrWhiteSpace($SolutionPath)) {
     $SolutionPath = $slnFiles[0].FullName
 }
 
-Write-Host "Starting code formatting..." -ForegroundColor Cyan
+# --verify-no-changes turns each step into a check instead of a rewrite.
+$extraArgs = @()
+if ($Check) { $extraArgs += '--verify-no-changes' }
 
-Write-Host "Step 1/3: Whitespace correction..." -ForegroundColor Yellow
-dotnet format whitespace $SolutionPath
+$mode = if ($Check) { "Checking" } else { "Formatting" }
+Write-Host "$mode $SolutionPath" -ForegroundColor Cyan
 
-Write-Host "Step 2/3: Applying general style rules..." -ForegroundColor Yellow
-dotnet format style $SolutionPath
+# Each step is verified on its own: $LASTEXITCODE only ever reflects the LAST command, so a single
+# check at the end would report success even when an earlier step had failed.
+function Invoke-FormatStep {
+    param([string]$Label, [string]$Subcommand)
 
-Write-Host "Step 3/3: Verifying file headers (IDE0073)..." -ForegroundColor Yellow
-dotnet format style $SolutionPath --diagnostics IDE0073
+    Write-Host "  $Label..." -ForegroundColor Yellow
+    dotnet format $Subcommand $SolutionPath @extraArgs
 
-if ($LASTEXITCODE -eq 0) {
-    Write-Host "`nSuccess! The entire solution has been formatted." -ForegroundColor Green
+    if ($LASTEXITCODE -ne 0) {
+        $why = if ($Check) { "would be reformatted" } else { "failed" }
+        Write-Host "`n$Label $why (exit $LASTEXITCODE)." -ForegroundColor Red
+        exit $LASTEXITCODE
+    }
+}
+
+# whitespace = indentation / spacing only.
+# style      = the .editorconfig IDE rules, INCLUDING the IDE0073 file header (it is severity=warning in
+#              .editorconfig and `dotnet format style` fixes warn-and-above by default), so the header
+#              needs no separate pass.
+# `dotnet format analyzers` is deliberately NOT run here: it applies analyzer code fixes, which would mix
+# behavioural rewrites into what should be a formatting-only change. Run it by hand if you want it.
+Invoke-FormatStep -Label "Step 1/2: whitespace" -Subcommand "whitespace"
+Invoke-FormatStep -Label "Step 2/2: style rules (incl. IDE0073 headers)" -Subcommand "style"
+
+if ($Check) {
+    Write-Host "`nSuccess! Formatting is already correct." -ForegroundColor Green
 } else {
-    Write-Host "`nErrors occurred during formatting." -ForegroundColor Red
-    exit $LASTEXITCODE
+    Write-Host "`nSuccess! The entire solution has been formatted." -ForegroundColor Green
 }

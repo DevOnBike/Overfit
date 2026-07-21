@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -345,26 +345,26 @@ namespace DevOnBike.Overfit.Server
             var voice = string.IsNullOrWhiteSpace(req.Voice) ? OrpheusPrompt.DefaultVoice : req.Voice!;
             var audio = tts.Synthesize(req.Input!, voice);
 
-            byte[] bytes;
-            string contentType;
-            if (format == "pcm")
-            {
-                bytes = ToPcm16Bytes(audio);
-                contentType = "audio/pcm";
-            }
-            else
-            {
-                using var ms = new MemoryStream();
-                WavWriter.WriteMono(ms, audio, tts.SampleRate, WavSampleFormat.Pcm16,
-                    SyntheticSpeechMetadata.ForNow(voice).ToInfoComment());
-                bytes = ms.ToArray();
-                contentType = "audio/wav";
-            }
+            // Both outputs are read below, so they must be definitely assigned; split ifs the compiler
+            // cannot prove exhaustive would not do that. The WAV branch keeps its `using` scope in a block.
+            var isPcm = format == "pcm";
+            var contentType = isPcm ? "audio/pcm" : "audio/wav";
+            var bytes = isPcm ? ToPcm16Bytes(audio) : ToWavBytes(audio, tts.SampleRate, voice);
 
             ctx.Response.StatusCode = (int)HttpStatusCode.OK;
             ctx.Response.ContentType = contentType;
             ctx.Response.ContentLength64 = bytes.Length;
             ctx.Response.OutputStream.Write(bytes, 0, bytes.Length);
+        }
+
+        /// <summary>WAV-encodes the synthesized audio. Split out of the caller so the `using MemoryStream`
+        /// keeps a scope of its own while the caller stays a single definitely-assigned expression.</summary>
+        private static byte[] ToWavBytes(float[] audio, int sampleRate, string voice)
+        {
+            using var ms = new MemoryStream();
+            WavWriter.WriteMono(ms, audio, sampleRate, WavSampleFormat.Pcm16,
+                SyntheticSpeechMetadata.ForNow(voice).ToInfoComment());
+            return ms.ToArray();
         }
 
         private static byte[] ToPcm16Bytes(float[] samples)
@@ -588,7 +588,8 @@ namespace DevOnBike.Overfit.Server
                 {
                     _openApiYaml = "openapi: 3.0.3\ninfo:\n  title: Overfit\n  version: '1.0.0'\npaths: {}\n";
                 }
-                else
+
+                if (!(stream is null))
                 {
                     using var reader = new StreamReader(stream, Encoding.UTF8);
                     _openApiYaml = reader.ReadToEnd();

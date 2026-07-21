@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -83,7 +83,8 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints.Schema
                 {
                     StartKeyString();
                 }
-                else
+
+                if (!(machine.CurrentStringIsKey))
                 {
                     StartValueString();
                 }
@@ -435,7 +436,11 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints.Schema
             var keyName = new string(((ReadOnlySpan<char>)_keyBuffer).Slice(0, _keyLength));
 
             ref readonly var objectNode = ref _schema.Nodes[_currentNodeIndex];
-            if (objectNode.Properties != null && objectNode.Properties.TryGetValue(keyName, out var valueNodeIndex))
+            var valueNodeIndex = 0;
+            var hasProperty = objectNode.Properties != null
+                && objectNode.Properties.TryGetValue(keyName, out valueNodeIndex);
+
+            if (hasProperty)
             {
                 if (objectNode.PropertyNames != null)
                 {
@@ -447,7 +452,8 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints.Schema
                 }
                 _currentNodeIndex = valueNodeIndex;
             }
-            else
+
+            if (!hasProperty)
             {
                 _currentNodeIndex = _schema.UnconstrainedNodeIndex;   // additional property — value unconstrained
             }

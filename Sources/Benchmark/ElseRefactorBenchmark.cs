@@ -7,6 +7,11 @@ using System.Runtime.CompilerServices;
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Configs;
 
+// The `else` forms in this file are the SUBJECT of the measurement, not an oversight: OVERFIT021's whole
+// justification is the measured cost table below, and it was produced by benchmarking these exact shapes
+// against their rewrites. Removing them would delete the evidence for the rule.
+// (Sources/Benchmark is excluded from the in-repo analyzers in Directory.Build.props for exactly this reason.)
+
 namespace Benchmarks
 {
     /// <summary>

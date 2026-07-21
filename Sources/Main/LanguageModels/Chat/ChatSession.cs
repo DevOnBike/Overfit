@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -253,7 +253,12 @@ namespace DevOnBike.Overfit.LanguageModels.Chat
             // verify, sampling-correct, and ~free when drafts don't fire — but it can't mask the draft
             // against a per-token constraint, so it only runs unconstrained on a speculation-capable
             // session. Everything else falls back to the exact single-token loop.
-            if (constraint is null && _session is CachedLlamaSession spec && spec.CanSpeculate)
+            // Hoisted out of the condition: the speculative session is needed inside the branch, and a
+            // second (negated) test could not re-introduce a pattern variable in the same scope.
+            var spec = _session as CachedLlamaSession;
+            var useSpeculative = constraint is null && spec is not null && spec.CanSpeculate;
+
+            if (useSpeculative)
             {
                 const int maxDraft = 8;
                 var history = new List<int>(promptTokens.Length + Math.Min(maxNew, 4096));
@@ -266,7 +271,7 @@ namespace DevOnBike.Overfit.LanguageModels.Chat
                 while (generated.Count < maxNew &&
                        (_slidingWindow || _session.CurrentPosition < _session.MaxContextLength))
                 {
-                    var n = spec.GenerateSpeculative(CollectionsMarshal.AsSpan(history), committed, in sampling, maxDraft);
+                    var n = spec!.GenerateSpeculative(CollectionsMarshal.AsSpan(history), committed, in sampling, maxDraft);
                     var stop = false;
                     for (var c = 0; c < n; c++)
                     {
@@ -284,7 +289,8 @@ namespace DevOnBike.Overfit.LanguageModels.Chat
                     }
                 }
             }
-            else
+
+            if (!useSpeculative)
             {
                 // With sliding-window enabled the cache never overflows (oldest tokens roll off), so we
                 // bound generation by MaxNewTokens only; otherwise we stop when the context fills.

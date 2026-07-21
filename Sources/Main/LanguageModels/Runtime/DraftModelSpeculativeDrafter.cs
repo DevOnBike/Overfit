@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -65,7 +65,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 // append every committed token from the last synced point.
                 ApplyTail(_syncedLen, committedThisStep, 0);
             }
-            else
+
+            if (!(_draftBase < 0))
             {
                 // The draft fed [seed, d0, d1, …]; committedThisStep = [seed, d0..d(a-1), correction].
                 // The accepted drafts already sit in the draft KV, so keep [base, base + keep) and re-feed

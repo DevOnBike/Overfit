@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -85,16 +85,10 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
         /// </summary>
         internal string Transcribe(ReadOnlySpan<float> samples, string language, int maxNewTokens, bool padToFullWindow)
         {
-            int windowLen;
-            if (padToFullWindow)
-            {
-                windowLen = SamplesPerWindow;
-            }
-            else
-            {
-                var present = Math.Min(samples.Length, SamplesPerWindow);
-                windowLen = Math.Min(SamplesPerWindow, Math.Max(present + TrailingSamples, MinSamples));
-            }
+            var present = Math.Min(samples.Length, SamplesPerWindow);
+            var windowLen = padToFullWindow
+                ? SamplesPerWindow
+                : Math.Min(SamplesPerWindow, Math.Max(present + TrailingSamples, MinSamples));
 
             // The 30 s buffer is reused across calls; we only clear + fill (and run the mel/encoder over) the
             // first windowLen samples — the rest is left untouched and never read.

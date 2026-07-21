@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -196,12 +196,17 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
         private void AppendToken(int token)
         {
-            if (_contextLength < MaxContextLength)
+            // Capture BEFORE the append increments _contextLength: a second test on the updated value
+            // would ALSO take the shift path on the very last free slot, writing the token twice.
+            var hasRoom = _contextLength < MaxContextLength;
+
+            if (hasRoom)
             {
                 _contextTokens[_contextLength] = token;
                 _contextLength++;
             }
-            else
+
+            if (!hasRoom)
             {
                 // Overlapping in-place left-shift — Span.CopyTo has memmove semantics.
                 _contextTokens.AsSpan(1, MaxContextLength - 1)

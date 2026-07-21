@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -336,7 +336,9 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                 // Q4_K-native / Q8_0-native / F32-fallback independently from
                 // its file format. Wo dispatches separately (Q8_0 OK per-head;
                 // K-quant not — headDim < the 256-element super-block).
-                DecodeWeight[] wq, wk, wv;
+                // The fusedQkv / !fusedQkv pair below is exhaustive, but the compiler cannot prove that
+                // across two separate ifs, and loading eagerly is not an option (each path reads tensors).
+                DecodeWeight[] wq = null!, wk = null!, wv = null!;
                 if (fusedQkv)
                 {
                     // Phi-3: one fused attn_qkv [out=(nHeads+2·nKvHeads)·headDim, in=dModel], output-major
@@ -350,7 +352,8 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                     wk = SplitKeyValue(qkvFused.Span.Slice(qElems, kvElems), nKvHeads, dModel, headDim, attnQuantizable);
                     wv = SplitKeyValue(qkvFused.Span.Slice(qElems + kvElems, kvElems), nKvHeads, dModel, headDim, attnQuantizable);
                 }
-                else
+
+                if (!(fusedQkv))
                 {
                     wq = LoadQkvHeads(reader, $"blk.{l}.attn_q.weight", nHeads, dModel, headDim, qFull.Span, attnQuantizable, mmap);
                     wk = LoadQkvHeads(reader, $"blk.{l}.attn_k.weight", nKvHeads, dModel, headDim, kFull.Span, attnQuantizable, mmap);
@@ -390,7 +393,14 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                 DecodeWeight[]? moeGate = null, moeUp = null, moeDown = null;
                 DecodeWeight moeShGate = default, moeShUp = default, moeShDown = default;
 
-                if (isMoe)
+                // One classification instead of an if/else-if ladder: the bodies each load tensors, so
+                // exactly one must run. 0 = MoE, 1 = fused gate_up (Phi-3), 2 = Q8-resident, 3 = F32.
+                var ffnKind = isMoe ? 0
+                    : fusedGateUp ? 1
+                    : quantize && dModel % Q8DotKernel.BlockSize == 0 && dFF % Q8DotKernel.BlockSize == 0 ? 2
+                    : 3;
+
+                if (ffnKind == 0)
                 {
                     // Router + routed experts (3-D tensors). Qwen-MoE additionally has a
                     // sigmoid-gated shared expert; Mixtral does not (hasSharedExpert == false).
@@ -401,7 +411,8 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                         moeUp = LoadExperts(reader, reader.Tensors[$"blk.{l}.ffn_up_exps.weight"]);
                         moeDown = LoadExperts(reader, reader.Tensors[$"blk.{l}.ffn_down_exps.weight"]);
                     }
-                    else
+
+                    if (!(mergedExperts))
                     {
                         // Older Mixtral: one 2-D weight per expert, loaded with the same resident
                         // dispatch as a dense FFN (Q4_K verbatim/mmap, Q5/Q6/Q8/F32).
@@ -417,7 +428,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                         moeSharedGateInp = LoadF32Vector(reader, $"blk.{l}.ffn_gate_inp_shexp.weight", dModel);
                     }
                 }
-                else if (fusedGateUp)
+                if (ffnKind == 1)
                 {
                     // Phi-3: one fused ffn_up [out=2·dFF, in=dModel], output-major = [gate rows | up rows]
                     // (HF gate_up_proj → chunk(2): first half gate, second half up). Dequant, slice the two
@@ -428,13 +439,13 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                     ffnUp = Q8Weight.QuantizeRows(gateUpFused.Span.Slice(half, half), dFF, dModel);
                     ffnDown = AllocAndLoadResident(reader, $"blk.{l}.ffn_down.weight", dFF, dModel, mmap);
                 }
-                else if (quantize && dModel % Q8DotKernel.BlockSize == 0 && dFF % Q8DotKernel.BlockSize == 0)
+                if (ffnKind == 2)
                 {
                     ffnGate = AllocAndLoadResident(reader, $"blk.{l}.ffn_gate.weight", dModel, dFF, mmap, repacked);
                     ffnUp = AllocAndLoadResident(reader, $"blk.{l}.ffn_up.weight", dModel, dFF, mmap, repacked);
                     ffnDown = AllocAndLoadResident(reader, $"blk.{l}.ffn_down.weight", dFF, dModel, mmap, repacked);
                 }
-                else
+                if (ffnKind == 3)
                 {
                     ffnGate = AllocAndLoadTransposed(reader, $"blk.{l}.ffn_gate.weight", dModel, dFF);
                     ffnUp = AllocAndLoadTransposed(reader, $"blk.{l}.ffn_up.weight", dModel, dFF);
@@ -487,32 +498,39 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             // tied → token_embd; untied → output.weight. When quantization is
             // disabled, or dModel is not a multiple of the Q8 block size, fall
             // back to an F32 transposed LM head (the kernel's input-major layout).
-            DecodeWeight lmHead;
+            // Exhaustive across the quantized / F32-fallback pair below; see the note on wq/wk/wv.
+            DecodeWeight lmHead = default;
             if (quantize && dModel % Q8DotKernel.BlockSize == 0)
             {
                 var lmHeadInfo = reader.Tensors[tieWeights ? "token_embd.weight" : "output.weight"];
-                if (lmHeadInfo.Type == GgmlType.Q4_K && dModel % Q4KWeight.SuperBlockElements == 0)
+                var headKind = lmHeadInfo.Type == GgmlType.Q4_K && dModel % Q4KWeight.SuperBlockElements == 0 ? 0
+                    : lmHeadInfo.Type == GgmlType.Q6_K && dModel % Q6KWeight.SuperBlockElements == 0 ? 1
+                    : lmHeadInfo.Type == GgmlType.Q8_0 ? 2
+                    : tieWeights ? 3
+                    : 4;
+
+                if (headKind == 0)
                 {
                     // Native Q4_K — read the file's blocks straight in (step 3.2b).
                     lmHead = LoadQ4KNative(reader, lmHeadInfo, dModel, vocab, mmap, repacked);
                 }
-                else if (lmHeadInfo.Type == GgmlType.Q6_K && dModel % Q6KWeight.SuperBlockElements == 0)
+                if (headKind == 1)
                 {
                     // Native Q6_K — read the file's blocks straight in (step 3.3c).
                     lmHead = LoadQ6KNative(reader, lmHeadInfo, dModel, vocab, mmap);
                 }
-                else if (lmHeadInfo.Type == GgmlType.Q8_0)
+                if (headKind == 2)
                 {
                     // Native Q8_0 — read the file's blocks straight in (step 2.4).
                     lmHead = LoadQ8Native(reader, lmHeadInfo, dModel, vocab);
                 }
-                else if (tieWeights)
+                if (headKind == 3)
                 {
                     // Reached only when token_embd is F16/F32/BF16 (the K-quant/Q8 cases are
                     // caught above), so the embedding is F32-backed here — .F32 is valid.
                     lmHead = Q8Weight.QuantizeRows(embedWeights.F32, vocab, dModel);
                 }
-                else
+                if (headKind == 4)
                 {
                     var outElems = checked((int)((long)vocab * dModel));
                     using var outputRaw = new PooledBuffer<float>(outElems, clearMemory: false);
@@ -520,7 +538,8 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                     lmHead = Q8Weight.QuantizeRows(outputRaw.Span, vocab, dModel);
                 }
             }
-            else
+
+            if (!(quantize && dModel % Q8DotKernel.BlockSize == 0))
             {
                 // F32 fallback — transpose [vocab, dModel] → [dModel, vocab].
                 var f32LmHead = TensorStorage<float>.Unpooled(checked((int)((long)vocab * dModel)));
@@ -537,7 +556,8 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                         }
                     }
                 }
-                else
+
+                if (!(tieWeights))
                 {
                     var outElems = checked((int)((long)vocab * dModel));
                     using var outputRaw = new PooledBuffer<float>(outElems, clearMemory: false);
@@ -656,7 +676,8 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                         {
                             reader.LoadTensorQ4_KRaw(info, whole.Span);
                         }
-                        else
+
+                        if (!(info.Type == GgmlType.Q4_K))
                         {
                             reader.LoadTensorQ6_KRaw(info, whole.Span);
                         }
@@ -952,22 +973,24 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             var blocksPerRow = inDim / Q4KWeight.SuperBlockElements;
             var totalBytes = checked((int)((long)outDim * blocksPerRow * Q4KWeight.SuperBlockBytes));
 
-            Q4KWeight weight;
-            if (mmap is not null)
-            {
-                // Zero-copy: the file's block bytes ARE Q4KWeight's layout, verbatim.
-                var slice = mmap.Slice(reader.DataStart + (long)info.Offset, totalBytes);
-                weight = new Q4KWeight(slice, inDim, outDim);
-            }
-            else
-            {
-                var bytes = new byte[totalBytes];
-                reader.LoadTensorQ4_KRaw(info, bytes);
-                weight = new Q4KWeight(bytes, inDim, outDim);
-            }
+            // Zero-copy when mmapped (the file's block bytes ARE Q4KWeight's layout, verbatim); otherwise
+            // read into a heap buffer. A ternary keeps `weight` definitely assigned without an else.
+            var weight = mmap is not null
+                ? new Q4KWeight(mmap.Slice(reader.DataStart + (long)info.Offset, totalBytes), inDim, outDim)
+                : LoadQ4KRawCopy(reader, info, totalBytes, inDim, outDim);
 
             AttachPrepacked(weight, info.Name, repacked);
             return weight;
+        }
+
+        /// <summary>Non-mmap fallback for <see cref="LoadQ4KNative"/>: read the raw Q4_K bytes into a heap
+        /// buffer. Split out only so the caller can stay a single definitely-assigned expression.</summary>
+        private static Q4KWeight LoadQ4KRawCopy(
+            GgufReader reader, GgufTensorInfo info, int totalBytes, int inDim, int outDim)
+        {
+            var bytes = new byte[totalBytes];
+            reader.LoadTensorQ4_KRaw(info, bytes);
+            return new Q4KWeight(bytes, inDim, outDim);
         }
 
         // Attaches the offline-repacked (block_q4_Kx8) mmap slice for this tensor when a sidecar carries it, so
@@ -1270,11 +1293,14 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
 
         private static void LoadTensorOrZeros(GgufReader reader, string name, Span<float> dst)
         {
-            if (reader.Tensors.TryGetValue(name, out var info))
+            var found = reader.Tensors.TryGetValue(name, out var info);
+
+            if (found)
             {
                 reader.LoadTensorAsF32(info, dst);
             }
-            else
+
+            if (!found)
             {
                 dst.Clear();
             }
@@ -1300,7 +1326,8 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                     wq[h] = Q8Weight.QuantizeRows(
                         qFull.Slice(h * headDim * dModel, headDim * dModel), headDim, dModel);
                 }
-                else
+
+                if (!(quantize))
                 {
                     var storage = TensorStorage<float>.Unpooled(checked((int)((long)dModel * headDim)));
                     var dst = storage.AsSpan();
@@ -1329,7 +1356,8 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                     wkv[kv] = Q8Weight.QuantizeRows(
                         kvFull.Slice(kv * headDim * dModel, headDim * dModel), headDim, dModel);
                 }
-                else
+
+                if (!(quantize))
                 {
                     var storage = TensorStorage<float>.Unpooled(checked((int)((long)dModel * headDim)));
                     var dst = storage.AsSpan();
@@ -1375,7 +1403,8 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                     }
                     wo[h] = Q8Weight.QuantizeRows(gather.Span, dModel, headDim);
                 }
-                else
+
+                if (!(quantize))
                 {
                     var storage = TensorStorage<float>.Unpooled(checked((int)((long)headDim * dModel)));
                     var dst = storage.AsSpan();

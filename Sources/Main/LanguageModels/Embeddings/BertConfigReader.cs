@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -63,38 +63,52 @@ namespace DevOnBike.Overfit.LanguageModels.Embeddings
                 {
                     reader.Read();
                     hidden = reader.GetInt32();
+                    continue;
                 }
-                else if (reader.ValueTextEquals("num_hidden_layers"))
+
+                if (reader.ValueTextEquals("num_hidden_layers"))
                 {
                     reader.Read();
                     layers = reader.GetInt32();
+                    continue;
                 }
-                else if (reader.ValueTextEquals("num_attention_heads"))
+
+                if (reader.ValueTextEquals("num_attention_heads"))
                 {
                     reader.Read();
                     heads = reader.GetInt32();
+                    continue;
                 }
-                else if (reader.ValueTextEquals("intermediate_size"))
+
+                if (reader.ValueTextEquals("intermediate_size"))
                 {
                     reader.Read();
                     ffn = reader.GetInt32();
+                    continue;
                 }
-                else if (reader.ValueTextEquals("max_position_embeddings"))
+
+                if (reader.ValueTextEquals("max_position_embeddings"))
                 {
                     reader.Read();
                     maxPos = reader.GetInt32();
+                    continue;
                 }
-                else if (reader.ValueTextEquals("vocab_size"))
+
+                if (reader.ValueTextEquals("vocab_size"))
                 {
                     reader.Read();
                     vocab = reader.GetInt32();
+                    continue;
                 }
-                else if (reader.ValueTextEquals("type_vocab_size"))
+
+                if (reader.ValueTextEquals("type_vocab_size"))
                 {
                     reader.Read();
                     typeVocab = reader.GetInt32();
+                    continue;
                 }
-                else if (reader.ValueTextEquals("layer_norm_eps"))
+
+                if (reader.ValueTextEquals("layer_norm_eps"))
                 {
                     reader.Read();
                     eps = (float)reader.GetDouble();

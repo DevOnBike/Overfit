@@ -520,7 +520,8 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
                     wBase.Dispose();
                 }
             }
-            else
+
+            if (!(_quantizeBase))
             {
                 adapter.WBaseNode = wBase.AsNode();
                 adapter.Provider = graph => BuildEffectiveWeight(graph, adapter);
@@ -573,7 +574,8 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
                         {
                             _model.LMHeadOutputProvider = adapter.OutputProvider;
                         }
-                        else
+
+                        if (!(adapter.OutputProvider is not null))
                         {
                             _model.LMHeadWeightProvider = adapter.Provider;
                         }
@@ -585,7 +587,8 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
                         {
                             _model.Blocks[adapter.Layer].FFN.W1OutputProvider = adapter.OutputProvider;
                         }
-                        else
+
+                        if (!(adapter.OutputProvider is not null))
                         {
                             _model.Blocks[adapter.Layer].FFN.W1WeightProvider = adapter.Provider;
                         }
@@ -597,7 +600,8 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
                         {
                             _model.Blocks[adapter.Layer].FFN.W2OutputProvider = adapter.OutputProvider;
                         }
-                        else
+
+                        if (!(adapter.OutputProvider is not null))
                         {
                             _model.Blocks[adapter.Layer].FFN.W2WeightProvider = adapter.Provider;
                         }
@@ -611,7 +615,8 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
                             {
                                 attn.SetQueryOutputProvider(adapter.HeadIndex, adapter.OutputProvider);
                             }
-                            else
+
+                            if (!(adapter.OutputProvider is not null))
                             {
                                 attn.SetQueryProvider(adapter.HeadIndex, adapter.Provider);
                             }
@@ -625,7 +630,8 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
                             {
                                 attn.SetKeyOutputProvider(adapter.HeadIndex, adapter.OutputProvider);
                             }
-                            else
+
+                            if (!(adapter.OutputProvider is not null))
                             {
                                 attn.SetKeyProvider(adapter.HeadIndex, adapter.Provider);
                             }
@@ -639,7 +645,8 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
                             {
                                 attn.SetValueOutputProvider(adapter.HeadIndex, adapter.OutputProvider);
                             }
-                            else
+
+                            if (!(adapter.OutputProvider is not null))
                             {
                                 attn.SetValueProvider(adapter.HeadIndex, adapter.Provider);
                             }
@@ -653,7 +660,8 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
                             {
                                 attn.SetOutputOutputProvider(adapter.HeadIndex, adapter.OutputProvider);
                             }
-                            else
+
+                            if (!(adapter.OutputProvider is not null))
                             {
                                 attn.SetOutputProvider(adapter.HeadIndex, adapter.Provider);
                             }
@@ -675,7 +683,8 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
                             _model.LMHeadOutputProvider = null;
                         }
                     }
-                    else if (ReferenceEquals(_model.LMHeadWeightProvider, adapter.Provider))
+
+                    if (adapter.OutputProvider is null && ReferenceEquals(_model.LMHeadWeightProvider, adapter.Provider))
                     {
                         _model.LMHeadWeightProvider = null;
                     }
@@ -692,7 +701,8 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
                                 ffn.W1OutputProvider = null;
                             }
                         }
-                        else if (ReferenceEquals(ffn.W1WeightProvider, adapter.Provider))
+
+                        if (adapter.OutputProvider is null && ReferenceEquals(ffn.W1WeightProvider, adapter.Provider))
                         {
                             ffn.W1WeightProvider = null;
                         }
@@ -710,7 +720,8 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
                                 ffn.W2OutputProvider = null;
                             }
                         }
-                        else if (ReferenceEquals(ffn.W2WeightProvider, adapter.Provider))
+
+                        if (adapter.OutputProvider is null && ReferenceEquals(ffn.W2WeightProvider, adapter.Provider))
                         {
                             ffn.W2WeightProvider = null;
                         }
@@ -728,7 +739,8 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
                                 attn.SetQueryOutputProvider(adapter.HeadIndex, null);
                             }
                         }
-                        else if (ReferenceEquals(attn.GetQueryProvider(adapter.HeadIndex), adapter.Provider))
+
+                        if (adapter.OutputProvider is null && ReferenceEquals(attn.GetQueryProvider(adapter.HeadIndex), adapter.Provider))
                         {
                             attn.SetQueryProvider(adapter.HeadIndex, null);
                         }
@@ -746,7 +758,8 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
                                 attn.SetKeyOutputProvider(adapter.HeadIndex, null);
                             }
                         }
-                        else if (ReferenceEquals(attn.GetKeyProvider(adapter.HeadIndex), adapter.Provider))
+
+                        if (adapter.OutputProvider is null && ReferenceEquals(attn.GetKeyProvider(adapter.HeadIndex), adapter.Provider))
                         {
                             attn.SetKeyProvider(adapter.HeadIndex, null);
                         }
@@ -764,7 +777,8 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
                                 attn.SetValueOutputProvider(adapter.HeadIndex, null);
                             }
                         }
-                        else if (ReferenceEquals(attn.GetValueProvider(adapter.HeadIndex), adapter.Provider))
+
+                        if (adapter.OutputProvider is null && ReferenceEquals(attn.GetValueProvider(adapter.HeadIndex), adapter.Provider))
                         {
                             attn.SetValueProvider(adapter.HeadIndex, null);
                         }
@@ -782,7 +796,8 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
                                 attn.SetOutputOutputProvider(adapter.HeadIndex, null);
                             }
                         }
-                        else if (ReferenceEquals(attn.GetOutputProvider(adapter.HeadIndex), adapter.Provider))
+
+                        if (adapter.OutputProvider is null && ReferenceEquals(attn.GetOutputProvider(adapter.HeadIndex), adapter.Provider))
                         {
                             attn.SetOutputProvider(adapter.HeadIndex, null);
                         }

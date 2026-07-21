@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -62,14 +62,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             for (var d = 0; d < n; d++)
             {
                 var q = MathF.Round(src[d] * inv);
-                if (q > 127f)
-                {
-                    q = 127f;
-                }
-                else if (q < -127f)
-                {
-                    q = -127f;
-                }
+                q = Math.Clamp(q, -127f, 127f);
                 dst[d] = (sbyte)q;
             }
             return scale;

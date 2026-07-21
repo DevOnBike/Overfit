@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -463,8 +463,10 @@ namespace DevOnBike.Overfit.Cli
             // via /proc/<pid>/environ, inherited by child processes, or dumped from the env later.
             Environment.SetEnvironmentVariable(keyEnv, null);
 
-            Redactor redactor;
-            RedactionPolicy policy;
+            // The config / built-in pair below is exhaustive, but the compiler cannot prove that across two
+            // separate ifs; the null! initialisers only state the invariant.
+            Redactor redactor = null!;
+            RedactionPolicy policy = null!;
             string? configUpstream = null;
             IReadOnlyList<string> configClientKeys = [];
             var configScanResponses = false;
@@ -487,7 +489,8 @@ namespace DevOnBike.Overfit.Cli
                 }
                 Console.WriteLine($"config: {Path.GetFullPath(configPath)}");
             }
-            else
+
+            if (!(!string.IsNullOrEmpty(configPath)))
             {
                 // Built-in: international + Polish (checksum-validated PESEL/NIP/REGON/IBAN) detectors, default policy.
                 var intl = DefaultRedactionRules.All();
@@ -524,7 +527,8 @@ namespace DevOnBike.Overfit.Cli
             {
                 Console.WriteLine($"client auth: ON ({clientKeys.Count} gateway key(s)) — callers must send 'Authorization: Bearer <key>'");
             }
-            else
+
+            if (!(clientKeys.Count > 0))
             {
                 Console.WriteLine($"client auth: OFF — set ${clientKeysEnv} (or \"clientKeys\" in --config) before exposing the gateway.");
             }
@@ -640,7 +644,8 @@ namespace DevOnBike.Overfit.Cli
                     model.PredictRawMargins(rows[r], outputs.AsSpan(r * groups, groups));
                 }
             }
-            else
+
+            if (!(margin))
             {
                 model.PredictBatchParallel(flat, rows.Count, outputs);
             }
@@ -652,7 +657,8 @@ namespace DevOnBike.Overfit.Cli
                 {
                     Console.Out.WriteLine(text);
                 }
-                else
+
+                if (!(writer is null))
                 {
                     writer.WriteLine(text);
                 }
