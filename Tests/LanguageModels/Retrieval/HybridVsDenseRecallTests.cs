@@ -28,7 +28,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Retrieval
     /// corpus of pure prose with no identifiers, expect hybrid to gain nothing.</para>
     ///
     /// <para><b>MEASURED RESULT (2026-07-21, MiniLM, 18 chunks, recall@5) — hybrid was a NET REGRESSION here,
-    /// which is why <c>McpRagIndex</c> was NOT switched over to it:</b></para>
+    /// which is why <c>McpRagIndex</c> was initially NOT switched over to it:</b></para>
     /// <code>
     /// group         dense R@K  hybrid R@K  dense MRR  hybrid MRR
     /// semantic           1.00        0.80      0.900       0.700   &lt;- regression
@@ -47,8 +47,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Retrieval
     ///
     /// <para><b>That prediction was then confirmed and this result superseded.</b>
     /// <see cref="HybridVsDenseOnDocsCorpusTests"/> re-ran the same comparison on a real 481-chunk corpus and
-    /// hybrid won everywhere — recall@5 0.61 → 0.89, MRR 0.500 → 0.736, including the semantic group. So the
-    /// regression measured here was an artefact of an 18-chunk corpus, not a property of hybrid retrieval.
+    /// hybrid won everywhere — recall@5 0.61 → 0.94, MRR 0.500 → 0.775, including the semantic group, and
+    /// <c>McpRagIndex</c> was switched over on that evidence. So the regression measured here was an artefact
+    /// of an 18-chunk corpus, not a property of hybrid retrieval.
     /// <b>Keep this test as the small-corpus caveat</b> (hybrid genuinely can hurt when the corpus is tiny),
     /// but do not treat it as evidence about the technique.</para>
     /// </summary>
@@ -112,7 +113,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Retrieval
             new("who is allowed to drive the vehicles", "drivers"),
         ];
 
-        [LocalOnlyFact]
+        [LongFact]
         public void Hybrid_VsDense_RecallByQueryKind()
         {
             if (!File.Exists(TestModelPaths.MiniLm.SafetensorsPath))

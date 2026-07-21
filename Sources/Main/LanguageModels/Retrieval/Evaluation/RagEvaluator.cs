@@ -48,13 +48,16 @@ namespace DevOnBike.Overfit.LanguageModels.Retrieval.Evaluation
         ///
         /// <para><see cref="EvaluateFalsePremise"/> is <b>not</b> available on this path — see its remarks.</para>
         /// </summary>
-        public static RagEvaluator ForHybrid(HybridRetriever retriever, Func<string, float[]> embedQuery)
+        public static RagEvaluator ForHybrid(
+            HybridRetriever retriever,
+            Func<string, float[]> embedQuery,
+            float fusionK = HybridRetriever.DefaultFusionK)
         {
             ArgumentNullException.ThrowIfNull(retriever);
             ArgumentNullException.ThrowIfNull(embedQuery);
 
             return new RagEvaluator(
-                (query, topK) => retriever.Search(embedQuery(query), query, topK),
+                (query, topK) => retriever.Search(embedQuery(query), query, topK, candidatesPerArm: 0, fusionK),
                 scoresAreCosineSimilarity: false);
         }
 

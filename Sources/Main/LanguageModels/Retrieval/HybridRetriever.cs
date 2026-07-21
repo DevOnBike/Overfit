@@ -22,6 +22,22 @@ namespace DevOnBike.Overfit.LanguageModels.Retrieval
     /// </summary>
     public sealed class HybridRetriever
     {
+        /// <summary>
+        /// RRF damping used when fusing these two arms. Deliberately far below
+        /// <see cref="ReciprocalRankFusion.DefaultK"/> (60), which is the constant from the original paper —
+        /// tuned there for fusing <i>many</i> retrieval systems over deep result lists, where broad agreement
+        /// really is the best available evidence. Fusing exactly <b>two</b> arms is a different problem: with
+        /// only two votes, "both arms ranked it mid-list" is weak evidence, and it should not outrank "one arm
+        /// is certain" — which is what a unique identifier looks like.
+        ///
+        /// <para>Measured on this repository's <c>docs/</c> corpus (481 chunks, MiniLM, recall@5): recall is
+        /// flat at 0.94 for k in [0.5, 5] and drops to 0.89 from k=10 upward, while MRR peaks at k=5 (0.775 vs
+        /// 0.736 at k=60). Identifier recall specifically goes 0.83 → 1.00. See
+        /// <c>HybridVsDenseOnDocsCorpusTests.Fusion_KSweep_OnRealDocsCorpus</c>, which prints the whole curve
+        /// so this value can be re-derived on any corpus rather than trusted.</para>
+        /// </summary>
+        public const float DefaultFusionK = 5f;
+
         private readonly VectorStore _vectors;
         private readonly Bm25Index _lexical;
 
@@ -75,12 +91,20 @@ namespace DevOnBike.Overfit.LanguageModels.Retrieval
         /// <c>topK</c>, a document ranked just outside both lists can never be promoted by agreement, which
         /// is the effect hybrid retrieval exists to capture. Deeper costs almost nothing here because both
         /// arms already scan the corpus; only the merge grows.</para>
+        ///
+        /// <para><paramref name="fusionK"/> is the RRF damping constant (see
+        /// <see cref="ReciprocalRankFusion.DefaultK"/>), exposed because it is the knob that decides whether
+        /// <b>one confident arm can outvote agreement between two lukewarm ones</b>. Large k flattens the top
+        /// of each list, so a document found by both arms wins; small k sharpens rank 1, so a unique
+        /// identifier found by the lexical arm alone can win. Neither is universally right — measure it on
+        /// your corpus.</para>
         /// </summary>
         public VectorMatch[] Search(
             ReadOnlySpan<float> queryVector,
             string queryText,
             int topK,
-            int candidatesPerArm = 0)
+            int candidatesPerArm = 0,
+            float fusionK = DefaultFusionK)
         {
             ArgumentNullException.ThrowIfNull(queryText);
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(topK);
@@ -101,7 +125,7 @@ namespace DevOnBike.Overfit.LanguageModels.Retrieval
 
             var results = new VectorMatch[Math.Min(topK, Count)];
             var written = ReciprocalRankFusion.Fuse(
-                dense.AsSpan(0, denseCount), lexical.AsSpan(0, lexicalCount), results);
+                dense.AsSpan(0, denseCount), lexical.AsSpan(0, lexicalCount), results, fusionK);
 
             return written == results.Length ? results : results[..written];
         }

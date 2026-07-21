@@ -34,11 +34,15 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Retrieval
     /// <c>McpRagIndex</c> onto hybrid retrieval:</b></para>
     /// <code>
     /// group         dense R@K  hybrid R@K  dense MRR  hybrid MRR
-    /// semantic           0.67        0.83      0.417       0.542
-    /// identifier         0.33        0.83      0.333       0.667
+    /// semantic           0.67        0.83      0.417       0.625
+    /// identifier         0.33        1.00      0.333       0.700
     /// mixed              0.83        1.00      0.750       1.000
-    /// OVERALL            0.61        0.89      0.500       0.736
+    /// OVERALL            0.61        0.94      0.500       0.775
     /// </code>
+    ///
+    /// <para>Those hybrid figures are at the final settings. The first run measured 0.89 / 0.736, and the gap
+    /// between the two is the subject of the notes below — it took BOTH a tokenisation fix and a fusion-constant
+    /// change, neither of which does anything without the other.</para>
     ///
     /// <para>Hybrid won every group — including the semantic one, which the small-corpus run had shown it
     /// damaging. Two cases still fail and both are informative rather than mysterious:</para>
@@ -103,47 +107,19 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Retrieval
             new("mixed", "how do I evaluate prompts locally for free?", "skill-eval.md"),
         ];
 
-        [LocalOnlyFact]
+        [LongFact]
         public void Hybrid_VsDense_OnRealDocsCorpus()
         {
-            if (!File.Exists(TestModelPaths.MiniLm.SafetensorsPath))
+            var indexed = BuildIndex();
+            if (indexed is null)
             {
-                _out.WriteLine($"missing MiniLM fixture at {TestModelPaths.MiniLm.Dir}");
                 return;
             }
 
-            var docsDirectory = FindDocsDirectory();
-            if (docsDirectory is null)
-            {
-                _out.WriteLine("could not locate the repository docs/ folder from the test output directory");
-                return;
-            }
+            var (embedder, hybrid, chunkIdsByFile, fileCount) = indexed.Value;
+            using var _ = embedder;
 
-            using var embedder = SentenceEmbedder.ForMiniLm(TestModelPaths.MiniLm.Dir);
-
-            var hybrid = new HybridRetriever(embedder.Dimension, 512);
-            var chunkIdsByFile = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
-
-            var files = Directory.GetFiles(docsDirectory, "*.md", SearchOption.AllDirectories);
-            Array.Sort(files, StringComparer.OrdinalIgnoreCase);
-
-            foreach (var file in files)
-            {
-                var name = Path.GetFileName(file);
-                var chunks = ChunkParagraphs(File.ReadAllText(file));
-                var ids = new List<string>();
-
-                for (var i = 0; i < chunks.Count; i++)
-                {
-                    var id = $"{name}#{i + 1}";
-                    hybrid.Add(id, embedder.Embed(chunks[i]), chunks[i]);
-                    ids.Add(id);
-                }
-
-                chunkIdsByFile[name] = ids;
-            }
-
-            _out.WriteLine($"=== Hybrid vs dense on docs/ — {files.Length} files, {hybrid.Count} chunks, MiniLM ===");
+            _out.WriteLine($"=== Hybrid vs dense on docs/ — {fileCount} files, {hybrid.Count} chunks, MiniLM ===");
 
             var denseEvaluator = new RagEvaluator(hybrid.Vectors, embedder.EmbedQuery);
             var hybridEvaluator = RagEvaluator.ForHybrid(hybrid, embedder);
@@ -215,6 +191,114 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Retrieval
                 hybridIdentifier.MeanReciprocalRank >= denseIdentifier.MeanReciprocalRank,
                 $"hybrid identifier MRR {hybridIdentifier.MeanReciprocalRank:F3} fell below dense "
                 + $"{denseIdentifier.MeanReciprocalRank:F3}");
+        }
+
+        /// <summary>
+        /// Sweeps the RRF damping constant on the same corpus and the same cases. This is the follow-on the
+        /// identifier-tokenisation measurement pointed at: the joined-identifier token moved
+        /// <c>docker.md</c> to lexical rank 1 yet changed no end-to-end metric, because at k=60 a document
+        /// found by ONE arm at rank 1 (1/61 ≈ 0.016) loses to a document found by BOTH arms at ranks 5 and 3
+        /// (1/65 + 1/63 ≈ 0.031). k is exactly the knob that sets that balance.
+        /// </summary>
+        [LongFact]
+        public void Fusion_KSweep_OnRealDocsCorpus()
+        {
+            var indexed = BuildIndex();
+            if (indexed is null)
+            {
+                return;
+            }
+
+            var (embedder, hybrid, chunkIdsByFile, _) = indexed.Value;
+            using var disposable = embedder;
+
+            const int TopK = 5;
+            var semantic = ToRetrievalCases(Semantic, chunkIdsByFile);
+            var identifier = ToRetrievalCases(Identifier, chunkIdsByFile);
+            var mixed = ToRetrievalCases(Mixed, chunkIdsByFile);
+            var all = new List<RetrievalCase>();
+            all.AddRange(semantic);
+            all.AddRange(identifier);
+            all.AddRange(mixed);
+
+            var dense = new RagEvaluator(hybrid.Vectors, embedder.EmbedQuery);
+            var denseAll = dense.EvaluateRetrieval(all, TopK);
+
+            _out.WriteLine($"=== RRF damping sweep on docs/ — {hybrid.Count} chunks, recall@{TopK} ===");
+            _out.WriteLine($"  {"k",6} {"sem R",7} {"ident R",8} {"mixed R",8} {"ALL R",7} {"ALL MRR",8}");
+            _out.WriteLine(
+                $"  {"dense",6} {dense.EvaluateRetrieval(semantic, TopK).RecallAtK,7:F2} "
+                + $"{dense.EvaluateRetrieval(identifier, TopK).RecallAtK,8:F2} "
+                + $"{dense.EvaluateRetrieval(mixed, TopK).RecallAtK,8:F2} "
+                + $"{denseAll.RecallAtK,7:F2} {denseAll.MeanReciprocalRank,8:F3}");
+
+            foreach (var k in new[] { 0.5f, 1f, 2f, 5f, 10f, 20f, 40f, 60f, 100f })
+            {
+                var evaluator = RagEvaluator.ForHybrid(hybrid, embedder.EmbedQuery, k);
+                var allReport = evaluator.EvaluateRetrieval(all, TopK);
+
+                _out.WriteLine(
+                    $"  {k,6:F1} {evaluator.EvaluateRetrieval(semantic, TopK).RecallAtK,7:F2} "
+                    + $"{evaluator.EvaluateRetrieval(identifier, TopK).RecallAtK,8:F2} "
+                    + $"{evaluator.EvaluateRetrieval(mixed, TopK).RecallAtK,8:F2} "
+                    + $"{allReport.RecallAtK,7:F2} {allReport.MeanReciprocalRank,8:F3}");
+            }
+
+            _out.WriteLine(string.Empty);
+            _out.WriteLine("  NOTE: 18 hand-written cases. Reading the argmax off this curve would be fitting k");
+            _out.WriteLine("  to my own question list, not to the retriever. Prefer a value on a flat stretch.");
+
+            // The default must remain a defensible choice, not silently the worst one on the curve.
+            var atDefault = RagEvaluator
+                .ForHybrid(hybrid, embedder.EmbedQuery, HybridRetriever.DefaultFusionK)
+                .EvaluateRetrieval(all, TopK);
+
+            Assert.True(
+                atDefault.RecallAtK >= denseAll.RecallAtK,
+                $"hybrid at the default k fell below dense ({atDefault.RecallAtK:F2} < {denseAll.RecallAtK:F2})");
+        }
+
+        // Embeds docs/ once. Returns null (with a written reason) when the fixture or the folder is missing.
+        private (SentenceEmbedder Embedder, HybridRetriever Hybrid,
+                 Dictionary<string, List<string>> ChunkIdsByFile, int FileCount)? BuildIndex()
+        {
+            if (!File.Exists(TestModelPaths.MiniLm.SafetensorsPath))
+            {
+                _out.WriteLine($"missing MiniLM fixture at {TestModelPaths.MiniLm.Dir}");
+                return null;
+            }
+
+            var docsDirectory = FindDocsDirectory();
+            if (docsDirectory is null)
+            {
+                _out.WriteLine("could not locate the repository docs/ folder from the test output directory");
+                return null;
+            }
+
+            var embedder = SentenceEmbedder.ForMiniLm(TestModelPaths.MiniLm.Dir);
+            var hybrid = new HybridRetriever(embedder.Dimension, 512);
+            var chunkIdsByFile = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+
+            var files = Directory.GetFiles(docsDirectory, "*.md", SearchOption.AllDirectories);
+            Array.Sort(files, StringComparer.OrdinalIgnoreCase);
+
+            foreach (var file in files)
+            {
+                var name = Path.GetFileName(file);
+                var chunks = ChunkParagraphs(File.ReadAllText(file));
+                var ids = new List<string>();
+
+                for (var i = 0; i < chunks.Count; i++)
+                {
+                    var id = $"{name}#{i + 1}";
+                    hybrid.Add(id, embedder.Embed(chunks[i]), chunks[i]);
+                    ids.Add(id);
+                }
+
+                chunkIdsByFile[name] = ids;
+            }
+
+            return (embedder, hybrid, chunkIdsByFile, files.Length);
         }
 
         private static List<RetrievalCase> ToRetrievalCases(

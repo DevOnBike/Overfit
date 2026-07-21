@@ -19,7 +19,7 @@ namespace DevOnBike.Overfit.Mcp
     ///
     /// <para>Retrieval is <b>hybrid</b> (<see cref="HybridRetriever"/>): semantic search over the embeddings
     /// fused with BM25 over the chunk text. Measured on this repository's own <c>docs/</c> folder (481 chunks,
-    /// MiniLM, recall@5) that lifted recall from <b>0.61 to 0.89</b> and MRR from <b>0.500 to 0.736</b> —
+    /// MiniLM, recall@5) that lifted recall from <b>0.61 to 0.94</b> and MRR from <b>0.500 to 0.775</b> —
     /// see <c>HybridVsDenseOnDocsCorpusTests</c>. Local document sets are full of literal tokens (file names,
     /// env vars, error codes, API names) that embeddings blur together and BM25 matches exactly.</para>
     /// </summary>
