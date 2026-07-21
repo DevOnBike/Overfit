@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -230,7 +230,8 @@ namespace DevOnBike.Overfit.Audio.Mp3
                     }
                 }
             }
-            else
+
+            if (!(_isMpeg1))
             {
                 _mainDataBegin = (int)br.ReadBits(8);
                 br.ReadBits(_nch == 1 ? 1 : 2); // private bits
@@ -262,7 +263,8 @@ namespace DevOnBike.Overfit.Audio.Mp3
                         _region0[g] = _blockType[g] == 2 && _mixedBlock[g] == 0 ? 8 : 7;
                         _region1[g] = 20 - _region0[g];
                     }
-                    else
+
+                    if (!(_winSwitch[g] == 1))
                     {
                         for (var r = 0; r < 3; r++)
                         {
@@ -293,7 +295,8 @@ namespace DevOnBike.Overfit.Audio.Mp3
                     {
                         ReadScaleFactorsMpeg1(ref br, gr, ch);
                     }
-                    else
+
+                    if (!(_isMpeg1))
                     {
                         ReadScaleFactorsLsf(ref br, gr, ch);
                     }
@@ -326,7 +329,8 @@ namespace DevOnBike.Overfit.Audio.Mp3
                         }
                     }
                 }
-                else
+
+                if (!(_mixedBlock[g] != 0))
                 {
                     for (var sfb = 0; sfb < 12; sfb++)
                     {
@@ -338,7 +342,8 @@ namespace DevOnBike.Overfit.Audio.Mp3
                     }
                 }
             }
-            else
+
+            if (!(_winSwitch[g] != 0 && _blockType[g] == 2))
             {
                 // long blocks, with scfsi sharing between granule 0 and 1
                 ReadLongBand(ref br, gr, ch, 0, 6, slen1, 0);
@@ -358,7 +363,8 @@ namespace DevOnBike.Overfit.Audio.Mp3
                     _scalefacL[g * 23 + sfb] = (int)br.ReadBits(slen);
                 }
             }
-            else
+
+            if (!(_scfsi[ch * 4 + scfsiBand] == 0 || gr == 0))
             {
                 var g0 = GC(0, ch);
                 for (var sfb = from; sfb < to; sfb++)
@@ -374,32 +380,39 @@ namespace DevOnBike.Overfit.Audio.Mp3
             var sfc = _scfCompress[g];
             int slen0, slen1, slen2, slen3, tindex;
 
-            if (sfc < 400)
+            // Classify BEFORE the bodies run: they subtract from sfc, so a second `sfc < 500` test would
+            // see the already-adjusted value. switch (with default) also proves definite assignment of
+            // slen0..3 / tindex to the compiler, which split ifs could not.
+            var scfBand = sfc < 400 ? 0 : sfc < 500 ? 1 : 2;
+
+            switch (scfBand)
             {
-                slen0 = (sfc >> 4) / 5;
-                slen1 = (sfc >> 4) % 5;
-                slen2 = (sfc & 0xf) >> 2;
-                slen3 = sfc & 0x3;
-                tindex = 0;
-            }
-            else if (sfc < 500)
-            {
-                sfc -= 400;
-                slen0 = (sfc >> 2) / 5;
-                slen1 = (sfc >> 2) % 5;
-                slen2 = sfc & 0x3;
-                slen3 = 0;
-                tindex = 1;
-            }
-            else
-            {
-                sfc -= 500;
-                slen0 = sfc / 3;
-                slen1 = sfc % 3;
-                slen2 = 0;
-                slen3 = 0;
-                tindex = 2;
-                _preflag[g] = 1;
+                case 0:
+                    slen0 = (sfc >> 4) / 5;
+                    slen1 = (sfc >> 4) % 5;
+                    slen2 = (sfc & 0xf) >> 2;
+                    slen3 = sfc & 0x3;
+                    tindex = 0;
+                    break;
+
+                case 1:
+                    sfc -= 400;
+                    slen0 = (sfc >> 2) / 5;
+                    slen1 = (sfc >> 2) % 5;
+                    slen2 = sfc & 0x3;
+                    slen3 = 0;
+                    tindex = 1;
+                    break;
+
+                default:
+                    sfc -= 500;
+                    slen0 = sfc / 3;
+                    slen1 = sfc % 3;
+                    slen2 = 0;
+                    slen3 = 0;
+                    tindex = 2;
+                    _preflag[g] = 1;
+                    break;
             }
 
             var blockClass = _blockType[g] == 2 ? (_mixedBlock[g] != 0 ? 2 : 1) : 0;
@@ -429,7 +442,8 @@ namespace DevOnBike.Overfit.Audio.Mp3
                     }
                 }
             }
-            else
+
+            if (!(_blockType[g] == 2))
             {
                 // long — fill scalefac_l[0..] sequentially.
                 var sfb = 0;
@@ -464,18 +478,12 @@ namespace DevOnBike.Overfit.Audio.Mp3
             }
 
             var bitPosEnd = part2Start + _part23[g] - 1;
-            int region1Start, region2Start;
-            if (_winSwitch[g] == 1 && _blockType[g] == 2)
-            {
-                region1Start = 36;
-                region2Start = 576;
-            }
-            else
-            {
-                var bl = Mp3Tables.SfBandLong[_sfIndex];
-                region1Start = bl[_region0[g] + 1];
-                region2Start = bl[_region0[g] + _region1[g] + 2];
-            }
+            // Ternaries: both are read below, so the compiler must see them assigned on every path.
+            // The band-table lookups stay lazy — only the taken branch of a ternary is evaluated.
+            var shortBlock = _winSwitch[g] == 1 && _blockType[g] == 2;
+            var bandsLong = Mp3Tables.SfBandLong[_sfIndex];
+            var region1Start = shortBlock ? 36 : bandsLong[_region0[g] + 1];
+            var region2Start = shortBlock ? 576 : bandsLong[_region0[g] + _region1[g] + 2];
 
             var pos = 0;
             var bigEnd = _bigValues[g] * 2;
@@ -568,7 +576,8 @@ namespace DevOnBike.Overfit.Audio.Mp3
                         }
                     }
                 }
-                else
+
+                if (!(_mixedBlock[g] != 0))
                 {
                     var sfb = 0;
                     var next = bs[1] * 3;
@@ -593,7 +602,8 @@ namespace DevOnBike.Overfit.Audio.Mp3
                     }
                 }
             }
-            else
+
+            if (!(_winSwitch[g] == 1 && _blockType[g] == 2))
             {
                 var sfb = 0;
                 var next = bl[1];
@@ -726,7 +736,8 @@ namespace DevOnBike.Overfit.Audio.Mp3
                             }
                         }
                     }
-                    else
+
+                    if (!(_mixedBlock[g0] != 0))
                     {
                         for (var sfb = 0; sfb < 12; sfb++)
                         {
@@ -737,7 +748,8 @@ namespace DevOnBike.Overfit.Audio.Mp3
                         }
                     }
                 }
-                else
+
+                if (!(_winSwitch[g0] == 1 && _blockType[g0] == 2))
                 {
                     for (var sfb = 0; sfb < 21; sfb++)
                     {
@@ -759,17 +771,8 @@ namespace DevOnBike.Overfit.Audio.Mp3
                 return;
             }
             var bl = Mp3Tables.SfBandLong[_sfIndex];
-            float ratioL, ratioR;
-            if (isPos == 6)
-            {
-                ratioL = 1f;
-                ratioR = 0f;
-            }
-            else
-            {
-                ratioL = IsRatios[isPos] / (1f + IsRatios[isPos]);
-                ratioR = 1f / (1f + IsRatios[isPos]);
-            }
+            var ratioL = isPos == 6 ? 1f : IsRatios[isPos] / (1f + IsRatios[isPos]);
+            var ratioR = isPos == 6 ? 0f : 1f / (1f + IsRatios[isPos]);
             var b0 = GC(gr, 0) * 576;
             var b1 = GC(gr, 1) * 576;
             for (var i = bl[sfb]; i < bl[sfb + 1]; i++)
@@ -794,17 +797,8 @@ namespace DevOnBike.Overfit.Audio.Mp3
                 {
                     continue;
                 }
-                float ratioL, ratioR;
-                if (isPos == 6)
-                {
-                    ratioL = 1f;
-                    ratioR = 0f;
-                }
-                else
-                {
-                    ratioL = IsRatios[isPos] / (1f + IsRatios[isPos]);
-                    ratioR = 1f / (1f + IsRatios[isPos]);
-                }
+                var ratioL = isPos == 6 ? 1f : IsRatios[isPos] / (1f + IsRatios[isPos]);
+                var ratioR = isPos == 6 ? 0f : 1f / (1f + IsRatios[isPos]);
                 var start = bs[sfb] * 3 + winLen * win;
                 for (var i = start; i < start + winLen; i++)
                 {
@@ -862,7 +856,8 @@ namespace DevOnBike.Overfit.Audio.Mp3
                     }
                 }
             }
-            else
+
+            if (!(blockType == 2))
             {
                 var cos = Mp3Tables.CosN36; // [18 × 36]
                 var wb = blockType * 36;

@@ -175,7 +175,8 @@ namespace DevOnBike.Overfit.Ops
             {
                 graph?.Record(OpCode.Dropout, output, input, mask); // Mask jako node context B
             }
-            else
+
+            if (!(output.RequiresGrad))
             {
                 mask.Dispose();
             }
@@ -232,7 +233,8 @@ namespace DevOnBike.Overfit.Ops
             {
                 graph?.Record(OpCode.Dropout, output, input, mask);   // reuse elementwise dropout backward
             }
-            else
+
+            if (!(output.RequiresGrad))
             {
                 mask.Dispose();
             }

@@ -283,7 +283,8 @@ namespace DevOnBike.Overfit.DeepLearning
                     input, Kernels.DataReadOnlySpan, output,
                     _inC, _outC, _h, _w, _k);
             }
-            else
+
+            if (_padding != 0 || _stride != 1)
             {
                 Conv2DKernels.ForwardNchw(
                     input, Kernels.DataReadOnlySpan, output,

@@ -87,7 +87,8 @@ namespace DevOnBike.Overfit.DeepLearning
                     config.VocabSize,
                     config.DModel);
             }
-            else
+
+            if (!config.TieWeights)
             {
                 var scale = MathF.Sqrt(2f / config.DModel);
                 var s = LMHead.DataSpan;
@@ -257,7 +258,8 @@ namespace DevOnBike.Overfit.DeepLearning
                     x = graph.Checkpoint((g, hidden) => blk.Forward(g, hidden), x, subArena);
                 }
             }
-            else
+
+            if (!_checkpointBlocks || !graph.IsRecording)
             {
                 foreach (var block in Blocks)
                 {
@@ -416,18 +418,17 @@ namespace DevOnBike.Overfit.DeepLearning
 
             FinalNorm.Load(reader);
 
-            if (!_config.TieWeights)
-            {
-                LMHead.Load(reader);
-            }
-            else
+            if (_config.TieWeights)
             {
                 TransposeInto(
                     TokenEmbedding.Weight.DataReadOnlySpan,
                     LMHead.DataSpan,
                     _config.VocabSize,
                     _config.DModel);
+                return;
             }
+
+            LMHead.Load(reader);
         }
 
         public void InvalidateAllCaches()
@@ -566,32 +567,15 @@ namespace DevOnBike.Overfit.DeepLearning
                 new TensorShape(vocabSize),
                 clearMemory: true);
 
-            AutogradNode flatLogits;
-
-            if (LMHeadOutputProvider is not null)
-            {
-                // QLoRA: the hook owns the whole head (FrozenQuantizedLinear(flat) + LoRA(flat)).
-                flatLogits = LMHeadOutputProvider(graph, flat);
-            }
-            else
-            {
-                AutogradNode headWeight;
-
-                if (LMHeadWeightProvider is not null)
-                {
-                    headWeight = LMHeadWeightProvider(graph);
-                }
-                else
-                {
-                    _lmHeadNode ??= LMHead.AsNode();
-                    headWeight = _lmHeadNode;
-                }
-
-                flatLogits = graph.Linear(
+            // QLoRA: the output hook owns the whole head (FrozenQuantizedLinear(flat) + LoRA(flat)).
+            // Nested ternaries keep this lazy — resolving the head weight eagerly would invoke
+            // LMHeadWeightProvider (which records graph nodes) even when the output hook is in charge.
+            var flatLogits = LMHeadOutputProvider is not null
+                ? LMHeadOutputProvider(graph, flat)
+                : graph.Linear(
                     flat,
-                    headWeight,
+                    LMHeadWeightProvider is not null ? LMHeadWeightProvider(graph) : (_lmHeadNode ??= LMHead.AsNode()),
                     bias);
-            }
 
             return graph.Reshape(
                 flatLogits,

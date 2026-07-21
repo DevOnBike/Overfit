@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -102,15 +102,12 @@ namespace DevOnBike.Overfit.Audio.Tts.Snac
                 var ti = frames / stride;
 
                 // avg_pool1d(stride) when the level is coarser than the latent rate
-                float[] pooled;
+                float[] pooled = residual;
+
                 if (stride > 1)
                 {
                     pooled = new float[latent * ti];
                     SnacResidualVq.AveragePoolTime(residual, pooled, latent, frames, stride);
-                }
-                else
-                {
-                    pooled = residual;
                 }
 
                 // in_proj: latent → codebook_dim (1×1)
@@ -141,7 +138,8 @@ namespace DevOnBike.Overfit.Audio.Tts.Snac
                         residual[j] -= up[j];
                     }
                 }
-                else
+
+                if (!(stride > 1))
                 {
                     for (var j = 0; j < residual.Length; j++)
                     {

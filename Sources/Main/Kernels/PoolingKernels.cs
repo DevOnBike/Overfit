@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -177,13 +177,13 @@ namespace DevOnBike.Overfit.Kernels
                 MaxPool2DForwardWithIndicesPool2(
                     input, output, maxIndices,
                     channels, inputH, inputW, outH, outW, batchOffset);
+
+                return;
             }
-            else
-            {
-                MaxPool2DForwardWithIndicesGeneric(
-                    input, output, maxIndices,
-                    channels, inputH, inputW, pool, outH, outW, batchOffset);
-            }
+
+            MaxPool2DForwardWithIndicesGeneric(
+                input, output, maxIndices,
+                channels, inputH, inputW, pool, outH, outW, batchOffset);
         }
 
         // ─────────────────────────────────────────────────────────────────────
@@ -406,25 +406,15 @@ namespace DevOnBike.Overfit.Kernels
                         var a = pairMax[ow * 2];
                         var b = pairMax[ow * 2 + 1];
 
-                        float maxVal;
-                        int maxIdx;
-
-                        if (a >= b)
-                        {
-                            // Horizontal winner is left column (ow*2).
-                            // Vertical winner: whichever row had the larger value.
-                            var idxInRow0 = row0Start + ow * 2;
-                            var idxInRow1 = row1Start + ow * 2;
-                            maxVal = a;
-                            maxIdx = input[idxInRow0] >= input[idxInRow1] ? idxInRow0 : idxInRow1;
-                        }
-                        else
-                        {
-                            var idxInRow0 = row0Start + ow * 2 + 1;
-                            var idxInRow1 = row1Start + ow * 2 + 1;
-                            maxVal = b;
-                            maxIdx = input[idxInRow0] >= input[idxInRow1] ? idxInRow0 : idxInRow1;
-                        }
+                        // Horizontal winner picks the column; vertical winner is whichever row held the
+                        // larger value. Ternaries, not two ifs: both outputs are assigned on every path, and
+                        // split ifs would not prove definite assignment to the compiler.
+                        var takeLeft = a >= b;
+                        var maxVal = takeLeft ? a : b;
+                        var col = takeLeft ? ow * 2 : (ow * 2) + 1;
+                        var idxInRow0 = row0Start + col;
+                        var idxInRow1 = row1Start + col;
+                        var maxIdx = input[idxInRow0] >= input[idxInRow1] ? idxInRow0 : idxInRow1;
 
                         output[outRowBase + ow] = maxVal;
                         maxIndices[outRowBase + ow] = batchOffset + maxIdx;
@@ -702,12 +692,15 @@ namespace DevOnBike.Overfit.Kernels
                                 var ix = inputXBase + kx;
                                 var inBoundsX = (uint)ix < (uint)inputW;
 
-                                if (inBoundsY && inBoundsX)
+                                var inBounds = inBoundsY && inBoundsX;
+
+                                if (inBounds)
                                 {
                                     sum += input[inputChanBase + iy * inputW + ix];
                                     count++;
                                 }
-                                else if (countIncludePad)
+
+                                if (!inBounds && countIncludePad)
                                 {
                                     // Zero-pad contributes 0 to sum but 1 to count.
                                     count++;

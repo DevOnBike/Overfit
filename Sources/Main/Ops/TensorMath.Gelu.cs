@@ -60,7 +60,8 @@ namespace DevOnBike.Overfit.Ops
             {
                 GeluForwardSimd(inS, outS);
             }
-            else
+
+            if (!(inS.Length < ParallelThreshold))
             {
                 unsafe
                 {
@@ -103,7 +104,8 @@ namespace DevOnBike.Overfit.Ops
             {
                 GeluBackwardSimd(inS, dOut, dIn);
             }
-            else
+
+            if (!(inS.Length < ParallelThreshold))
             {
                 unsafe
                 {

@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -147,18 +147,12 @@ namespace DevOnBike.Overfit.Ops
 
         private static void GetDims(TensorShape shape, out int b, out int x, out int y)
         {
-            if (shape.Rank == 2)
-            {
-                b = 1;
-                x = shape.D0;
-                y = shape.D1;
-            }
-            else
-            {
-                b = shape.D0;
-                x = shape.D1;
-                y = shape.D2;
-            }
+            // Ternaries, not split ifs: all three are `out` parameters, so the compiler must see them
+            // assigned on every path — two ifs it cannot prove exhaustive would fail CS0177.
+            var rank2 = shape.Rank == 2;
+            b = rank2 ? 1 : shape.D0;
+            x = rank2 ? shape.D0 : shape.D1;
+            y = rank2 ? shape.D1 : shape.D2;
         }
     }
 }

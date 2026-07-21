@@ -71,7 +71,8 @@ namespace DevOnBike.Overfit.Ops
                         batchOffset: n * inputSize);
                 }
             }
-            else
+
+            if (!(batchSize < BatchSequentialThreshold))
             {
                 var inputSpan = input.DataView.AsReadOnlySpan();
                 var outputSpan = output.DataView.AsSpan();
@@ -189,7 +190,8 @@ namespace DevOnBike.Overfit.Ops
                     }
                 }
             }
-            else
+
+            if (!(batchSize < BatchSequentialThreshold))
             {
                 unsafe
                 {

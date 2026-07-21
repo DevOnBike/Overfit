@@ -52,13 +52,8 @@ namespace DevOnBike.Overfit.Ops
             // duration of the call. The local path allocates but isn't on the training
             // hot path; it's the cost of decoupling inference from graph state.
             Conv2DWorkspace? localWorkspace = null;
-            Conv2DWorkspace workspace;
 
-            if (graph is not null)
-            {
-                workspace = graph.GetConv2DWorkspace(batchSize, inC, outC, h, w, k, padding, stride);
-            }
-            else
+            if (graph is null)
             {
                 localWorkspace = new Conv2DWorkspace();
                 var localWorkers = Math.Max(1, Math.Min(OverfitParallel.MaxDegreeOfParallelism, Math.Max(1, batchSize)));
@@ -66,8 +61,13 @@ namespace DevOnBike.Overfit.Ops
                     localWorkers,
                     colLength: kSqInC * spatialOut,
                     partialWeightGradientLength: outC * kSqInC);
-                workspace = localWorkspace;
             }
+
+            // Single definitely-assigned expression: the graph owns the workspace when there is one,
+            // otherwise the local we just built. Split ifs could not prove assignment to the compiler.
+            var workspace = graph is not null
+                ? graph.GetConv2DWorkspace(batchSize, inC, outC, h, w, k, padding, stride)
+                : localWorkspace!;
 
             try
             {
@@ -457,7 +457,8 @@ namespace DevOnBike.Overfit.Ops
                                             : 0f;
                                 }
                             }
-                            else
+
+                            if (!(inputY >= 0 && inputY < h))
                             {
                                 output
                                     .Slice(rowOffset + y * oW, oW)

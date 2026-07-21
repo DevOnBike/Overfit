@@ -98,8 +98,10 @@ namespace DevOnBike.Overfit.Kernels
                         inputW,
                         outH,
                         outW);
+
+                    continue;
                 }
-                else
+
                 {
                     // Valid conv (no padding, unit stride) is the padded path with padding=0, stride=1 — reuse the
                     // parallel ForwardNchwSingleBatch so 1x1 / generic convs (e.g. ResNet's bottleneck 1x1 layers,

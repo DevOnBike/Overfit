@@ -55,7 +55,8 @@ namespace DevOnBike.Overfit.Ops
             {
                 RmsNormForwardSeq(inS, outS, gammaS, invRmsS, numRows, C, eps);
             }
-            else
+
+            if (!((long)numRows * C < ParallelThreshold))
             {
                 unsafe
                 {
@@ -79,7 +80,8 @@ namespace DevOnBike.Overfit.Ops
             {
                 graph?.Record(OpCode.RmsNorm, output, input, c0: gamma, c1: invRms, contextCount: 2);
             }
-            else
+
+            if (!(requiresGrad))
             {
                 invRms.Dispose();
             }

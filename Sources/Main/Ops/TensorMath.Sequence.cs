@@ -43,7 +43,8 @@ namespace DevOnBike.Overfit.Ops
                     ExecuteLSTMInner(b, hS, gDS, uhS, bS, cPrevS, cnDS, hnDS);
                 }
             }
-            else
+
+            if (!(batchSize < BatchSequentialThreshold))
             {
                 OverfitParallel.For(0, batchSize, b => ExecuteLSTMInner(b, hS,
                     gD.DataView.AsSpan(),
@@ -60,7 +61,8 @@ namespace DevOnBike.Overfit.Ops
                 graph.Record(OpCode.FusedLSTMStep, hNode, x, hPrev, nodeContext: [cPrev, W, U, B, cNode, gD]);
 #pragma warning restore OVERFIT001
             }
-            else
+
+            if (!(graph != null && graph.IsRecording && req))
             {
                 if (!req)
                 {
@@ -163,7 +165,8 @@ namespace DevOnBike.Overfit.Ops
                     processBatch(b, scratch);
                 }
             }
-            else
+
+            if (!(OverfitParallel.SuppressParallelismOnCurrentThread))
             {
 #pragma warning disable OVERFIT008 // stateful localInit/localFinally overload (thread-local TensorStorage scratch) — no OverfitParallel equivalent; the suppress case is handled by the inline branch above
                 Parallel.For(0, batchSize,

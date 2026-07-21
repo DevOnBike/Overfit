@@ -184,7 +184,8 @@ namespace DevOnBike.Overfit.Ops
                     }
                 }
             }
-            else
+
+            if (!(batchSize > 1 && work >= AttentionParallelWorkThreshold))
             {
                 for (var b = 0; b < batchSize; b++)
                 {
@@ -205,7 +206,8 @@ namespace DevOnBike.Overfit.Ops
                     i1: dk,
                     i2: causalMask ? 1 : 0);
             }
-            else
+
+            if (!(requiresGrad))
             {
                 attnWeights.Dispose();
             }
@@ -408,7 +410,8 @@ namespace DevOnBike.Overfit.Ops
                     {
                         dARow[j] = 0f;
                     }
-                    else
+
+                    if (!(causalMask && j > i))
                     {
                         dARow[j] = TensorPrimitives.Dot(
                             dORow,
