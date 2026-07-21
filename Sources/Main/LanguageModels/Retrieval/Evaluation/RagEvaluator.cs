@@ -22,17 +22,14 @@ namespace DevOnBike.Overfit.LanguageModels.Retrieval.Evaluation
     /// </summary>
     public sealed class RagEvaluator
     {
-        private readonly VectorStore _store;
-        private readonly Func<string, float[]> _embedQuery;
+        private readonly Func<string, int, VectorMatch[]> _retrieve;
+        private readonly bool _scoresAreCosineSimilarity;
 
         /// <summary>Creates an evaluator over an indexed store and a query-embedding delegate (e.g.
         /// <c>embedder.EmbedQuery</c>, or a deterministic fake in a unit test).</summary>
         public RagEvaluator(VectorStore store, Func<string, float[]> embedQuery)
+            : this(BuildDenseRetrieve(store, embedQuery), scoresAreCosineSimilarity: true)
         {
-            ArgumentNullException.ThrowIfNull(store);
-            ArgumentNullException.ThrowIfNull(embedQuery);
-            _store = store;
-            _embedQuery = embedQuery;
         }
 
         /// <summary>Convenience factory over a <see cref="SentenceEmbedder"/> — uses <c>EmbedQuery</c> so the
@@ -41,6 +38,46 @@ namespace DevOnBike.Overfit.LanguageModels.Retrieval.Evaluation
         {
             ArgumentNullException.ThrowIfNull(embedder);
             return new RagEvaluator(store, embedder.EmbedQuery);
+        }
+
+        /// <summary>
+        /// Evaluator over a <see cref="HybridRetriever"/> — the same recall / paraphrase-stability checks, run
+        /// against dense+lexical fusion instead of dense alone. This is what makes "did hybrid actually help on
+        /// MY corpus?" a measurement rather than an assumption: build both evaluators over the same cases and
+        /// compare the reports.
+        ///
+        /// <para><see cref="EvaluateFalsePremise"/> is <b>not</b> available on this path — see its remarks.</para>
+        /// </summary>
+        public static RagEvaluator ForHybrid(HybridRetriever retriever, Func<string, float[]> embedQuery)
+        {
+            ArgumentNullException.ThrowIfNull(retriever);
+            ArgumentNullException.ThrowIfNull(embedQuery);
+
+            return new RagEvaluator(
+                (query, topK) => retriever.Search(embedQuery(query), query, topK),
+                scoresAreCosineSimilarity: false);
+        }
+
+        /// <summary>Convenience factory pairing a <see cref="HybridRetriever"/> with a <see cref="SentenceEmbedder"/>.</summary>
+        public static RagEvaluator ForHybrid(HybridRetriever retriever, SentenceEmbedder embedder)
+        {
+            ArgumentNullException.ThrowIfNull(embedder);
+            return ForHybrid(retriever, embedder.EmbedQuery);
+        }
+
+        private RagEvaluator(Func<string, int, VectorMatch[]> retrieve, bool scoresAreCosineSimilarity)
+        {
+            _retrieve = retrieve;
+            _scoresAreCosineSimilarity = scoresAreCosineSimilarity;
+        }
+
+        // Null-checked here rather than in the constructor body, because `: this(...)` runs first.
+        private static Func<string, int, VectorMatch[]> BuildDenseRetrieve(
+            VectorStore store, Func<string, float[]> embedQuery)
+        {
+            ArgumentNullException.ThrowIfNull(store);
+            ArgumentNullException.ThrowIfNull(embedQuery);
+            return (query, topK) => store.Search(embedQuery(query), topK);
         }
 
         /// <summary>Runs every <see cref="RetrievalCase"/> and reports recall@K + MRR + per-case ranks.</summary>
@@ -117,15 +154,31 @@ namespace DevOnBike.Overfit.LanguageModels.Retrieval.Evaluation
 
         /// <summary>Runs every <see cref="FalsePremiseCase"/> and flags those whose top match clears
         /// <paramref name="groundedThreshold"/> (a sprung trap — the corpus offered a confident source for an
-        /// un-grounded question).</summary>
+        /// un-grounded question).
+        ///
+        /// <para>Requires a <b>dense</b> evaluator: the threshold is compared against a cosine similarity, which
+        /// has a fixed, corpus-independent scale. Fused hybrid scores are derived from ranks, so every query
+        /// produces a top score of roughly the same magnitude whether or not the corpus actually contains an
+        /// answer — exactly the signal this check depends on. Calling it on a
+        /// <see cref="ForHybrid(HybridRetriever, Func{string, float[]})"/> evaluator throws rather than
+        /// returning a number that looks fine and means nothing.</para>
+        /// </summary>
         public FalsePremiseReport EvaluateFalsePremise(IEnumerable<FalsePremiseCase> cases, double groundedThreshold = 0.5)
         {
             ArgumentNullException.ThrowIfNull(cases);
 
+            if (!_scoresAreCosineSimilarity)
+            {
+                throw new OverfitRuntimeException(
+                    "False-premise evaluation compares the top retrieval score against a cosine threshold, so it "
+                    + "requires a dense evaluator. Reciprocal-rank-fused scores have no absolute scale — build a "
+                    + "RagEvaluator over the HybridRetriever's Vectors arm for this check.");
+            }
+
             var results = new List<FalsePremiseReport.CaseResult>();
             foreach (var c in cases)
             {
-                var matches = _store.Search(_embedQuery(c.Query), 1);
+                var matches = _retrieve(c.Query, 1);
                 string? topId = null;
                 var topScore = 0f;
                 if (matches.Length > 0)
@@ -142,7 +195,7 @@ namespace DevOnBike.Overfit.LanguageModels.Retrieval.Evaluation
 
         private string[] RetrieveIds(string query, int topK)
         {
-            var matches = _store.Search(_embedQuery(query), topK);
+            var matches = _retrieve(query, topK);
             var ids = new string[matches.Length];
             for (var i = 0; i < matches.Length; i++)
             {

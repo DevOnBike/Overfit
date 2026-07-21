@@ -14,22 +14,28 @@ namespace DevOnBike.Overfit.Mcp
     /// A self-contained RAG index over a local document folder for the <c>rag_query</c> MCP tool:
     /// chunks <c>.txt</c>/<c>.md</c> files on paragraph boundaries, embeds every chunk with the chat
     /// model's OWN embeddings (<see cref="OverfitClient.Embed"/> — multilingual, no second model
-    /// needed) into an in-process <see cref="VectorStore"/>, then answers questions grounded in the
-    /// top-K chunks with per-chunk source citations. Everything stays on the machine.
+    /// needed), then answers questions grounded in the top-K chunks with per-chunk source citations.
+    /// Everything stays on the machine.
+    ///
+    /// <para>Retrieval is <b>hybrid</b> (<see cref="HybridRetriever"/>): semantic search over the embeddings
+    /// fused with BM25 over the chunk text. Measured on this repository's own <c>docs/</c> folder (481 chunks,
+    /// MiniLM, recall@5) that lifted recall from <b>0.61 to 0.89</b> and MRR from <b>0.500 to 0.736</b> —
+    /// see <c>HybridVsDenseOnDocsCorpusTests</c>. Local document sets are full of literal tokens (file names,
+    /// env vars, error codes, API names) that embeddings blur together and BM25 matches exactly.</para>
     /// </summary>
     public sealed class McpRagIndex
     {
         private const int TargetChunkChars = 1200;
 
         private readonly OverfitClient _client;
-        private readonly VectorStore _store;
+        private readonly HybridRetriever _retriever;
 
-        public int ChunkCount => _store.Count;
+        public int ChunkCount => _retriever.Count;
 
-        private McpRagIndex(OverfitClient client, VectorStore store)
+        private McpRagIndex(OverfitClient client, HybridRetriever retriever)
         {
             _client = client;
-            _store = store;
+            _retriever = retriever;
         }
 
         /// <summary>
@@ -45,7 +51,7 @@ namespace DevOnBike.Overfit.Mcp
                 throw new DirectoryNotFoundException($"RAG document directory not found: {directory}");
             }
 
-            var store = new VectorStore(client.EmbeddingDimension);
+            var retriever = new HybridRetriever(client.EmbeddingDimension);
             var files = new List<string>();
             files.AddRange(Directory.GetFiles(directory, "*.txt", SearchOption.AllDirectories));
             files.AddRange(Directory.GetFiles(directory, "*.md", SearchOption.AllDirectories));
@@ -59,18 +65,18 @@ namespace DevOnBike.Overfit.Mcp
                 for (var i = 0; i < chunks.Count; i++)
                 {
                     var vector = client.Embed(chunks[i]);
-                    store.Add($"{name}#{i + 1}", vector, chunks[i]);
+                    retriever.Add($"{name}#{i + 1}", vector, chunks[i]);
                 }
 
                 log?.WriteLine($"[overfit-mcp] indexed {name}: {chunks.Count} chunk(s)");
             }
 
-            if (store.Count == 0)
+            if (retriever.Count == 0)
             {
                 throw new OverfitRuntimeException($"No indexable .txt/.md content found under: {directory}");
             }
 
-            return new McpRagIndex(client, store);
+            return new McpRagIndex(client, retriever);
         }
 
         /// <summary>
@@ -84,7 +90,7 @@ namespace DevOnBike.Overfit.Mcp
             ArgumentException.ThrowIfNullOrEmpty(question);
 
             var queryVector = _client.Embed(question);
-            var matches = _store.Search(queryVector, Math.Min(topK, _store.Count));
+            var matches = _retriever.Search(queryVector, question, Math.Min(topK, _retriever.Count));
 
             var prompt = new StringBuilder(4096);
             prompt.AppendLine("Answer the question using ONLY the context below. Cite the context entries you used as [1], [2], … . If the context does not contain the answer, say so plainly.");
