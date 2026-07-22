@@ -242,6 +242,131 @@ tensors on first use. Worth revisiting if RAM matters more than TTFT.
 **Gap to llama.cpp: 3.76× → 2.93×.** Remaining, by measured share: `ffn_gateup` 34.2%, `attn_q` + `attn_out`
 28.9% (the per-head dispatches, 576 calls each), `attn_scores` 6.8%. AVX-512 (ceiling 1.60×) still last.
 
+#### ▶▶ NEXT LEVER (sized 2026-07-22): hoist activation quantization out of the per-head loop — ~18.8%
+
+`Q4KPrefillProjectionBenchmark.QuantizeActivationsOnly` measures Q8_K quantization of `672 × 2048`
+activations at **~1.0 ms**. Against the profile:
+
+| | dispatches over `hidden` | quantization cost | actually needed |
+|---|---:|---:|---:|
+| `attn_q` (621.7 ms / 576 calls = 1.079 ms) | 576 | ~576 ms | — |
+| `attn_kv` (181.4 ms) | 144 | ~144 ms | — |
+| **total** | **720** | **~720 ms** | **36** (once per layer) |
+
+So **~93% of a Q-head dispatch is activation quantization** — the projection itself is 2048→128, roughly
+0.08 ms. `hidden` is loop-invariant across heads, so the same matrix is quantized 16× per layer. `attn_out`
+is NOT affected: its input is the per-head `attn` band.
+
+**Recoverable ≈ 684 ms of 3632.6 ms ≈ 18.8% → prefill 185 → ~228 tok/s.**
+
+Decode already fixed exactly this in 2026-05 (`ProjectPreQuantized`, "hidden was re-quantized per head, now
+quantized once per layer"); the batched prefill path never got the equivalent.
+
+#### ✅ SHIPPED — shared activation quantization: 185 → 194 tok/s (1.05×), but 3.3× short of the estimate
+
+`BatchedQuantProjection.Dispatch` takes optional pre-quantized Q8_K scratch;
+`CachedMultiHeadAttention.DecodeBatchedQuant` quantizes `hidden` once per layer and passes it to every Q/K/V
+dispatch. Q4_K and Q6_K share the Q8_K format bit-for-bit, so one buffer serves all three.
+
+| component | before | after | Δ |
+|---|---:|---:|---:|
+| `attn_q` | 621.7 ms | **456.5 ms** | −26.6% |
+| `attn_kv` | 181.4 ms | **139.3 ms** | −23.2% |
+| `ffn_gateup` *(canary)* | 1242.3 ms | 1211.0 ms | −2.5% |
+| `attn_out` *(canary)* | 427.4 ms | 427.7 ms | +0.1% |
+| **prefill total** | **3632.6 ms · 185 tok/s** | **3462.3 ms · 194 tok/s** | **−4.7% · 1.05×** |
+
+**The estimate said ~684 ms; the measurement says ~207 ms — 3.3× optimistic.** Cause: the sizing benchmark
+timed quantization of a 672×2048 block **in isolation** (~1.0 ms), i.e. reading 5.5 MB cold. In production
+the 16 repeats run back-to-back on a cache-resident `hidden`, so the redundant passes were far cheaper than
+the isolated measurement implied. **Lesson: an operation benchmarked alone over-states its cost when the
+thing you are removing is a repeat on hot data — size the repeat, not the first call.**
+
+#### ✅ SHIPPED — whole-matrix O projection: 194 → 219 tok/s (1.13×)
+
+Per head the O projection is `[headDim → dModel]`, and **headDim (128) is not a multiple of the 256-element
+Q4_K super-block**, so `CanRepack` is false and all 16 dispatches per layer were stuck on the
+weight-stationary kernel. The whole matrix is `[nHeads·headDim → dModel]` = 2048 wide, which *does* repack.
+`BlockWeights.WoWhole` was already loaded **zero-copy from the mmap** (and prepacked when a sidecar exists),
+so this costs no extra RAM — it only needed the per-head bands concatenated before one dispatch.
+
+| component | before | after | Δ |
+|---|---:|---:|---:|
+| `attn_out` | 427.7 ms / 576 calls | **109.6 ms / 36 calls** | **−74.4%** (3.9×) |
+| `attn_q` *(canary)* | 456.5 ms | 459.1 ms | +0.6% |
+| `ffn_gateup` *(canary)* | 1211.0 ms | 1222.7 ms | +1.0% |
+| **prefill total** | **3462.3 ms · 194 tok/s** | **3068.5 ms · 219 tok/s** | **−11.4% · 1.13×** |
+
+**Gate on `WoWhole.IsQ4K`, NOT `HasWholeAttnQ4K`.** The latter also demands Q/K/V, and under Q4_K_M `attn_v`
+is Q6_K in half the layers — so the four-way gate enabled this in only 18 of 36. The measurement caught it:
+`attn_out` reported **306 calls** (18 layers × 16 heads + 18 × 1) instead of 36, and fixing the gate roughly
+doubled the win.
+
+Contracting all heads inside one matmul reassociates a sum the per-head path does in head order, so
+`useWholeO` also honours `DisableRepackedKernelsForParity` — without that the batched-vs-single-token parity
+test can never reach its 1e-2 bound.
+
+#### ▶ WHAT IS LEFT — profile after the three wins (219 tok/s, gap 2.47×)
+
+```
+ffn_gateup  1222.7 ms  39.8%   (36)   <- Q4_K tiled already
+ffn_down     720.1 ms  23.5%   (36)   <- Q6_K tiled already
+attn_q       459.1 ms  15.0%  (576)   <- weight-stationary: blocked by `bias.IsEmpty`
+attn_scores  251.1 ms   8.2%  (576)
+attn_kv      140.3 ms   4.6%   (72)
+attn_out     109.6 ms   3.6%   (36)   <- done
+other        105.1 ms   3.4%
+```
+
+**The structural waste is spent.** Every remaining component is already on the best kernel Overfit has, with
+two exceptions:
+
+1. **`attn_q` — 15.0%, and it is blocked by one gate, not by shape.** Per-head Q is `[2048 → 128]`:
+   `inputSize % 256 == 0` ✓ and `outputSize % 8 == 0` ✓, so **`CanRepack` is TRUE** — the only thing keeping
+   it off the tiled kernel is `bias.IsEmpty` (Qwen puts a bias on Q/K/V). Micro-bench for that shape class:
+   tiled 4.41 ms vs weight-stationary 12.95 ms; measured `attn_q` is 12.75 ms/layer. **Ceiling ≈ 300 ms of
+   3068 ≈ 9.8% → ~243 tok/s.**
+   Bias support in `GemmTiled` was built once and reverted on a measured **0.999× tie** — but that tie was
+   taken when the biased projections were ~6% of FLOPs and the FFN dwarfed them. The composition has changed;
+   **re-measure before rebuilding, and re-measure with the FLOP-weighted census, not the dispatch count.**
+
+2. **`attn_scores` — 8.2%, never examined.** `BatchedAttentionKernel.ComputeParallel` has had no profiling
+   pass at all.
+
+**Everything else is kernel quality, i.e. writing better SIMD.** The measured headline: llama.cpp built
+AVX2-only does 336.7 tok/s against our 219 — so **1.54× of the remaining 2.47× is pure kernel craft at equal
+instruction set**, and AVX-512 accounts for the other 1.60×. Both are intrinsics work on `GemmTiled`
+(register-blocking the accumulators, 512-bit lanes), not structural fixes. Expect weeks, not evenings, and
+size each step against its share before building.
+
+#### ✅ RESOLVED — `BatchedPrefillParityTests` (was failing since before this work)
+
+`BatchedPrefill_MatchesSingleToken_OnRealQwen` asserts `maxAbsLogitDiff == 0` between batched prefill and the
+single-token path. It now reports `argmax batched=11 single=13, maxAbsLogitDiff ≈ 0.44`.
+
+**Not caused by the changes above.** Disabling *both* repacked paths (Q6_K tiled off AND the `IsPrepacked`
+short-circuit removed from the Q4_K gate) makes it pass 5/5 — with the shared quantization still enabled,
+which also proves that change is bit-identical. The trigger is the `*.gguf.repack` sidecar created
+2026-07-20: it sets `IsPrepacked`, routing bias-free Q4_K projections through the repacked `GemmTiled`, whose
+reduction is associated differently. The Q6_K tiled kernel is the same class of change and breaks it
+independently.
+
+**Nobody noticed because the test is `[LongFact]`** — skipped by default, so a numerics regression sat
+unobserved for two days. Decision needed: either make the test explicitly disable the repacked paths (so it
+keeps testing the batched-vs-single-token *math* it claims to), or replace the exact-equality gate with a
+coherence check, as `OVERFIT_REPACK_ATTN` already is. Do not silently relax it.
+
+**Plan.** Q4_K and Q6_K share the Q8_K scratch format bit-for-bit (`SuperBlockElements 256`, `GroupSize 16`,
+and `Q6KDotKernel.QuantizeActivationQ8K` delegates to Q4_K's), so ONE pre-quantized buffer serves Q, K and V
+regardless of whether V is Q4_K or Q6_K. Steps: (1) add `bool preQuantized = false` to the three batched
+kernel entry points — `Q4KDotKernel.ProjectBatched` / `ProjectBatchedWeightStationary`,
+`Q6KDotKernel.ProjectBatched` — guarding their internal quantize loop (anchor: the
+`"Activation quantization scratch is too small for rows."` validation, which occurs exactly at those three);
+(2) give `BatchedQuantProjection.Dispatch` optional pre-quantized scratch spans, defaulting to today's
+pooled-and-quantize behaviour; (3) quantize `hidden` once at the top of
+`CachedMultiHeadAttention.DecodeBatchedQuant` and pass it to the Q/K/V dispatches. Output must stay
+bit-identical — quantization is deterministic, so this is a pure de-duplication.
+
 At 3.4 B params × 672 tokens the gap is ≈3.7 TFLOP/s-equivalent for them against ≈1.0 for us.
 
 **Why this lever is different from the five that were refuted:** it has a measured ceiling, a named cause, and

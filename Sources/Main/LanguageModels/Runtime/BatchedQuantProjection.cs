@@ -38,6 +38,37 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// use.</para></summary>
         internal static bool UseTiledPrefillQ6K = true;
 
+        /// <summary>
+        /// Test hook: forces the NON-repacked batched kernels for both Q4_K and Q6_K, overriding even
+        /// <c>IsPrepacked</c>. Mirrors <c>CachedLlamaSession.DisableBatchedPrefillForParity</c>.
+        ///
+        /// <para>Needed because the repacked <c>block_q*_Kx8</c> GEMMs associate their reduction differently
+        /// from the per-row kernels, so they are <b>not</b> bit-identical to the single-token path — measured
+        /// at <c>maxAbsLogitDiff ≈ 0.44</c> on Qwen-3B, enough to flip an argmax. That is the accepted trade
+        /// (the same standard <c>OVERFIT_REPACK_ATTN</c> is held to: validated by end-to-end coherence, not
+        /// byte-parity), but it means a test asserting batched == single-token has to hold the kernel layout
+        /// constant, or it silently stops testing the thing it claims to.</para>
+        ///
+        /// <para>A <c>*.gguf.repack</c> sidecar sets <c>IsPrepacked</c> and therefore turns the repacked path
+        /// on regardless of the env flag — which is exactly how <c>BatchedPrefillParityTests</c> came to be
+        /// failing unnoticed for two days, being <c>[LongFact]</c>.</para>
+        /// </summary>
+        internal static bool DisableRepackedKernelsForParity;
+
+        /// <summary>
+        /// <paramref name="preQuants"/> / <paramref name="preScales"/> / <paramref name="preBsums"/> let the
+        /// caller supply activations ALREADY quantized to Q8_K, skipping the internal quantization pass.
+        /// Empty (the default) keeps the original behaviour: pool the scratch and quantize here.
+        ///
+        /// <para>Attention needs this because it dispatches Q once <b>per head</b> and K/V once per group,
+        /// every one of them over the same loop-invariant <c>hidden</c> — a benchmark measured the Q8_K
+        /// quantization of a 672×2048 activation block at ~1.0 ms against a 1.079 ms Q-head dispatch, i.e.
+        /// ~93% of the call. Quantizing once per layer is bit-identical, since the quantization is
+        /// deterministic.</para>
+        ///
+        /// <para>Honoured for the Q6_K and Q4_K paths (everything attention uses); the Q8_0 and F32 paths
+        /// ignore it and quantize as before.</para>
+        /// </summary>
         public static void Dispatch(
             ReadOnlySpan<float> input,
             int rows,
@@ -45,10 +76,32 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             ReadOnlySpan<float> bias,
             Span<float> output,
             int inputSize,
-            int outputSize)
+            int outputSize,
+            Span<sbyte> preQuants = default,
+            Span<float> preScales = default,
+            Span<short> preBsums = default)
         {
             // Resident-format dispatch, classified once so the original first-match order is explicit.
             var kind = weight.IsQ6K ? 0 : weight.IsQ4K ? 1 : weight.IsQuantized ? 2 : 3;
+            var pre = !preQuants.IsEmpty;
+
+            if (kind == 0 && pre)
+            {
+                var wp = weight.Quantized6K;
+                DispatchQ6K(
+                    input, rows, wp, bias, output, inputSize,
+                    preQuants, preScales, preBsums, preQuantized: true);
+                return;
+            }
+
+            if (kind == 1 && pre)
+            {
+                var wp = weight.Quantized4K;
+                DispatchQ4K(
+                    input, rows, wp, bias, output, inputSize,
+                    preQuants, preScales, preBsums, preQuantized: true);
+                return;
+            }
 
             if (kind == 0)
             {
@@ -58,28 +111,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 using var qBytes = new PooledBuffer<sbyte>(rows * inputSize, clearMemory: false);
                 using var scales = new PooledBuffer<float>(rows * spr, clearMemory: false);
                 using var sums = new PooledBuffer<short>(groups, clearMemory: false);
-                // Register-tiled Q6_K GEMM over the repacked block_q6_Kx8 layout. Under Q4_K_M half of
-                // ffn_down is Q6_K, and a prefill profile put ffn_down at 37.9% of prefill running at
-                // 0.61 TFLOP/s — against ffn_gate_up's 1.78 — precisely because Q6_K had only the
-                // re-decode-per-row kernel below. No-bias only (GemmTiled applies none); AVX2/FMA required.
-                var tiled6 = UseTiledPrefillQ6K && bias.IsEmpty && w.CanRepack
-                    && CpuFeatures.HasAvx2 && CpuFeatures.HasFma;
-
-                if (tiled6)
-                {
-                    DispatchTiledQ6K(
-                        input, rows, w, output,
-                        qBytes.Span.Slice(0, rows * inputSize), scales.Span.Slice(0, rows * spr),
-                        sums.Span.Slice(0, groups));
-                }
-
-                if (!tiled6)
-                {
-                    Q6KDotKernel.ProjectBatched(
-                        input, rows, w, bias, output,
-                        qBytes.Span.Slice(0, rows * inputSize), scales.Span.Slice(0, rows * spr),
-                        sums.Span.Slice(0, groups));
-                }
+                DispatchQ6K(
+                    input, rows, w, bias, output, inputSize,
+                    qBytes.Span.Slice(0, rows * inputSize), scales.Span.Slice(0, rows * spr),
+                    sums.Span.Slice(0, groups), preQuantized: false);
             }
             if (kind == 1)
             {
@@ -89,40 +124,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 using var qBytes = new PooledBuffer<sbyte>(rows * inputSize, clearMemory: false);
                 using var scales = new PooledBuffer<float>(rows * spr, clearMemory: false);
                 using var sums = new PooledBuffer<short>(groups, clearMemory: false);
-
-                // Register-tiled GEMM: repacked block_q4_Kx8, decode each super-block once and reuse across a
-                // tile of NR columns — measured ~3× vs weight-stationary under parallelism, 1.61× end-to-end
-                // prefill. Default-on when the weight is already prepacked (an offline sidecar mmap'd it → zero
-                // extra RAM); otherwise opt-in via OVERFIT_TILED_PREFILL since repacking copies the weight.
-                // No-bias only (GemmTiled applies none). AVX2/FMA required — the kernel is x86-only, so on ARM
-                // (e.g. the Android app) this falls through to the weight-stationary path even if a sidecar
-                // mmap'd a prepacked layout (IsPrepacked would otherwise bypass the env flag's AVX2 gate).
-                var tiled = (w.IsPrepacked || UseTiledPrefillQ4K) && bias.IsEmpty && w.CanRepack
-                    && CpuFeatures.HasAvx2 && CpuFeatures.HasFma;
-
-                if (tiled)
-                {
-                    DispatchTiledQ4K(
-                        input, rows, w, output,
-                        qBytes.Span.Slice(0, rows * inputSize), scales.Span.Slice(0, rows * spr),
-                        sums.Span.Slice(0, groups));
-                }
-                // Weight-stationary: decode each Q4_K super-block once and reuse across the row tile (bit-identical
-                // to ProjectBatched, measured ~1.3–1.7× on the prefill / speculative-verify batched matmul).
-                if (!tiled && UseWeightStationaryQ4K)
-                {
-                    Q4KDotKernel.ProjectBatchedWeightStationary(
-                        input, rows, w, bias, output,
-                        qBytes.Span.Slice(0, rows * inputSize), scales.Span.Slice(0, rows * spr),
-                        sums.Span.Slice(0, groups));
-                }
-                if (!tiled && !UseWeightStationaryQ4K)
-                {
-                    Q4KDotKernel.ProjectBatched(
-                        input, rows, w, bias, output,
-                        qBytes.Span.Slice(0, rows * inputSize), scales.Span.Slice(0, rows * spr),
-                        sums.Span.Slice(0, groups));
-                }
+                DispatchQ4K(
+                    input, rows, w, bias, output, inputSize,
+                    qBytes.Span.Slice(0, rows * inputSize), scales.Span.Slice(0, rows * spr),
+                    sums.Span.Slice(0, groups), preQuantized: false);
             }
             if (kind == 2)
             {
@@ -140,6 +145,68 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             }
         }
 
+        // Q6_K format path, shared by the pooled and pre-quantized entries so the kernel-selection gates
+        // exist in exactly one place.
+        private static void DispatchQ6K(
+            ReadOnlySpan<float> input, int rows, Q6KWeight w, ReadOnlySpan<float> bias, Span<float> output,
+            int inputSize, Span<sbyte> quants, Span<float> scales, Span<short> sums, bool preQuantized)
+        {
+            // Register-tiled Q6_K GEMM over the repacked block_q6_Kx8 layout. Under Q4_K_M half of ffn_down
+            // is Q6_K, and a prefill profile put ffn_down at 37.9% of prefill running at 0.61 TFLOP/s -
+            // against ffn_gate_up's 1.78 - precisely because Q6_K had only the re-decode-per-row kernel.
+            // No-bias only (GemmTiled applies none); AVX2/FMA required.
+            var tiled6 = UseTiledPrefillQ6K && !DisableRepackedKernelsForParity
+                && bias.IsEmpty && w.CanRepack
+                && CpuFeatures.HasAvx2 && CpuFeatures.HasFma;
+
+            if (tiled6)
+            {
+                DispatchTiledQ6K(input, rows, w, output, quants, scales, sums, preQuantized);
+            }
+
+            if (!tiled6)
+            {
+                Q6KDotKernel.ProjectBatched(
+                    input, rows, w, bias, output, quants, scales, sums, preQuantized);
+            }
+        }
+
+        // Q4_K format path, shared by the pooled and pre-quantized entries.
+        private static void DispatchQ4K(
+            ReadOnlySpan<float> input, int rows, Q4KWeight w, ReadOnlySpan<float> bias, Span<float> output,
+            int inputSize, Span<sbyte> quants, Span<float> scales, Span<short> sums, bool preQuantized)
+        {
+            // Register-tiled GEMM: repacked block_q4_Kx8, decode each super-block once and reuse across a
+            // tile of NR columns - measured ~3x vs weight-stationary under parallelism, 1.61x end-to-end
+            // prefill. Default-on when the weight is already prepacked (an offline sidecar mmap'd it -> zero
+            // extra RAM); otherwise opt-in via OVERFIT_TILED_PREFILL since repacking copies the weight.
+            // No-bias only (GemmTiled applies none). AVX2/FMA required - the kernel is x86-only, so on ARM
+            // (e.g. the Android app) this falls through to the weight-stationary path even if a sidecar
+            // mmap'd a prepacked layout (IsPrepacked would otherwise bypass the env flag's AVX2 gate).
+            var tiled = (w.IsPrepacked || UseTiledPrefillQ4K) && !DisableRepackedKernelsForParity
+                && bias.IsEmpty && w.CanRepack
+                && CpuFeatures.HasAvx2 && CpuFeatures.HasFma;
+
+            if (tiled)
+            {
+                DispatchTiledQ4K(input, rows, w, output, quants, scales, sums, preQuantized);
+            }
+
+            // Weight-stationary: decode each Q4_K super-block once and reuse across the row tile
+            // (bit-identical to ProjectBatched, measured ~1.3-1.7x on the batched matmul).
+            if (!tiled && UseWeightStationaryQ4K)
+            {
+                Q4KDotKernel.ProjectBatchedWeightStationary(
+                    input, rows, w, bias, output, quants, scales, sums, preQuantized);
+            }
+
+            if (!tiled && !UseWeightStationaryQ4K)
+            {
+                Q4KDotKernel.ProjectBatched(
+                    input, rows, w, bias, output, quants, scales, sums, preQuantized);
+            }
+        }
+
         // Register-tiled Q4_K prefill GEMM: quantize all rows to Q8_K, then run GemmTiled over row-tiles of NR
         // columns in parallel. NR is chosen so the tile count stays >= cores (an under-filled pool regressed
         // hard in the Phase-3 bench). No-bias only (checked at the call site) — GemmTiled applies no bias.
@@ -150,7 +217,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             Span<float> output,
             Span<sbyte> quants,
             Span<float> scales,
-            Span<short> bsums)
+            Span<short> bsums,
+            bool preQuantized)
         {
             var inputSize = w.InputSize;
             var outputSize = w.OutputSize;
@@ -158,13 +226,16 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             var bsumsPerRow = spr * Q4KDotKernel.GroupsPerSuperBlock;
 
             // Q8_K activation quantization — column-contiguous (column c == row c owns inputSize quants).
-            for (var n = 0; n < rows; n++)
+            if (!preQuantized)
             {
-                Q4KDotKernel.QuantizeActivationQ8K(
-                    input.Slice(n * inputSize, inputSize),
-                    quants.Slice(n * inputSize, inputSize),
-                    scales.Slice(n * spr, spr),
-                    bsums.Slice(n * bsumsPerRow, bsumsPerRow));
+                for (var n = 0; n < rows; n++)
+                {
+                    Q4KDotKernel.QuantizeActivationQ8K(
+                        input.Slice(n * inputSize, inputSize),
+                        quants.Slice(n * inputSize, inputSize),
+                        scales.Slice(n * spr, spr),
+                        bsums.Slice(n * bsumsPerRow, bsumsPerRow));
+                }
             }
 
             var repacked = w.EnsureRepacked();
@@ -212,20 +283,24 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             Span<float> output,
             Span<sbyte> quants,
             Span<float> scales,
-            Span<short> bsums)
+            Span<short> bsums,
+            bool preQuantized)
         {
             var inputSize = w.InputSize;
             var outputSize = w.OutputSize;
             var spr = w.SuperBlocksPerRow;
             var bsumsPerRow = spr * Q6KDotKernel.GroupsPerSuperBlock;
 
-            for (var n = 0; n < rows; n++)
+            if (!preQuantized)
             {
-                Q6KDotKernel.QuantizeActivationQ8K(
-                    input.Slice(n * inputSize, inputSize),
-                    quants.Slice(n * inputSize, inputSize),
-                    scales.Slice(n * spr, spr),
-                    bsums.Slice(n * bsumsPerRow, bsumsPerRow));
+                for (var n = 0; n < rows; n++)
+                {
+                    Q6KDotKernel.QuantizeActivationQ8K(
+                        input.Slice(n * inputSize, inputSize),
+                        quants.Slice(n * inputSize, inputSize),
+                        scales.Slice(n * spr, spr),
+                        bsums.Slice(n * bsumsPerRow, bsumsPerRow));
+                }
             }
 
             var repacked = w.EnsureRepacked();

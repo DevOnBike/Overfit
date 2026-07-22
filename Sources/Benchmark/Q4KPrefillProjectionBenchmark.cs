@@ -144,6 +144,32 @@ namespace Benchmarks
             BatchedQuantProjection.Dispatch(_input, Rows, in _weight, [], _output, _inputSize, _outputSize);
         }
 
+        /// <summary>
+        /// Q8_K activation quantization ALONE, for the same <c>rows × inputSize</c> the projections consume.
+        ///
+        /// <para>This sizes the next lever. Attention dispatches Q once <b>per head</b> over a
+        /// loop-invariant <c>hidden</c>, so this cost is paid 16× per layer where once would do — a prefill
+        /// profile put <c>attn_q</c> at 621.7 ms across 576 calls. Decode already fixed exactly this
+        /// (<c>ProjectPreQuantized</c>, 2026-05); prefill never got the equivalent. What this benchmark
+        /// answers is whether the redundant share is worth ~5% or ~13% of prefill — two estimates that
+        /// differ by enough to change the decision.</para>
+        /// </summary>
+        [Benchmark]
+        public void QuantizeActivationsOnly()
+        {
+            var superBlocksPerRow = _q4k.SuperBlocksPerRow;
+            var bsumsPerRow = superBlocksPerRow * Q4KDotKernel.GroupsPerSuperBlock;
+
+            for (var n = 0; n < Rows; n++)
+            {
+                Q4KDotKernel.QuantizeActivationQ8K(
+                    _input.AsSpan(n * _inputSize, _inputSize),
+                    _quants.AsSpan(n * _inputSize, _inputSize),
+                    _scales.AsSpan(n * superBlocksPerRow, superBlocksPerRow),
+                    _bsums.AsSpan(n * bsumsPerRow, bsumsPerRow));
+            }
+        }
+
         /// <summary>The original re-decode-per-row kernel — kept as the reference the kernel docs' "~3×" claim
         /// is actually measured against.</summary>
         [Benchmark]
