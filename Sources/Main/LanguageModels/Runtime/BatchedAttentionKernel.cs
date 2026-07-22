@@ -35,6 +35,13 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
     public static unsafe class BatchedAttentionKernel
     {
         /// <summary>
+        /// Whether <see cref="ComputeParallel"/> hands workers an interleaved slot order instead of the raw
+        /// query order. A/B switch for the measurement below; set <c>OVERFIT_BALANCED_ATTN=0</c> to disable.
+        /// </summary>
+        internal static bool UseBalancedQueryOrder =
+            Environment.GetEnvironmentVariable("OVERFIT_BALANCED_ATTN") != "0";
+
+        /// <summary>
         /// Sequential batched attention. <paramref name="query"/> is row-major
         /// <c>[rows × headDim]</c>, <paramref name="keys"/>/<paramref name="values"/>
         /// row-major <c>[cacheLength × headDim]</c>, <paramref name="output"/>
@@ -101,6 +108,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     Scale = scale,
                     Softcap = softcap,
                     BasePos = cacheLength - rows,
+                    Balanced = UseBalancedQueryOrder,
                 };
 
                 OverfitParallel.For(0, rows, &ComputeQueryRange, &context);
@@ -120,10 +128,42 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             var output = new Span<float>(ctx.Output, ctx.Rows * headDim);
             var scratch = new Span<float>(ctx.Scratch, ctx.Rows * cacheLength);
 
-            for (var i = start; i < end; i++)
+            var balanced = ctx.Balanced;
+            var rows = ctx.Rows;
+
+            for (var slot = start; slot < end; slot++)
             {
+                var i = balanced ? BalancedQueryIndex(slot, rows) : slot;
+
                 ComputeQuery(query, keys, values, output, scratch, i, ctx.BasePos, cacheLength, headDim, ctx.Scale, ctx.Softcap);
             }
+        }
+
+        /// <summary>
+        /// Maps a scheduling slot to a query index so that <b>any contiguous run of slots carries the same
+        /// amount of work</b>, by pairing the cheapest remaining query with the most expensive one.
+        ///
+        /// <para><b>Why this is needed.</b> Under the causal mask query <c>i</c> attends over <c>basePos+i+1</c>
+        /// keys, so work grows linearly with the query index — yet <c>OverfitParallel.For</c> splits its range
+        /// into <i>contiguous</i> chunks (<c>perChunk = ceil(total/chunks)</c>). On a 672-token prefill across
+        /// 32 workers that gave worker 0 rows 0-20 (≈231 dot products) and worker 31 rows 651-671 (≈13 902).
+        /// The region's duration is its longest chunk, so it ran <b>1.97× longer than the balanced ideal</b>
+        /// of 7 067 while 31 workers sat idle.</para>
+        ///
+        /// <para>Slot <c>2k</c> maps to query <c>k</c> and slot <c>2k+1</c> to query <c>rows-1-k</c>, so each
+        /// consecutive pair costs <c>rows+1</c> regardless of where it lands. The mapping is a bijection over
+        /// <c>[0, rows)</c> for both parities of <c>rows</c>.</para>
+        ///
+        /// <para>Output is <b>bit-identical</b>: queries are independent — each writes its own disjoint output
+        /// row and score-scratch row, and no value is reduced across queries — so reordering them changes
+        /// nothing but which worker runs which.</para>
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static int BalancedQueryIndex(int slot, int rows)
+        {
+            var half = slot >> 1;
+
+            return (slot & 1) == 0 ? half : rows - 1 - half;
         }
 
         /// <summary>
@@ -209,6 +249,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             public float Scale;
             public float Softcap;
             public int BasePos;
+            public bool Balanced;
         }
     }
 }

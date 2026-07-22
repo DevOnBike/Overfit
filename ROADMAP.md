@@ -482,6 +482,36 @@ optimisation in this section). More workers still wins for us; there is nothing 
 |---|---:|---:|---:|---:|---:|---:|
 | prefill | 151 | 197 | 218 | 209 | 238 | **246** |
 
+#### ▶ attn_scores — load-balanced query order: real but 6× smaller than predicted
+
+`OverfitParallel.For` splits its range into **contiguous** chunks, but under the causal mask query `i`
+attends over `basePos+i+1` keys, so work grows linearly with the index. On a 672-token prefill across
+32 workers, worker 0 got rows 0-20 (≈231 dot products) and worker 31 rows 651-671 (≈13 902).
+`BatchedAttentionKernel.BalancedQueryIndex` now pairs slot `2k`→query `k` with slot `2k+1`→query
+`rows-1-k`, so every consecutive pair costs `rows+1` wherever it lands. Bit-identical (queries are
+independent; nothing is reduced across them), zero cost, `OVERFIT_BALANCED_ATTN=0` disables it.
+
+ABAB-interleaved, 3 rounds, best-of-N, untouched FFN as the canary:
+
+| component | baseline | balanced | ratio |
+|---|---:|---:|---:|
+| **attn_scores** | 275.5 ms | **244.9 ms** | **1.12×** |
+| attn_q (canary) | 105.4 | 105.6 | 1.00× |
+| ffn_down (canary) | 725.4 | 722.2 | 1.00× |
+| total/request | 2793.4 | 2768.5 | 1.01× |
+
+Kept — clean separation across all three rounds, canaries flat. But **the prediction was 1.97× and the
+measurement was 1.12×**, so the model behind it was wrong: chunk imbalance is a real cost but not what
+dominates this kernel. Worth recording as the correction, because the same "longest chunk sets the
+duration" reasoning would misprice the next scheduling change too.
+
+**What the profile actually says about attn_scores.** Per head-layer the causal QK plus softmax·V is
+≈115.7 MFLOP; across 16 heads × 36 layers that is **66.6 GFLOP in 244.9 ms = 0.27 TFLOP/s** — **12% of
+this machine's 2.19 TFLOP/s float ceiling**, and 6× below our own Q4_K GEMM. Keys per head are 344 KB,
+so this fits L2 and is not bandwidth-bound. The kernel itself (`CachedAttentionKernel.ComputeSingleHead`,
+reached one query at a time) is the open question — that, and the float side of Q4_K dequantization, are
+the two measured candidates left.
+
 #### ▶ WHAT IS LEFT — profile at 249 tok/s, gap 2.18×
 
 ```
