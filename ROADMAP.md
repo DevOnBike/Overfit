@@ -22,7 +22,7 @@ Zero-allocation, pure C# deep-learning framework targeting high-performance CPU 
 | Native C# GGUF loader (F32/F16/BF16/Q8_0/Q4_K/Q6_K) | ✅ Loads `*.gguf` from Ollama/HF directly |
 | Streaming token generation (`IAsyncEnumerable`) | ✅ Stable, with stop-tokens + cancellation |
 | LoRA adapter (Enable/Disable, Save/Load) | ✅ Stable, zero-copy weight refs |
-| **Quantized weight storage at inference time** | ✅ **Q8_0 + Q4_K_M decode paths done & parity-verified — Qwen2.5-3B Q4_K_M decodes ~19 tok/s @ 3.20 GB RAM, 1 B/token (post-mmap, 2026-05-21). Same-file A/B vs LLamaSharp/llama.cpp: ~1.5× faster on raw tok/s (~29 vs ~19), RAM parity (3.20 GB both), Overfit wins on per-token allocation (1 B vs 21 220 B). Catch-up plan in "Decode throughput catch-up vs llama.cpp" section below.** |
+| **Quantized weight storage at inference time** | ✅ **Q8_0 + Q4_K_M decode & prefill paths done & parity-verified.** Decode ~24 tok/s Qwen-3B Q4_K_M, memory-bound (GEMV kernel at 82% of DRAM ceiling — `DecodeGemvRooflineBenchmark`), 1.13× behind llama.cpp. **Prefill ~299 tok/s (pp672), ~1.81× behind their AVX-512 build / 1.14× behind AVX2**, after the AVX-512 Q4_K/Q6_K prefill kernels. Both compute-side perf tracks CLOSED by measurement — see "✅ CLOSED — CPU PREFILL + DECODE PERF TRACK". |
 | Mixture-of-Experts inference (Qwen-MoE, Mixtral-8x7B) | ✅ Coherent in pure C# (Q8_0 + Q4_K_M); verified "Paris" 2026-05-27 |
 | Training: gradient checkpointing | ✅ `ComputationGraph.Checkpoint` + `CheckpointedModule` — 24× live-activation cut on 12L GPT-1 |
 | Training: data parallelism (N replicas) | ✅ `DataParallelTrainer` / `DataParallelSession` + thread-budget fix — ~6× throughput (24 workers) |
@@ -77,7 +77,47 @@ So in-place rewrites are free and **the only real risk is extracting a method**.
 
 ---
 
-## ▶ NEXT UP — PREFILL. Measured 3.76× behind llama.cpp, and it is compute-bound
+## ✅ CLOSED — CPU PREFILL + DECODE PERF TRACK (2026-07-22 → 2026-07-23)
+
+**Both compute-side performance tracks are closed, by measurement rather than assertion.** The detailed,
+chronological record is preserved below — every win, every reverted negative, and the measurement discipline
+that produced them. The headline:
+
+| | start of track | end of track |
+|---|---:|---:|
+| **prefill** | 143 tok/s (3.76× behind llama.cpp AVX-512) | **~299 tok/s (~1.81×)** — 1.14× to their AVX2 build |
+| **decode** | — | **memory-bound, 1.13× behind**, GEMV kernel at 82% of the DRAM ceiling |
+
+**What shipped this track** (all bit-identical or coherence-safe, pinned by parity tests): Q6_K tiled GEMM,
+shared activation quantization, whole-matrix O / Q / K/V projections, register-tiled prefill kernels, the
+F16-scale hoist (decode once per projection, not once per column tile), **AVX-512 Q4_K and Q6_K prefill
+kernels** (pair what is already adjacent in memory — the choice of what shares a register turned a −20%
+port into +12%), register-resident attention value accumulation, and vectorized softmax exp.
+
+**Why it is closed:**
+- **Prefill.** Our Q4_K matmul measured *faster* than llama.cpp's at equal ISA and thread count (1.70 vs
+  1.56 TFLOP/s), so the remaining gap is AVX-512 coverage (now largely done) and kernel structure (done).
+  What is left — a flash-attention GEMM for the `attn_scores` dot (~2% e2e), the scalar `Unpack` (~3.5% of
+  one kernel) — is high-effort, low-return.
+- **Decode.** `DecodeGemvRooflineBenchmark` showed the kernel's compute runs at 132.5 GB/s hot, *above* the
+  90 GB/s DRAM ceiling, and 82% of it when streaming from DRAM — so decode is memory-bound and an AVX-512
+  decode kernel cannot help (the direct measurement behind the reverted decode-port negative). The whole-model
+  shortfall is per-token overhead and layer→layer serial latency, where we are already 1.13× of llama.cpp.
+
+**The most valuable output was the measurement discipline** — roughly eleven mechanism hypotheses refuted,
+the rules that survived recorded in the `feedback-measurement-discipline` memory, and permanent infrastructure
+left behind: `MachineRooflineBenchmark`, `DecodeGemvRooflineBenchmark`, `Diagnostics/Throughput.cs`, and the
+BenchmarkDotNet throughput columns.
+
+**Next move is a business decision (perf course vs Redaction Gateway), not another kernel.** Any further perf
+work should measure the ceiling before writing code — the discipline that made this track pay.
+
+---
+
+<details>
+<summary>▼ Full chronological record of the perf track (preserved)</summary>
+
+### PREFILL — starting point: measured 3.76× behind llama.cpp, compute-bound
 
 **Measured 2026-07-22, same file (`qwen.q4km.gguf`), same 672-token prompt, best configuration on both sides:**
 
@@ -892,6 +932,29 @@ prefill and decode both reach this method so they stay bit-identical to each oth
 **attn_scores is now optimised across all three parts** (value sum register-resident, exp vectorised, the dot
 is what remains). Further gains need the flash-GEMM for the dot — ~2% e2e at high risk, not worth it now.
 
+#### ★ DECODE IS MEMORY-BOUND — measured directly, AVX-512 cannot help
+
+`DecodeGemvRooflineBenchmark` runs the production decode GEMV (`GemvParallel`, AVX2) on a Q4_K FFN weight at
+two sizes — one that fits this box's 128 MB L3, one that does not — to separate the kernel's compute rate
+from the memory rate it is fed:
+
+| weight | source | GB/s |
+|---|---|---:|
+| 12.7 MB (fits L3) | hot cache | **132.5** |
+| 203 MB (exceeds L3) | DRAM | **73.5** |
+| DRAM read ceiling | — | ~90 |
+
+**The kernel's compute (132.5 GB/s hot) is well above the DRAM ceiling (90)**, so the dequant consumes bytes
+faster than DRAM delivers them: decode is not compute-bound, and an AVX-512 / VNNI decode kernel cannot help.
+This is the direct measurement behind the earlier reverted "AVX-512 decode port" negative. Streaming from
+DRAM the GEMV hits **73.5 GB/s = 82% of the ceiling** — the kernel itself is near-optimal.
+
+The whole-model decode figure (~46 GB/s) is well below the isolated GEMV's 73.5, so that shortfall is **not**
+the weight kernel — it is per-token overhead (attention over the growing KV cache, RoPE, norms, sampling) and
+the serial layer→layer dependency that leaves memory idle between GEMVs. That is an overlap/latency problem,
+not a compute one, and we are already at 1.13× of llama.cpp there. **Decode's compute levers are exhausted,
+by measurement.**
+
 **Remaining measured item:** the scalar `Unpack` at ~3.5% of the Q4_K kernel.
 
 *Invalidated run, kept as a warning:* the first tile sweep ran inside an 11-benchmark class and reported
@@ -990,9 +1053,12 @@ projection with a micro-bench against `sgemm.cpp` before writing any kernel.
    `ProjectBatched` (re-decode per row), **not** against weight-stationary. Recorded in `CLAUDE.md`.
 
 Decode is ~88% quantized GEMV sitting at the DRAM floor (`ffn 69.3% · attention 19.3% · lm_head 10.3%`), so
-there is no cheap **decode** kernel win left — see the prefill section above for the path that *is* open.
+there is no cheap **decode** kernel win left — this was later confirmed directly by `DecodeGemvRooflineBenchmark`
+(kernel compute above the DRAM ceiling; see the closing summary at the top of this track).
 The product direction (perf course vs. the on-prem commercial track) remains deferred and is a separate,
 non-technical decision.
+
+</details>
 
 ---
 
