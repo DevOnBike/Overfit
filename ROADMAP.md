@@ -744,7 +744,28 @@ pre-decoded scale path) asserting exact equality rather than a tolerance. Gated 
 `CpuFeatures.HasAvx512`/`HasAvx512Bw` — the repo's own OVERFIT015 analyzer rejected a direct `IsSupported`
 check, which is what that rule is for. Suite 1494/0/229.
 
-#### ▶ NEGATIVE — the same AVX-512 port for Q6_K is SLOWER, reverted
+#### ★★ Q6_K AVX-512, SECOND ATTEMPT — pair what is already adjacent: +12% on `ffn_down`
+
+The failure below was diagnosed as broadcast traffic, not vector width, and that diagnosis held. `ql03`/`ql47`
+are stored adjacently (`k*64` and `k*64+32`), as are `qhL03`/`qhL47` — so **one 512-bit load carries real data
+in both halves and no weight broadcast is needed at all**. Activations come from a single `vpbroadcastq`
+(`Vector512.Create(long)` replicates the 8-byte pattern), which is exactly the tiling the 256-bit path built
+by hand from two Create calls. The only cross-half move left is one `GetUpper` per reduction, unavoidable
+since AVX-512 has no `vphaddd` for zmm. Accumulators stay 256-bit, so register pressure is unchanged.
+
+ABAB-interleaved, three rounds:
+
+| component | 256-bit | 512-bit | |
+|---|---:|---:|---:|
+| **ffn_down** | 659.7 ms | **589.2** | **1.12×** |
+| ffn_gateup / attn_scores / attn_kv / attn_q / attn_out (canaries) | 1017.1 / 187.7 / 138.0 / 84.9 / 89.2 | 1011.3 / 189.0 / 139.0 / 84.7 / 89.0 | 0.99–1.01× |
+| total | 2373.6 | 2298.6 | **1.03×** |
+
+**Prefill 283 → 292 tok/s, gap 1.91× → 1.85×.** Bit-identical, `Avx512Q6KPrefillParityTests` 7/7, suite
+1501/0/229. Same kernel, same instruction set, same shape — **only the choice of what shares a register**
+turned −20% into +12%.
+
+#### ▶ NEGATIVE (superseded above) — column-pairing the Q6_K port is SLOWER
 
 `Q6KGemvKernel.GemmTiled512` exists and is bit-identical (`Avx512Q6KPrefillParityTests`, 7 cases), but
 `BatchedQuantProjection.UseAvx512PrefillQ6K` is **off**: on the same machine and prompt where the Q4_K port
@@ -795,7 +816,59 @@ optimisation budget — RyuJIT is a fast JIT, and Native AOT uses the same backe
 scheduling to reach for. **None of this explains the remaining gap**: the Q4_K matmul measured faster than
 llama.cpp's at equal ISA and thread count. What is left is AVX-512 coverage and our own kernel structure.
 
-**Remaining measured item:** the scalar `Unpack` at ~3.5% of the Q4_K kernel.
+#### ▶ NEGATIVE — the unaccounted time holds no surprise; it is spread thin
+
+A claimed "~192 ms unaccounted" was an arithmetic error: it conflated time outside both blocks with time
+inside attention that no sub-slice covers. The profiler's own top-level rows split it properly:
+
+| | time | share |
+|---|---:|---:|
+| **attention** (top level) | 585.2 ms | 24.6% |
+| — sub-slices (`kv`+`q`+`scores`+`out`) | 504.0 | |
+| — **unattributed inside attention** (RoPE, QK-norm, the whole-matrix Q/O gather+scatter) | **81.2** | **3.4%** |
+| **ffn** (top level) | 1683.3 ms | 70.8% |
+| — sub-slices (`gateup`+`down`) | 1683.1 | |
+| — unattributed | **0.2** | **0%** |
+| **other** (norms / residual / embed / final norm) | 109.4 | 4.6% |
+
+**FFN is 100% accounted**, which kills the hypothesis that SwiGLU's 266M `silu` calls were a hidden cost —
+the activation lives inside `ffn_gateup` and is not separable at this granularity. The residual is genuinely
+thin: halving *both* remaining pieces would buy ~4%. The work is in the large kernels, not hiding beside them.
+
+**What F16C would be worth now, if .NET exposed it: ~0.1%.** Ablation priced the F16 decode at 12% of the
+Q4_K kernel, but hoisting already removed 83/84 of that work by decoding once per projection instead of once
+per column tile. The missing instruction would speed up what remains; the restructuring deleted it. Worth
+recording as the general shape: **a workaround that removes work beats an instruction that accelerates it**,
+and having the instruction available would likely have stopped the search at 12%. Where F16C would still pay
+is *model loading* — `GgufReader`, `GgmlDequant`, `SafetensorsReader` and the Whisper loader all widen halves
+in scalar loops, hundreds of millions of values per 3B model — but that is startup, not inference.
+
+#### ★ whole-matrix K/V — one dispatch per projection: prefill 291 → 297 tok/s
+
+Per-group K/V projects `[dModel → headDim] = [2048 → 128]`, which a micro-bench put at **0.37 TFLOP/s**:
+352 MFLOP is too little work to amortise the dispatch's fixed cost, and single-thread was only 1.9× slower
+than the pool, so the 84-tile launch — not the matmul — dominates. Ceiling measured before building: two
+narrow dispatches 3206 µs vs one wide `[2048 → 256]` 1768 µs = **1.81×** on the projection. Built it:
+project all KV heads through `WkWhole`/`WvWhole` once, gather each group's band (adding the per-KV-head bias
+in the copy). Gated on both whole handles being Q4_K, so Q6_K `attn_v` layers fall back to per-group.
+
+ABAB, canaries flat: **attn_kv 139.1 → 96.4 ms (1.44×)**. End-to-end, six paired rounds:
+
+| | median | min |
+|---|---:|---:|
+| per-group | 2311 ms / 291 tok/s | 2298 / 292 |
+| **whole** | **2262 / 297** | **2251 / 299** |
+
+**+2.2% e2e**, matching the 1.81×-on-projection ceiling. Bit-identical (each output row's dot product is
+unchanged; no reassociation), no parity gate, suite 1501/0/229, `OVERFIT_WHOLE_KV=0` disables.
+
+*Methodology note kept as a warning:* the first component table read total as 1.00× while attn_kv clearly
+dropped — an artifact of taking each component's min from a different run, so total-min and attn_kv-min came
+from different rounds. A paired total-only measurement resolved it. **Best-of-N per component does not give a
+consistent end-to-end number; measure total paired.**
+
+**Remaining measured item:** the scalar `Unpack` at ~3.5% of the Q4_K kernel; and `attn_scores` at 187 ms /
+0.27 TFLOP/s, which needs a flash-attention-style blocked kernel rather than a loop change.
 
 *Invalidated run, kept as a warning:* the first tile sweep ran inside an 11-benchmark class and reported
 `Tiled` and `Tiled_Cols8` — **the same configuration** — 21% apart, far outside their ±9% bars. Two identical

@@ -450,20 +450,28 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         }
 
         /// <summary>
-        /// AVX-512 form of <see cref="GemmTiled"/>, structured exactly like
-        /// <c>Q4KGemvKernel.GemmTiled512</c>: <b>two activation columns per instruction</b>, column <c>2p</c>
-        /// in the low 256 bits and <c>2p+1</c> in the high, with the shared weights broadcast into both halves
-        /// and the pair loop left innermost so the per-block weight decode stays amortised across the tile.
+        /// AVX-512 form of <see cref="GemmTiled"/> that widens along the <b>weight layout</b> rather than
+        /// across activation columns.
         ///
-        /// <para><b>The one place it cannot widen.</b> <see cref="ReduceRows"/> ends in <c>vphaddd</c>, which
-        /// AVX-512 does not provide for zmm at all. The two <c>vpmaddwd</c> steps still run at 512; only the
-        /// horizontal add and its permute drop to 256-bit halves and are re-joined. That costs one extra
-        /// instruction per reduction against eighteen saved elsewhere in the same iteration — the arithmetic
-        /// bulk (eight <c>vpmaddubsw</c>, four subtracts, the scale multiplies) all pairs cleanly.</para>
+        /// <para><b>Why not column pairing.</b> The first attempt put column <c>2p</c> in the low half and
+        /// <c>2p+1</c> in the high, which meant every weight vector had to be broadcast into both halves with a
+        /// <c>vinserti64x4</c>. Q6_K issues six such broadcasts per <c>k</c>, sixteen times per block, for far
+        /// less arithmetic each than Q4_K does — the lane-crossing traffic outran the arithmetic saved and the
+        /// kernel measured <b>20% slower</b>. That version is recorded as a negative in ROADMAP.</para>
         ///
-        /// <para><b>Bit-identical</b> to <see cref="GemmTiled"/>: each column's operations and their order are
-        /// unchanged, including the split reduction, which is the same 256-bit sequence applied to the same
-        /// values.</para>
+        /// <para><b>What this does instead.</b> <c>ql03</c> and <c>ql47</c> are already adjacent in the repacked
+        /// block — at <c>k*64</c> and <c>k*64+32</c> — and so are <c>qhL03</c>/<c>qhL47</c>. One 512-bit load
+        /// therefore carries <i>real data</i> in both halves, with no broadcast at all, and the halves stay
+        /// independent all the way through <c>vpmaddubsw</c> and the subtract. Activations arrive as a single
+        /// <c>vpbroadcastq</c> — <c>Vector512.Create(long)</c> replicates the 8-byte pattern eight times, which
+        /// is exactly the tiling the 256-bit path built by hand.</para>
+        ///
+        /// <para>The only cross-half move left is one <c>GetUpper</c> per reduction, because AVX-512 provides no
+        /// <c>vphaddd</c> for zmm. Accumulators stay 256-bit, so register pressure is unchanged.</para>
+        ///
+        /// <para><b>Bit-identical</b> to <see cref="GemmTiled"/>: the 512-bit operations act lanewise on exactly
+        /// the values the two 256-bit operations did, and the horizontal add receives the same
+        /// <c>(m03, m47)</c> pair it always did.</para>
         /// </summary>
         public static unsafe void GemmTiled512(
             ReadOnlySpan<byte> repacked,
@@ -481,7 +489,6 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             }
 
             var nb = inputSize / 256;
-            var pairs = (cols + 1) / 2;
 
             var m4b = Vector512.Create((byte)0x0F);
             var m2 = Vector512.Create((byte)0x03);
@@ -489,8 +496,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             var ones = Vector512.Create((short)1);
             var reduce = Vector256.Create(0, 1, 4, 5, 2, 3, 6, 7);
 
-            Span<Vector512<float>> sumf = stackalloc Vector512<float>[pairs];
-            Span<Vector512<int>> iacc = stackalloc Vector512<int>[pairs];
+            Span<Vector256<float>> sumf = stackalloc Vector256<float>[cols];
+            Span<Vector256<int>> iacc = stackalloc Vector256<int>[cols];
 
             fixed (byte* rep = repacked)
             fixed (sbyte* aqAll = actQuants)
@@ -502,9 +509,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 {
                     var bptr = rep + (long)x * nb * BlockKx8Bytes;
 
-                    for (var p = 0; p < pairs; p++)
+                    for (var c = 0; c < cols; c++)
                     {
-                        sumf[p] = Vector512<float>.Zero;
+                        sumf[c] = Vector256<float>.Zero;
                     }
 
                     for (var l = 0; l < nb; l++)
@@ -514,14 +521,13 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                         var ql = blk + DstQlOffset;
                         var qh = blk + DstQhOffset;
 
-                        var d256 = dsc is not null
+                        var dVec = dsc is not null
                             ? Vector256.Load(dsc + (((long)x * nb) + l) * DecodedScalesPerBlock)
                             : LoadF16x8Int(blk);
-                        var dVec = Vector512.Create(d256, d256);
 
-                        for (var p = 0; p < pairs; p++)
+                        for (var c = 0; c < cols; c++)
                         {
-                            iacc[p] = Vector512<int>.Zero;
+                            iacc[c] = Vector256<int>.Zero;
                         }
 
                         for (var k = 0; k < 16; k++)
@@ -535,82 +541,49 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                             var qhBlockL = ((qhHalfL + (baseL % 32)) / 8) * 64;
                             var qhBlockH = ((qhHalfH + (baseH % 32)) / 8) * 64;
 
-                            // Weight side: decoded once, shared by both columns of every pair.
-                            var ql03 = Broadcast512(ql + k * 64);
-                            var ql47 = Broadcast512(ql + k * 64 + 32);
-                            var qhL03 = Broadcast512(qh + qhBlockL);
-                            var qhL47 = Broadcast512(qh + qhBlockL + 32);
-                            var qhH03 = Broadcast512(qh + qhBlockH);
-                            var qhH47 = Broadcast512(qh + qhBlockH + 32);
+                            // One load each: rows 0-3 in the low half, rows 4-7 in the high half, as stored.
+                            var ql0347 = Vector512.Load(ql + k * 64);
+                            var qhL0347 = Vector512.Load(qh + qhBlockL);
+                            var qhH0347 = Vector512.Load(qh + qhBlockH);
 
-                            var qLu03 = LoNib512(ql03, m4b) | QhBits512(qhL03, qhShiftL, m2);
-                            var qLu47 = LoNib512(ql47, m4b) | QhBits512(qhL47, qhShiftL, m2);
-                            var qHu03 = HiNib512(ql03, m4b) | QhBits512(qhH03, qhShiftH, m2);
-                            var qHu47 = HiNib512(ql47, m4b) | QhBits512(qhH47, qhShiftH, m2);
+                            var qLu = LoNib512(ql0347, m4b) | QhBits512(qhL0347, qhShiftL, m2);
+                            var qHu = HiNib512(ql0347, m4b) | QhBits512(qhH0347, qhShiftH, m2);
 
-                            var sl = ScaleVec(scales + (baseL / 16) * 8);
-                            var sh = ScaleVec(scales + (baseH / 16) * 8);
-                            var scaleL = Vector512.Create(sl, sl);
-                            var scaleH = Vector512.Create(sh, sh);
+                            var scaleL = ScaleVec(scales + (baseL / 16) * 8);
+                            var scaleH = ScaleVec(scales + (baseH / 16) * 8);
 
-                            for (var p = 0; p < pairs; p++)
+                            for (var c = 0; c < cols; c++)
                             {
-                                var lowCol = 2 * p;
-                                var highCol = Math.Min(2 * p + 1, cols - 1);
-                                var aLow = aqAll + (long)lowCol * inputSize + l * 256;
-                                var aHigh = aqAll + (long)highCol * inputSize + l * 256;
+                                var aqs = aqAll + (long)c * inputSize + l * 256;
+                                var actL = TileAct512(aqs + baseL);
+                                var actH = TileAct512(aqs + baseH);
 
-                                var actL = TileAct512(aLow + baseL, aHigh + baseL);
-                                var actH = TileAct512(aLow + baseH, aHigh + baseH);
+                                var pL = Avx512BW.Subtract(Mul512(qLu, actL), Mul512(m32, actL));
+                                var pH = Avx512BW.Subtract(Mul512(qHu, actH), Mul512(m32, actH));
 
-                                var sumL = ReduceRows512(
-                                    Avx512BW.Subtract(Mul512(qLu03, actL), Mul512(m32, actL)),
-                                    Avx512BW.Subtract(Mul512(qLu47, actL), Mul512(m32, actL)),
-                                    ones, reduce);
-                                var sumH = ReduceRows512(
-                                    Avx512BW.Subtract(Mul512(qHu03, actH), Mul512(m32, actH)),
-                                    Avx512BW.Subtract(Mul512(qHu47, actH), Mul512(m32, actH)),
-                                    ones, reduce);
+                                var sumL = ReduceRows512(pL, ones, reduce);
+                                var sumH = ReduceRows512(pH, ones, reduce);
 
-                                iacc[p] = Avx512F.Add(iacc[p], Avx512F.Add(
-                                    Avx512F.MultiplyLow(sumL, scaleL), Avx512F.MultiplyLow(sumH, scaleH)));
+                                iacc[c] = Avx2.Add(iacc[c], Avx2.Add(
+                                    Avx2.MultiplyLow(sumL, scaleL), Avx2.MultiplyLow(sumH, scaleH)));
                             }
                         }
 
-                        for (var p = 0; p < pairs; p++)
+                        for (var c = 0; c < cols; c++)
                         {
-                            var rowScale = Vector512.Create(
-                                Vector256.Create(asc[(long)(2 * p) * nb + l]),
-                                Vector256.Create(asc[(long)Math.Min(2 * p + 1, cols - 1) * nb + l]));
-
-                            sumf[p] = Avx512F.FusedMultiplyAdd(
-                                Avx512F.ConvertToVector512Single(iacc[p]),
-                                Avx512F.Multiply(dVec, rowScale),
-                                sumf[p]);
+                            sumf[c] = Fma.MultiplyAdd(
+                                Avx.ConvertToVector256Single(iacc[c]),
+                                Avx.Multiply(dVec, Vector256.Create(asc[(long)c * nb + l])),
+                                sumf[c]);
                         }
                     }
 
-                    for (var p = 0; p < pairs; p++)
+                    for (var c = 0; c < cols; c++)
                     {
-                        sumf[p].GetLower().Store(outp + (long)(2 * p) * outputSize + x * 8);
-
-                        // The odd tail duplicated its low column into the high half; discard that copy.
-                        if (2 * p + 1 < cols)
-                        {
-                            sumf[p].GetUpper().Store(outp + (long)(2 * p + 1) * outputSize + x * 8);
-                        }
+                        sumf[c].Store(outp + (long)c * outputSize + x * 8);
                     }
                 }
             }
-        }
-
-        /// <summary>The same 32 weight bytes in both halves — weights are shared by the two columns of a pair.</summary>
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static unsafe Vector512<byte> Broadcast512(byte* p)
-        {
-            var v = Vector256.Load(p);
-
-            return Vector512.Create(v, v);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -633,34 +606,26 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         private static Vector512<short> Mul512(Vector512<byte> rhs, Vector512<sbyte> lhs) =>
             Avx512BW.MultiplyAddAdjacent(rhs, lhs);
 
-        /// <summary>One column's eight activation bytes per half, duplicated in both 128-bit lanes of that half.</summary>
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static unsafe Vector512<sbyte> TileAct512(sbyte* low, sbyte* high)
-        {
-            var lo = Unsafe.ReadUnaligned<long>(low);
-            var hi = Unsafe.ReadUnaligned<long>(high);
-            var vl = Vector128.Create(lo, lo).AsSByte();
-            var vh = Vector128.Create(hi, hi).AsSByte();
-
-            return Vector512.Create(Vector256.Create(vl, vl), Vector256.Create(vh, vh));
-        }
-
         /// <summary>
-        /// <see cref="ReduceRows"/> widened as far as the instruction set allows: both <c>vpmaddwd</c> steps run
-        /// at 512 bits, then the horizontal add and its permute drop to 256-bit halves because AVX-512 has no
-        /// <c>vphaddd</c> for zmm. Each half is the identical 256-bit sequence, so the result is bit-identical.
+        /// Eight activation bytes replicated across all 64 lanes by a single <c>vpbroadcastq</c> — the same
+        /// tiling <see cref="TileAct"/> assembles from two Create calls, at no cross-half cost.
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static Vector512<int> ReduceRows512(
-            Vector512<short> p03, Vector512<short> p47, Vector512<short> ones, Vector256<int> reduce)
+        private static unsafe Vector512<sbyte> TileAct512(sbyte* a) =>
+            Vector512.Create(Unsafe.ReadUnaligned<long>(a)).AsSByte();
+
+        /// <summary>
+        /// <see cref="ReduceRows"/> over a vector holding <c>[p03 | p47]</c>. The <c>vpmaddwd</c> runs at 512
+        /// bits; the horizontal add then takes the two halves, which is exactly the <c>(m03, m47)</c> pair the
+        /// 256-bit version passes, so the result is bit-identical.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static Vector256<int> ReduceRows512(
+            Vector512<short> p0347, Vector512<short> ones, Vector256<int> reduce)
         {
-            var m03 = Avx512BW.MultiplyAddAdjacent(p03, ones);
-            var m47 = Avx512BW.MultiplyAddAdjacent(p47, ones);
+            var m = Avx512BW.MultiplyAddAdjacent(p0347, ones);
 
-            var lower = Avx2.PermuteVar8x32(Avx2.HorizontalAdd(m03.GetLower(), m47.GetLower()), reduce);
-            var upper = Avx2.PermuteVar8x32(Avx2.HorizontalAdd(m03.GetUpper(), m47.GetUpper()), reduce);
-
-            return Vector512.Create(lower, upper);
+            return Avx2.PermuteVar8x32(Avx2.HorizontalAdd(m.GetLower(), m.GetUpper()), reduce);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]

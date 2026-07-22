@@ -87,6 +87,13 @@ namespace Benchmarks
                 // count (32) - the only like-for-like kernel comparison available without editing their tests.
                 "llama_ref" => (14336, 4096),
 
+                // Per-KV-head K or V projection (dModel 2048 -> headDim 128) vs the whole-matrix form for a
+                // 2-KV-head GQA model (2048 -> 256). The narrow shape is where attn_kv measured 0.37 TFLOP/s:
+                // 352 MFLOP is too little work to amortise the dispatch's fixed cost (repack check, scale
+                // decode, 84-tile launch). This pair measures whether widening the output recovers it.
+                "kv_head" => (2048, 128),
+                "kv_whole" => (2048, 256),
+
                 _ => (2048, 2048),
             };
         }

@@ -117,7 +117,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// (no <c>vphaddd</c> for zmm), adding three more cross-half moves per call, 32 calls per block. The
         /// lane-crossing traffic outruns the arithmetic saved.</para>
         /// </summary>
-        internal static bool UseAvx512PrefillQ6K;
+        internal static bool UseAvx512PrefillQ6K =
+            CpuFeatures.HasAvx512
+            && CpuFeatures.HasAvx512Bw
+            && Environment.GetEnvironmentVariable("OVERFIT_AVX512_Q6K") != "0";
 
         /// <summary>
         /// Weight bytes one worker's band may occupy. Half of a 1 MB Zen-5 L2, leaving the rest for the

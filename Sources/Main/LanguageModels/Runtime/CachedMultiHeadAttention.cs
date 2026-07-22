@@ -571,6 +571,14 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         }
 
         /// <summary>
+        /// Project all KV heads in one dispatch instead of one per group; A/B via <c>OVERFIT_WHOLE_KV=0</c>.
+        /// See the measurement at the projection site (1.81× on the projection, 0.37 TFLOP/s per-group is
+        /// launch-bound). Bit-identical, so it is on by default where the whole handles are Q4_K.
+        /// </summary>
+        internal static bool UseWholeKv =
+            Environment.GetEnvironmentVariable("OVERFIT_WHOLE_KV") != "0";
+
+        /// <summary>
         /// Batched (prefill) multi-head attention for the <b>Llama/Qwen quantized</b> path — the
         /// multi-row counterpart of <see cref="Decode"/> that supports RoPE + GQA + quantized weights
         /// (the cases <see cref="DecodeBatched"/> rejects). KV groups are processed sequentially (each
@@ -703,6 +711,33 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 PrefillProfiler.Stop(PrefillProfiler.Component.AttnQ, profWholeQ);
             }
 
+            // Whole-matrix K/V: the per-group projection is [dModel -> headDim] = [2048 -> 128], and a
+            // micro-bench put that at 0.37 TFLOP/s — 352 MFLOP is too little work to amortise a dispatch's
+            // fixed cost (repack check, scale decode, the 84-tile parallel launch), and single-thread was only
+            // 1.9x slower than the pool, i.e. the launch, not the matmul, dominates. Projecting all KV heads at
+            // once ([dModel -> kvHeads*headDim]) doubles the work per launch: measured 1.81x on the projection
+            // (2x narrow 3206 us vs 1x wide 1768 us). Gated on the whole K AND V handles both being Q4_K, so
+            // Q6_K attn_v layers fall back to per-group. Bias and QK-norm still applied per group below, so the
+            // result is unchanged from the per-group path (deterministic reduction, no reassociation).
+            var kvDim = KvHeadCount * headDim;
+            var useWholeKv = weights.WkWhole.IsQ4K && weights.WvWhole.IsQ4K && UseWholeKv;
+            using var kAll = new PooledBuffer<float>(useWholeKv ? rows * kvDim : 0, clearMemory: false);
+            using var vAll = new PooledBuffer<float>(useWholeKv ? rows * kvDim : 0, clearMemory: false);
+
+            if (useWholeKv)
+            {
+                var wholeK = weights.WkWhole; // property returns by value - needs a local to pass by `in`
+                var wholeV = weights.WvWhole;
+                var profWholeKv = PrefillProfiler.Start();
+                BatchedQuantProjection.Dispatch(
+                    hidden, rows, in wholeK, [], kAll.Span.Slice(0, rows * kvDim),
+                    dModel, kvDim, hQuants, hScales, hBsums);
+                BatchedQuantProjection.Dispatch(
+                    hidden, rows, in wholeV, [], vAll.Span.Slice(0, rows * kvDim),
+                    dModel, kvDim, hQuants, hScales, hBsums);
+                PrefillProfiler.Stop(PrefillProfiler.Component.AttnKv, profWholeKv);
+            }
+
             for (var group = 0; group < KvHeadCount; group++)
             {
                 // K/V weights: GQA shares one KV head per group; MHA uses the head's own.
@@ -730,10 +765,34 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
                 // K/V projected once per group, RoPE-rotated, stored — every Q head reads the cache.
                 var profKv = PrefillProfiler.Start();
-                BatchedQuantProjection.Dispatch(
-                    hidden, rows, in wk, bk, kg.Span, dModel, headDim, hQuants, hScales, hBsums);
-                BatchedQuantProjection.Dispatch(
-                    hidden, rows, in wv, bv, vg.Span, dModel, headDim, hQuants, hScales, hBsums);
+                if (useWholeKv)
+                {
+                    // Gather this group's band out of the whole projection; the bias lives per KV head and is
+                    // added here, exactly as the per-group dispatch would have applied it.
+                    for (var n = 0; n < rows; n++)
+                    {
+                        var dstK = kg.Span.Slice(n * headDim, headDim);
+                        var dstV = vg.Span.Slice(n * headDim, headDim);
+                        kAll.Span.Slice(n * kvDim + group * headDim, headDim).CopyTo(dstK);
+                        vAll.Span.Slice(n * kvDim + group * headDim, headDim).CopyTo(dstV);
+                        if (!bk.IsEmpty)
+                        {
+                            TensorPrimitives.Add(dstK, bk.Slice(0, headDim), dstK);
+                        }
+                        if (!bv.IsEmpty)
+                        {
+                            TensorPrimitives.Add(dstV, bv.Slice(0, headDim), dstV);
+                        }
+                    }
+                }
+
+                if (!useWholeKv)
+                {
+                    BatchedQuantProjection.Dispatch(
+                        hidden, rows, in wk, bk, kg.Span, dModel, headDim, hQuants, hScales, hBsums);
+                    BatchedQuantProjection.Dispatch(
+                        hidden, rows, in wv, bv, vg.Span, dModel, headDim, hQuants, hScales, hBsums);
+                }
                 PrefillProfiler.Stop(PrefillProfiler.Component.AttnKv, profKv);
                 if (weights.HasQkNorm)
                 {
