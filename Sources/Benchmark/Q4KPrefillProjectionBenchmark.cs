@@ -4,6 +4,7 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using BenchmarkDotNet.Attributes;
+using BenchmarkDotNet.Running;
 using Benchmarks.Helpers;
 using DevOnBike.Overfit.LanguageModels.Loading;
 using DevOnBike.Overfit.LanguageModels.Runtime;
@@ -74,19 +75,48 @@ namespace Benchmarks
         private bool _originalTiled;
         private bool _originalStationary;
 
-        [GlobalSetup]
-        public void Setup()
+        private static (int InputSize, int OutputSize) ShapeOf(string shape)
         {
-            (_inputSize, _outputSize) = Shape switch
+            return shape switch
             {
                 "ffn_gate_up" => (2048, 11008),
                 "ffn_down" => (11008, 2048),
+
                 // The exact shape llama.cpp's own test-backend-ops reports (m=4096, k=14336): 60.13 GFLOP
                 // at n=512, where its AVX2 build measured 1.56 TFLOPS for q4_K. Same shape, same thread
                 // count (32) - the only like-for-like kernel comparison available without editing their tests.
                 "llama_ref" => (14336, 4096),
+
                 _ => (2048, 2048),
             };
+        }
+
+        /// <summary>
+        /// Declares each benchmark's work amount so the TFLOP/s and GB/s columns are computed in-repo.
+        ///
+        /// <para>Note that <see cref="QuantizeActivationsOnly"/> declares <b>bytes, not FLOPs</b>: it performs no
+        /// multiply-accumulate, so crediting it with the matmul's FLOP count — as an out-of-repo script briefly
+        /// did on 2026-07-22, yielding a fictitious 29.6 TFLOP/s — describes memory traffic as arithmetic.</para>
+        /// </summary>
+        public static WorkAmount GetWorkAmount(BenchmarkCase benchmarkCase)
+        {
+            var rows = (int)benchmarkCase.Parameters["Rows"];
+            var (inputSize, outputSize) = ShapeOf((string)benchmarkCase.Parameters["Shape"]);
+
+            if (benchmarkCase.Descriptor.WorkloadMethod.Name == nameof(QuantizeActivationsOnly))
+            {
+                // Reads rows×inputSize floats, writes the same count of sbyte quants plus per-super-block
+                // scales and bsums — the scales/bsums are ~1% of the traffic and are not modelled.
+                return WorkAmount.Memory((long)rows * inputSize * (sizeof(float) + sizeof(sbyte)));
+            }
+
+            return WorkAmount.Matmul(rows, inputSize, outputSize);
+        }
+
+        [GlobalSetup]
+        public void Setup()
+        {
+            (_inputSize, _outputSize) = ShapeOf(Shape);
 
             _originalTiled = BatchedQuantProjection.UseTiledPrefillQ4K;
             _originalStationary = BatchedQuantProjection.UseWeightStationaryQ4K;

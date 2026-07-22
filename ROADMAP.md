@@ -442,6 +442,46 @@ Also unresolved: their production run (`llama-bench`) chose **16 threads** and b
 `test-backend-ops`, so thread count is worth re-sweeping on our side too. The last worker sweep
 (8→92, 16→122, 24→130, 32→144 tok/s) predates every optimisation since and may no longer hold at 249 tok/s.
 
+#### ★ MACHINE ROOFLINE — measured, in-repo (`MachineRooflineBenchmark`)
+
+Every kernel figure above was a bare number. These are the ceilings that make them readable
+(32 workers, AVX2). Rates are derived by `Helpers/WorkAmount.cs` + `Helpers/ThroughputColumn.cs`,
+declared next to each benchmark — *not* in a script, after an out-of-repo script credited a
+quantization-only benchmark with the matmul's FLOP count and reported a fictitious 29.6 TFLOP/s.
+
+| ceiling | measured |
+|---|---:|
+| peak float FMA | **2.19 TFLOP/s** |
+| peak int8 dot (`vpmaddubsw`+`vpmaddwd`) | **11.21 TOPS** |
+| DRAM read | **89.9 GB/s** |
+| copy | 73.0 GB/s |
+| STREAM triad | 47.3 GB/s |
+
+**Where our Q4_K GEMM (1.70 TFLOP/s) actually sits:** 15% of the integer ceiling, **78% of the float
+ceiling**, and 1% of DRAM bandwidth (33 MB of weights in 35.3 ms = 0.94 GB/s). So the kernel is neither
+memory-bound nor integer-issue-bound — **it is bound by the float side of dequantization** (scale
+multiplication and int32→float conversion of the accumulators). That is also why llama.cpp's AVX-512
+build wins 1.60×: AVX-512 doubles both ceilings.
+
+**Decode, for the first time with a number under it:** Qwen-3B Q4_K (~1.9 GB) at 24.4 tok/s consumes
+≈46 GB/s against an 89.9 GB/s read ceiling. The long-standing "decode is at the DRAM floor" conclusion
+was previously reasoning only; it now has a measurement.
+
+*Benchmark trap paid for here:* the first version put the accumulator chains in a `stackalloc` span and
+measured a float peak of **0.79 TFLOP/s** — below the 1.70 our real matmul achieves, which is impossible
+for a loop that touches no memory. The span forced an L1 round-trip per accumulator per iteration.
+Constant-index named locals are what keep a value in a register.
+
+#### ▶ NEGATIVE — prefill worker sweep: llama.cpp's 16-thread choice does not transfer
+
+llama.cpp's `llama-bench` picks 16 threads over the machine's 32 and beats a 32-thread
+`test-backend-ops`, so our worker count was re-swept at 249 tok/s (the previous sweep predated every
+optimisation in this section). More workers still wins for us; there is nothing to take here.
+
+| workers | 8 | 12 | 16 | 24 | 31 | 32 (default) |
+|---|---:|---:|---:|---:|---:|---:|
+| prefill | 151 | 197 | 218 | 209 | 238 | **246** |
+
 #### ▶ WHAT IS LEFT — profile at 249 tok/s, gap 2.18×
 
 ```
