@@ -353,6 +353,95 @@ ones even on the same kernel.
 reassociates a sum the per-head path performs in head order; Q's contraction is over `dModel` in both
 shapes, so every output element is the same dot product either way.
 
+#### 📖 READ — how llama.cpp's `ggml_gemm_q4_K_8x8_q8_K` differs from ours
+
+`D:\llamacpp-tmp\ggml\src\ggml-cpu\arch\x86\repack.cpp:2042`. Four variants:
+
+| ISA | tile (act rows × out cols) | accumulators |
+|---|---|---|
+| AVX-512 main | 16 × 16 | `__m512 acc_rows[16]` + `acc_min_rows[16]` = 32 ZMM |
+| AVX-512 tail | 4 × 16 | 8 ZMM |
+| AVX2 main | 16 × 8 | `__m256 acc_rows[16]` + `[16]` |
+| AVX2 tail | 4 × 8 | 8 YMM |
+| **ours (`GemmTiled`)** | **`cols` × 8** | **5 `stackalloc` spans of length `cols`** |
+
+Differences, in order of likely cost:
+
+1. **Constant vs runtime accumulator index.** Theirs are `acc_rows[0]`…`[15]` with fully unrolled updates
+   (lines 2789-2792, 3464-3467 are four explicit FMAs, not a loop), so the compiler register-allocates and
+   spills selectively. Ours are indexed by a runtime `c`, so every access is a stack read/write **and** a
+   bounds check — register allocation is impossible, not merely unlucky. Note their AVX2 path declares 32
+   `__m256` against 16 YMM, so it spills too and is still fast: the win is *selective* spilling.
+2. **Five accumulator arrays to their two.** `accRow`, `accMin`, `iaccB`, `iaccMinB`, `q8s` — 40 vectors of
+   stack traffic per iteration at `cols=8`.
+3. **Activations are repacked too** (`block_q8_Kx4`, four rows interleaved), so one load feeds four rows.
+   That is why their row tile is always a multiple of 4. Ours loads each column separately.
+4. AVX-512 is a consequence of (1), not an independent lever: 32 ZMM is what makes the 16×16 tile fit.
+
+#### ✗ ATTEMPTED — unrolled fixed-tile specialisation: INCONCLUSIVE, reverted
+
+A `cols == 4` specialisation with named accumulators was written and passed parity — **but was never
+executed**: the dispatcher picks `nr = rows/8 >= cores ? 8 : 4`, which is 8 at 672 rows on 32 cores. That is
+the **third** unreached-path mistake in one day (after the dead `OVERFIT_TILED_PREFILL` flag and the
+`IsPrepacked` gate hiding the bias change).
+
+Retargeting it to 8 columns by regex-rewriting the existing kernel text produced **incorrect code** —
+duplicate unrolled bodies (the generator reported 11 where 8 were expected, and I proceeded anyway), parity
+failed at `cols: 8`, and the kernel ran 7-9× slower (70-83× single-threaded). Reverted.
+
+#### ✗ TESTED AND REFUTED — register pressure is not the bottleneck
+
+Register accounting first, since it reframes the task: **AVX2 has 16 YMM registers**, and the kernel keeps
+**16 decoded weight vectors** live across the column loop plus 3 hot accumulators per column — 40 vectors
+wanted at `cols=8`. Naming the accumulators cannot help, because they have nowhere to go. (This also explains
+why llama.cpp's own AVX2 path spills: it declares 32 `__m256`.)
+
+That analysis produced a concrete, small change instead: the low-nibble weight vectors feed only `iacc0` and
+the high-nibble ones only `iacc1`, so they are never needed simultaneously. **Splitting the sub-block into
+two half-passes over the columns halves peak weight pressure from 16 vectors to 8** — bit-identical (parity
+5/5), and the only thing it changes is register lifetime.
+
+**Measured: a tie.** Single-thread is the low-noise signal (StdDev ~1%) and it did not move —
+`ffn_gate_up` 167.8 → 168.9 ms, `attn_qo` 31.7 → 32.1 ms, i.e. marginally *worse*. The parallel column showed
+`attn_qo` −12.7%, but that sits inside the run-to-run spread of that measurement (5050 / 5217 / 4408 µs
+across runs) and the FFN shapes — 71% of prefill — did not move at all. Reverted.
+
+**So spilling is not what costs us.** The remaining structural difference to llama.cpp is the one that
+reduces *loads*, not register pressure: `block_q8_Kx4` interleaves four activation rows so one load feeds
+four of them, where we issue four `BroadcastLo` per column. That is the next thing to size — and it is a
+change to the activation-quantization output layout, not to the kernel's register allocation.
+
+#### ★ LIKE-FOR-LIKE KERNEL COMPARISON — our Q4_K matmul is FASTER than llama.cpp's
+
+Everything above compared whole-model tok/s and *inferred* the kernel difference. That inference was wrong.
+llama.cpp's own `test-backend-ops perf -o MUL_MAT` (AVX2 build, 32 threads — it uses
+`std::thread::hardware_concurrency`) reports for `q4_K m=4096 k=14336 n=512`, 60.13 GFLOP/run:
+
+| | time | TFLOP/s |
+|---|---:|---:|
+| llama.cpp | 38 559 µs | **1.56** |
+| **Overfit `GemmTiled`** (same shape, 32 workers) | **35 308 µs** | **1.70** |
+
+**Ours is 1.09× faster**, and ~1.91 TFLOP/s with the activation quantization (3 750 µs) excluded.
+**So the Q4_K matmul is not where we lose.** Two earlier conclusions are retracted: the "2.34× kernel craft
+at equal ISA" attribution, and the register/interleaving hypotheses built on top of it.
+
+**The unexplained part, restated honestly.** Prefill FLOPs are ≈3.72 TFLOP (36 layers; the LM head runs on
+the last position only). Ours: 2.695 s = 1.38 TFLOP/s. Theirs (AVX2): 1.996 s = 1.86 TFLOP/s. Our own split:
+
+| | time | FLOPs | TFLOP/s |
+|---|---:|---:|---:|
+| FFN | 1923 ms | 3.27 T | **1.70** |
+| attention projections | 662 ms | 0.45 T | **0.68** |
+| other | 110 ms | — | — |
+
+Our FFN already matches the isolated kernel rate. **Attention runs at 0.4× the FFN's efficiency** — that is
+where the FLOP throughput collapses, and it is 25% of prefill.
+
+Also unresolved: their production run (`llama-bench`) chose **16 threads** and beat a 32-thread
+`test-backend-ops`, so thread count is worth re-sweeping on our side too. The last worker sweep
+(8→92, 16→122, 24→130, 32→144 tok/s) predates every optimisation since and may no longer hold at 249 tok/s.
+
 #### ▶ WHAT IS LEFT — profile at 249 tok/s, gap 2.18×
 
 ```

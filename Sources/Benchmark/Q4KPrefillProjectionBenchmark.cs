@@ -50,13 +50,13 @@ namespace Benchmarks
     public class Q4KPrefillProjectionBenchmark
     {
         /// <summary>Prompt length used in the llama.cpp comparison, so the numbers are directly relatable.</summary>
-        [Params(672)]
+        [Params(672, 512)]
         public int Rows
         {
             get; set;
         }
 
-        [Params("ffn_gate_up", "ffn_down", "attn_qo")]
+        [Params("ffn_gate_up", "ffn_down", "attn_qo", "llama_ref")]
         public string Shape
         {
             get; set;
@@ -81,6 +81,10 @@ namespace Benchmarks
             {
                 "ffn_gate_up" => (2048, 11008),
                 "ffn_down" => (11008, 2048),
+                // The exact shape llama.cpp's own test-backend-ops reports (m=4096, k=14336): 60.13 GFLOP
+                // at n=512, where its AVX2 build measured 1.56 TFLOPS for q4_K. Same shape, same thread
+                // count (32) - the only like-for-like kernel comparison available without editing their tests.
+                "llama_ref" => (14336, 4096),
                 _ => (2048, 2048),
             };
 
