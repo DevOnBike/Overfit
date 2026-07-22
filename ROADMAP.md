@@ -306,7 +306,54 @@ Contracting all heads inside one matmul reassociates a sum the per-head path doe
 `useWholeO` also honours `DisableRepackedKernelsForParity` — without that the batched-vs-single-token parity
 test can never reach its 1e-2 bound.
 
-#### ▶ WHAT IS LEFT — profile after the three wins (219 tok/s, gap 2.47×)
+#### ✅ MEASURED — biased projections on the tiled kernel: 220 → 249 tok/s (1.13×)
+
+`GemmTiled` gained the optional bias again (it folds into the final store; the no-bias path keeps two
+separate store loops so its bit-identity is untouched), and `bias.IsEmpty` came out of the Q4_K tiled gate.
+
+**On its own that changed nothing — `attn_q` moved 459.1 → 463.9 ms, a tie for the second time.** The reason
+was not the shape and not the bias: per-head Q/K/V weights are *slices* of the tensor the `*.gguf.repack`
+sidecar covers, so `IsPrepacked` is false for them, and `OVERFIT_TILED_PREFILL` was unset — the gate
+`(IsPrepacked || UseTiledPrefillQ4K)` failed before `bias.IsEmpty` ever mattered. **The same dead-flag trap
+as 2026-07-21. Check that the path is taken before concluding the kernel does not help.**
+
+With `OVERFIT_TILED_PREFILL=1`:
+
+| component | before | after | Δ |
+|---|---:|---:|---:|
+| `attn_q` | 463.9 ms | **171.3 ms** | **−63%** (2.7×) |
+| `attn_kv` | 140.5 ms | **80.3 ms** | −43% |
+| `ffn_gateup` *(canary)* | 1208.5 ms | 1214.2 ms | +0.5% |
+| **prefill total** | **3056.4 ms · 220 tok/s** | **2699.6 ms · 249 tok/s** | **1.13×** |
+
+Parity green in BOTH configurations: reference path `maxAbsLogitDiff = 0`, fast path agrees on the token.
+
+**Not enabled by default — it costs RAM.** The flag makes `EnsureRepacked()` allocate a heap copy for every
+repackable Q4_K weight that the sidecar does not cover, i.e. all ~600 per-head Q/K/V slices (~100 MB on
+Qwen-3B). **The zero-RAM version is whole-matrix Q/K/V**: `WqWhole` / `WkWhole` / `WvWhole` are already loaded
+zero-copy from the mmap and prepacked by the sidecar, exactly like `WoWhole` — so the same gather/scatter
+refactor that landed for O would buy this win without the allocation. That is the next build.
+
+#### ✅ SHIPPED — whole-matrix Q: 249 tok/s at ZERO extra RAM
+
+One `[dModel → nHeads·headDim]` projection replaces 16 per-head ones, then each head gathers its columns
+(and adds its own bias, since `BlockWeights` keeps the Q bias per head and there is no concatenated form).
+
+| component | per-head | whole-matrix | Δ |
+|---|---:|---:|---:|
+| `attn_q` | 463.9 ms / 576 calls | **103.8 ms / 36 calls** | **−78%** (4.5×) |
+| **prefill total** | **3056.4 ms · 220 tok/s** | **2695.8 ms · 249 tok/s** | **1.13×** |
+
+**This is the same 249 tok/s the `OVERFIT_TILED_PREFILL=1` experiment produced, without its ~100 MB** —
+`WqWhole` is mmap'd zero-copy and covered by the sidecar, so it is prepacked without allocating anything.
+It also beats the flag on the component itself (103.8 vs 171.3 ms): one large matmul wins over sixteen small
+ones even on the same kernel.
+
+**No parity gate needed here, unlike whole-matrix O.** O contracts over `nHeads·headDim` and therefore
+reassociates a sum the per-head path performs in head order; Q's contraction is over `dModel` in both
+shapes, so every output element is the same dot product either way.
+
+#### ▶ WHAT IS LEFT — profile at 249 tok/s, gap 2.18×
 
 ```
 ffn_gateup  1222.7 ms  39.8%   (36)   <- Q4_K tiled already

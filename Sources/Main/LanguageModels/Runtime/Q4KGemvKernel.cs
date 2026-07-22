@@ -302,11 +302,18 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             ReadOnlySpan<sbyte> actQuants,
             ReadOnlySpan<float> actScales,
             ReadOnlySpan<short> actBsums,
-            Span<float> output)
+            Span<float> output,
+            ReadOnlySpan<float> bias = default)
         {
             if (cols is < 1 or > MaxTileCols)
             {
                 throw new ArgumentOutOfRangeException(nameof(cols), cols, $"cols must be in [1, {MaxTileCols}].");
+            }
+
+            if (!bias.IsEmpty && bias.Length < outputSize)
+            {
+                throw new ArgumentException(
+                    $"bias length {bias.Length} < outputSize {outputSize}.", nameof(bias));
             }
 
             var nb = inputSize / 256;
@@ -333,6 +340,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             fixed (float* asc = actScales)
             fixed (short* ab = actBsums)
             fixed (float* o = output)
+            fixed (float* bs = bias) // null when empty — keeps the no-bias path branch-free per store
             {
                 for (var x = 0; x < outputSize / 8; x++)
                 {
@@ -462,10 +470,28 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                         }
                     }
 
-                    for (var c = 0; c < cols; c++)
+                    // Two stores rather than one with a zero vector: `x + 0f` rewrites -0.0 to +0.0,
+                    // which would break the bit-identity the no-bias path is pinned to. The branch is
+                    // per output-group, not per column, and is perfectly predicted.
+                    if (bs is null)
                     {
-                        var row = Avx2.PermuteVar8x32(accRow[c], finalpermute);
-                        Avx.Subtract(row, accMin[c]).Store(o + (long)c * outputSize + x * 8);
+                        for (var c = 0; c < cols; c++)
+                        {
+                            var row = Avx2.PermuteVar8x32(accRow[c], finalpermute);
+                            Avx.Subtract(row, accMin[c]).Store(o + (long)c * outputSize + x * 8);
+                        }
+                    }
+
+                    if (bs is not null)
+                    {
+                        // Same 8 bias floats for every column - hoisted out of the column loop.
+                        var biasVec = Vector256.Load(bs + x * 8);
+                        for (var c = 0; c < cols; c++)
+                        {
+                            var row = Avx2.PermuteVar8x32(accRow[c], finalpermute);
+                            Avx.Add(Avx.Subtract(row, accMin[c]), biasVec)
+                                .Store(o + (long)c * outputSize + x * 8);
+                        }
                     }
                 }
             }

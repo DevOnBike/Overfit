@@ -685,6 +685,24 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 }
             }
 
+            // Whole-matrix Q: one [dModel -> nHeads*headDim] projection instead of 16 per-head ones. Unlike
+            // whole-matrix O this reassociates NOTHING - every Q output element is an independent dot over
+            // dModel either way - so it needs no parity gate. What it buys is kernel eligibility: WqWhole is
+            // covered by the *.gguf.repack sidecar (per-head weights are slices, which the sidecar cannot
+            // match by name), so IsPrepacked is true and the tiled GEMM applies at zero extra RAM.
+            var useWholeQ = weights.WqWhole.IsQ4K;
+            using var qAll = new PooledBuffer<float>(useWholeQ ? rows * totalHeadDim : 0, clearMemory: false);
+
+            if (useWholeQ)
+            {
+                var wholeQ = weights.WqWhole; // property returns by value - needs a local to pass by `in`
+                var profWholeQ = PrefillProfiler.Start();
+                BatchedQuantProjection.Dispatch(
+                    hidden, rows, in wholeQ, [], qAll.Span.Slice(0, rows * totalHeadDim),
+                    dModel, totalHeadDim, hQuants, hScales, hBsums);
+                PrefillProfiler.Stop(PrefillProfiler.Component.AttnQ, profWholeQ);
+            }
+
             for (var group = 0; group < KvHeadCount; group++)
             {
                 // K/V weights: GQA shares one KV head per group; MHA uses the head's own.
@@ -753,10 +771,28 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     var wq = hw.Wq;
                     var wo = hw.Wo;
 
-                    var profQ = PrefillProfiler.Start();
-                    BatchedQuantProjection.Dispatch(
-                        hidden, rows, in wq, hw.Bq, qh.Span, dModel, headDim, hQuants, hScales, hBsums);
-                    PrefillProfiler.Stop(PrefillProfiler.Component.AttnQ, profQ);
+                    if (useWholeQ)
+                    {
+                        // Gather this head's columns; the bias is added here because BlockWeights keeps it
+                        // per head and there is no concatenated form to hand the matmul.
+                        for (var n = 0; n < rows; n++)
+                        {
+                            var dst = qh.Span.Slice(n * headDim, headDim);
+                            qAll.Span.Slice(n * totalHeadDim + h * headDim, headDim).CopyTo(dst);
+                            if (!hw.Bq.IsEmpty)
+                            {
+                                TensorPrimitives.Add(dst, hw.Bq.Slice(0, headDim), dst);
+                            }
+                        }
+                    }
+
+                    if (!useWholeQ)
+                    {
+                        var profQ = PrefillProfiler.Start();
+                        BatchedQuantProjection.Dispatch(
+                            hidden, rows, in wq, hw.Bq, qh.Span, dModel, headDim, hQuants, hScales, hBsums);
+                        PrefillProfiler.Stop(PrefillProfiler.Component.AttnQ, profQ);
+                    }
                     if (weights.HasQkNorm)
                     {
                         QkNormKernel.Apply(qh.Span, weights.QkNormQ, rows, headDim);

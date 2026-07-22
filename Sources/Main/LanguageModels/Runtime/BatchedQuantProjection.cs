@@ -183,13 +183,16 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             // No-bias only (GemmTiled applies none). AVX2/FMA required - the kernel is x86-only, so on ARM
             // (e.g. the Android app) this falls through to the weight-stationary path even if a sidecar
             // mmap'd a prepacked layout (IsPrepacked would otherwise bypass the env flag's AVX2 gate).
+            // `bias.IsEmpty` used to sit here because GemmTiled applied none. With attention Q/K/V biased,
+            // that kept attn_q (15% of prefill) on the weight-stationary kernel even though its shape
+            // [2048 -> 128] repacks fine. GemmTiled now folds the bias into its final store.
             var tiled = (w.IsPrepacked || UseTiledPrefillQ4K) && !DisableRepackedKernelsForParity
-                && bias.IsEmpty && w.CanRepack
+                && w.CanRepack
                 && CpuFeatures.HasAvx2 && CpuFeatures.HasFma;
 
             if (tiled)
             {
-                DispatchTiledQ4K(input, rows, w, output, quants, scales, sums, preQuantized);
+                DispatchTiledQ4K(input, rows, w, bias, output, quants, scales, sums, preQuantized);
             }
 
             // Weight-stationary: decode each Q4_K super-block once and reuse across the row tile
@@ -214,6 +217,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             ReadOnlySpan<float> input,
             int rows,
             Q4KWeight w,
+            ReadOnlySpan<float> bias,
             Span<float> output,
             Span<sbyte> quants,
             Span<float> scales,
@@ -253,6 +257,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             fixed (float* sc = scales)
             fixed (short* bs = bsums)
             fixed (float* o = output)
+            fixed (float* bi = bias) // null when the projection has no bias
             {
                 var ctx = new TiledContext
                 {
@@ -262,6 +267,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     Scales = sc,
                     Bsums = bs,
                     Output = o,
+                    Bias = bi,
+                    BiasLength = bias.Length,
                     InputSize = inputSize,
                     OutputSize = outputSize,
                     Spr = spr,
@@ -375,6 +382,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             public float* Scales;
             public short* Bsums;
             public float* Output;
+            public float* Bias;
+            public int BiasLength;
             public int InputSize;
             public int OutputSize;
             public int Spr;
@@ -398,7 +407,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     new ReadOnlySpan<sbyte>(c.Quants + (long)s * c.InputSize, cols * c.InputSize),
                     new ReadOnlySpan<float>(c.Scales + (long)s * c.Spr, cols * c.Spr),
                     new ReadOnlySpan<short>(c.Bsums + (long)s * c.BsumsPerRow, cols * c.BsumsPerRow),
-                    new Span<float>(c.Output + (long)s * c.OutputSize, cols * c.OutputSize));
+                    new Span<float>(c.Output + (long)s * c.OutputSize, cols * c.OutputSize),
+                    new ReadOnlySpan<float>(c.Bias, c.BiasLength));
             }
         }
     }
