@@ -3,6 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Numerics.Tensors;
 using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.X86;
@@ -65,7 +66,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             for (var t = 0; t < sequenceLength; t++)
             {
                 var key = keys.Slice(t * headDimension, headDimension);
-                var score = Dot(query, key) * scale;
+
+                // AblateScoreDot replaces the query·key GEMV with a cheap constant, to weigh the dot against
+                // the exp below. Measurement only, never a production path.
+                var score = (AblateScoreDot ? key[0] : Dot(query, key)) * scale;
                 if (softcap > 0f) // Gemma-2 attn logit soft-cap: tanh(s/cap)·cap
                 {
                     score = MathF.Tanh(score * invCap) * softcap;
@@ -81,11 +85,28 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
             var sumExp = 0.0f;
 
-            for (var t = 0; t < sequenceLength; t++)
+            if (UseVectorizedSoftmaxExp && !AblateSoftmaxExp)
             {
-                var exp = MathF.Exp(scoreScratch[t] - maxScore);
-                scoreScratch[t] = exp;
-                sumExp += exp;
+                // Vectorized softmax exp — the same lever SwiGLU already took (ApplySiLU): the scalar
+                // per-element MathF.Exp was ~32% of attn_scores by ablation. scoreScratch[0..seqLen] is a
+                // contiguous L1-resident buffer, exactly the bulk shape TensorPrimitives serves. Differs a few
+                // ULP from scalar, so NOT byte-parity against the F32 reference — but prefill and decode both
+                // reach this same method, so they stay bit-identical to EACH OTHER (the parity tests compare
+                // the two paths, not against a stored scalar-exp value).
+                var scores = scoreScratch.Slice(0, sequenceLength);
+                TensorPrimitives.Subtract(scores, maxScore, scores);
+                TensorPrimitives.Exp(scores, scores);
+                sumExp = TensorPrimitives.Sum(scores);
+            }
+
+            if (!(UseVectorizedSoftmaxExp && !AblateSoftmaxExp))
+            {
+                for (var t = 0; t < sequenceLength; t++)
+                {
+                    var exp = AblateSoftmaxExp ? scoreScratch[t] - maxScore : MathF.Exp(scoreScratch[t] - maxScore);
+                    scoreScratch[t] = exp;
+                    sumExp += exp;
+                }
             }
 
             if (sumExp <= 0f || float.IsNaN(sumExp) || float.IsInfinity(sumExp))
@@ -144,6 +165,18 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// <summary>A/B switch for <see cref="AccumulateValuesBlocked"/>; set <c>OVERFIT_ATTN_REGACC=0</c> to disable.</summary>
         internal static bool UseRegisterResidentValueSum =
             Environment.GetEnvironmentVariable("OVERFIT_ATTN_REGACC") != "0";
+
+        private static readonly string AblateMode = Environment.GetEnvironmentVariable("OVERFIT_ATTN_ABLATE") ?? "none";
+
+        /// <summary>Measurement-only: replace the query·key dot with a constant, to size it against the exp.</summary>
+        internal static bool AblateScoreDot = AblateMode is "dot" or "both";
+
+        /// <summary>Measurement-only: skip the softmax exp, to size it against the query·key dot.</summary>
+        internal static bool AblateSoftmaxExp = AblateMode is "exp" or "both";
+
+        /// <summary>Vectorize the softmax exp via <c>TensorPrimitives</c>; set <c>OVERFIT_ATTN_VEXP=0</c> to disable.</summary>
+        internal static bool UseVectorizedSoftmaxExp =
+            Environment.GetEnvironmentVariable("OVERFIT_ATTN_VEXP") != "0";
 
         /// <summary>
         /// The softmax-weighted value sum with the accumulators held in <b>registers across the whole

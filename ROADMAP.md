@@ -867,8 +867,32 @@ dropped — an artifact of taking each component's min from a different run, so 
 from different rounds. A paired total-only measurement resolved it. **Best-of-N per component does not give a
 consistent end-to-end number; measure total paired.**
 
-**Remaining measured item:** the scalar `Unpack` at ~3.5% of the Q4_K kernel; and `attn_scores` at 187 ms /
-0.27 TFLOP/s, which needs a flash-attention-style blocked kernel rather than a loop change.
+#### ▶ attn_scores, split by ablation — and why flash-attention is the WRONG lever
+
+Before writing a blocked kernel, ablation inside the real kernel split the 189.4 ms three ways:
+
+| removed | attn_scores | share |
+|---|---:|---:|
+| Q·Kᵀ dot | 137.7 ms | **27%** |
+| softmax exp | 128.0 ms | **32%** |
+| both | 60.7 ms | rest **32%** |
+
+**Neither dominates, and exp is the larger of the two.** A flash-attention rewrite only attacks the dot
+(27% of the component = 2.3% of prefill) — the most expensive, highest-risk change aimed at the smaller
+piece. Dropped. The exp is the better target and is a *bulk contiguous buffer*, exactly the shape
+`TensorPrimitives` serves — the same lever SwiGLU already took (`ApplySiLU` → `TensorPrimitives.Sigmoid`).
+
+Replacing the scalar `MathF.Exp` loop with `TensorPrimitives.Subtract`/`Exp`/`Sum`: **attn_scores 189.4 →
+173.2 ms (1.09×)**, e2e 297 → 299 tok/s (vector won all six paired rounds). Smaller than the 32% ablation
+because `TensorPrimitives.Exp` is not free and the fused scalar loop became three passes over a short buffer;
+exp itself went ~61 → ~45 ms. Not byte-parity vs the F32 reference (few-ULP, coherence-safe like SwiGLU), but
+prefill and decode both reach this method so they stay bit-identical to each other — parity suite green,
+1501/0/229. `OVERFIT_ATTN_VEXP=0` disables.
+
+**attn_scores is now optimised across all three parts** (value sum register-resident, exp vectorised, the dot
+is what remains). Further gains need the flash-GEMM for the dot — ~2% e2e at high risk, not worth it now.
+
+**Remaining measured item:** the scalar `Unpack` at ~3.5% of the Q4_K kernel.
 
 *Invalidated run, kept as a warning:* the first tile sweep ran inside an 11-benchmark class and reported
 `Tiled` and `Tiled_Cols8` — **the same configuration** — 21% apart, far outside their ±9% bars. Two identical
