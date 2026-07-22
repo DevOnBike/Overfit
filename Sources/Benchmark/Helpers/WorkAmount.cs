@@ -3,6 +3,8 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using DevOnBike.Overfit.Diagnostics;
+
 namespace Benchmarks.Helpers
 {
     /// <summary>
@@ -35,7 +37,7 @@ namespace Benchmarks.Helpers
         /// <summary>A matmul of <paramref name="rows"/>×<paramref name="k"/> by <paramref name="k"/>×<paramref name="n"/>.</summary>
         public static WorkAmount Matmul(long rows, long k, long n)
         {
-            return new WorkAmount(2L * rows * k * n, 0L);
+            return new WorkAmount(Throughput.MatmulFlops(rows, k, n), 0L);
         }
 
         /// <summary>Pure memory traffic, no arithmetic worth counting.</summary>

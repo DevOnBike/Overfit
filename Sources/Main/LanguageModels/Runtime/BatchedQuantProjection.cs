@@ -59,6 +59,58 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         internal static int TileColsOverride;
 
         /// <summary>
+        /// Parallelise the tiled prefill GEMM over <b>bands of output rows</b> instead of over column tiles.
+        ///
+        /// <para><b>The problem it addresses.</b> Today one work item is one column tile, and a column tile walks
+        /// the <i>entire</i> weight matrix — so every worker streams all 12.68 MB of `ffn_gate_up`, and the matrix
+        /// is re-read <c>rows/NR</c> times per projection. Widening NR halves that traffic but also halves the
+        /// number of work items, and the measured sweep showed the two cancelling: NR=16 lost 8% at 672 rows to
+        /// scheduling imbalance despite halving the traffic.</para>
+        ///
+        /// <para><b>The change.</b> Give each worker a contiguous band of output groups and let it loop over all
+        /// column tiles inside that band. Its weight working set is then one band — sized below to fit L2 —
+        /// which it reads once from L3 and re-reads from its own cache for every remaining column tile. The
+        /// memory probe measured exactly this distinction: the same instruction mix ran at 4.60 TFLOP/s against
+        /// an L2-resident window and 3.04 against an L3-resident one, a <b>1.50×</b> difference.</para>
+        ///
+        /// <para>It also decouples the two knobs: work-item count no longer depends on NR, so a wide column tile
+        /// stops costing parallelism. This is the L2 blocking level of the standard GEMM structure
+        /// (Goto &amp; van de Geijn), which this kernel has never had.</para>
+        /// </summary>
+        internal static bool UseOutputBlocking;
+
+        /// <summary>
+        /// Decode every weight block's F16 scale/min pair to <see cref="float"/> once per projection instead of
+        /// once per column tile.
+        ///
+        /// <para><c>GemmTiled</c> decodes them inline, which reads as amortised — but the kernel runs once per
+        /// column tile, 84 times for a 672-token prompt at NR=8, so each F16 pair is widened 84 times over.
+        /// Ablation put that decode at <b>12%</b> of the kernel, the largest non-arithmetic item measured, and
+        /// it is fixed work per block, so it is exactly the term the tile-width sweep showed being amortised
+        /// across columns. Hoisting it divides the work by the tile count.</para>
+        /// </summary>
+        internal static bool UsePrecomputedScales = true;
+
+        /// <summary>
+        /// Weight bytes one worker's band may occupy. Half of a 1 MB Zen-5 L2, leaving the rest for the
+        /// activation tile and the output band; the point is residency, not filling the cache exactly.
+        /// </summary>
+        private const int BandWeightBudgetBytes = 512 * 1024;
+
+        /// <summary>
+        /// Output groups per band: small enough that the band's weights sit in L2, and numerous enough that
+        /// every core still gets several bands so the tail worker does not set the region's duration.
+        /// </summary>
+        private static int ResolveGroupsPerBand(int totalGroups, int superBlocksPerRow, int blockBytes, int cores)
+        {
+            var bytesPerGroup = Math.Max(1, superBlocksPerRow * blockBytes);
+            var byCache = Math.Max(1, BandWeightBudgetBytes / bytesPerGroup);
+            var byParallelism = Math.Max(1, totalGroups / (cores * 2));
+
+            return Math.Min(byCache, byParallelism);
+        }
+
+        /// <summary>
         /// Picks the column-tile width (NR) for one prefill projection: the <b>widest</b> tile that still leaves
         /// at least one tile per core.
         ///
@@ -302,7 +354,22 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             var nr = ResolveTileCols(rows, cores, Q4KGemvKernel.MaxTileCols);
             var tiles = (rows + nr - 1) / nr;
 
+            // One decode of the F16 scales for the whole projection, reused by every column tile. Skipped when
+            // there is only one tile, where hoisting would just move the same work.
+            var scaleCount = UsePrecomputedScales && tiles > 1
+                ? (outputSize / 8) * spr * Q4KGemvKernel.DecodedScalesPerBlock
+                : 0;
+
+            using var decodedScales = new PooledBuffer<float>(scaleCount, clearMemory: false);
+
+            if (scaleCount > 0)
+            {
+                Q4KGemvKernel.DecodeBlockScales(
+                    repacked, outputSize, inputSize, decodedScales.Span.Slice(0, scaleCount));
+            }
+
             fixed (byte* rp = repacked)
+            fixed (float* dsc = decodedScales.Span.Slice(0, scaleCount))
             fixed (sbyte* q = quants)
             fixed (float* sc = scales)
             fixed (short* bs = bsums)
@@ -325,8 +392,24 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     BsumsPerRow = bsumsPerRow,
                     Nr = nr,
                     Rows = rows,
+                    Tiles = tiles,
+                    DecodedScales = dsc,
+                    DecodedScalesLength = scaleCount,
                 };
-                OverfitParallel.For(0, tiles, &TiledChunk, &ctx);
+
+                if (!UseOutputBlocking)
+                {
+                    OverfitParallel.For(0, tiles, &TiledChunk, &ctx);
+                    return;
+                }
+
+                var totalGroups = outputSize / 8;
+                ctx.GroupsPerBand = ResolveGroupsPerBand(
+                    totalGroups, spr, Q4KRepack.BlockKx8Bytes, cores);
+
+                var bands = (totalGroups + ctx.GroupsPerBand - 1) / ctx.GroupsPerBand;
+
+                OverfitParallel.For(0, bands, &TiledBandChunk, &ctx);
             }
         }
 
@@ -436,6 +519,18 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             public int BsumsPerRow;
             public int Nr;
             public int Rows;
+
+            /// <summary>Column tiles per projection — the inner loop when banding over output rows.</summary>
+            public int Tiles;
+
+            /// <summary>Output groups per band; see <see cref="ResolveGroupsPerBand"/>.</summary>
+            public int GroupsPerBand;
+
+            /// <summary>F16 scales widened once for the whole projection; null when decoded inline.</summary>
+            public float* DecodedScales;
+
+            /// <summary>Length of <see cref="DecodedScales"/>; 0 when decoded inline.</summary>
+            public int DecodedScalesLength;
         }
 
         private static unsafe void TiledChunk(int start, int end, void* context)
@@ -454,7 +549,46 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     new ReadOnlySpan<float>(c.Scales + (long)s * c.Spr, cols * c.Spr),
                     new ReadOnlySpan<short>(c.Bsums + (long)s * c.BsumsPerRow, cols * c.BsumsPerRow),
                     new Span<float>(c.Output + (long)s * c.OutputSize, cols * c.OutputSize),
-                    new ReadOnlySpan<float>(c.Bias, c.BiasLength));
+                    new ReadOnlySpan<float>(c.Bias, c.BiasLength),
+                    0,
+                    0,
+                    new ReadOnlySpan<float>(c.DecodedScales, c.DecodedScalesLength));
+            }
+        }
+
+        // One band of output groups, swept by every column tile in turn. The band's weights are read from L3
+        // once and then re-read from this worker's own L2 for each remaining tile — the whole point of the
+        // structure. Bands are disjoint in both weights (read-only) and output rows, so no worker writes where
+        // another reads.
+        private static unsafe void TiledBandChunk(int start, int end, void* context)
+        {
+            ref var c = ref Unsafe.AsRef<TiledContext>(context);
+            var totalGroups = c.OutputSize / 8;
+
+            for (var band = start; band < end; band++)
+            {
+                var groupStart = band * c.GroupsPerBand;
+                var groupCount = Math.Min(c.GroupsPerBand, totalGroups - groupStart);
+
+                for (var t = 0; t < c.Tiles; t++)
+                {
+                    var s = t * c.Nr;
+                    var cols = Math.Min(c.Nr, c.Rows - s);
+
+                    Q4KGemvKernel.GemmTiled(
+                        new ReadOnlySpan<byte>(c.Repacked, c.RepackedLength),
+                        c.OutputSize,
+                        c.InputSize,
+                        cols,
+                        new ReadOnlySpan<sbyte>(c.Quants + (long)s * c.InputSize, cols * c.InputSize),
+                        new ReadOnlySpan<float>(c.Scales + (long)s * c.Spr, cols * c.Spr),
+                        new ReadOnlySpan<short>(c.Bsums + (long)s * c.BsumsPerRow, cols * c.BsumsPerRow),
+                        new Span<float>(c.Output + (long)s * c.OutputSize, cols * c.OutputSize),
+                        new ReadOnlySpan<float>(c.Bias, c.BiasLength),
+                        groupStart,
+                        groupCount,
+                        new ReadOnlySpan<float>(c.DecodedScales, c.DecodedScalesLength));
+                }
             }
         }
     }

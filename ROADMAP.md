@@ -648,10 +648,59 @@ reproduces NR=8 at 672 (no change to the profiled prompt, prefill stays 249 tok/
 ~1024 rows — a real gain for long prompts. The ≥1024 branch was measured rather than reasoned, because six
 mechanism hypotheses were refuted the same day.
 
-*The trade-off itself is the finding.* Traffic falls as 1/NR while parallel granularity falls as NR, so tile
-width alone cannot buy much. Escaping it needs the blocking level the kernel does not have: **block over
-output rows as well**, so a wide column tile and many independent work items stop being alternatives. That is
-the Goto/BLIS structure and it is the outstanding work.
+#### ▶ NEGATIVE — output-row banding (the "missing L2 blocking level") is 20% SLOWER
+
+Implemented as `BatchedQuantProjection.UseOutputBlocking` (default **off**, kept as the record): parallelise
+over bands of output groups instead of column tiles, so each worker owns an L2-sized slice of the weight
+matrix and re-reads it from its own cache for every column tile. `Q4KGemvKernel.GemmTiled` gained
+`groupStart`/`groupCount` for this. Two runs, agreeing:
+
+| arm | run 1 | run 2 | TFLOP/s |
+|---|---:|---:|---:|
+| **Cols8 (today's production)** | **14.91 ms** | **15.06** | **2.02** |
+| Banded16 | 16.72 | 16.04 | 1.85 |
+| Cols16 | 17.10 | 16.89 | 1.78 |
+| **Banded8** | **18.21** | **17.81** | **1.68** |
+
+**And this refutes the traffic story that motivated it.** Banding removes 84× of the weight re-reads; if that
+traffic were the constraint it had to show. It did not — this chip's 128 MB L3 (V-cache) holds the whole
+12.7 MB matrix, so those re-reads were never going to DRAM in the first place.
+
+**Unified explanation that fits every measurement taken today.** The per-block fixed work — F16 scale decode
+(ablated at **12%**), scalar `Unpack` (**3.5%**), nibble unpack (~0%) — is amortised across the columns in a
+tile. At NR=8 that is ~15% of runtime; at NR=4, ~30%; at NR=16, ~7.5%. Predicted 4→8 gain
+`1.30/1.15 = 1.13×` against **1.17× measured**; predicted 8→16 gain `1.15/1.075 = 1.07×`, overwhelmed by the
+1.52×/1.14× imbalance shift, against **−8% measured**. No bandwidth term is needed anywhere.
+
+**So the lever is to delete the fixed work, not to move the data.**
+
+#### ★ WIN — hoisting the F16 scale decode: prefill 249 → 256 tok/s
+
+`GemmTiled` decodes each block's F16 scale/min pair inline, which reads as amortised — but the kernel runs
+**once per column tile**, 84 times at 672 rows and NR=8, so every pair is widened 84 times over.
+`Q4KGemvKernel.DecodeBlockScales` now widens them once per projection into a pooled scratch
+(`BatchedQuantProjection.UsePrecomputedScales`), which the tiles share. Bit-identical — same conversions,
+fewer of them — and it needs **no format change and no extra weight RAM**, unlike storing f32 in
+`block_q4_Kx8` (+2.8% permanently, and every `.gguf.repack` sidecar invalidated).
+
+| arm (672 rows, `ffn_gate_up`, two runs) | run 1 | run 2 | TFLOP/s |
+|---|---:|---:|---:|
+| **hoisted, NR=8** | **13.88 ms** | **13.60** | **2.21** |
+| ablation floor (decode removed entirely) | 14.45 | 14.31 | 2.11 |
+| NR=8 baseline | 15.91 | 15.21 | 1.95 |
+| hoisted, NR=16 | 16.66 | 17.05 | 1.80 |
+| NR=16 baseline | 18.01 | 17.87 | 1.69 |
+
+**+13% at NR=8** — faster than the ablation floor, because ablation still built a constant vector and took the
+branch, so the full 12% was recovered and a little more.
+
+**The amortisation theory predicted this before it was measured, twice over.** Fixed per-block work is ~15% of
+runtime at NR=8 and ~7.5% at NR=16, so the gain should roughly halve with the wider tile: predicted 2.0×,
+measured 13%/6% = 2.2×. End to end it predicted `0.45 × 0.13 = 5.9%` off prefill → 2606 ms; measured
+**2622–2632 ms, 255–256 tok/s**, within 0.6%. Gap to llama.cpp's AVX-512 build: 2.18× → **2.12×**.
+
+Suite 1486/0/229. **Next: the same hoist for `Q6KGemvKernel` — `ffn_down` is 27% of prefill (708 ms) and has
+the identical per-block decode**, so the same ~13% there is worth roughly another 9 tok/s.
 
 *Invalidated run, kept as a warning:* the first tile sweep ran inside an 11-benchmark class and reported
 `Tiled` and `Tiled_Cols8` — **the same configuration** — 21% apart, far outside their ±9% bars. Two identical

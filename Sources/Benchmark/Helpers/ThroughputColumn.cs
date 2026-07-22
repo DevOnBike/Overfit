@@ -8,6 +8,7 @@ using System.Reflection;
 using BenchmarkDotNet.Columns;
 using BenchmarkDotNet.Reports;
 using BenchmarkDotNet.Running;
+using DevOnBike.Overfit.Diagnostics;
 
 namespace Benchmarks.Helpers
 {
@@ -78,19 +79,22 @@ namespace Benchmarks.Helpers
                 return "-";
             }
 
-            // BenchmarkDotNet reports the mean in nanoseconds.
-            var seconds = statistics.Mean / 1e9;
+            // BenchmarkDotNet reports the mean in nanoseconds. The rates themselves come from the shared
+            // Throughput helper so the benchmark table and the runtime profiler cannot drift apart.
+            var elapsed = TimeSpan.FromTicks((long)(statistics.Mean / 100.0));
 
             if (_compute)
             {
                 return work.Flops <= 0L
                     ? "-"
-                    : (work.Flops / seconds / 1e12).ToString("F2", CultureInfo.InvariantCulture);
+                    : Throughput.TeraflopsPerSecond(work.Flops, elapsed)
+                        .ToString("F2", CultureInfo.InvariantCulture);
             }
 
             return work.Bytes <= 0L
                 ? "-"
-                : (work.Bytes / seconds / 1e9).ToString("F1", CultureInfo.InvariantCulture);
+                : Throughput.GigabytesPerSecond(work.Bytes, elapsed)
+                    .ToString("F1", CultureInfo.InvariantCulture);
         }
 
         public string GetValue(Summary summary, BenchmarkCase benchmarkCase, SummaryStyle style)

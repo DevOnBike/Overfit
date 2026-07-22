@@ -237,12 +237,54 @@ namespace Benchmarks
             RunTiledWithCols(4);
         }
 
-        private void RunTiledWithCols(int cols)
+        /// <summary>
+        /// Output-row banding at today's tile width — isolates the blocking change from the tile width, so the
+        /// L2-residency effect is measured on its own rather than tangled with a different NR.
+        /// </summary>
+        [Benchmark]
+        public void Tiled_Banded8()
+        {
+            RunTiledWithCols(8, banded: true);
+        }
+
+        /// <summary>
+        /// Banding plus the wide tile. Banding decouples work-item count from NR, so the tile width that lost
+        /// 8% to scheduling imbalance at 672 rows should now keep its halved weight traffic.
+        /// </summary>
+        [Benchmark]
+        public void Tiled_Banded16()
+        {
+            RunTiledWithCols(16, banded: true);
+        }
+
+        /// <summary>
+        /// The tile width in production, with the F16 scale decode hoisted to once per projection instead of
+        /// once per column tile. Ablation put that decode at 12%; this is the arm that says how much of it a
+        /// legitimate implementation actually recovers.
+        /// </summary>
+        [Benchmark]
+        public void Tiled_HoistedScales8()
+        {
+            RunTiledWithCols(8, hoistScales: true);
+        }
+
+        /// <summary>Hoisted scales at the wide tile, where the fixed per-block work is already thinner.</summary>
+        [Benchmark]
+        public void Tiled_HoistedScales16()
+        {
+            RunTiledWithCols(16, hoistScales: true);
+        }
+
+        private void RunTiledWithCols(int cols, bool banded = false, bool hoistScales = false)
         {
             BatchedQuantProjection.UseTiledPrefillQ4K = true;
             BatchedQuantProjection.UseWeightStationaryQ4K = false;
             BatchedQuantProjection.TileColsOverride = cols;
+            BatchedQuantProjection.UseOutputBlocking = banded;
+            BatchedQuantProjection.UsePrecomputedScales = hoistScales;
             BatchedQuantProjection.Dispatch(_input, Rows, in _weight, [], _output, _inputSize, _outputSize);
+            BatchedQuantProjection.UsePrecomputedScales = true;
+            BatchedQuantProjection.UseOutputBlocking = false;
             BatchedQuantProjection.TileColsOverride = 0;
         }
 

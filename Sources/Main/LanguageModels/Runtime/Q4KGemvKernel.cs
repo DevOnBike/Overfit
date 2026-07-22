@@ -294,6 +294,52 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             Avx.Subtract(accRow, accMin).Store(output + x * 8);
         }
 
+        /// <summary>Floats written per weight block by <see cref="DecodeBlockScales"/>: 8 scales then 8 mins.</summary>
+        public const int DecodedScalesPerBlock = 16;
+
+        /// <summary>
+        /// Decodes every weight block's F16 scale/min pair to <see cref="float"/> once, into
+        /// <paramref name="destination"/> laid out as <c>[(group·nb + block) · 16]</c> — eight rearranged
+        /// scales followed by eight mins.
+        ///
+        /// <para><b>Why this exists.</b> <see cref="GemmTiled"/> decodes these inline, once per (group, block).
+        /// That looks amortised, but the kernel is invoked once per <i>column tile</i> — 84 times for a
+        /// 672-token prompt at NR=8 — so the same F16 pairs are decoded 84 times over. Ablating the decode out
+        /// of the kernel measured <b>12%</b> of its runtime, the largest single non-arithmetic item found.
+        /// Hoisting it here reduces that work by the tile count instead of removing capability.</para>
+        ///
+        /// <para>Bit-identical to the inline path: the same conversions produce the same values, only fewer
+        /// times. The alternative — widening <c>block_q4_Kx8</c> to hold f32 scales — costs 2.8% weight RAM
+        /// permanently and invalidates every <c>.gguf.repack</c> sidecar; this costs a pooled scratch buffer
+        /// that lives for one projection.</para>
+        /// </summary>
+        public static void DecodeBlockScales(
+            ReadOnlySpan<byte> repacked,
+            int outputSize,
+            int inputSize,
+            Span<float> destination)
+        {
+            var nb = inputSize / 256;
+            var groups = outputSize / 8;
+            var deltamask = Vector128.Create((byte)0, 1, 8, 9, 2, 3, 10, 11, 4, 5, 12, 13, 6, 7, 14, 15);
+
+            fixed (byte* w = repacked)
+            fixed (float* d = destination)
+            {
+                for (var x = 0; x < groups; x++)
+                {
+                    for (var b = 0; b < nb; b++)
+                    {
+                        var index = ((long)x * nb + b) * DecodedScalesPerBlock;
+                        var blk = w + ((long)x * nb + b) * BlockKx8Bytes;
+
+                        LoadF16x8Rearrange(blk, deltamask).Store(d + index);
+                        LoadF16x8(blk + 16).Store(d + index + 8);
+                    }
+                }
+            }
+        }
+
         /// <summary>Max activation columns per <see cref="GemmTiled"/> call — the register-tile width (NR). Kept
         /// small so the per-column accumulator scratch stays a bounded stack allocation; the caller tiles a
         /// larger prompt into NR-column chunks.</summary>
@@ -324,7 +370,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             ReadOnlySpan<float> actScales,
             ReadOnlySpan<short> actBsums,
             Span<float> output,
-            ReadOnlySpan<float> bias = default)
+            ReadOnlySpan<float> bias = default,
+            int groupStart = 0,
+            int groupCount = 0,
+            ReadOnlySpan<float> decodedScales = default)
         {
             if (cols is < 1 or > MaxTileCols)
             {
@@ -362,8 +411,16 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             fixed (short* ab = actBsums)
             fixed (float* o = output)
             fixed (float* bs = bias) // null when empty — keeps the no-bias path branch-free per store
+            fixed (float* ds = decodedScales) // null when the caller did not pre-decode; see DecodeBlockScales
             {
-                for (var x = 0; x < outputSize / 8; x++)
+                // Absolute group index throughout, so a caller can hand this kernel one band of output rows
+                // and every weight/output/bias offset below still lands in the right place.
+                var totalGroups = outputSize / 8;
+                var groupEnd = groupCount <= 0
+                    ? totalGroups
+                    : Math.Min(groupStart + groupCount, totalGroups);
+
+                for (var x = groupStart; x < groupEnd; x++)
                 {
                     var bptr = w + (long)x * nb * BlockKx8Bytes;
                     for (var c = 0; c < cols; c++)
@@ -375,12 +432,17 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     for (var b = 0; b < nb; b++)
                     {
                         var blk = bptr + (long)b * BlockKx8Bytes;
-                        var colScale = AblateF16Scales
-                            ? Vector256.Create(1f)
-                            : LoadF16x8Rearrange(blk, deltamask);
-                        var colDmin = AblateF16Scales
-                            ? Vector256.Create(0f)
-                            : LoadF16x8(blk + 16);
+
+                        // Pre-decoded when the caller hoisted the F16 widening out of the tile loop; the values
+                        // are identical either way, so the two paths are bit-identical.
+                        var decodedAt = ds + (((long)x * nb) + b) * DecodedScalesPerBlock;
+                        var colScale = ds is not null
+                            ? Vector256.Load(decodedAt)
+                            : AblateF16Scales ? Vector256.Create(1f) : LoadF16x8Rearrange(blk, deltamask);
+                        var colDmin = ds is not null
+                            ? Vector256.Load(decodedAt + 8)
+                            : AblateF16Scales ? Vector256.Create(0f) : LoadF16x8(blk + 16);
+
                         var qsBase = blk + DstQsOffset;
                         var scBase = blk + DstScalesOffset;
 
