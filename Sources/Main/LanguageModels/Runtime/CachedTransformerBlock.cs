@@ -425,7 +425,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 }
             }
 
+            var profAttn = PrefillProfiler.Start();
             _attention.DecodeBatchedQuant(ln1.Span, rows, in weights, cache, layerIndex, basePosition, attnOut.Span, rope);
+            PrefillProfiler.Stop(PrefillProfiler.Component.Attention, profAttn);
 
             for (var n = 0; n < rows; n++)
             {
@@ -454,6 +456,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 }
             }
 
+            var profFfn = PrefillProfiler.Start();
+
             if (weights.IsMoe)
             {
                 _moe!.DecodeBatched(
@@ -468,6 +472,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 _feedForward.DecodeSwiGluBatchedDispatched(
                     ln2.Span, rows, weights.FfnGate, weights.FfnW1, weights.FfnW2, ffnOut.Span);
             }
+
+            PrefillProfiler.Stop(PrefillProfiler.Component.Ffn, profFfn);
 
             for (var n = 0; n < rows; n++)
             {

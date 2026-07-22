@@ -658,8 +658,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 }
 
                 // K/V projected once per group, RoPE-rotated, stored — every Q head reads the cache.
+                var profKv = PrefillProfiler.Start();
                 BatchedQuantProjection.Dispatch(hidden, rows, in wk, bk, kg.Span, dModel, headDim);
                 BatchedQuantProjection.Dispatch(hidden, rows, in wv, bv, vg.Span, dModel, headDim);
+                PrefillProfiler.Stop(PrefillProfiler.Component.AttnKv, profKv);
                 if (weights.HasQkNorm)
                 {
                     QkNormKernel.Apply(kg.Span, weights.QkNormK, rows, headDim);
@@ -696,7 +698,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     var wq = hw.Wq;
                     var wo = hw.Wo;
 
+                    var profQ = PrefillProfiler.Start();
                     BatchedQuantProjection.Dispatch(hidden, rows, in wq, hw.Bq, qh.Span, dModel, headDim);
+                    PrefillProfiler.Stop(PrefillProfiler.Component.AttnQ, profQ);
                     if (weights.HasQkNorm)
                     {
                         QkNormKernel.Apply(qh.Span, weights.QkNormQ, rows, headDim);
@@ -709,9 +713,13 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                         }
                     }
 
+                    var profScores = PrefillProfiler.Start();
                     BatchedAttentionKernel.ComputeParallel(qh.Span, keys, values, attn.Span, score.Span, rows, cacheLength, headDim, scale, AttnLogitSoftcap);
+                    PrefillProfiler.Stop(PrefillProfiler.Component.AttnScores, profScores);
 
+                    var profOut = PrefillProfiler.Start();
                     BatchedQuantProjection.Dispatch(attn.Span, rows, in wo, [], band.Span, headDim, dModel);
+                    PrefillProfiler.Stop(PrefillProfiler.Component.AttnOut, profOut);
                     for (var n = 0; n < rows; n++)
                     {
                         var outRow = output.Slice(n * dModel, dModel);

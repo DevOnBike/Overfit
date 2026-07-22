@@ -30,6 +30,14 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// the <c>OVERFIT_TILED_PREFILL</c> env flag; mutable so perf/coherence benches can A/B it in one process.</summary>
         internal static bool UseTiledPrefillQ4K = Q4KGemvKernel.TiledPrefillEnabled;
 
+        /// <summary>Gates the register-tiled Q6_K prefill GEMM (<see cref="Q6KGemvKernel.GemmTiled"/>).
+        /// Mutable so perf tests can A/B it in one process.
+        ///
+        /// <para><b>Costs RAM:</b> unlike Q4_K, <see cref="Q6KWeight"/> has no prepacked-sidecar path, so
+        /// <c>EnsureRepacked</c> always allocates a heap copy (~the size of the Q6_K tensors) on first
+        /// use.</para></summary>
+        internal static bool UseTiledPrefillQ6K = true;
+
         public static void Dispatch(
             ReadOnlySpan<float> input,
             int rows,
@@ -50,10 +58,28 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 using var qBytes = new PooledBuffer<sbyte>(rows * inputSize, clearMemory: false);
                 using var scales = new PooledBuffer<float>(rows * spr, clearMemory: false);
                 using var sums = new PooledBuffer<short>(groups, clearMemory: false);
-                Q6KDotKernel.ProjectBatched(
-                    input, rows, w, bias, output,
-                    qBytes.Span.Slice(0, rows * inputSize), scales.Span.Slice(0, rows * spr),
-                    sums.Span.Slice(0, groups));
+                // Register-tiled Q6_K GEMM over the repacked block_q6_Kx8 layout. Under Q4_K_M half of
+                // ffn_down is Q6_K, and a prefill profile put ffn_down at 37.9% of prefill running at
+                // 0.61 TFLOP/s — against ffn_gate_up's 1.78 — precisely because Q6_K had only the
+                // re-decode-per-row kernel below. No-bias only (GemmTiled applies none); AVX2/FMA required.
+                var tiled6 = UseTiledPrefillQ6K && bias.IsEmpty && w.CanRepack
+                    && CpuFeatures.HasAvx2 && CpuFeatures.HasFma;
+
+                if (tiled6)
+                {
+                    DispatchTiledQ6K(
+                        input, rows, w, output,
+                        qBytes.Span.Slice(0, rows * inputSize), scales.Span.Slice(0, rows * spr),
+                        sums.Span.Slice(0, groups));
+                }
+
+                if (!tiled6)
+                {
+                    Q6KDotKernel.ProjectBatched(
+                        input, rows, w, bias, output,
+                        qBytes.Span.Slice(0, rows * inputSize), scales.Span.Slice(0, rows * spr),
+                        sums.Span.Slice(0, groups));
+                }
             }
             if (kind == 1)
             {
@@ -173,6 +199,96 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     Rows = rows,
                 };
                 OverfitParallel.For(0, tiles, &TiledChunk, &ctx);
+            }
+        }
+
+        // Register-tiled Q6_K prefill GEMM: quantize all rows to Q8_K, then run GemmTiled over row-tiles of
+        // NR columns in parallel. Mirrors DispatchTiledQ4K, minus the bsums — the Q6_K kernel folds the −32
+        // bias correction into the maddubs instead of using the activation group sums.
+        private static unsafe void DispatchTiledQ6K(
+            ReadOnlySpan<float> input,
+            int rows,
+            Q6KWeight w,
+            Span<float> output,
+            Span<sbyte> quants,
+            Span<float> scales,
+            Span<short> bsums)
+        {
+            var inputSize = w.InputSize;
+            var outputSize = w.OutputSize;
+            var spr = w.SuperBlocksPerRow;
+            var bsumsPerRow = spr * Q6KDotKernel.GroupsPerSuperBlock;
+
+            for (var n = 0; n < rows; n++)
+            {
+                Q6KDotKernel.QuantizeActivationQ8K(
+                    input.Slice(n * inputSize, inputSize),
+                    quants.Slice(n * inputSize, inputSize),
+                    scales.Slice(n * spr, spr),
+                    bsums.Slice(n * bsumsPerRow, bsumsPerRow));
+            }
+
+            var repacked = w.EnsureRepacked();
+
+            var cores = Environment.ProcessorCount;
+            var nr = rows / 8 >= cores ? 8 : 4;
+            if (nr > Q6KGemvKernel.MaxTileCols)
+            {
+                nr = Q6KGemvKernel.MaxTileCols;
+            }
+            var tiles = (rows + nr - 1) / nr;
+
+            fixed (byte* rp = repacked)
+            fixed (sbyte* q = quants)
+            fixed (float* sc = scales)
+            fixed (float* o = output)
+            {
+                var ctx = new TiledQ6KContext
+                {
+                    Repacked = rp,
+                    RepackedLength = repacked.Length,
+                    Quants = q,
+                    Scales = sc,
+                    Output = o,
+                    InputSize = inputSize,
+                    OutputSize = outputSize,
+                    Spr = spr,
+                    Nr = nr,
+                    Rows = rows,
+                };
+                OverfitParallel.For(0, tiles, &TiledQ6KChunk, &ctx);
+            }
+        }
+
+        private unsafe struct TiledQ6KContext
+        {
+            public byte* Repacked;
+            public int RepackedLength;
+            public sbyte* Quants;
+            public float* Scales;
+            public float* Output;
+            public int InputSize;
+            public int OutputSize;
+            public int Spr;
+            public int Nr;
+            public int Rows;
+        }
+
+        private static unsafe void TiledQ6KChunk(int start, int end, void* context)
+        {
+            ref var c = ref Unsafe.AsRef<TiledQ6KContext>(context);
+            for (var t = start; t < end; t++)
+            {
+                var s = t * c.Nr;
+                var cols = Math.Min(c.Nr, c.Rows - s);
+                Q6KGemvKernel.GemmTiled(
+                    new ReadOnlySpan<byte>(c.Repacked, c.RepackedLength),
+                    c.OutputSize,
+                    c.InputSize,
+                    cols,
+                    new ReadOnlySpan<sbyte>(c.Quants + (long)s * c.InputSize, cols * c.InputSize),
+                    new ReadOnlySpan<float>(c.Scales + (long)s * c.Spr, cols * c.Spr),
+                    new Span<float>(c.Output + (long)s * c.OutputSize, cols * c.OutputSize));
             }
         }
 

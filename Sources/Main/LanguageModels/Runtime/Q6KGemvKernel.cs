@@ -263,6 +263,146 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             }
         }
 
+        /// <summary>Max activation columns per <see cref="GemmTiled"/> call — the register-tile width. The
+        /// caller splits a longer prompt into tiles of this many columns.</summary>
+        public const int MaxTileCols = 16;
+
+        /// <summary>
+        /// Register-tiled Q6_K prefill GEMM over the repacked <c>block_q6_Kx8</c> layout: produces
+        /// <paramref name="cols"/> output columns (prompt tokens) at once, unpacking each weight super-block
+        /// <b>once</b> and reusing it across every column — the loop the decode <see cref="GemvAvx2"/> has
+        /// nothing to tile.
+        ///
+        /// <para><b>Why this and not the weight-stationary shape.</b> A weight-stationary Q6_K kernel was
+        /// built first, modelled on the Q4_K one, and measured <b>13.5% slower</b>: it hoisted the whole 6-bit
+        /// unpack into a stack buffer, so each row paid a store+reload through L1 instead of consuming the
+        /// quants from registers, and inverting the loops made activation reads strided. Tiling keeps the
+        /// unpacked quants <i>in registers</i> and amortises them across columns instead — which is exactly
+        /// why the Q4_K tiled kernel measures ~3.3× over its own weight-stationary variant.</para>
+        ///
+        /// <para><b>Bit-identical to <see cref="GemvAvx2"/> per column:</b> the per-(row, column) operation
+        /// sequence and accumulation order are unchanged; only weight decoding moves outward. Layout matches
+        /// the Q4_K tiled kernel — activations column-contiguous, output column-major
+        /// (<c>output[c*outputSize + row]</c>). AVX2 + FMA.</para>
+        /// </summary>
+        public static unsafe void GemmTiled(
+            ReadOnlySpan<byte> repacked,
+            int outputSize,
+            int inputSize,
+            int cols,
+            ReadOnlySpan<sbyte> actQuants,
+            ReadOnlySpan<float> actScales,
+            Span<float> output)
+        {
+            if (cols is < 1 or > MaxTileCols)
+            {
+                throw new ArgumentOutOfRangeException(nameof(cols), cols, $"cols must be in [1, {MaxTileCols}].");
+            }
+
+            var nb = inputSize / 256;
+
+            var m4b = Vector256.Create((byte)0x0F);
+            var m2 = Vector256.Create((byte)0x03);
+            var m32 = Vector256.Create((byte)32);
+            var ones = Vector256.Create((short)1);
+            var reduce = Vector256.Create(0, 1, 4, 5, 2, 3, 6, 7);
+
+            // Per-column accumulators. cols <= MaxTileCols keeps this a small bounded frame.
+            Span<Vector256<float>> sumf = stackalloc Vector256<float>[cols];
+            Span<Vector256<int>> iacc = stackalloc Vector256<int>[cols];
+
+            fixed (byte* rep = repacked)
+            fixed (sbyte* aqAll = actQuants)
+            fixed (float* asc = actScales)
+            fixed (float* outp = output)
+            {
+                for (var x = 0; x < outputSize / 8; x++)
+                {
+                    var bptr = rep + (long)x * nb * BlockKx8Bytes;
+
+                    for (var c = 0; c < cols; c++)
+                    {
+                        sumf[c] = Vector256<float>.Zero;
+                    }
+
+                    for (var l = 0; l < nb; l++)
+                    {
+                        var blk = bptr + (long)l * BlockKx8Bytes;
+                        var scales = blk + DstScalesOffset;
+                        var ql = blk + DstQlOffset;
+                        var qh = blk + DstQhOffset;
+                        var dVec = LoadF16x8Int(blk);
+
+                        for (var c = 0; c < cols; c++)
+                        {
+                            iacc[c] = Vector256<int>.Zero;
+                        }
+
+                        for (var k = 0; k < 16; k++)
+                        {
+                            var baseL = (k / 8) * 128 + (k % 8) * 8;
+                            var baseH = baseL + 64;
+                            var qhShiftL = (byte)(((baseL % 128) / 32) * 2);
+                            var qhShiftH = (byte)(((baseH % 128) / 32) * 2);
+                            var qhHalfL = (baseL / 128) * 32;
+                            var qhHalfH = (baseH / 128) * 32;
+                            var qhBlockL = ((qhHalfL + (baseL % 32)) / 8) * 64;
+                            var qhBlockH = ((qhHalfH + (baseH % 32)) / 8) * 64;
+
+                            // ── Weight side: decoded ONCE, reused across every column (the tiling win). ──
+                            var ql03 = Vector256.Load(ql + k * 64);
+                            var ql47 = Vector256.Load(ql + k * 64 + 32);
+                            var qhL03 = Vector256.Load(qh + qhBlockL);
+                            var qhL47 = Vector256.Load(qh + qhBlockL + 32);
+                            var qhH03 = Vector256.Load(qh + qhBlockH);
+                            var qhH47 = Vector256.Load(qh + qhBlockH + 32);
+
+                            var qLu03 = Avx2.Or(LoNib(ql03, m4b), QhBits(qhL03, qhShiftL, m2));
+                            var qLu47 = Avx2.Or(LoNib(ql47, m4b), QhBits(qhL47, qhShiftL, m2));
+                            var qHu03 = Avx2.Or(HiNib(ql03, m4b), QhBits(qhH03, qhShiftH, m2));
+                            var qHu47 = Avx2.Or(HiNib(ql47, m4b), QhBits(qhH47, qhShiftH, m2));
+
+                            var scaleL = ScaleVec(scales + (baseL / 16) * 8);
+                            var scaleH = ScaleVec(scales + (baseH / 16) * 8);
+
+                            // ── Activation side: per column. ──
+                            for (var c = 0; c < cols; c++)
+                            {
+                                var aqs = aqAll + (long)c * inputSize + l * 256;
+                                var actL = TileAct(aqs + baseL);
+                                var actH = TileAct(aqs + baseH);
+
+                                var sumL = ReduceRows(
+                                    Avx2.Subtract(Avx2.MultiplyAddAdjacent(qLu03, actL), Avx2.MultiplyAddAdjacent(m32, actL)),
+                                    Avx2.Subtract(Avx2.MultiplyAddAdjacent(qLu47, actL), Avx2.MultiplyAddAdjacent(m32, actL)),
+                                    ones, reduce);
+                                var sumH = ReduceRows(
+                                    Avx2.Subtract(Avx2.MultiplyAddAdjacent(qHu03, actH), Avx2.MultiplyAddAdjacent(m32, actH)),
+                                    Avx2.Subtract(Avx2.MultiplyAddAdjacent(qHu47, actH), Avx2.MultiplyAddAdjacent(m32, actH)),
+                                    ones, reduce);
+
+                                iacc[c] = Avx2.Add(iacc[c], Avx2.Add(
+                                    Avx2.MultiplyLow(sumL, scaleL), Avx2.MultiplyLow(sumH, scaleH)));
+                            }
+                        }
+
+                        for (var c = 0; c < cols; c++)
+                        {
+                            sumf[c] = Fma.MultiplyAdd(
+                                Avx.ConvertToVector256Single(iacc[c]),
+                                Avx.Multiply(dVec, Vector256.Create(asc[(long)c * nb + l])),
+                                sumf[c]);
+                        }
+                    }
+
+                    for (var c = 0; c < cols; c++)
+                    {
+                        sumf[c].Store(outp + (long)c * outputSize + x * 8);
+                    }
+                }
+            }
+        }
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static Vector256<byte> LoNib(Vector256<byte> v, Vector256<byte> m4b) => Avx2.And(v, m4b);
 

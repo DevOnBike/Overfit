@@ -346,11 +346,16 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             var gate = gateArr.Span;
             var up = upArr.Span;
 
+            var profGateUp = PrefillProfiler.Start();
             BatchedQuantProjection.Dispatch(hidden, rows, in wGate, [], gate, DModel, DFF);
             ApplyGate(gate, Activation);
             BatchedQuantProjection.Dispatch(hidden, rows, in wUp, [], up, DModel, DFF);
             TensorPrimitives.Multiply(gate, up, up);
+            PrefillProfiler.Stop(PrefillProfiler.Component.FfnGateUp, profGateUp);
+
+            var profDown = PrefillProfiler.Start();
             BatchedQuantProjection.Dispatch(up, rows, in wDown, [], output.Slice(0, rows * DModel), DFF, DModel);
+            PrefillProfiler.Stop(PrefillProfiler.Component.FfnDown, profDown);
         }
 
         /// <summary>

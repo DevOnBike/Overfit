@@ -192,7 +192,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 && _config.FfnActivation is FeedForwardActivation.SwiGLU or FeedForwardActivation.GeGLU
                 && _cache.CurrentLength + promptTokens.Length <= _cache.MaxLength)
             {
+                PrefillProfiler.BeginRequest(promptTokens.Length);
                 PrefillBatchedQuant(promptTokens);
+                PrefillProfiler.EndRequest();
                 return;
             }
 

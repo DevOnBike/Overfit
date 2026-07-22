@@ -112,5 +112,57 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
 
             Assert.True(promptLength > 128, $"prompt too short to exercise batched prefill ({promptLength} tokens)");
         }
+
+        /// <summary>
+        /// Splits prefill into attention vs FFN via <see cref="PrefillProfiler"/>. This is the measurement
+        /// that decides where the 2.34×-at-equal-ISA gap to llama.cpp actually sits: in the FFN matmuls, or
+        /// in the attention path where Q and O are dispatched once per head over the same activations.
+        /// </summary>
+        [LongFact]
+        public void Prefill_ComponentBreakdown()
+        {
+            var path = TestModelPaths.Qwen3B.Q4KmGgufPath;
+            if (!File.Exists(path))
+            {
+                _out.WriteLine($"missing {path}");
+                return;
+            }
+
+            using var engine = CachedLlamaInferenceEngine.LoadGguf(path);
+            var tok = GgufTokenizer.Load(path);
+            var sampling = SamplingOptions.Greedy;
+
+            var paragraph = string.Join(" ",
+                Enumerable.Repeat(
+                    "The history of computing began with mechanical calculators and evolved through vacuum tubes, "
+                    + "transistors, integrated circuits and finally the microprocessor era.", 24));
+            var ids = tok.Encode(paragraph);
+
+            // Warm up OUTSIDE the profiled region: JIT, page-in, one-off repack.
+            using (var warm = engine.CreateSession(1024))
+            {
+                warm.Reset(ids);
+                warm.GenerateNextToken(in sampling);
+            }
+
+            PrefillProfiler.Reset();
+            PrefillProfiler.Enabled = true;
+            try
+            {
+                const int Runs = 3;
+                for (var r = 0; r < Runs; r++)
+                {
+                    using var session = engine.CreateSession(1024);
+                    session.Reset(ids);
+                }
+            }
+            finally
+            {
+                PrefillProfiler.Enabled = false;
+            }
+
+            _out.WriteLine(PrefillProfiler.Report());
+            Assert.True(PrefillProfiler.Rows > 0, "profiler recorded no prefill rows — hooks not reached");
+        }
     }
 }

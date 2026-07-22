@@ -77,10 +77,184 @@ So in-place rewrites are free and **the only real risk is extracting a method**.
 
 ---
 
-## ▶ NEXT UP — the cheap CPU-perf levers are exhausted; the open item is a product decision
+## ▶ NEXT UP — PREFILL. Measured 3.76× behind llama.cpp, and it is compute-bound
 
-**Three candidate levers were sized and all three died on measurement (2026-07-21). Do not re-open without
-new evidence.**
+**Measured 2026-07-22, same file (`qwen.q4km.gguf`), same 672-token prompt, best configuration on both sides:**
+
+| | prefill (pp672) | notes |
+|---|---:|---|
+| llama.cpp b10088 (built from `D:\llamacpp-tmp`, `/arch:AVX512`, 16 threads) | **541.7 ± 2.6 tok/s** | `llama-bench -p 672 -n 0 -r 3` |
+| Overfit (sidecar `.repack` present, 32 workers) | **144 tok/s** | `PrefillProfileTests` |
+| | **3.76×** | |
+
+**Not a thread-configuration artefact.** Worker sweep: 8 → 92, 16 → 122, 24 → 130, 32 (default) → 144 tok/s —
+monotonic, default is best. Prefill *scales* with cores, unlike decode (which has a cliff at
+`workers == procCount`). The gap is algorithmic.
+
+**This corrects the previous heading here, which read "the cheap CPU-perf levers are exhausted".** That was
+true of **decode** and was wrongly generalised to performance as a whole. The two paths are not alike:
+
+| path | gap to llama.cpp | why |
+|---|---|---|
+| decode | **1.13×**, uniform across context | memory-bound, sitting on the DRAM floor |
+| **prefill** | **3.76×** | compute-bound — there is no floor here |
+
+**The reference kernel is NOT tinyBLAS.** `ggml/src/ggml-cpu/llamafile/sgemm.cpp` contains no
+`GGML_TYPE_Q4_K` case at all. The Q4_K prefill path is `ggml_gemm_q4_K_8x8_q8_K` in
+`ggml/src/ggml-cpu/arch/x86/repack.cpp` (~1450 lines) — the same `block_q4_Kx8` repacked layout Overfit
+already uses. So this is not a missing algorithm; it is the same algorithm implemented far better.
+
+**Per-projection micro-bench (2026-07-22, `Q4KPrefillProjectionBenchmark`, 672 rows, real Qwen-3B shapes) —
+this REFUTED the first hypothesis written here, which claimed the tiled kernel "wins nothing":**
+
+| shape | Tiled | WeightStationary | ReDecodePerRow | Tiled 1-thread |
+|---|---:|---:|---:|---:|
+| `ffn_gate_up` (2048→11008) | **15.44 ms** | 53.62 ms | 86.55 ms | 169.3 ms |
+| `ffn_down` (11008→2048) | **17.27 ms** | 55.55 ms | 85.61 ms | 169.7 ms |
+| `attn_qo` (2048→2048) | **4.41 ms** | 11.85 ms | 20.64 ms | 32.2 ms |
+
+`GemmTiled` is **~3.2–3.4× faster than weight-stationary**, exactly as its own docs claim. It is a real GEMM
+and it already carries the FFN in production (a `.repack` sidecar sets `IsPrepacked`, which routes every
+bias-free projection through it).
+
+**So why did the 2026-07-21 end-to-end A/B tie at 0.999×?** Because that A/B only moved the *biased*
+projections — attention Q/K/V. Those are **88% of the dispatch count but only ~6% of the FLOPs**: Q is
+dispatched per head at 2048→128, while one FFN layer is 3 × 30.3 GFLOP. The tie was real and correctly
+measured; it simply measured the small projections. **Dispatch count is not work — always weight a path
+census by FLOPs before drawing a conclusion from it.**
+
+**The real gap is kernel throughput.** At 672 rows a projection is 30.3 GFLOP, so our best kernel runs at
+**≈1.9 TFLOP/s** (15.4 ms) against llama.cpp's **≈3.7 TFLOP/s** whole-model rate — a **~1.9× kernel gap**,
+not a missing algorithm. The residual beyond that is dispatch overhead in the per-head attention path, where
+the same activation matrix is re-quantized once per head.
+**The gap decomposes — measured, not assumed.** llama.cpp was rebuilt AVX2-only
+(`-DGGML_NATIVE=OFF -DGGML_AVX2=ON -DGGML_AVX512=OFF`, `D:\llamacpp-tmp\build-avx2`) and re-benched on the
+same file:
+
+| build | pp672 |
+|---|---:|
+| llama.cpp, AVX-512 | 539.9 tok/s |
+| llama.cpp, AVX2 only | 336.7 tok/s |
+| Overfit, AVX2 | 144 tok/s |
+
+**3.76× = 2.34× (kernel quality at equal ISA) × 1.60× (AVX-512).**
+
+This **refutes the ranking first written here**, which called AVX-512 "the most likely source of ~2×". It is
+the *smaller* factor. Porting the kernel to AVX-512 caps out at 1.60×; the larger 2.34× is available without
+touching the instruction set. Note also that the old "AVX-512 ≈ 0" result stands for **decode** (memory-bound,
+where wider SIMD cannot help by construction) — here it is worth 1.60×, so that negative genuinely does not
+transfer to compute-bound prefill.
+
+### Prefill component breakdown — measured 2026-07-22 (`PrefillProfiler`, first time in the project)
+
+Qwen-3B Q4_K_M, 672-token prompt, median of 3 (`PrefillProfileTests.Prefill_ComponentBreakdown`):
+
+```
+total/request : 4697.5 ms (143 tok/s)
+  attention   : 1595.7 ms  34.0%   (36 calls)
+  ffn         : 3000.8 ms  63.9%   (36 calls)
+    attn_kv   :  179.7 ms   3.8%   ( 72)
+    attn_q    :  624.1 ms  13.3%   (576)   <- per head
+    attn_scores: 263.9 ms   5.6%   (576)
+    attn_out  :  427.9 ms   9.1%   (576)   <- per head
+    ffn_gateup: 1222.5 ms  26.0%   ( 36)
+    ffn_down  : 1778.1 ms  37.9%   ( 36)   <- biggest single item
+  other       :  101.0 ms   2.1%
+```
+
+### ▶▶ THE NEXT LEVER: Q6_K has no batched prefill kernel
+
+`ffn_down` costs **more** than `ffn_gateup` while doing **half** the work (one 30.3 GFLOP projection vs two).
+Per layer that is 0.61 TFLOP/s against gate_up's 1.78 — a 2.9× efficiency gap that the micro-bench did *not*
+show (Tiled: 17.27 vs 15.44 ms). So production is not taking the same path. Cause, confirmed by dumping the
+GGUF tensor types:
+
+- **`ffn_down` is Q4_K ×18 + Q6_K ×18** (and `attn_v` likewise) — half the layers are Q6_K.
+- In `BatchedQuantProjection`, the Q6_K branch has **only `Q6KDotKernel.ProjectBatched`** (re-decode per row).
+  There is **no `ProjectBatchedWeightStationary` and no `GemmTiled` for Q6_K**, while Q4_K has both.
+- Arithmetic checks out: 18 layers × 17.3 ms (tiled) + 18 × X = 1778 ms ⇒ X ≈ 81.5 ms, and the micro-bench
+  measured `ReDecodePerRow` at 85.6 ms for that shape.
+
+**The repack layout for Q6_K already exists** (`Q6KRepack`, `RowsInterleaved = 8`, `Q6KGemvKernel.GemvParallel`)
+— it is wired for *decode* only. So this is filling a gap in an existing kernel family, not inventing one.
+
+**Estimated payoff: `ffn_down` 1778 → ~670 ms ≈ 1.1 s of 4.7 s (~23%), i.e. 143 → ~187 tok/s (1.31×).**
+An estimate, not a promise — Q6_K does more work per weight (6-bit vs 4-bit) than the Q4_K kernel it is
+modelled on.
+
+**Attack order, by value/risk rather than by ceiling:**
+
+| lever | ceiling | risk |
+|---|---|---|
+| **Q6_K batched prefill kernel** | ~1.31× | **low** — layout exists, structure copied from Q4_K |
+| AVX-512 port | 1.60× | high — intrinsics rewritten from scratch |
+| per-head attention (`attn_q` + `attn_out` = 22.4%, 576 dispatches each) | unknown | medium — dispatch restructuring |
+
+#### ✗ Q6_K weight-stationary — BUILT, MEASURED +13.5% SLOWER, REVERTED (2026-07-22)
+
+`Q6KDotKernel.ProjectBatchedWeightStationary` was written on the Q4_K model: unpack each super-block once
+into scratch, contract against a 64-row tile. Bit-identical (12/12 parity tests, including tile-boundary and
+no-bias cases). Measured on the real model:
+
+| component | before | after | Δ |
+|---|---:|---:|---:|
+| `ffn_down` | 1778.1 ms | **2018.0 ms** | **+13.5%** |
+| `ffn_gateup` *(canary)* | 1222.5 ms | 1247.5 ms | +2.0% |
+| `attention` *(canary)* | 1595.7 ms | 1616.7 ms | +1.3% |
+
+Canaries drifted 1–2%, `ffn_down` moved 13.5% — a real regression, reverted.
+
+**Two mistakes in the analogy, both worth remembering.** (1) Q4_K's weight-stationary hoists only the
+*scale/min* decode; the 4-bit nibble unpack still happens **in registers, per row**. I hoisted the entire
+6-bit unpack into a 256-byte stack buffer, so every row now stores and reloads it through L1 instead of
+consuming it from registers. (2) Inverting the loop order made activation reads strided (one 256-byte slice
+per row, 11 008 bytes apart) instead of streaming a row contiguously.
+
+**So the Q6_K gap is not closed by the obvious transform.** The right analogue to Q4_K's 3.3× is the *tiled*
+kernel over the repacked `block_q6_Kx8` layout — and `Q6KRepack` already produces that layout for decode.
+
+#### ✅ Q6_K tiled GEMM — SHIPPED, prefill 143 → 185 tok/s (1.29×)
+
+`Q6KGemvKernel.GemmTiled` unpacks each weight super-block once and holds it **in registers** across a tile of
+up to 16 activation columns — the opposite of the reverted weight-stationary attempt, which pushed the unpack
+through a stack buffer. Wired into `BatchedQuantProjection` via `DispatchTiledQ6K` (gate:
+`UseTiledPrefillQ6K && bias.IsEmpty && CanRepack && AVX2 && FMA`).
+
+| component | before | after | Δ |
+|---|---:|---:|---:|
+| `ffn_down` | 1778.1 ms | **713.6 ms** | **−59.9%** (2.49×) |
+| `ffn_gateup` *(canary)* | 1222.5 ms | 1242.3 ms | +1.6% |
+| `attention` *(canary)* | 1595.7 ms | 1571.5 ms | −1.5% |
+| **prefill total** | **4697.5 ms · 143 tok/s** | **3632.6 ms · 185 tok/s** | **−22.7% · 1.29×** |
+
+Canaries within ±1.6%, and an independent run of `PrefillPathAbTests` measured 186 tok/s. The estimate that
+motivated the work (1778 → ~670 ms, 143 → ~187 tok/s) landed almost exactly.
+
+**Correctness.** `Q6KTiledGemmParityTests` pins `GemmTiled` bit-identical to `GemvAvx2` per column (6 cases).
+End-to-end the first generated token is **576, unchanged** from before the kernel. Note this is *coherence*
+evidence, not byte-parity: the old path (`ProjectBatched`, non-repacked) associates the reduction differently
+from the repacked kernels, so outputs differ in the low bits — the same standard `OVERFIT_REPACK_ATTN` is held
+to.
+
+**Cost:** `Q6KWeight` has no prepacked-sidecar path, so `EnsureRepacked()` allocates a heap copy of the Q6_K
+tensors on first use. Worth revisiting if RAM matters more than TTFT.
+
+**Gap to llama.cpp: 3.76× → 2.93×.** Remaining, by measured share: `ffn_gateup` 34.2%, `attn_q` + `attn_out`
+28.9% (the per-head dispatches, 576 calls each), `attn_scores` 6.8%. AVX-512 (ceiling 1.60×) still last.
+
+At 3.4 B params × 672 tokens the gap is ≈3.7 TFLOP/s-equivalent for them against ≈1.0 for us.
+
+**Why this lever is different from the five that were refuted:** it has a measured ceiling, a named cause, and
+a working reference implementation to read. The earlier register-/cache-blocking negatives were on
+*memory-bound* paths, where blocking cannot help by construction. Prefill is compute-bound.
+**Honest expectation: 3.76× is the ceiling, not a promise — 2× would be a good outcome.** Size a single
+projection with a micro-bench against `sgemm.cpp` before writing any kernel.
+
+---
+
+### Refuted levers — do not re-open without new evidence
+
+**Three candidates were sized and all three died on measurement (2026-07-21).**
 
 1. **`SearchValues` / tokenizer-level work — CLOSED.** A prefill profile (Qwen-3B Q4_K_M, 672-token prompt,
    median of 5) puts tokenization at **0.04% of time-to-first-token** — 1.8 ms against 4731 ms of prefill
@@ -98,8 +272,9 @@ new evidence.**
    `ProjectBatched` (re-decode per row), **not** against weight-stationary. Recorded in `CLAUDE.md`.
 
 Decode is ~88% quantized GEMV sitting at the DRAM floor (`ffn 69.3% · attention 19.3% · lm_head 10.3%`), so
-there is no cheap kernel win left. What remains open is **not technical**: the product direction (perf course
-vs. the on-prem commercial track) has been deferred across several sessions and is the actual blocker.
+there is no cheap **decode** kernel win left — see the prefill section above for the path that *is* open.
+The product direction (perf course vs. the on-prem commercial track) remains deferred and is a separate,
+non-technical decision.
 
 ---
 
