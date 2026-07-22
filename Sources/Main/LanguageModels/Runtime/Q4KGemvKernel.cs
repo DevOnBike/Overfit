@@ -590,6 +590,327 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             }
         }
 
+        /// <summary>
+        /// AVX-512 form of <see cref="GemmTiled"/>: identical arithmetic, but <b>two activation columns per
+        /// instruction</b> — column <c>2p</c> in the low 256 bits of every vector, column <c>2p+1</c> in the
+        /// high 256. The weights are the same for both, so they are broadcast into both halves; only the
+        /// activations, their scales and their block sums differ per half.
+        ///
+        /// <para><b>Why columns and not output rows.</b> Widening the output-row group to 16 would need a new
+        /// <c>block_q4_Kx16</c> repack layout and would invalidate every sidecar. Pairing columns reuses
+        /// <c>block_q4_Kx8</c> untouched, and every shuffle in this kernel is per-128-bit-lane, so it widens
+        /// without changing meaning.</para>
+        ///
+        /// <para><b>Why the pair loop stays innermost.</b> Hoisting it would re-decode the sixteen weight
+        /// vectors per pair. Amortising that fixed per-block work across the whole column tile is precisely
+        /// what the tile-width sweep showed to dominate this kernel, so the loop order is preserved exactly.</para>
+        ///
+        /// <para><b>Bit-identical</b> to <see cref="GemmTiled"/>: each column's operations and their order are
+        /// unchanged, two columns merely execute at once. Measured ceilings on this machine: the kernel's own
+        /// instruction mix runs at 4.63 TFLOP/s at 256 bits and 7.71–9.08 at 512.</para>
+        /// </summary>
+        public static void GemmTiled512(
+            ReadOnlySpan<byte> repacked,
+            int outputSize,
+            int inputSize,
+            int cols,
+            ReadOnlySpan<sbyte> actQuants,
+            ReadOnlySpan<float> actScales,
+            ReadOnlySpan<short> actBsums,
+            Span<float> output,
+            ReadOnlySpan<float> bias = default,
+            ReadOnlySpan<float> decodedScales = default)
+        {
+            if (cols is < 1 or > MaxTileCols)
+            {
+                throw new ArgumentOutOfRangeException(nameof(cols), cols, $"cols must be in [1, {MaxTileCols}].");
+            }
+
+            if (!bias.IsEmpty && bias.Length < outputSize)
+            {
+                throw new ArgumentException(
+                    $"bias length {bias.Length} < outputSize {outputSize}.", nameof(bias));
+            }
+
+            var nb = inputSize / 256;
+            var pairs = (cols + 1) / 2;
+
+            Span<Vector512<float>> accRow = stackalloc Vector512<float>[pairs];
+            Span<Vector512<float>> accMin = stackalloc Vector512<float>[pairs];
+            Span<Vector512<int>> iaccB = stackalloc Vector512<int>[pairs];
+            Span<Vector512<int>> iaccMinB = stackalloc Vector512<int>[pairs];
+            Span<Vector512<short>> q8s = stackalloc Vector512<short>[pairs];
+
+            var m4b = Vector512.Create((byte)0x0F);
+            var deltamask = Vector128.Create((byte)0, 1, 8, 9, 2, 3, 10, 11, 4, 5, 12, 13, 6, 7, 14, 15);
+            var scalemask = Vector128.Create((byte)0, 0, 4, 4, 1, 1, 5, 5, 2, 2, 6, 6, 3, 3, 7, 7);
+            var finalpermute = Vector256.Create(0, 2, 4, 6, 1, 3, 5, 7);
+
+            // Avx2.Blend(..., 170) takes the odd int32 lanes from the right operand; over sixteen lanes that is
+            // the same alternating pattern, expressed as a mask vector because AVX-512 blends by mask.
+            var blendMask = Vector512.Create(0, -1, 0, -1, 0, -1, 0, -1, 0, -1, 0, -1, 0, -1, 0, -1);
+
+            const uint kmask1 = 0x3f3f3f3f, kmask2 = 0x0f0f0f0f, kmask3 = 0x03030303;
+
+            var u0 = stackalloc uint[4];
+            var u1 = stackalloc uint[4];
+
+            fixed (byte* w = repacked)
+            fixed (sbyte* aq = actQuants)
+            fixed (float* asc = actScales)
+            fixed (short* ab = actBsums)
+            fixed (float* o = output)
+            fixed (float* bs = bias)
+            fixed (float* ds = decodedScales)
+            {
+                for (var x = 0; x < outputSize / 8; x++)
+                {
+                    var bptr = w + (long)x * nb * BlockKx8Bytes;
+
+                    for (var p = 0; p < pairs; p++)
+                    {
+                        accRow[p] = Vector512<float>.Zero;
+                        accMin[p] = Vector512<float>.Zero;
+                    }
+
+                    for (var b = 0; b < nb; b++)
+                    {
+                        var blk = bptr + (long)b * BlockKx8Bytes;
+                        var decodedAt = ds + (((long)x * nb) + b) * DecodedScalesPerBlock;
+
+                        var colScale256 = ds is not null
+                            ? Vector256.Load(decodedAt)
+                            : LoadF16x8Rearrange(blk, deltamask);
+                        var colDmin256 = ds is not null
+                            ? Vector256.Load(decodedAt + 8)
+                            : LoadF16x8(blk + 16);
+
+                        var colScale = Vector512.Create(colScale256, colScale256);
+                        var colDmin = Vector512.Create(colDmin256, colDmin256);
+
+                        var qsBase = blk + DstQsOffset;
+                        var scBase = blk + DstScalesOffset;
+
+                        for (var p = 0; p < pairs; p++)
+                        {
+                            iaccB[p] = Vector512<int>.Zero;
+                            iaccMinB[p] = Vector512<int>.Zero;
+                            q8s[p] = Vector512.Create(BlockSums(ab, PairLow(p), nb, b), BlockSums(ab, PairHigh(p, cols), nb, b));
+                        }
+
+                        for (var sb = 0; sb < 4; sb++)
+                        {
+                            var qs = qsBase + sb * 256;
+
+                            var raw0123_0 = Broadcast512(qs);
+                            var raw4567_0 = Broadcast512(qs + 32);
+                            var raw0123_1 = Broadcast512(qs + 64);
+                            var raw4567_1 = Broadcast512(qs + 96);
+                            var raw0123_2 = Broadcast512(qs + 128);
+                            var raw4567_2 = Broadcast512(qs + 160);
+                            var raw0123_3 = Broadcast512(qs + 192);
+                            var raw4567_3 = Broadcast512(qs + 224);
+
+                            var v0123_00 = raw0123_0 & m4b;
+                            var v4567_00 = raw4567_0 & m4b;
+                            var v0123_01 = raw0123_1 & m4b;
+                            var v4567_01 = raw4567_1 & m4b;
+                            var v0123_02 = raw0123_2 & m4b;
+                            var v4567_02 = raw4567_2 & m4b;
+                            var v0123_03 = raw0123_3 & m4b;
+                            var v4567_03 = raw4567_3 & m4b;
+
+                            var v0123_10 = Hi512(raw0123_0) & m4b;
+                            var v4567_10 = Hi512(raw4567_0) & m4b;
+                            var v0123_11 = Hi512(raw0123_1) & m4b;
+                            var v4567_11 = Hi512(raw4567_1) & m4b;
+                            var v0123_12 = Hi512(raw0123_2) & m4b;
+                            var v4567_12 = Hi512(raw4567_2) & m4b;
+                            var v0123_13 = Hi512(raw0123_3) & m4b;
+                            var v4567_13 = Hi512(raw4567_3) & m4b;
+
+                            u0[0] = Unsafe.ReadUnaligned<uint>(scBase + 24 * sb);
+                            u0[1] = Unsafe.ReadUnaligned<uint>(scBase + 24 * sb + 4);
+                            u0[2] = Unsafe.ReadUnaligned<uint>(scBase + 24 * sb + 8);
+                            u1[0] = Unsafe.ReadUnaligned<uint>(scBase + 12 + sb * 24);
+                            u1[1] = Unsafe.ReadUnaligned<uint>(scBase + 12 + sb * 24 + 4);
+                            u1[2] = Unsafe.ReadUnaligned<uint>(scBase + 12 + sb * 24 + 8);
+                            Unpack(u0, kmask1, kmask2, kmask3);
+                            Unpack(u1, kmask1, kmask2, kmask3);
+
+                            var ms0 = Vector128.Create(u0[0], u0[1], u0[2], u0[3]).AsByte();
+                            var ms1 = Vector128.Create(u1[0], u1[1], u1[2], u1[3]).AsByte();
+                            var s0 = Avx2.ConvertToVector256Int16(Ssse3.Shuffle(ms0, scalemask));
+                            var s1 = Avx2.ConvertToVector256Int16(Ssse3.Shuffle(ms1, scalemask));
+                            var mn = Avx2.ConvertToVector256Int16(
+                                Sse2.UnpackLow(
+                                    Sse2.Shuffle(ms0.AsInt32(), 78).AsByte(),
+                                    Sse2.Shuffle(ms1.AsInt32(), 78).AsByte()));
+
+                            var scales0 = Vector512.Create(s0, s0);
+                            var scales1 = Vector512.Create(s1, s1);
+                            var mins01 = Vector512.Create(mn, mn);
+
+                            for (var p = 0; p < pairs; p++)
+                            {
+                                var lowCol = PairLow(p);
+                                var highCol = PairHigh(p, cols);
+                                var aLow = aq + (long)lowCol * inputSize + b * 256 + sb * 64;
+                                var aHigh = aq + (long)highCol * inputSize + b * 256 + sb * 64;
+
+                                var l00 = BroadcastLo512(aLow, aHigh);
+                                var l01 = BroadcastLo512(aLow + 16, aHigh + 16);
+                                var l10 = BroadcastLo512(aLow + 32, aHigh + 32);
+                                var l11 = BroadcastLo512(aLow + 48, aHigh + 48);
+
+                                var iacc0 = Vector512<short>.Zero;
+                                var iacc1 = Vector512<short>.Zero;
+
+                                iacc0 = Avx512BW.Add(iacc0, Mul512(Blend512(v0123_00, Sh512(v4567_00, 177), blendMask), Sh32_512(l00, 0)));
+                                iacc0 = Avx512BW.Add(iacc0, Mul512(Blend512(Sh512(v0123_00, 177), v4567_00, blendMask), Sh32_512(l00, 85)));
+                                iacc0 = Avx512BW.Add(iacc0, Mul512(Blend512(v0123_01, Sh512(v4567_01, 177), blendMask), Sh32_512(l00, 170)));
+                                iacc0 = Avx512BW.Add(iacc0, Mul512(Blend512(Sh512(v0123_01, 177), v4567_01, blendMask), Sh32_512(l00, 255)));
+                                iacc0 = Avx512BW.Add(iacc0, Mul512(Blend512(v0123_02, Sh512(v4567_02, 177), blendMask), Sh32_512(l01, 0)));
+                                iacc0 = Avx512BW.Add(iacc0, Mul512(Blend512(Sh512(v0123_02, 177), v4567_02, blendMask), Sh32_512(l01, 85)));
+                                iacc0 = Avx512BW.Add(iacc0, Mul512(Blend512(v0123_03, Sh512(v4567_03, 177), blendMask), Sh32_512(l01, 170)));
+                                iacc0 = Avx512BW.Add(iacc0, Mul512(Blend512(Sh512(v0123_03, 177), v4567_03, blendMask), Sh32_512(l01, 255)));
+                                var iacc0i = Avx512BW.MultiplyAddAdjacent(iacc0, scales0);
+
+                                iacc1 = Avx512BW.Add(iacc1, Mul512(Blend512(v0123_10, Sh512(v4567_10, 177), blendMask), Sh32_512(l10, 0)));
+                                iacc1 = Avx512BW.Add(iacc1, Mul512(Blend512(Sh512(v0123_10, 177), v4567_10, blendMask), Sh32_512(l10, 85)));
+                                iacc1 = Avx512BW.Add(iacc1, Mul512(Blend512(v0123_11, Sh512(v4567_11, 177), blendMask), Sh32_512(l10, 170)));
+                                iacc1 = Avx512BW.Add(iacc1, Mul512(Blend512(Sh512(v0123_11, 177), v4567_11, blendMask), Sh32_512(l10, 255)));
+                                iacc1 = Avx512BW.Add(iacc1, Mul512(Blend512(v0123_12, Sh512(v4567_12, 177), blendMask), Sh32_512(l11, 0)));
+                                iacc1 = Avx512BW.Add(iacc1, Mul512(Blend512(Sh512(v0123_12, 177), v4567_12, blendMask), Sh32_512(l11, 85)));
+                                iacc1 = Avx512BW.Add(iacc1, Mul512(Blend512(v0123_13, Sh512(v4567_13, 177), blendMask), Sh32_512(l11, 170)));
+                                iacc1 = Avx512BW.Add(iacc1, Mul512(Blend512(Sh512(v0123_13, 177), v4567_13, blendMask), Sh32_512(l11, 255)));
+                                var iacc1i = Avx512BW.MultiplyAddAdjacent(iacc1, scales1);
+
+                                var q8sSb = Avx512F.Shuffle(q8s[p].AsInt32(), 0).AsInt16();
+                                var iaccMinSb = Avx512BW.MultiplyAddAdjacent(q8sSb, mins01);
+                                q8s[p] = Avx512BW.ShiftRightLogical128BitLane(q8s[p].AsByte(), 4).AsInt16();
+
+                                iaccB[p] = Avx512F.Add(iaccB[p], Avx512F.Add(iacc0i, iacc1i));
+                                iaccMinB[p] = Avx512F.Add(iaccMinB[p], iaccMinSb);
+                            }
+                        }
+
+                        for (var p = 0; p < pairs; p++)
+                        {
+                            var rowScale = Vector512.Create(
+                                Vector256.Create(asc[(long)PairLow(p) * nb + b]),
+                                Vector256.Create(asc[(long)PairHigh(p, cols) * nb + b]));
+
+                            accRow[p] = Avx512F.FusedMultiplyAdd(
+                                Avx512F.ConvertToVector512Single(iaccB[p]),
+                                Avx512F.Multiply(colScale, rowScale),
+                                accRow[p]);
+                            accMin[p] = Avx512F.FusedMultiplyAdd(
+                                Avx512F.ConvertToVector512Single(iaccMinB[p]),
+                                Avx512F.Multiply(colDmin, rowScale),
+                                accMin[p]);
+                        }
+                    }
+
+                    for (var p = 0; p < pairs; p++)
+                    {
+                        var lowCol = PairLow(p);
+                        var highCol = 2 * p + 1;
+
+                        StoreColumn(o, bs, accRow[p].GetLower(), accMin[p].GetLower(),
+                            finalpermute, lowCol, outputSize, x);
+
+                        // The odd tail computed a duplicate of the low column in the high half; discard it.
+                        if (highCol < cols)
+                        {
+                            StoreColumn(o, bs, accRow[p].GetUpper(), accMin[p].GetUpper(),
+                                finalpermute, highCol, outputSize, x);
+                        }
+                    }
+                }
+            }
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static int PairLow(int pair) => 2 * pair;
+
+        /// <summary>The odd column of a pair, or the even one again when the tile has an odd column count.</summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static int PairHigh(int pair, int cols) => Math.Min(2 * pair + 1, cols - 1);
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static Vector256<short> BlockSums(short* ab, int column, int nb, int b)
+        {
+            var q8sums = Vector256.Load(ab + (long)column * nb * 16 + b * 16);
+            var hadd = Ssse3.HorizontalAdd(q8sums.GetLower(), q8sums.GetUpper());
+
+            return Vector256.Create(hadd, hadd).AsInt16();
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static void StoreColumn(
+            float* o,
+            float* bs,
+            Vector256<float> row,
+            Vector256<float> min,
+            Vector256<int> finalpermute,
+            int column,
+            int outputSize,
+            int x)
+        {
+            var permuted = Avx2.PermuteVar8x32(row, finalpermute);
+            var value = Avx.Subtract(permuted, min);
+
+            // Two stores rather than adding a zero vector: `x + 0f` rewrites -0.0 to +0.0 and would break the
+            // bit-identity the no-bias path is pinned to.
+            if (bs is null)
+            {
+                value.Store(o + (long)column * outputSize + x * 8);
+                return;
+            }
+
+            Avx.Add(value, Vector256.Load(bs + x * 8)).Store(o + (long)column * outputSize + x * 8);
+        }
+
+        /// <summary>The same 32 weight bytes in both halves — weights are shared by the two columns of a pair.</summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static Vector512<byte> Broadcast512(byte* p)
+        {
+            var v = Vector256.Load(p);
+
+            return Vector512.Create(v, v);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static Vector512<byte> Hi512(Vector512<byte> v) =>
+            Avx512BW.ShiftRightLogical(v.AsUInt16(), 4).AsByte();
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static Vector512<byte> Sh512(Vector512<byte> v, [ConstantExpected] byte imm) =>
+            Avx512F.Shuffle(v.AsInt32(), imm).AsByte();
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static Vector512<sbyte> Sh32_512(Vector512<sbyte> v, [ConstantExpected] byte imm) =>
+            Avx512F.Shuffle(v.AsInt32(), imm).AsSByte();
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static Vector512<byte> Blend512(Vector512<byte> a, Vector512<byte> b, Vector512<int> mask) =>
+            Avx512F.BlendVariable(a.AsInt32(), b.AsInt32(), mask).AsByte();
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static Vector512<short> Mul512(Vector512<byte> rhs, Vector512<sbyte> lhs) =>
+            Avx512BW.MultiplyAddAdjacent(rhs, lhs);
+
+        /// <summary>One 16-byte activation run per half, duplicated within each half exactly as <see cref="BroadcastLo"/> does.</summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static Vector512<sbyte> BroadcastLo512(sbyte* low, sbyte* high)
+        {
+            var l = Vector128.Load(low);
+            var h = Vector128.Load(high);
+
+            return Vector512.Create(Vector256.Create(l, l), Vector256.Create(h, h));
+        }
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static Vector256<byte> Hi(Vector256<byte> v) => Avx2.ShiftRightLogical(v.AsUInt16(), 4).AsByte();
 

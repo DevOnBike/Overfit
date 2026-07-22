@@ -21,6 +21,10 @@ namespace DevOnBike.Overfit.Intrinsics
 
         public static readonly bool HasAvx512 = Avx512F.IsSupported;
 
+        // AVX-512 byte/word ops (vpmaddubsw/vpmaddwd on zmm) — required by the quantized prefill kernels,
+        // which reach their MACs through those rather than through floating-point FMA.
+        public static readonly bool HasAvx512Bw = Avx512BW.IsSupported;
+
         public static readonly bool HasAvxVnni = AvxVnni.IsSupported;
 
         public static readonly bool HasSse = Sse.IsSupported;

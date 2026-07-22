@@ -92,6 +92,16 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         internal static bool UsePrecomputedScales = true;
 
         /// <summary>
+        /// Route the tiled Q4_K prefill GEMM through <see cref="Q4KGemvKernel.GemmTiled512"/>, which processes
+        /// two activation columns per instruction. Defaults to on wherever the silicon supports it.
+        ///
+        /// <para>Measured ceilings on this machine for the kernel's own instruction mix: 4.63 TFLOP/s at 256
+        /// bits against 7.71–9.08 at 512. The port is bit-identical, so the existing parity tests apply to it
+        /// unchanged; <c>Avx512PrefillParityTests</c> pins the two kernels against each other directly.</para>
+        /// </summary>
+        internal static bool UseAvx512PrefillQ4K = CpuFeatures.HasAvx512 && CpuFeatures.HasAvx512Bw;
+
+        /// <summary>
         /// Weight bytes one worker's band may occupy. Half of a 1 MB Zen-5 L2, leaving the rest for the
         /// activation tile and the output band; the point is residency, not filling the cache exactly.
         /// </summary>
@@ -395,6 +405,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     Tiles = tiles,
                     DecodedScales = dsc,
                     DecodedScalesLength = scaleCount,
+                    Avx512 = UseAvx512PrefillQ4K && !DisableRepackedKernelsForParity,
                 };
 
                 if (!UseOutputBlocking)
@@ -555,6 +566,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
             /// <summary>Length of <see cref="DecodedScales"/>; 0 when decoded inline.</summary>
             public int DecodedScalesLength;
+
+            /// <summary>Route through the two-columns-per-instruction AVX-512 kernel.</summary>
+            public bool Avx512;
         }
 
         private static unsafe void TiledChunk(int start, int end, void* context)
@@ -564,19 +578,23 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             {
                 var s = t * c.Nr;
                 var cols = Math.Min(c.Nr, c.Rows - s);
+                var weights = new ReadOnlySpan<byte>(c.Repacked, c.RepackedLength);
+                var quants = new ReadOnlySpan<sbyte>(c.Quants + (long)s * c.InputSize, cols * c.InputSize);
+                var scales = new ReadOnlySpan<float>(c.Scales + (long)s * c.Spr, cols * c.Spr);
+                var sums = new ReadOnlySpan<short>(c.Bsums + (long)s * c.BsumsPerRow, cols * c.BsumsPerRow);
+                var dst = new Span<float>(c.Output + (long)s * c.OutputSize, cols * c.OutputSize);
+                var bias = new ReadOnlySpan<float>(c.Bias, c.BiasLength);
+                var decoded = new ReadOnlySpan<float>(c.DecodedScales, c.DecodedScalesLength);
+
+                if (c.Avx512)
+                {
+                    Q4KGemvKernel.GemmTiled512(
+                        weights, c.OutputSize, c.InputSize, cols, quants, scales, sums, dst, bias, decoded);
+                    continue;
+                }
+
                 Q4KGemvKernel.GemmTiled(
-                    new ReadOnlySpan<byte>(c.Repacked, c.RepackedLength),
-                    c.OutputSize,
-                    c.InputSize,
-                    cols,
-                    new ReadOnlySpan<sbyte>(c.Quants + (long)s * c.InputSize, cols * c.InputSize),
-                    new ReadOnlySpan<float>(c.Scales + (long)s * c.Spr, cols * c.Spr),
-                    new ReadOnlySpan<short>(c.Bsums + (long)s * c.BsumsPerRow, cols * c.BsumsPerRow),
-                    new Span<float>(c.Output + (long)s * c.OutputSize, cols * c.OutputSize),
-                    new ReadOnlySpan<float>(c.Bias, c.BiasLength),
-                    0,
-                    0,
-                    new ReadOnlySpan<float>(c.DecodedScales, c.DecodedScalesLength));
+                    weights, c.OutputSize, c.InputSize, cols, quants, scales, sums, dst, bias, 0, 0, decoded);
             }
         }
 

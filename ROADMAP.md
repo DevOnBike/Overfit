@@ -711,6 +711,41 @@ kernels without re-reading their inputs was a guess.
 **Both hoists together: prefill 249 → 258–259 tok/s, gap to llama.cpp's AVX-512 build 2.18× → 2.10×.**
 Suite 1486/0/229.
 
+#### ★★ AVX-512 Q4_K PREFILL KERNEL — prefill 259 → 280 tok/s, gap under 2× for the first time
+
+`Q4KGemvKernel.GemmTiled512` processes **two activation columns per instruction**: column `2p` in the low 256
+bits of every vector, `2p+1` in the high. Weights are identical for both, so they are broadcast into both
+halves; only activations, their scales and their block sums differ. Every shuffle in this kernel is
+per-128-bit-lane, so it widens without changing meaning — no new repack layout, `block_q4_Kx8` untouched,
+sidecars still valid.
+
+Two decisions worth keeping: pairing **columns** rather than widening the output-row group avoids a
+`block_q4_Kx16` layout and the sidecar invalidation that implies; and the pair loop stays **innermost**,
+because hoisting it would re-decode the sixteen weight vectors per pair and throw away the amortisation the
+tile-width sweep showed to dominate this kernel.
+
+| component | before | after | |
+|---|---:|---:|---:|
+| `ffn_gateup` | 1180 ms | **1017.6** | **−13.8%** |
+| `attn_out` | 106.0 | **89.4** | −15.7% |
+| `attn_q` | 100.6 | **85.6** | −14.9% |
+| `ffn_down` (Q6_K, not ported) | 691 | 658 | −4.8% |
+| `attn_scores` (different kernel) | 207.6 | 210.8 | flat |
+| **prefill** | **2597 ms / 259 tok/s** | **2398 / 280 tok/s** | **+8.2%** |
+
+`attn_scores` staying flat while every Q4_K path moves 14–16% is the internal control: this is the change,
+not box drift. **Gap to llama.cpp AVX-512 2.10× → 1.93×; to their AVX2 build 1.20×.**
+
+The kernel itself gained ~1.16×, not the 1.67× its instruction mix promised, because that mix is roughly half
+the kernel — loads, the scalar `Unpack` and the stores did not widen. The prior estimate was 1.24×.
+
+**Bit-identical**, pinned by `Avx512PrefillParityTests` (8 cases: odd and even column counts, bias, and the
+pre-decoded scale path) asserting exact equality rather than a tolerance. Gated through
+`CpuFeatures.HasAvx512`/`HasAvx512Bw` — the repo's own OVERFIT015 analyzer rejected a direct `IsSupported`
+check, which is what that rule is for. Suite 1494/0/229.
+
+**Next: the same port for `Q6KGemvKernel`** — `ffn_down` is 27% of prefill (658 ms) and still runs 256-bit.
+
 *Invalidated run, kept as a warning:* the first tile sweep ran inside an 11-benchmark class and reported
 `Tiled` and `Tiled_Cols8` — **the same configuration** — 21% apart, far outside their ±9% bars. Two identical
 arms in one table is the cheapest canary there is; narrowing the filter so the arms sit adjacent in time made
