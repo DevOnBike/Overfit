@@ -512,6 +512,152 @@ so this fits L2 and is not bandwidth-bound. The kernel itself (`CachedAttentionK
 reached one query at a time) is the open question — that, and the float side of Q4_K dequantization, are
 the two measured candidates left.
 
+#### ★ AVX-512 GO/NO-GO GATE — PASSED, the port is worth writing
+
+Our Q4_K GEMM sits at 78% of the 256-bit float ceiling and FFN is 69% of prefill, so the only way to move
+the dominant cost is to raise the ceiling. Before writing any kernel, `MachineRooflineBenchmark` was
+extended with `Vector512` variants to check whether this silicon actually delivers the wider ceiling.
+This was a real risk: Zen 4 double-pumps 512-bit ops through a 256-bit datapath (~1.1×) and many Intel
+parts drop clocks under 512-bit load, either of which would have killed the plan.
+
+Box: **AMD Ryzen 9 9950X3D** (Zen 5), 16 physical / 32 logical, AVX-512 F+BW+CD+DQ+VL + VNNI + VBMI + IFMA.
+
+| ceiling | 256-bit | 512-bit | gain |
+|---|---:|---:|---:|
+| float FMA | 2.20 TFLOP/s | **4.15** | **1.89×** |
+| int8 dot | 11.16 TOPS | **22.87** | **2.05×** |
+
+Zen 5 has the full 512-bit datapath and the measurement shows it — essentially the theoretical 2×, with no
+visible clock penalty. **Our 1.70 TFLOP/s GEMM is 78% of the 256-bit ceiling but only 41% of the 512-bit
+one.** If the port preserves utilisation, FFN 1923 ms → ~1000 ms and prefill 2769 → ~1850 ms ≈ **373 tok/s**,
+which would be *above* llama.cpp's AVX2 build (336.7) and 1.45× off their AVX-512 (541.7).
+
+Two notes. **AVX-512 VNNI is present**: `vpdpbusd` collapses the `vpmaddubsw`+`vpmaddwd`+`add` triple our
+kernel issues into one instruction — a second-order lever here since the kernel is float-bound, but it is
+what llama.cpp uses. And the existing **"AVX-512 decode port" negative does not transfer**: decode is
+memory-bound (measured today at ~46 GB/s against an 89.9 GB/s ceiling), where wider vectors buy nothing;
+prefill is compute-bound and pinned against the float ceiling.
+
+Next: port `Q4KGemvKernel.GemmTiled` (ffn_gate_up, attn_q/o), then `Q6KGemvKernel.GemmTiled` (ffn_down) —
+parity test first, then measure. Dispatch at run time through `CpuFeatures.HasAvx512`, never at compile
+time: `Cli.csproj` pins `IlcInstructionSet=avx2` and the AOT build must keep running on machines without it.
+
+#### ★ RETRACTION + the kernel's real ceiling
+
+**Retracted: "our Q4_K GEMM runs at 78% of the float ceiling."** That divided *logical* MACs by the
+*floating-point instruction* ceiling, but the kernel performs one `vpmaddubsw` per **32** MACs and issues
+only ~6 float ops per column per block against ~160 integer/shuffle ops. Against the ceiling that actually
+applies it sits at **15% of 11.2 TOPS**, not 78%. The AVX-512 recommendation survives the correction, but
+its stated reason ("the ceiling is too low") was wrong — the real problem is instructions issued per MAC.
+
+`MachineRooflineBenchmark` now measures the ceiling **for this kernel's instruction mix** — the eight-
+statement `iacc0` block verbatim, `Blend` + two lane shuffles + `vpmaddubsw` + `Add` — rather than an
+idealised dot chain:
+
+| | TFLOP/s |
+|---|---:|
+| idealised int8 chain (3 instructions / 32 MACs) | 11.2 |
+| **kernel's instruction mix, 4 live accumulators** | **4.63** |
+| same mix, 512-bit | 7.71 |
+| **our real GEMM** | **1.70** |
+
+So the shuffles cost 2.4× against the idealised chain, and we then reach only **37% of our own mix's
+ceiling**. That residual 2.7× is not arithmetic — it is loads, weight decode, the float tail, and spills.
+
+**NEGATIVE — register pressure is not the explanation.** The suspicion was that `GemmTiled`'s `stackalloc`
+accumulator spans spill: at four columns it holds `accRow`+`accMin` (8 vectors, live across the block loop),
+`iaccB`+`iaccMinB` (8, across the sub-block loop) and `iacc0`+`iacc1` (8) — 24 vectors before a single
+weight, against 16 ymm registers. Probing it with `IntegerDotChains`' body at 12 vs 16 chains (12+3
+constants fit ymm, 16+3 do not; both fit 512-bit's 32 zmm):
+
+| live accumulators | 256-bit | 512-bit |
+|---|---:|---:|
+| 12 (fits ymm) | 11.50 | 23.52 |
+| 16 (exceeds ymm) | **14.99** | 24.19 |
+
+Sixteen chains are **30% faster** at 256-bit, not slower — more independent chains cover latency better and
+any spill hides behind the surrounding work. **There is no register cliff, and the "de-spill first" plan is
+dropped.**
+
+An earlier version of this probe reported the opposite (−41% at 256-bit, and 512-bit falling *harder* than
+256-bit, which cannot be true if the larger file helps at all). It routed each step through a helper taking
+five vector parameters; once the statements were written inline the effect vanished entirely. The tell was
+the impossible 512-bit ordering — treat that shape of result as a broken benchmark, not a discovery.
+
+**Still unexplained: 1.70 actual vs 4.64 for its own instruction mix, a 2.7× residual.** The mix benchmark
+models only the eight `iacc0` statements. Ablating the three pieces it omits, inside the real kernel
+(`Q4KGemvKernel.Ablate*` — measurement-only toggles, default off), on `ffn_gate_up` at 672 rows:
+
+| ablation | mean | vs `Tiled` |
+|---|---:|---:|
+| `Tiled` (baseline) | 15.567 ms | — |
+| no F16 scale/min decode | 13.701 ms | **−12.0%** |
+| no scalar `Unpack` of 6-bit scales | 15.016 ms | −3.5% |
+| no nibble `And`/shift | 15.679 ms | +0.7% (tie) |
+
+Error bars are ±1.0–1.1 ms on ~15 ms (≈7%), so only the F16 result clears the noise, and barely; the other
+two sit inside it. **Together they bound at ~15% and do not explain a 2.7× residual (≈63% of runtime).**
+
+The one thing the mix benchmark did not model at all is **memory traffic** — it ran on register constants.
+The real kernel issues 8×32 B weight loads per sub-block (12.7 MB streamed per projection), per-column
+activation loads, and span-backed accumulator accesses. That is the remaining suspect, and it is untested.
+
+**NEGATIVE — the F16 decode's 12% is the scalar conversions, not the memory round-trip.**
+`LoadF16x8Rearrange` used to store its shuffled vector to `stackalloc` and immediately re-read it as eight
+`ushort`s — textbook store-to-load forwarding stall. Extracting the lanes from the register with `pextrw`
+instead measured **15,269 µs vs 15,567 µs, i.e. −1.9% against ±7% noise: a tie**, with the ablation floor
+unchanged at 11.9%. The round-trip was free; the eight scalar `Half`→`float` conversions are the cost.
+
+Capturing it therefore means *eliminating* the conversions, not speeding them up: store the scales as **f32 at
+repack time**. `block_q4_Kx8` is our own layout, so this is available — +32 B on a 1152 B block (**+2.8%
+weight RAM for 12%**), at the price of a `.gguf.repack` sidecar format change. Note x86 could do this in one
+`vcvtph2ps`, but .NET exposes neither an `F16C` intrinsic class nor a `Half` overload of `Vector128.Widen`.
+
+#### ★★ THE WEIGHT STREAM IS READ 84 TIMES PER PROJECTION — no cache blocking exists
+
+Applying the standard model (Goto & van de Geijn, *Anatomy of High-Performance Matrix Multiplication* — the
+GotoBLAS/BLIS scheme, where block sizes are derived from cache sizes: an `mr×nr` tile of C in registers, a
+`kc×nr` panel of B in L1, an `mc×kc` block of A in L2, a `kc×n` panel of B in L3) exposes what the profiling
+missed all day:
+
+`GemmTiled` receives **8 columns** and walks the **entire** weight matrix. The dispatcher splits 672 rows
+into tiles of 8, so **84 tiles each stream all 12.68 MB** of `ffn_gate_up`'s weights:
+
+    84 × 12.68 MB = 1.07 GB per projection, in 15.27 ms = ~70 GB/s
+    measured DRAM read ceiling = 90 GB/s
+
+Our tiling is a *register* tile (`MaxTileCols`) only — there is **no L2/L3 blocking level at all**. This is a
+candidate for the whole remaining 1.56× residual, and unlike everything else on the list it is a structural
+fix with a textbook algorithm behind it.
+
+**Measured — the traffic argument holds, then breaks on parallel granularity.** `ffn_gate_up`, two runs each,
+agreeing on ordering:
+
+| tile | passes | 672 rows | 1024 rows |
+|---|---:|---:|---:|
+| NR=4 | rows/4 | 17.8 ms · 1.70 | 27–29 ms · 1.66 |
+| NR=8 | rows/8 | **15.2–15.9 ms · 1.95** | 23.7–24.5 ms · 1.92 |
+| NR=16 | rows/16 | 16.5–17.0 ms · 1.80 | **22.7–23.0 ms · 2.02** |
+
+Halving the traffic 4→8 buys **+17%** exactly as predicted. Halving it again 8→16 *loses* **8%** at 672 rows,
+because 42 tiles over 32 cores leaves ten workers with two and twenty-two with one — a 1.52× imbalance
+against 1.14× at NR=8. At 1024 rows there are enough tiles again and the wider tile wins by 4–7%.
+
+So `ResolveTileCols` now takes the widest tile that still gives **~2 tiles per core**, not one. That
+reproduces NR=8 at 672 (no change to the profiled prompt, prefill stays 249 tok/s) and switches to NR=16 from
+~1024 rows — a real gain for long prompts. The ≥1024 branch was measured rather than reasoned, because six
+mechanism hypotheses were refuted the same day.
+
+*The trade-off itself is the finding.* Traffic falls as 1/NR while parallel granularity falls as NR, so tile
+width alone cannot buy much. Escaping it needs the blocking level the kernel does not have: **block over
+output rows as well**, so a wide column tile and many independent work items stop being alternatives. That is
+the Goto/BLIS structure and it is the outstanding work.
+
+*Invalidated run, kept as a warning:* the first tile sweep ran inside an 11-benchmark class and reported
+`Tiled` and `Tiled_Cols8` — **the same configuration** — 21% apart, far outside their ±9% bars. Two identical
+arms in one table is the cheapest canary there is; narrowing the filter so the arms sit adjacent in time made
+the result reproducible.
+
 #### ▶ WHAT IS LEFT — profile at 249 tok/s, gap 2.18×
 
 ```

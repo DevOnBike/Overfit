@@ -156,6 +156,10 @@ namespace Benchmarks
         {
             BatchedQuantProjection.UseTiledPrefillQ4K = _originalTiled;
             BatchedQuantProjection.UseWeightStationaryQ4K = _originalStationary;
+            Q4KGemvKernel.AblateF16Scales = false;
+            Q4KGemvKernel.AblateScaleUnpack = false;
+            Q4KGemvKernel.AblateNibbleUnpack = false;
+            BatchedQuantProjection.TileColsOverride = 0;
             _weight.Dispose();
         }
 
@@ -202,6 +206,86 @@ namespace Benchmarks
                     _scales.AsSpan(n * superBlocksPerRow, superBlocksPerRow),
                     _bsums.AsSpan(n * bsumsPerRow, bsumsPerRow));
             }
+        }
+
+        /// <summary>
+        /// <see cref="Tiled"/> with the column tile forced to 8 — today's dispatcher choice, and the arm the
+        /// wider tiles below are judged against.
+        ///
+        /// <para>A tile of NR columns walks the whole weight matrix, so the matrix is streamed <c>rows/NR</c>
+        /// times. At NR=8 and 672 rows that is 84 passes over 12.68 MB = 1.07 GB per projection, roughly 70 GB/s
+        /// against a measured 90 GB/s ceiling. If that traffic is what caps the kernel at 1.98 TFLOP/s against
+        /// its instruction mix's 4.6, halving it should show here.</para>
+        /// </summary>
+        [Benchmark]
+        public void Tiled_Cols8()
+        {
+            RunTiledWithCols(8);
+        }
+
+        /// <summary>Half the weight traffic of <see cref="Tiled_Cols8"/> — 42 passes instead of 84.</summary>
+        [Benchmark]
+        public void Tiled_Cols16()
+        {
+            RunTiledWithCols(16);
+        }
+
+        /// <summary>Twice the traffic of <see cref="Tiled_Cols8"/>, to confirm the trend runs both ways.</summary>
+        [Benchmark]
+        public void Tiled_Cols4()
+        {
+            RunTiledWithCols(4);
+        }
+
+        private void RunTiledWithCols(int cols)
+        {
+            BatchedQuantProjection.UseTiledPrefillQ4K = true;
+            BatchedQuantProjection.UseWeightStationaryQ4K = false;
+            BatchedQuantProjection.TileColsOverride = cols;
+            BatchedQuantProjection.Dispatch(_input, Rows, in _weight, [], _output, _inputSize, _outputSize);
+            BatchedQuantProjection.TileColsOverride = 0;
+        }
+
+        /// <summary>
+        /// <see cref="Tiled"/> with the per-block F16 scale/min decode replaced by constants — i.e. without
+        /// <c>LoadF16x8Rearrange</c>, which stores a vector to <c>stackalloc</c> and reads it back through
+        /// eight separate <c>BitConverter.UInt16BitsToHalf</c> calls, plus the second <c>LoadF16x8</c>.
+        ///
+        /// <para>This and the two ablations below split the unexplained gap between the kernel's measured
+        /// 1.70 TFLOP/s and the 4.64 its own arithmetic instruction mix reaches — the residual is work the mix
+        /// benchmark never modelled, and each of these is a candidate. Ratios against <see cref="Tiled"/> are
+        /// <b>upper</b> bounds: removing a computation also lets the JIT fold what depended on it.</para>
+        /// </summary>
+        [Benchmark]
+        public void Tiled_NoF16Decode()
+        {
+            BatchedQuantProjection.UseTiledPrefillQ4K = true;
+            BatchedQuantProjection.UseWeightStationaryQ4K = false;
+            Q4KGemvKernel.AblateF16Scales = true;
+            BatchedQuantProjection.Dispatch(_input, Rows, in _weight, [], _output, _inputSize, _outputSize);
+            Q4KGemvKernel.AblateF16Scales = false;
+        }
+
+        /// <summary><see cref="Tiled"/> without the scalar <c>Unpack</c> of the 6-bit sub-block scales.</summary>
+        [Benchmark]
+        public void Tiled_NoScaleUnpack()
+        {
+            BatchedQuantProjection.UseTiledPrefillQ4K = true;
+            BatchedQuantProjection.UseWeightStationaryQ4K = false;
+            Q4KGemvKernel.AblateScaleUnpack = true;
+            BatchedQuantProjection.Dispatch(_input, Rows, in _weight, [], _output, _inputSize, _outputSize);
+            Q4KGemvKernel.AblateScaleUnpack = false;
+        }
+
+        /// <summary><see cref="Tiled"/> without the 16 <c>And</c>/shift ops that split bytes into nibbles.</summary>
+        [Benchmark]
+        public void Tiled_NoNibbleUnpack()
+        {
+            BatchedQuantProjection.UseTiledPrefillQ4K = true;
+            BatchedQuantProjection.UseWeightStationaryQ4K = false;
+            Q4KGemvKernel.AblateNibbleUnpack = true;
+            BatchedQuantProjection.Dispatch(_input, Rows, in _weight, [], _output, _inputSize, _outputSize);
+            Q4KGemvKernel.AblateNibbleUnpack = false;
         }
 
         /// <summary>The original re-decode-per-row kernel — kept as the reference the kernel docs' "~3×" claim

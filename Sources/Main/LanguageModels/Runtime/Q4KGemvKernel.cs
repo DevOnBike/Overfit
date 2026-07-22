@@ -50,6 +50,27 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// </summary>
         public static readonly bool TiledPrefillEnabled = ResolveFlag(OverfitEnvironment.TiledPrefill);
 
+        /// <summary>
+        /// Measurement-only ablations for <see cref="GemmTiled"/>, all default-off. Each replaces one piece of
+        /// per-block work with a constant so its share of the kernel's runtime can be read off directly.
+        ///
+        /// <para><b>Why ablation rather than micro-benchmarks.</b> The kernel reaches 1.70 TFLOP/s against 4.64
+        /// for its own arithmetic instruction mix, and the 2.7× residual is work the mix benchmark does not
+        /// model. Timing that work in isolation would measure a synthetic harness; toggling it inside the real
+        /// kernel measures its actual share. <b>Results are wrong while an ablation is on</b> — these are timing
+        /// probes, never a production path.</para>
+        ///
+        /// <para>Caveat when reading the numbers: removing a computation also lets the JIT fold or hoist what
+        /// depended on it, so an ablation is an <i>upper</i> bound on the removed work's cost.</para>
+        /// </summary>
+        internal static bool AblateF16Scales;
+
+        /// <inheritdoc cref="AblateF16Scales"/>
+        internal static bool AblateScaleUnpack;
+
+        /// <inheritdoc cref="AblateF16Scales"/>
+        internal static bool AblateNibbleUnpack;
+
         private static bool ResolveFlag(string envVar)
         {
             if (!CpuFeatures.HasAvx2)
@@ -354,8 +375,12 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     for (var b = 0; b < nb; b++)
                     {
                         var blk = bptr + (long)b * BlockKx8Bytes;
-                        var colScale = LoadF16x8Rearrange(blk, deltamask);
-                        var colDmin = LoadF16x8(blk + 16);
+                        var colScale = AblateF16Scales
+                            ? Vector256.Create(1f)
+                            : LoadF16x8Rearrange(blk, deltamask);
+                        var colDmin = AblateF16Scales
+                            ? Vector256.Create(0f)
+                            : LoadF16x8(blk + 16);
                         var qsBase = blk + DstQsOffset;
                         var scBase = blk + DstScalesOffset;
 
@@ -382,23 +407,25 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                             var raw4567_3 = Vector256.Load(qs + 224);
 
                             // Weight nibbles — decoded ONCE, reused across all cols (the tiling win).
-                            var v0123_00 = Avx2.And(raw0123_0, m4b);
-                            var v4567_00 = Avx2.And(raw4567_0, m4b);
-                            var v0123_01 = Avx2.And(raw0123_1, m4b);
-                            var v4567_01 = Avx2.And(raw4567_1, m4b);
-                            var v0123_02 = Avx2.And(raw0123_2, m4b);
-                            var v4567_02 = Avx2.And(raw4567_2, m4b);
-                            var v0123_03 = Avx2.And(raw0123_3, m4b);
-                            var v4567_03 = Avx2.And(raw4567_3, m4b);
+                            var ablateNibbles = AblateNibbleUnpack;
 
-                            var v0123_10 = Avx2.And(Hi(raw0123_0), m4b);
-                            var v4567_10 = Avx2.And(Hi(raw4567_0), m4b);
-                            var v0123_11 = Avx2.And(Hi(raw0123_1), m4b);
-                            var v4567_11 = Avx2.And(Hi(raw4567_1), m4b);
-                            var v0123_12 = Avx2.And(Hi(raw0123_2), m4b);
-                            var v4567_12 = Avx2.And(Hi(raw4567_2), m4b);
-                            var v0123_13 = Avx2.And(Hi(raw0123_3), m4b);
-                            var v4567_13 = Avx2.And(Hi(raw4567_3), m4b);
+                            var v0123_00 = ablateNibbles ? raw0123_0 : Avx2.And(raw0123_0, m4b);
+                            var v4567_00 = ablateNibbles ? raw4567_0 : Avx2.And(raw4567_0, m4b);
+                            var v0123_01 = ablateNibbles ? raw0123_1 : Avx2.And(raw0123_1, m4b);
+                            var v4567_01 = ablateNibbles ? raw4567_1 : Avx2.And(raw4567_1, m4b);
+                            var v0123_02 = ablateNibbles ? raw0123_2 : Avx2.And(raw0123_2, m4b);
+                            var v4567_02 = ablateNibbles ? raw4567_2 : Avx2.And(raw4567_2, m4b);
+                            var v0123_03 = ablateNibbles ? raw0123_3 : Avx2.And(raw0123_3, m4b);
+                            var v4567_03 = ablateNibbles ? raw4567_3 : Avx2.And(raw4567_3, m4b);
+
+                            var v0123_10 = ablateNibbles ? raw0123_0 : Avx2.And(Hi(raw0123_0), m4b);
+                            var v4567_10 = ablateNibbles ? raw4567_0 : Avx2.And(Hi(raw4567_0), m4b);
+                            var v0123_11 = ablateNibbles ? raw0123_1 : Avx2.And(Hi(raw0123_1), m4b);
+                            var v4567_11 = ablateNibbles ? raw4567_1 : Avx2.And(Hi(raw4567_1), m4b);
+                            var v0123_12 = ablateNibbles ? raw0123_2 : Avx2.And(Hi(raw0123_2), m4b);
+                            var v4567_12 = ablateNibbles ? raw4567_2 : Avx2.And(Hi(raw4567_2), m4b);
+                            var v0123_13 = ablateNibbles ? raw0123_3 : Avx2.And(Hi(raw0123_3), m4b);
+                            var v4567_13 = ablateNibbles ? raw4567_3 : Avx2.And(Hi(raw4567_3), m4b);
 
                             u0[0] = Unsafe.ReadUnaligned<uint>(scBase + 24 * sb);
                             u0[1] = Unsafe.ReadUnaligned<uint>(scBase + 24 * sb + 4);
@@ -406,8 +433,12 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                             u1[0] = Unsafe.ReadUnaligned<uint>(scBase + 12 + sb * 24);
                             u1[1] = Unsafe.ReadUnaligned<uint>(scBase + 12 + sb * 24 + 4);
                             u1[2] = Unsafe.ReadUnaligned<uint>(scBase + 12 + sb * 24 + 8);
-                            Unpack(u0, kmask1, kmask2, kmask3);
-                            Unpack(u1, kmask1, kmask2, kmask3);
+
+                            if (!AblateScaleUnpack)
+                            {
+                                Unpack(u0, kmask1, kmask2, kmask3);
+                                Unpack(u1, kmask1, kmask2, kmask3);
+                            }
 
                             var ms0 = Vector128.Create(u0[0], u0[1], u0[2], u0[3]).AsByte();
                             var ms1 = Vector128.Create(u1[0], u1[1], u1[2], u1[3]).AsByte();
@@ -529,6 +560,15 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             u[0] &= k1;
         }
 
+        /// <summary>
+        /// Widens eight IEEE half-precision values to <see cref="float"/>.
+        ///
+        /// <para>The hardware path is one <c>vcvtph2ps</c>. The scalar fallback below costs eight
+        /// <see cref="BitConverter.UInt16BitsToHalf"/> calls plus a <see cref="Vector256"/> build, and ablating
+        /// this decode out of <c>GemmTiled</c> measured <b>12%</b> of the kernel's runtime — it runs once per
+        /// weight super-block and so is not amortised across the column tile. Half→float is exact in both
+        /// paths (no rounding is possible when widening), so the two are bit-identical.</para>
+        /// </summary>
         private static Vector256<float> LoadF16x8(byte* p)
         {
             var u = (ushort*)p;
@@ -539,12 +579,34 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 (float)BitConverter.UInt16BitsToHalf(u[6]), (float)BitConverter.UInt16BitsToHalf(u[7]));
         }
 
+        /// <summary>
+        /// The same widening as <see cref="LoadF16x8"/>, after the repacked layout's byte rearrangement.
+        ///
+        /// <para>The lanes are extracted straight out of the register with <c>pextrw</c>. The previous version
+        /// stored the shuffled vector into a <c>stackalloc</c> buffer and immediately re-read it as eight
+        /// <see cref="ushort"/>s — a 16-byte store followed by eight narrow loads of the same address, which
+        /// is the pathological case for store-to-load forwarding: the loads cannot be satisfied from the store
+        /// buffer and stall until the store retires to L1.</para>
+        ///
+        /// <para>x86 has <c>vcvtph2ps</c>, which would widen all eight in one instruction, but .NET exposes
+        /// neither an <c>F16C</c> intrinsic class nor a <see cref="Half"/> overload of
+        /// <see cref="Vector128.Widen(Vector128{float})"/>, so the conversions stay scalar. Ablating this decode
+        /// out of the kernel measured 12% of its runtime; removing only the round-trip recovers whatever share
+        /// of that was the stall rather than the arithmetic.</para>
+        /// </summary>
         private static Vector256<float> LoadF16x8Rearrange(byte* p, Vector128<byte> deltamask)
         {
-            var bytes = Ssse3.Shuffle(Vector128.Load(p), deltamask);
-            var tmp = stackalloc byte[16];
-            bytes.Store(tmp);
-            return LoadF16x8(tmp);
+            var v = Ssse3.Shuffle(Vector128.Load(p), deltamask).AsUInt16();
+
+            return Vector256.Create(
+                (float)BitConverter.UInt16BitsToHalf(v.GetElement(0)),
+                (float)BitConverter.UInt16BitsToHalf(v.GetElement(1)),
+                (float)BitConverter.UInt16BitsToHalf(v.GetElement(2)),
+                (float)BitConverter.UInt16BitsToHalf(v.GetElement(3)),
+                (float)BitConverter.UInt16BitsToHalf(v.GetElement(4)),
+                (float)BitConverter.UInt16BitsToHalf(v.GetElement(5)),
+                (float)BitConverter.UInt16BitsToHalf(v.GetElement(6)),
+                (float)BitConverter.UInt16BitsToHalf(v.GetElement(7)));
         }
     }
 }

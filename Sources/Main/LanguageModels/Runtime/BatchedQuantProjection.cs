@@ -55,6 +55,60 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// </summary>
         internal static bool DisableRepackedKernelsForParity;
 
+        /// <summary>Forces a specific prefill column-tile width; 0 leaves <see cref="ResolveTileCols"/> to choose.</summary>
+        internal static int TileColsOverride;
+
+        /// <summary>
+        /// Picks the column-tile width (NR) for one prefill projection: the <b>widest</b> tile that still leaves
+        /// at least one tile per core.
+        ///
+        /// <para><b>Why width matters more than it looks.</b> A tile of NR columns walks the <i>entire</i> weight
+        /// matrix, so the matrix is streamed <c>rows/NR</c> times per projection. At NR=8 and 672 rows that is 84
+        /// passes over `ffn_gate_up`'s 12.68 MB — 1.07 GB of traffic in 15.3 ms, about 70 GB/s against a measured
+        /// 90 GB/s read ceiling. Doubling NR halves that traffic outright. This is the only blocking level the
+        /// kernel has: the tile lives in registers, and there is nothing sized to L2 or L3 between it and memory.
+        /// </para>
+        ///
+        /// <para><b>And why it cannot simply be maximised.</b> Fewer, fatter tiles are fewer independent work
+        /// items, and the parallel region costs its longest worker. Measured on 672 rows across 32 cores
+        /// (`ffn_gate_up`, two runs, agreeing):</para>
+        ///
+        /// <list type="table">
+        ///   <item><term>NR=4</term><description>168 passes, 17.8 ms, 1.70 TFLOP/s</description></item>
+        ///   <item><term>NR=8</term><description>84 passes, 15.2–15.9 ms, <b>1.95 TFLOP/s</b></description></item>
+        ///   <item><term>NR=16</term><description>42 passes, 16.5–17.0 ms, 1.80 TFLOP/s</description></item>
+        /// </list>
+        ///
+        /// <para>Halving the traffic 4→8 buys +17%, exactly as the bandwidth argument predicts. Halving it again
+        /// 8→16 <i>loses</i> 8%, because 42 tiles over 32 cores leaves ten workers with two tiles and twenty-two
+        /// with one — a 1.52× imbalance against 1.14× at NR=8. So the rule is not "widest that fits a core" but
+        /// "widest that still gives every core a couple of tiles"; below that the granularity loss outruns the
+        /// traffic saving. A longer prompt moves the balance back toward the wider tile.</para>
+        ///
+        /// <para>Escaping the trade-off entirely needs the missing blocking level: block over output rows as
+        /// well, so a wide column tile and a large number of independent work items stop being alternatives.</para>
+        /// </summary>
+        private static int ResolveTileCols(int rows, int cores, int maxTileCols)
+        {
+            if (TileColsOverride > 0)
+            {
+                return Math.Min(TileColsOverride, maxTileCols);
+            }
+
+            // Require ~2 tiles per core, not 1: at exactly one the tail worker doubles the region's duration.
+            const int TilesPerCore = 2;
+
+            for (var nr = 16; nr > 4; nr >>= 1)
+            {
+                if (nr <= maxTileCols && rows / nr >= cores * TilesPerCore)
+                {
+                    return nr;
+                }
+            }
+
+            return 4;
+        }
+
         /// <summary>
         /// <paramref name="preQuants"/> / <paramref name="preScales"/> / <paramref name="preBsums"/> let the
         /// caller supply activations ALREADY quantized to Q8_K, skipping the internal quantization pass.
@@ -245,11 +299,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             var repacked = w.EnsureRepacked();
 
             var cores = Environment.ProcessorCount;
-            var nr = rows / 8 >= cores ? 8 : 4;
-            if (nr > Q4KGemvKernel.MaxTileCols)
-            {
-                nr = Q4KGemvKernel.MaxTileCols;
-            }
+            var nr = ResolveTileCols(rows, cores, Q4KGemvKernel.MaxTileCols);
             var tiles = (rows + nr - 1) / nr;
 
             fixed (byte* rp = repacked)
@@ -313,11 +363,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             var repacked = w.EnsureRepacked();
 
             var cores = Environment.ProcessorCount;
-            var nr = rows / 8 >= cores ? 8 : 4;
-            if (nr > Q6KGemvKernel.MaxTileCols)
-            {
-                nr = Q6KGemvKernel.MaxTileCols;
-            }
+            var nr = ResolveTileCols(rows, cores, Q6KGemvKernel.MaxTileCols);
             var tiles = (rows + nr - 1) / nr;
 
             fixed (byte* rp = repacked)
