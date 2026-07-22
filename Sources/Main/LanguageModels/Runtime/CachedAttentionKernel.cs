@@ -98,12 +98,26 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
             var invSum = 1f / sumExp;
 
+            // Fold the normalisation into the probabilities once, so the inner loops below read a plain
+            // coefficient. `scoreScratch[t] * invSum` computed here or there is the same product.
             for (var t = 0; t < sequenceLength; t++)
             {
-                var probability = scoreScratch[t] * invSum;
+                scoreScratch[t] *= invSum;
+            }
+
+            var dStart = 0;
+
+            if (CpuFeatures.HasAvx2 && UseRegisterResidentValueSum)
+            {
+                dStart = AccumulateValuesBlocked(values, scoreScratch, output, sequenceLength, headDimension);
+            }
+
+            for (var t = 0; t < sequenceLength; t++)
+            {
+                var probability = scoreScratch[t];
                 var value = values.Slice(t * headDimension, headDimension);
 
-                var d = 0;
+                var d = dStart;
                 if (CpuFeatures.HasAvx2)
                 {
                     // Vectorize over headDim. output[d] accumulates over t in ascending order
@@ -125,6 +139,84 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     output[d] += probability * value[d];
                 }
             }
+        }
+
+        /// <summary>A/B switch for <see cref="AccumulateValuesBlocked"/>; set <c>OVERFIT_ATTN_REGACC=0</c> to disable.</summary>
+        internal static bool UseRegisterResidentValueSum =
+            Environment.GetEnvironmentVariable("OVERFIT_ATTN_REGACC") != "0";
+
+        /// <summary>
+        /// The softmax-weighted value sum with the accumulators held in <b>registers across the whole
+        /// <c>t</c> loop</b>, processing 64 output dimensions at a time. Returns the first dimension it did
+        /// not cover, which the caller finishes with the original loop.
+        ///
+        /// <para><b>What it removes.</b> The straightforward order — for each <c>t</c>, walk every <c>d</c> —
+        /// loads and stores the whole output accumulator once per <c>t</c>. Per <c>t</c> that is 512 B of value
+        /// read against 512 B of accumulator read plus 512 B of accumulator write: <b>two thirds of the traffic
+        /// is the accumulator going out to L1 and back</b>. Across a 672-token prefill head-layer that is
+        /// ~226k iterations, ~347 MB moved of which ~231 MB is pure round-trip. Blocking <c>d</c> so the
+        /// accumulators stay in registers reduces that to one load and one store per block per query.</para>
+        ///
+        /// <para>The value stream is unchanged in volume — the <c>d</c> blocks partition each value row, so the
+        /// same bytes are read, just in two passes rather than one. Values fit L2 comfortably at these head
+        /// dimensions.</para>
+        ///
+        /// <para><b>Bit-identical:</b> for every <c>d</c> the contributions are still summed in ascending
+        /// <c>t</c> order, and the multiply and add stay separate — the no-FMA property the surrounding method
+        /// documents is deliberate and preserved here.</para>
+        /// </summary>
+        private static int AccumulateValuesBlocked(
+            ReadOnlySpan<float> values,
+            ReadOnlySpan<float> probabilities,
+            Span<float> output,
+            int sequenceLength,
+            int headDimension)
+        {
+            const int Lanes = 8;
+            const int BlockWidth = 8 * Lanes;
+
+            ref var o = ref MemoryMarshal.GetReference(output);
+            ref var v = ref MemoryMarshal.GetReference(values);
+
+            var d0 = 0;
+
+            for (; d0 + BlockWidth <= headDimension; d0 += BlockWidth)
+            {
+                var a0 = Vector256<float>.Zero;
+                var a1 = Vector256<float>.Zero;
+                var a2 = Vector256<float>.Zero;
+                var a3 = Vector256<float>.Zero;
+                var a4 = Vector256<float>.Zero;
+                var a5 = Vector256<float>.Zero;
+                var a6 = Vector256<float>.Zero;
+                var a7 = Vector256<float>.Zero;
+
+                for (var t = 0; t < sequenceLength; t++)
+                {
+                    var probV = Vector256.Create(probabilities[t]);
+                    var b = (nuint)((long)t * headDimension + d0);
+
+                    a0 = Avx.Add(a0, Avx.Multiply(probV, Vector256.LoadUnsafe(ref v, b)));
+                    a1 = Avx.Add(a1, Avx.Multiply(probV, Vector256.LoadUnsafe(ref v, b + 8)));
+                    a2 = Avx.Add(a2, Avx.Multiply(probV, Vector256.LoadUnsafe(ref v, b + 16)));
+                    a3 = Avx.Add(a3, Avx.Multiply(probV, Vector256.LoadUnsafe(ref v, b + 24)));
+                    a4 = Avx.Add(a4, Avx.Multiply(probV, Vector256.LoadUnsafe(ref v, b + 32)));
+                    a5 = Avx.Add(a5, Avx.Multiply(probV, Vector256.LoadUnsafe(ref v, b + 40)));
+                    a6 = Avx.Add(a6, Avx.Multiply(probV, Vector256.LoadUnsafe(ref v, b + 48)));
+                    a7 = Avx.Add(a7, Avx.Multiply(probV, Vector256.LoadUnsafe(ref v, b + 56)));
+                }
+
+                a0.StoreUnsafe(ref o, (nuint)d0);
+                a1.StoreUnsafe(ref o, (nuint)(d0 + 8));
+                a2.StoreUnsafe(ref o, (nuint)(d0 + 16));
+                a3.StoreUnsafe(ref o, (nuint)(d0 + 24));
+                a4.StoreUnsafe(ref o, (nuint)(d0 + 32));
+                a5.StoreUnsafe(ref o, (nuint)(d0 + 40));
+                a6.StoreUnsafe(ref o, (nuint)(d0 + 48));
+                a7.StoreUnsafe(ref o, (nuint)(d0 + 56));
+            }
+
+            return d0;
         }
 
         /// <summary>

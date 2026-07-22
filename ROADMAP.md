@@ -762,8 +762,40 @@ AVX-512 has no `vphaddd` for zmm, adding three more cross-half moves per call ac
 lane-crossing traffic outruns the arithmetic saved. **A wider vector is not a property of the ISA alone; it
 is a ratio between broadcast cost and work done per broadcast, and that ratio is per-kernel.**
 
-**Where prefill stands: 280 tok/s, gap 1.93×.** Remaining measured items: `attn_scores` 212 ms at 0.27
-TFLOP/s (12% of its ceiling, needs a new kernel), and the scalar `Unpack` at ~3.5%.
+#### ★ attn_scores — register-resident value accumulation: −13% on the component
+
+The softmax-weighted value sum walked every `d` for each `t`, so it loaded **and stored** the whole output
+accumulator once per `t`: 512 B of value read against 512 B of accumulator read plus 512 B written — two
+thirds of the traffic was the accumulator round-tripping through L1, ~231 MB of ~347 MB per head-layer.
+`AccumulateValuesBlocked` blocks `d` into 64 dimensions so eight accumulators stay in registers across the
+whole `t` loop; the value stream is unchanged in volume, just read in two passes. Bit-identical — ascending
+`t` order per `d` preserved, and the deliberate no-FMA property kept.
+
+ABAB-interleaved, three rounds, best-of-N:
+
+| component | baseline | blocked | |
+|---|---:|---:|---:|
+| **attn_scores** | 213.8 ms | **186.3** | **1.15×** |
+| attn_kv / attn_q / attn_out (canaries) | 137.4 / 84.6 / 88.5 | 137.9 / 85.5 / 89.2 | 1.00 / 0.99 / 0.99× |
+| ffn_gateup / ffn_down (canaries) | 1006.8 / 659.2 | 1012.8 / 662.6 | 0.99× |
+| total | 2385.7 | 2366.6 | 1.01× |
+
+**End to end this is only +0.8%**, because attn_scores is 8% of prefill. A first single-arm run appeared to
+show 280 → 292 tok/s, but `attn_kv` and `ffn_gateup` — neither touched by the change — moved with it, so that
+reading was box drift and is withdrawn. Interleaving the arms with those components as canaries is what
+separated the two. **Prefill stands at ~283 tok/s.**
+
+**On the .NET-vs-C++ gaps this work exposed.** Three are real: no `F16C` intrinsic class (nor a `Half`
+overload of `Vector128.Widen`), no first-class AVX-512 mask registers, and no `restrict`. All are
+dotnet/runtime JIT work, not something a library can supply — F16C in particular is a well-scoped ask with an
+existing pattern to follow. `TensorPrimitives` is the right home for the subset expressible as *bulk*
+buffer-to-buffer work, and does carry hardware paths not otherwise reachable; it did not fit here because the
+values are eight at a time, interleaved every 1152 bytes inside a hot loop. The deeper difference is
+optimisation budget — RyuJIT is a fast JIT, and Native AOT uses the same backend, so there is no LLVM-class
+scheduling to reach for. **None of this explains the remaining gap**: the Q4_K matmul measured faster than
+llama.cpp's at equal ISA and thread count. What is left is AVX-512 coverage and our own kernel structure.
+
+**Remaining measured item:** the scalar `Unpack` at ~3.5% of the Q4_K kernel.
 
 *Invalidated run, kept as a warning:* the first tile sweep ran inside an 11-benchmark class and reported
 `Tiled` and `Tiled_Cols8` — **the same configuration** — 21% apart, far outside their ±9% bars. Two identical
