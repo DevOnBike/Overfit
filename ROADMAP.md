@@ -699,8 +699,17 @@ runtime at NR=8 and ~7.5% at NR=16, so the gain should roughly halve with the wi
 measured 13%/6% = 2.2×. End to end it predicted `0.45 × 0.13 = 5.9%` off prefill → 2606 ms; measured
 **2622–2632 ms, 255–256 tok/s**, within 0.6%. Gap to llama.cpp's AVX-512 build: 2.18× → **2.12×**.
 
-Suite 1486/0/229. **Next: the same hoist for `Q6KGemvKernel` — `ffn_down` is 27% of prefill (708 ms) and has
-the identical per-block decode**, so the same ~13% there is worth roughly another 9 tok/s.
+**The same hoist for Q6_K pays 5× less than predicted.** `Q6KGemvKernel.DecodeBlockScales` mirrors the Q4_K
+one and carries `ffn_down` (27% of prefill). Predicted ~13% and another ~9 tok/s; measured **ffn_down 708.6 →
+690.4 ms, −2.6%**, worth 3 tok/s. The reason was checkable in advance and was not checked: Q6_K widens
+**eight** values per block against Q4_K's sixteen (it has no `dmin`), and its block is larger — 1680 B vs
+1152 B — with more compute in the 6-bit unpack. The fixed decode is therefore a much smaller fraction of a
+bigger block: 12% / ~4.6 ≈ 2.6%, which is what came out. The amortisation model predicts well *within* a
+kernel — it called the tile-width scaling and the end-to-end figure correctly — but extrapolating it *across*
+kernels without re-reading their inputs was a guess.
+
+**Both hoists together: prefill 249 → 258–259 tok/s, gap to llama.cpp's AVX-512 build 2.18× → 2.10×.**
+Suite 1486/0/229.
 
 *Invalidated run, kept as a warning:* the first tile sweep ran inside an 11-benchmark class and reported
 `Tiled` and `Tiled_Cols8` — **the same configuration** — 21% apart, far outside their ±9% bars. Two identical

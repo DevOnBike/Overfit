@@ -449,7 +449,22 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             var nr = ResolveTileCols(rows, cores, Q6KGemvKernel.MaxTileCols);
             var tiles = (rows + nr - 1) / nr;
 
+            // Same hoist as the Q4_K path: widen the F16 row scales once per projection rather than once per
+            // column tile. Q6_K has no dmin, so this is half the scratch.
+            var scaleCount = UsePrecomputedScales && tiles > 1
+                ? (outputSize / 8) * spr * Q6KGemvKernel.DecodedScalesPerBlock
+                : 0;
+
+            using var decodedScales = new PooledBuffer<float>(scaleCount, clearMemory: false);
+
+            if (scaleCount > 0)
+            {
+                Q6KGemvKernel.DecodeBlockScales(
+                    repacked, outputSize, inputSize, decodedScales.Span.Slice(0, scaleCount));
+            }
+
             fixed (byte* rp = repacked)
+            fixed (float* dsc = decodedScales.Span.Slice(0, scaleCount))
             fixed (sbyte* q = quants)
             fixed (float* sc = scales)
             fixed (float* o = output)
@@ -466,6 +481,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     Spr = spr,
                     Nr = nr,
                     Rows = rows,
+                    DecodedScales = dsc,
+                    DecodedScalesLength = scaleCount,
                 };
                 OverfitParallel.For(0, tiles, &TiledQ6KChunk, &ctx);
             }
@@ -483,6 +500,12 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             public int Spr;
             public int Nr;
             public int Rows;
+
+            /// <summary>F16 row scales widened once for the whole projection; null when decoded inline.</summary>
+            public float* DecodedScales;
+
+            /// <summary>Length of <see cref="DecodedScales"/>; 0 when decoded inline.</summary>
+            public int DecodedScalesLength;
         }
 
         private static unsafe void TiledQ6KChunk(int start, int end, void* context)
@@ -499,7 +522,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     cols,
                     new ReadOnlySpan<sbyte>(c.Quants + (long)s * c.InputSize, cols * c.InputSize),
                     new ReadOnlySpan<float>(c.Scales + (long)s * c.Spr, cols * c.Spr),
-                    new Span<float>(c.Output + (long)s * c.OutputSize, cols * c.OutputSize));
+                    new Span<float>(c.Output + (long)s * c.OutputSize, cols * c.OutputSize),
+                    new ReadOnlySpan<float>(c.DecodedScales, c.DecodedScalesLength));
             }
         }
 

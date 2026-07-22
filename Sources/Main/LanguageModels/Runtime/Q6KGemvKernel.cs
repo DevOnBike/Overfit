@@ -285,6 +285,45 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// the Q4_K tiled kernel — activations column-contiguous, output column-major
         /// (<c>output[c*outputSize + row]</c>). AVX2 + FMA.</para>
         /// </summary>
+        /// <summary>Floats written per weight block by <see cref="DecodeBlockScales"/>: the eight row scales.</summary>
+        public const int DecodedScalesPerBlock = 8;
+
+        /// <summary>
+        /// Widens every weight block's eight F16 row scales to <see cref="float"/> once, into
+        /// <paramref name="destination"/> laid out as <c>[(group·nb + block) · 8]</c>.
+        ///
+        /// <para>The Q6_K counterpart of <c>Q4KGemvKernel.DecodeBlockScales</c>, and needed for the same
+        /// reason: <see cref="GemmTiled"/> widens these inline once per (group, block), but the kernel itself
+        /// runs once per <i>column tile</i>, so the same values are decoded as many times as there are tiles.
+        /// On the Q4_K side hoisting this measured +13% on the projection. Q6_K carries `ffn_down`, 27% of
+        /// prefill. Bit-identical: the same conversions, fewer times.</para>
+        ///
+        /// <para>Q6_K has no <c>dmin</c>, so this writes 8 floats per block against Q4_K's 16.</para>
+        /// </summary>
+        public static unsafe void DecodeBlockScales(
+            ReadOnlySpan<byte> repacked,
+            int outputSize,
+            int inputSize,
+            Span<float> destination)
+        {
+            var nb = inputSize / 256;
+            var groups = outputSize / 8;
+
+            fixed (byte* w = repacked)
+            fixed (float* d = destination)
+            {
+                for (var x = 0; x < groups; x++)
+                {
+                    for (var l = 0; l < nb; l++)
+                    {
+                        var index = ((long)x * nb + l) * DecodedScalesPerBlock;
+
+                        LoadF16x8Int(w + ((long)x * nb + l) * BlockKx8Bytes).Store(d + index);
+                    }
+                }
+            }
+        }
+
         public static unsafe void GemmTiled(
             ReadOnlySpan<byte> repacked,
             int outputSize,
@@ -292,7 +331,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             int cols,
             ReadOnlySpan<sbyte> actQuants,
             ReadOnlySpan<float> actScales,
-            Span<float> output)
+            Span<float> output,
+            ReadOnlySpan<float> decodedScales = default)
         {
             if (cols is < 1 or > MaxTileCols)
             {
@@ -315,6 +355,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             fixed (sbyte* aqAll = actQuants)
             fixed (float* asc = actScales)
             fixed (float* outp = output)
+            fixed (float* dsc = decodedScales) // null when the caller did not pre-decode; see DecodeBlockScales
             {
                 for (var x = 0; x < outputSize / 8; x++)
                 {
@@ -331,7 +372,12 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                         var scales = blk + DstScalesOffset;
                         var ql = blk + DstQlOffset;
                         var qh = blk + DstQhOffset;
-                        var dVec = LoadF16x8Int(blk);
+
+                        // Pre-decoded when the caller hoisted the F16 widening out of the tile loop; identical
+                        // values either way, so the two paths are bit-identical.
+                        var dVec = dsc is not null
+                            ? Vector256.Load(dsc + (((long)x * nb) + l) * DecodedScalesPerBlock)
+                            : LoadF16x8Int(blk);
 
                         for (var c = 0; c < cols; c++)
                         {
