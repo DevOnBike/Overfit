@@ -449,6 +449,220 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             }
         }
 
+        /// <summary>
+        /// AVX-512 form of <see cref="GemmTiled"/>, structured exactly like
+        /// <c>Q4KGemvKernel.GemmTiled512</c>: <b>two activation columns per instruction</b>, column <c>2p</c>
+        /// in the low 256 bits and <c>2p+1</c> in the high, with the shared weights broadcast into both halves
+        /// and the pair loop left innermost so the per-block weight decode stays amortised across the tile.
+        ///
+        /// <para><b>The one place it cannot widen.</b> <see cref="ReduceRows"/> ends in <c>vphaddd</c>, which
+        /// AVX-512 does not provide for zmm at all. The two <c>vpmaddwd</c> steps still run at 512; only the
+        /// horizontal add and its permute drop to 256-bit halves and are re-joined. That costs one extra
+        /// instruction per reduction against eighteen saved elsewhere in the same iteration — the arithmetic
+        /// bulk (eight <c>vpmaddubsw</c>, four subtracts, the scale multiplies) all pairs cleanly.</para>
+        ///
+        /// <para><b>Bit-identical</b> to <see cref="GemmTiled"/>: each column's operations and their order are
+        /// unchanged, including the split reduction, which is the same 256-bit sequence applied to the same
+        /// values.</para>
+        /// </summary>
+        public static unsafe void GemmTiled512(
+            ReadOnlySpan<byte> repacked,
+            int outputSize,
+            int inputSize,
+            int cols,
+            ReadOnlySpan<sbyte> actQuants,
+            ReadOnlySpan<float> actScales,
+            Span<float> output,
+            ReadOnlySpan<float> decodedScales = default)
+        {
+            if (cols is < 1 or > MaxTileCols)
+            {
+                throw new ArgumentOutOfRangeException(nameof(cols), cols, $"cols must be in [1, {MaxTileCols}].");
+            }
+
+            var nb = inputSize / 256;
+            var pairs = (cols + 1) / 2;
+
+            var m4b = Vector512.Create((byte)0x0F);
+            var m2 = Vector512.Create((byte)0x03);
+            var m32 = Vector512.Create((byte)32);
+            var ones = Vector512.Create((short)1);
+            var reduce = Vector256.Create(0, 1, 4, 5, 2, 3, 6, 7);
+
+            Span<Vector512<float>> sumf = stackalloc Vector512<float>[pairs];
+            Span<Vector512<int>> iacc = stackalloc Vector512<int>[pairs];
+
+            fixed (byte* rep = repacked)
+            fixed (sbyte* aqAll = actQuants)
+            fixed (float* asc = actScales)
+            fixed (float* outp = output)
+            fixed (float* dsc = decodedScales)
+            {
+                for (var x = 0; x < outputSize / 8; x++)
+                {
+                    var bptr = rep + (long)x * nb * BlockKx8Bytes;
+
+                    for (var p = 0; p < pairs; p++)
+                    {
+                        sumf[p] = Vector512<float>.Zero;
+                    }
+
+                    for (var l = 0; l < nb; l++)
+                    {
+                        var blk = bptr + (long)l * BlockKx8Bytes;
+                        var scales = blk + DstScalesOffset;
+                        var ql = blk + DstQlOffset;
+                        var qh = blk + DstQhOffset;
+
+                        var d256 = dsc is not null
+                            ? Vector256.Load(dsc + (((long)x * nb) + l) * DecodedScalesPerBlock)
+                            : LoadF16x8Int(blk);
+                        var dVec = Vector512.Create(d256, d256);
+
+                        for (var p = 0; p < pairs; p++)
+                        {
+                            iacc[p] = Vector512<int>.Zero;
+                        }
+
+                        for (var k = 0; k < 16; k++)
+                        {
+                            var baseL = (k / 8) * 128 + (k % 8) * 8;
+                            var baseH = baseL + 64;
+                            var qhShiftL = (byte)(((baseL % 128) / 32) * 2);
+                            var qhShiftH = (byte)(((baseH % 128) / 32) * 2);
+                            var qhHalfL = (baseL / 128) * 32;
+                            var qhHalfH = (baseH / 128) * 32;
+                            var qhBlockL = ((qhHalfL + (baseL % 32)) / 8) * 64;
+                            var qhBlockH = ((qhHalfH + (baseH % 32)) / 8) * 64;
+
+                            // Weight side: decoded once, shared by both columns of every pair.
+                            var ql03 = Broadcast512(ql + k * 64);
+                            var ql47 = Broadcast512(ql + k * 64 + 32);
+                            var qhL03 = Broadcast512(qh + qhBlockL);
+                            var qhL47 = Broadcast512(qh + qhBlockL + 32);
+                            var qhH03 = Broadcast512(qh + qhBlockH);
+                            var qhH47 = Broadcast512(qh + qhBlockH + 32);
+
+                            var qLu03 = LoNib512(ql03, m4b) | QhBits512(qhL03, qhShiftL, m2);
+                            var qLu47 = LoNib512(ql47, m4b) | QhBits512(qhL47, qhShiftL, m2);
+                            var qHu03 = HiNib512(ql03, m4b) | QhBits512(qhH03, qhShiftH, m2);
+                            var qHu47 = HiNib512(ql47, m4b) | QhBits512(qhH47, qhShiftH, m2);
+
+                            var sl = ScaleVec(scales + (baseL / 16) * 8);
+                            var sh = ScaleVec(scales + (baseH / 16) * 8);
+                            var scaleL = Vector512.Create(sl, sl);
+                            var scaleH = Vector512.Create(sh, sh);
+
+                            for (var p = 0; p < pairs; p++)
+                            {
+                                var lowCol = 2 * p;
+                                var highCol = Math.Min(2 * p + 1, cols - 1);
+                                var aLow = aqAll + (long)lowCol * inputSize + l * 256;
+                                var aHigh = aqAll + (long)highCol * inputSize + l * 256;
+
+                                var actL = TileAct512(aLow + baseL, aHigh + baseL);
+                                var actH = TileAct512(aLow + baseH, aHigh + baseH);
+
+                                var sumL = ReduceRows512(
+                                    Avx512BW.Subtract(Mul512(qLu03, actL), Mul512(m32, actL)),
+                                    Avx512BW.Subtract(Mul512(qLu47, actL), Mul512(m32, actL)),
+                                    ones, reduce);
+                                var sumH = ReduceRows512(
+                                    Avx512BW.Subtract(Mul512(qHu03, actH), Mul512(m32, actH)),
+                                    Avx512BW.Subtract(Mul512(qHu47, actH), Mul512(m32, actH)),
+                                    ones, reduce);
+
+                                iacc[p] = Avx512F.Add(iacc[p], Avx512F.Add(
+                                    Avx512F.MultiplyLow(sumL, scaleL), Avx512F.MultiplyLow(sumH, scaleH)));
+                            }
+                        }
+
+                        for (var p = 0; p < pairs; p++)
+                        {
+                            var rowScale = Vector512.Create(
+                                Vector256.Create(asc[(long)(2 * p) * nb + l]),
+                                Vector256.Create(asc[(long)Math.Min(2 * p + 1, cols - 1) * nb + l]));
+
+                            sumf[p] = Avx512F.FusedMultiplyAdd(
+                                Avx512F.ConvertToVector512Single(iacc[p]),
+                                Avx512F.Multiply(dVec, rowScale),
+                                sumf[p]);
+                        }
+                    }
+
+                    for (var p = 0; p < pairs; p++)
+                    {
+                        sumf[p].GetLower().Store(outp + (long)(2 * p) * outputSize + x * 8);
+
+                        // The odd tail duplicated its low column into the high half; discard that copy.
+                        if (2 * p + 1 < cols)
+                        {
+                            sumf[p].GetUpper().Store(outp + (long)(2 * p + 1) * outputSize + x * 8);
+                        }
+                    }
+                }
+            }
+        }
+
+        /// <summary>The same 32 weight bytes in both halves — weights are shared by the two columns of a pair.</summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static unsafe Vector512<byte> Broadcast512(byte* p)
+        {
+            var v = Vector256.Load(p);
+
+            return Vector512.Create(v, v);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static Vector512<byte> LoNib512(Vector512<byte> v, Vector512<byte> m4b) => v & m4b;
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static Vector512<byte> HiNib512(Vector512<byte> v, Vector512<byte> m4b) =>
+            Avx512BW.ShiftRightLogical(v.AsInt16(), 4).AsByte() & m4b;
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static Vector512<byte> QhBits512(Vector512<byte> qh, byte shift, Vector512<byte> m2)
+        {
+            var count = Vector128.CreateScalar((short)shift);
+            var bits = Avx512BW.ShiftRightLogical(qh.AsInt16(), count).AsByte() & m2;
+
+            return Avx512BW.ShiftLeftLogical(bits.AsInt16(), 4).AsByte();
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static Vector512<short> Mul512(Vector512<byte> rhs, Vector512<sbyte> lhs) =>
+            Avx512BW.MultiplyAddAdjacent(rhs, lhs);
+
+        /// <summary>One column's eight activation bytes per half, duplicated in both 128-bit lanes of that half.</summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static unsafe Vector512<sbyte> TileAct512(sbyte* low, sbyte* high)
+        {
+            var lo = Unsafe.ReadUnaligned<long>(low);
+            var hi = Unsafe.ReadUnaligned<long>(high);
+            var vl = Vector128.Create(lo, lo).AsSByte();
+            var vh = Vector128.Create(hi, hi).AsSByte();
+
+            return Vector512.Create(Vector256.Create(vl, vl), Vector256.Create(vh, vh));
+        }
+
+        /// <summary>
+        /// <see cref="ReduceRows"/> widened as far as the instruction set allows: both <c>vpmaddwd</c> steps run
+        /// at 512 bits, then the horizontal add and its permute drop to 256-bit halves because AVX-512 has no
+        /// <c>vphaddd</c> for zmm. Each half is the identical 256-bit sequence, so the result is bit-identical.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static Vector512<int> ReduceRows512(
+            Vector512<short> p03, Vector512<short> p47, Vector512<short> ones, Vector256<int> reduce)
+        {
+            var m03 = Avx512BW.MultiplyAddAdjacent(p03, ones);
+            var m47 = Avx512BW.MultiplyAddAdjacent(p47, ones);
+
+            var lower = Avx2.PermuteVar8x32(Avx2.HorizontalAdd(m03.GetLower(), m47.GetLower()), reduce);
+            var upper = Avx2.PermuteVar8x32(Avx2.HorizontalAdd(m03.GetUpper(), m47.GetUpper()), reduce);
+
+            return Vector512.Create(lower, upper);
+        }
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static Vector256<byte> LoNib(Vector256<byte> v, Vector256<byte> m4b) => Avx2.And(v, m4b);
 

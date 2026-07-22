@@ -102,6 +102,24 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         internal static bool UseAvx512PrefillQ4K = CpuFeatures.HasAvx512 && CpuFeatures.HasAvx512Bw;
 
         /// <summary>
+        /// The same port for Q6_K — <b>measured slower and therefore off</b>. Kept behind the flag with
+        /// <c>Avx512Q6KPrefillParityTests</c> guarding it, because the negative is the useful part.
+        ///
+        /// <para>On the identical machine and prompt where the Q4_K port took <c>ffn_gateup</c> down 13.8%,
+        /// the Q6_K port took <c>ffn_down</c> from 658 ms to <b>794–900 ms</b> and prefill from 280 back to
+        /// 256–265 tok/s. The Q4_K components stayed flat across the same runs, and the run-to-run spread was
+        /// concentrated entirely on <c>ffn_down</c>, so it is the change and not the box.</para>
+        ///
+        /// <para><b>Why the same technique inverts.</b> Column pairing pays for the <c>vinserti64x4</c> that
+        /// builds each broadcast out of arithmetic done on it. Q4_K broadcasts eight weight vectors per
+        /// sub-block and then issues sixteen paired statements against them. Q6_K broadcasts six per <c>k</c>,
+        /// sixteen times per block, for far less arithmetic each — and its <c>ReduceRows</c> cannot widen at all
+        /// (no <c>vphaddd</c> for zmm), adding three more cross-half moves per call, 32 calls per block. The
+        /// lane-crossing traffic outruns the arithmetic saved.</para>
+        /// </summary>
+        internal static bool UseAvx512PrefillQ6K;
+
+        /// <summary>
         /// Weight bytes one worker's band may occupy. Half of a 1 MB Zen-5 L2, leaving the rest for the
         /// activation tile and the output band; the point is residency, not filling the cache exactly.
         /// </summary>
@@ -494,6 +512,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     Rows = rows,
                     DecodedScales = dsc,
                     DecodedScalesLength = scaleCount,
+                    Avx512 = UseAvx512PrefillQ6K && !DisableRepackedKernelsForParity,
                 };
                 OverfitParallel.For(0, tiles, &TiledQ6KChunk, &ctx);
             }
@@ -517,6 +536,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
             /// <summary>Length of <see cref="DecodedScales"/>; 0 when decoded inline.</summary>
             public int DecodedScalesLength;
+
+            /// <summary>Route through the two-columns-per-instruction AVX-512 kernel.</summary>
+            public bool Avx512;
         }
 
         private static unsafe void TiledQ6KChunk(int start, int end, void* context)
@@ -526,15 +548,21 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             {
                 var s = t * c.Nr;
                 var cols = Math.Min(c.Nr, c.Rows - s);
+                var weights = new ReadOnlySpan<byte>(c.Repacked, c.RepackedLength);
+                var quants = new ReadOnlySpan<sbyte>(c.Quants + (long)s * c.InputSize, cols * c.InputSize);
+                var scales = new ReadOnlySpan<float>(c.Scales + (long)s * c.Spr, cols * c.Spr);
+                var dst = new Span<float>(c.Output + (long)s * c.OutputSize, cols * c.OutputSize);
+                var decoded = new ReadOnlySpan<float>(c.DecodedScales, c.DecodedScalesLength);
+
+                if (c.Avx512)
+                {
+                    Q6KGemvKernel.GemmTiled512(
+                        weights, c.OutputSize, c.InputSize, cols, quants, scales, dst, decoded);
+                    continue;
+                }
+
                 Q6KGemvKernel.GemmTiled(
-                    new ReadOnlySpan<byte>(c.Repacked, c.RepackedLength),
-                    c.OutputSize,
-                    c.InputSize,
-                    cols,
-                    new ReadOnlySpan<sbyte>(c.Quants + (long)s * c.InputSize, cols * c.InputSize),
-                    new ReadOnlySpan<float>(c.Scales + (long)s * c.Spr, cols * c.Spr),
-                    new Span<float>(c.Output + (long)s * c.OutputSize, cols * c.OutputSize),
-                    new ReadOnlySpan<float>(c.DecodedScales, c.DecodedScalesLength));
+                    weights, c.OutputSize, c.InputSize, cols, quants, scales, dst, decoded);
             }
         }
 

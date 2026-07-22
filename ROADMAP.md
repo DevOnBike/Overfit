@@ -744,7 +744,26 @@ pre-decoded scale path) asserting exact equality rather than a tolerance. Gated 
 `CpuFeatures.HasAvx512`/`HasAvx512Bw` — the repo's own OVERFIT015 analyzer rejected a direct `IsSupported`
 check, which is what that rule is for. Suite 1494/0/229.
 
-**Next: the same port for `Q6KGemvKernel`** — `ffn_down` is 27% of prefill (658 ms) and still runs 256-bit.
+#### ▶ NEGATIVE — the same AVX-512 port for Q6_K is SLOWER, reverted
+
+`Q6KGemvKernel.GemmTiled512` exists and is bit-identical (`Avx512Q6KPrefillParityTests`, 7 cases), but
+`BatchedQuantProjection.UseAvx512PrefillQ6K` is **off**: on the same machine and prompt where the Q4_K port
+took `ffn_gateup` down 13.8%, this took `ffn_down` from 658 ms to **794–900 ms** and prefill from 280 back to
+256–265 tok/s. Reverting restored 2398.5/2399.6 ms and `ffn_down` 656/659 ms exactly.
+
+Two things marked it as real rather than drift: the Q4_K components held steady across the same runs
+(`ffn_gateup` 1023/1009, `attn_q` 86/84), and the run-to-run spread was concentrated entirely on `ffn_down`.
+
+**Why the identical technique inverts between the two kernels.** Column pairing pays for the
+`vinserti64x4` that builds each broadcast with the arithmetic subsequently done on it. Q4_K broadcasts eight
+weight vectors per sub-block and then issues sixteen paired statements against them. Q6_K broadcasts six per
+`k`, sixteen times per block, for far less arithmetic each — and its `ReduceRows` cannot widen at all, since
+AVX-512 has no `vphaddd` for zmm, adding three more cross-half moves per call across 32 calls per block. The
+lane-crossing traffic outruns the arithmetic saved. **A wider vector is not a property of the ISA alone; it
+is a ratio between broadcast cost and work done per broadcast, and that ratio is per-kernel.**
+
+**Where prefill stands: 280 tok/s, gap 1.93×.** Remaining measured items: `attn_scores` 212 ms at 0.27
+TFLOP/s (12% of its ceiling, needs a new kernel), and the scalar `Unpack` at ~3.5%.
 
 *Invalidated run, kept as a warning:* the first tile sweep ran inside an 11-benchmark class and reported
 `Tiled` and `Tiled_Cols8` — **the same configuration** — 21% apart, far outside their ±9% bars. Two identical
