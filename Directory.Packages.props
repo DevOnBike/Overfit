@@ -21,8 +21,8 @@
          rules silently off). Expect this package to show as permanently "outdated"; that is INTENTIONAL, not
          debt. Bump it only when the SDK's own Roslyn version moves up. -->
     <PackageVersion Include="Microsoft.CodeAnalysis.CSharp" Version="5.0.0" />
-    <PackageVersion Include="Microsoft.Agents.AI" Version="1.13.0" />
-    <PackageVersion Include="Microsoft.Extensions.AI.Abstractions" Version="10.8.0" />
+    <PackageVersion Include="Microsoft.Agents.AI" Version="1.14.0" />
+    <PackageVersion Include="Microsoft.Extensions.AI.Abstractions" Version="10.8.1" />
     <PackageVersion Include="Microsoft.Extensions.AI.Evaluation" Version="10.8.0" />
     <PackageVersion Include="Microsoft.Extensions.AI.Evaluation.Quality" Version="10.8.0" />
     <PackageVersion Include="Microsoft.ML" Version="5.0.0" />
