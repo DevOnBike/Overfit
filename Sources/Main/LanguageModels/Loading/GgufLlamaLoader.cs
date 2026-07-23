@@ -1293,14 +1293,15 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
 
         private static void LoadTensorOrZeros(GgufReader reader, string name, Span<float> dst)
         {
-            var found = reader.Tensors.TryGetValue(name, out var info);
-
-            if (found)
+            // Test the TryGetValue directly rather than through a `found` bool: routed through a separate
+            // variable the compiler loses the link to `info`'s null state and reports CS8604 on the call
+            // below, which the AOT guard promotes to an error.
+            if (reader.Tensors.TryGetValue(name, out var info))
             {
                 reader.LoadTensorAsF32(info, dst);
             }
 
-            if (!found)
+            if (info is null)
             {
                 dst.Clear();
             }

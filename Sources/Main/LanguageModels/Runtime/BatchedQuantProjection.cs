@@ -99,7 +99,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// bits against 7.71–9.08 at 512. The port is bit-identical, so the existing parity tests apply to it
         /// unchanged; <c>Avx512PrefillParityTests</c> pins the two kernels against each other directly.</para>
         /// </summary>
-        internal static bool UseAvx512PrefillQ4K = CpuFeatures.HasAvx512 && CpuFeatures.HasAvx512Bw;
+        internal static bool UseAvx512PrefillQ4K =
+            CpuFeatures.HasAvx512
+            && CpuFeatures.HasAvx512Bw
+            && Environment.GetEnvironmentVariable(OverfitEnvironment.Avx512PrefillQ4K) != "0";
 
         /// <summary>
         /// The same port for Q6_K — <b>measured slower and therefore off</b>. Kept behind the flag with
@@ -120,7 +123,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         internal static bool UseAvx512PrefillQ6K =
             CpuFeatures.HasAvx512
             && CpuFeatures.HasAvx512Bw
-            && Environment.GetEnvironmentVariable("OVERFIT_AVX512_Q6K") != "0";
+            && Environment.GetEnvironmentVariable(OverfitEnvironment.Avx512PrefillQ6K) != "0";
 
         /// <summary>
         /// Weight bytes one worker's band may occupy. Half of a 1 MB Zen-5 L2, leaving the rest for the

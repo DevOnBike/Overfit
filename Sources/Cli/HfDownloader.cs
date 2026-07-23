@@ -3,6 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using DevOnBike.Overfit.Runtime;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Security.Cryptography;
@@ -28,7 +29,7 @@ namespace DevOnBike.Overfit.Cli
 
         private static string ResolveEndpoint()
         {
-            var endpoint = Environment.GetEnvironmentVariable("HF_ENDPOINT");
+            var endpoint = Environment.GetEnvironmentVariable(OverfitEnvironment.HuggingFaceEndpoint);
             return string.IsNullOrWhiteSpace(endpoint) ? "https://huggingface.co" : endpoint.TrimEnd('/');
         }
 
@@ -41,7 +42,7 @@ namespace DevOnBike.Overfit.Cli
 
             client.DefaultRequestHeaders.UserAgent.ParseAdd("overfit-cli/1.0");
 
-            var token = Environment.GetEnvironmentVariable("HF_TOKEN");
+            var token = Environment.GetEnvironmentVariable(OverfitEnvironment.HuggingFaceToken);
 
             if (!string.IsNullOrWhiteSpace(token))
             {

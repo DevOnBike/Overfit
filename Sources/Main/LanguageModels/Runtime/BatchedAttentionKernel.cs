@@ -39,7 +39,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// query order. A/B switch for the measurement below; set <c>OVERFIT_BALANCED_ATTN=0</c> to disable.
         /// </summary>
         internal static bool UseBalancedQueryOrder =
-            Environment.GetEnvironmentVariable("OVERFIT_BALANCED_ATTN") != "0";
+            Environment.GetEnvironmentVariable(OverfitEnvironment.BalancedAttention) != "0";
 
         /// <summary>
         /// Sequential batched attention. <paramref name="query"/> is row-major

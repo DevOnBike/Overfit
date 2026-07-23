@@ -109,8 +109,26 @@ the rules that survived recorded in the `feedback-measurement-discipline` memory
 left behind: `MachineRooflineBenchmark`, `DecodeGemvRooflineBenchmark`, `Diagnostics/Throughput.cs`, and the
 BenchmarkDotNet throughput columns.
 
-**Next move is a business decision (perf course vs Redaction Gateway), not another kernel.** Any further perf
-work should measure the ceiling before writing code — the discipline that made this track pay.
+**Next move is a business decision (perf course vs Redaction Gateway), not another *LLM* kernel.** Any further
+perf work should measure the ceiling before writing code — the discipline that made this track pay.
+
+#### ⚠ BUT: the largest untouched perf reserve in the project is CNN inference, not LLM — 13.2× behind ORT
+
+Measured 2026-07-23, `LargeCnnComparisonBenchmark`, VGG-16 (~15.5 GFLOPs/inference), same box:
+
+| | time | GFLOP/s | % of this box's float ceiling (2.19 TFLOP/s) |
+|---|---:|---:|---:|
+| ONNX Runtime (native MLAS) | **9.96 ms** | 1557 | **71%** |
+| Overfit (im2col + GEMM, DAG importer) | **131.7 ms** | 118 | **5.4%** |
+
+Parity is exact (maxAbsDiff 6.7e-8, cosine 1.000000, same argmax) — this is purely speed. For scale: the
+whole prefill sprint above chased a **1.8×** gap on a path already near half of its instruction mix's
+ceiling. This is a **13×** gap on a path at 5% of the machine ceiling.
+
+**A framing correction this exposes.** The README headline "~8× faster than ONNX Runtime" is measured on
+`Linear(784 → 10)`, where ORT's *per-call overhead* dominates — it is a real result for small-model,
+in-process serving, but it says nothing about kernel quality. VGG-16 is compute-dominated and is the honest
+kernel-vs-kernel test. Both statements are true; only the second describes the kernels.
 
 ---
 

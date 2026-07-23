@@ -3,6 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using DevOnBike.Overfit.Runtime;
 using BenchmarkDotNet.Attributes;
 using DevOnBike.Overfit.Inference;
 using DevOnBike.Overfit.Onnx;
@@ -41,7 +42,7 @@ namespace Benchmarks
         [GlobalSetup]
         public void Setup()
         {
-            var modelPath = Environment.GetEnvironmentVariable("OVERFIT_CNN_ONNX") ?? DefaultModelPath;
+            var modelPath = Environment.GetEnvironmentVariable(OverfitEnvironment.CnnOnnx) ?? DefaultModelPath;
             if (!File.Exists(modelPath))
             {
                 throw new FileNotFoundException(

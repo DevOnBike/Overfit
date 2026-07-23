@@ -8,6 +8,7 @@ using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.X86;
 using DevOnBike.Overfit.Intrinsics;
+using DevOnBike.Overfit.Runtime;
 
 namespace DevOnBike.Overfit.LanguageModels.Runtime
 {
@@ -164,9 +165,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
         /// <summary>A/B switch for <see cref="AccumulateValuesBlocked"/>; set <c>OVERFIT_ATTN_REGACC=0</c> to disable.</summary>
         internal static bool UseRegisterResidentValueSum =
-            Environment.GetEnvironmentVariable("OVERFIT_ATTN_REGACC") != "0";
+            Environment.GetEnvironmentVariable(OverfitEnvironment.AttentionRegisterAccumulate) != "0";
 
-        private static readonly string AblateMode = Environment.GetEnvironmentVariable("OVERFIT_ATTN_ABLATE") ?? "none";
+        private static readonly string AblateMode = Environment.GetEnvironmentVariable(OverfitEnvironment.AttentionAblate) ?? "none";
 
         /// <summary>Measurement-only: replace the query·key dot with a constant, to size it against the exp.</summary>
         internal static bool AblateScoreDot = AblateMode is "dot" or "both";
@@ -176,7 +177,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
         /// <summary>Vectorize the softmax exp via <c>TensorPrimitives</c>; set <c>OVERFIT_ATTN_VEXP=0</c> to disable.</summary>
         internal static bool UseVectorizedSoftmaxExp =
-            Environment.GetEnvironmentVariable("OVERFIT_ATTN_VEXP") != "0";
+            Environment.GetEnvironmentVariable(OverfitEnvironment.AttentionVectorizedExp) != "0";
 
         /// <summary>
         /// The softmax-weighted value sum with the accumulators held in <b>registers across the whole

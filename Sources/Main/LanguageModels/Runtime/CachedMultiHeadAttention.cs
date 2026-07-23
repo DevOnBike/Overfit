@@ -111,25 +111,22 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 dModel, HeadDimension, maxSequenceLength, attnLogitSoftcap);
             }
 
-            // Whole-matrix attention scratch only when OVERFIT_REPACK_ATTN is on (else empty, no RAM cost).
-            if (Q4KGemvKernel.AttnEnabled)
-            {
-                var wholeSize = headCount * HeadDimension;
-                _qWhole = new float[wholeSize];
-                _attnBands = new float[wholeSize];
-                _attnQuants = new sbyte[wholeSize];
-                _attnScales = new float[(wholeSize + Q4KDotKernel.SuperBlockElements - 1) / Q4KDotKernel.SuperBlockElements];
-                _attnBsums = new short[(wholeSize + Q4KDotKernel.GroupSize - 1) / Q4KDotKernel.GroupSize];
-            }
+            // Whole-matrix attention scratch only when OVERFIT_REPACK_ATTN is on; `[]` otherwise, no RAM cost.
+            // Conditional expressions rather than two mirrored `if` blocks — a pair of `if (x)` / `if (!x)`
+            // statements is not visibly exhaustive to the compiler, so these read as CS8618 "uninitialised"
+            // and broke the AOT guard, which promotes warnings to errors.
+            var wholeAttn = Q4KGemvKernel.AttnEnabled;
+            var wholeSize = headCount * HeadDimension;
 
-            if (!(Q4KGemvKernel.AttnEnabled))
-            {
-                _qWhole = [];
-                _attnBands = [];
-                _attnQuants = [];
-                _attnScales = [];
-                _attnBsums = [];
-            }
+            _qWhole = wholeAttn ? new float[wholeSize] : [];
+            _attnBands = wholeAttn ? new float[wholeSize] : [];
+            _attnQuants = wholeAttn ? new sbyte[wholeSize] : [];
+            _attnScales = wholeAttn
+                ? new float[(wholeSize + Q4KDotKernel.SuperBlockElements - 1) / Q4KDotKernel.SuperBlockElements]
+                : [];
+            _attnBsums = wholeAttn
+                ? new short[(wholeSize + Q4KDotKernel.GroupSize - 1) / Q4KDotKernel.GroupSize]
+                : [];
         }
 
         /// <summary>Gemma-2 attention logit soft-cap applied to pre-softmax scores (0 = off).</summary>
@@ -576,7 +573,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// launch-bound). Bit-identical, so it is on by default where the whole handles are Q4_K.
         /// </summary>
         internal static bool UseWholeKv =
-            Environment.GetEnvironmentVariable("OVERFIT_WHOLE_KV") != "0";
+            Environment.GetEnvironmentVariable(OverfitEnvironment.WholeMatrixKv) != "0";
 
         /// <summary>
         /// Batched (prefill) multi-head attention for the <b>Llama/Qwen quantized</b> path — the

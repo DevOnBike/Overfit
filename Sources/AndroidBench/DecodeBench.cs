@@ -3,6 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using DevOnBike.Overfit.Runtime;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -29,12 +30,12 @@ namespace DevOnBike.Overfit.AndroidBench
             // efficiency cores) — fine on a dedicated desktop, wasteful on a phone. Disable it and cap the
             // worker count to the big cluster. Must be set BEFORE any Overfit type loads (OverfitParallel
             // reads these at static-init). Read by env name to avoid pulling internals into this project.
-            var poolEnv = Environment.GetEnvironmentVariable("OVERFIT_BENCH_POOL");
-            var workersEnv = Environment.GetEnvironmentVariable("OVERFIT_BENCH_WORKERS");
+            var poolEnv = Environment.GetEnvironmentVariable(OverfitEnvironment.BenchPool);
+            var workersEnv = Environment.GetEnvironmentVariable(OverfitEnvironment.BenchWorkers);
             Environment.SetEnvironmentVariable("OVERFIT_DECODE_POOL", string.IsNullOrEmpty(poolEnv) ? "0" : poolEnv);
             Environment.SetEnvironmentVariable("OVERFIT_DECODE_WORKERS", string.IsNullOrEmpty(workersEnv) ? "4" : workersEnv);
-            log($"config: OVERFIT_DECODE_POOL={Environment.GetEnvironmentVariable("OVERFIT_DECODE_POOL")} " +
-                $"OVERFIT_DECODE_WORKERS={Environment.GetEnvironmentVariable("OVERFIT_DECODE_WORKERS")}");
+            log($"config: OVERFIT_DECODE_POOL={Environment.GetEnvironmentVariable(OverfitEnvironment.DecodePool)} " +
+                $"OVERFIT_DECODE_WORKERS={Environment.GetEnvironmentVariable(OverfitEnvironment.DecodeWorkers)}");
 
             var fast = Dp.IsSupported ? "NEON(SDOT)" : Avx2.IsSupported ? "AVX2" : "scalar";
 

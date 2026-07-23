@@ -559,7 +559,7 @@ namespace DevOnBike.Overfit.Autograd
             }
 
             var isGitHubActions = string.Equals(
-                Environment.GetEnvironmentVariable("GITHUB_ACTIONS"),
+                Environment.GetEnvironmentVariable(OverfitEnvironment.GitHubActions),
                 "true",
                 StringComparison.OrdinalIgnoreCase);
 

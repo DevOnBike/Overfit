@@ -3,6 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using DevOnBike.Overfit.Runtime;
 using DevOnBike.Overfit.Anomalies.Adaptive;
 using DevOnBike.Overfit.Anomalies.Baseline;
 using DevOnBike.Overfit.Anomalies.Gpt;
@@ -469,7 +470,7 @@ namespace DevOnBike.Overfit.Demo.AnomalyConsole
                 return explicitPath;
             }
 
-            var dir = Environment.GetEnvironmentVariable("OVERFIT_MODEL_DIR");
+            var dir = Environment.GetEnvironmentVariable(OverfitEnvironment.ModelDir);
             var candidates = new[]
             {
                 dir is null ? null : Path.Combine(dir, "k8s_metrics.csv"),

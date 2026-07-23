@@ -13,6 +13,7 @@
 // judgments; the evaluator prompts are tuned against GPT-4o-class models, so treat small local
 // judges (<7B) as a demo of the PLUMBING, not a calibrated quality gate.
 
+using DevOnBike.Overfit.Runtime;
 using DevOnBike.Overfit.Demo.Evaluation;
 using DevOnBike.Overfit.Extensions.AI;
 using DevOnBike.Overfit.LanguageModels;
@@ -22,7 +23,7 @@ using Microsoft.Extensions.AI.Evaluation.Quality;
 
 var modelPath = args.Length > 0
     ? args[0]
-    : Environment.GetEnvironmentVariable("OVERFIT_JUDGE") ?? @"C:\qwen3b\qwen.q4km.gguf";
+    : Environment.GetEnvironmentVariable(OverfitEnvironment.Judge) ?? @"C:\qwen3b\qwen.q4km.gguf";
 
 if (!File.Exists(modelPath))
 {

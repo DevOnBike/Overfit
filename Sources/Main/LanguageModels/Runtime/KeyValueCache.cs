@@ -69,26 +69,20 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             Dtype = dtype;
 
             var elems = (int)shape.ElementsPerCache;
-            if (dtype == KvCacheDType.Q8)
-            {
-                var vectors = shape.LayerCount * shape.KvHeadCount * shape.MaxSequenceLength;
-                _keysQ = new sbyte[elems];
-                _valuesQ = new sbyte[elems];
-                _keyScales = new float[vectors];
-                _valueScales = new float[vectors];
-                _keys = [];
-                _values = [];
-            }
+            var vectors = shape.LayerCount * shape.KvHeadCount * shape.MaxSequenceLength;
+            var quantized = dtype == KvCacheDType.Q8;
 
-            if (!(dtype == KvCacheDType.Q8))
-            {
-                _keys = new float[elems];
-                _values = new float[elems];
-                _keysQ = [];
-                _valuesQ = [];
-                _keyScales = [];
-                _valueScales = [];
-            }
+            // Conditional expressions rather than two mirrored `if` blocks: the compiler cannot see that a pair
+            // of `if (x)` / `if (!x)` statements is exhaustive, so every field read as CS8618 "uninitialised"
+            // and the AOT guard (which promotes warnings to errors) failed on it. A ternary is one definite
+            // assignment per field, needs no `else` (OVERFIT021), and the unused side is `[]` = Array.Empty,
+            // so the discarded branch allocates nothing.
+            _keys = quantized ? [] : new float[elems];
+            _values = quantized ? [] : new float[elems];
+            _keysQ = quantized ? new sbyte[elems] : [];
+            _valuesQ = quantized ? new sbyte[elems] : [];
+            _keyScales = quantized ? new float[vectors] : [];
+            _valueScales = quantized ? new float[vectors] : [];
         }
 
         public KeyValueCacheShape Shape
