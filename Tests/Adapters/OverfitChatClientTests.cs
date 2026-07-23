@@ -4,7 +4,6 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using System.Text;
-using System.Threading.Tasks;
 using DevOnBike.Overfit.Extensions.AI;
 using DevOnBike.Overfit.LanguageModels.Chat;
 using DevOnBike.Overfit.LanguageModels.Contracts;

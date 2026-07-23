@@ -1333,11 +1333,12 @@ namespace DevOnBike.Overfit.Cli
 
             try
             {
-                while (true)
+                // Bound stated in the header (OVERFIT023): the REPL ends when stdin closes — ReadLine
+                // returns null on EOF, a closed pipe or Ctrl+Z/Ctrl+D. `/exit` is the interactive shortcut
+                // for the same thing and stays an explicit break.
+                for (var line = ReadCommand(); line is not null; line = ReadCommand())
                 {
-                    Console.Write("> ");
-                    var line = Console.ReadLine();
-                    if (line is null || line.Equals("/exit", StringComparison.OrdinalIgnoreCase))
+                    if (line.Equals("/exit", StringComparison.OrdinalIgnoreCase))
                     {
                         break;
                     }
@@ -1366,6 +1367,12 @@ namespace DevOnBike.Overfit.Cli
                 client.Dispose();
             }
             return 0;
+
+            static string? ReadCommand()
+            {
+                Console.Write("> ");
+                return Console.ReadLine();
+            }
         }
     }
 }

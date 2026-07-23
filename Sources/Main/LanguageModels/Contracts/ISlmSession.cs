@@ -81,6 +81,24 @@ namespace DevOnBike.Overfit.LanguageModels.Contracts
                     $"{GetType().Name} does not support constrained generation.");
 #pragma warning restore RS0030
 
+        /// <summary>
+        /// Generates the next token and hands it to <paramref name="onSampled"/> as early as the
+        /// implementation can — ideally before the forward pass that prepares the following logits, which is
+        /// what lets a streaming caller put the token on the wire a whole weight-pass sooner. Returning
+        /// <c>true</c> from the hook says the caller is finished with generation, letting the implementation
+        /// skip that pass entirely.
+        ///
+        /// <para>The default implementation invokes the hook <i>after</i> the step instead, so a caller can
+        /// rely on it firing exactly once per token whatever the session: it is a latency optimisation where
+        /// supported, never a difference in what gets emitted.</para>
+        /// </summary>
+        int GenerateNextToken(in SamplingOptions sampling, ITokenConstraint? constraint, Func<int, bool>? onSampled)
+        {
+            var token = GenerateNextToken(in sampling, constraint);
+            onSampled?.Invoke(token);
+            return token;
+        }
+
         int Generate(
             ReadOnlySpan<int> promptTokens,
             Span<int> outputTokens,

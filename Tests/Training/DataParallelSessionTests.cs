@@ -3,10 +3,8 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using System.Linq;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Optimizers;
-using DevOnBike.Overfit.Parameters;
 using DevOnBike.Overfit.Training;
 
 namespace DevOnBike.Overfit.Tests.Training

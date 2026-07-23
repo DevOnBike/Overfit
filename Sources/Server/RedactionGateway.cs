@@ -67,7 +67,10 @@ namespace DevOnBike.Overfit.Server
                 Console.WriteLine("  response scanning: ON (model-generated secrets/PII masked on non-streaming responses).");
             }
 
-            while (true)
+            // Bound stated in the header (OVERFIT023): the loop runs exactly as long as the listener is up.
+            // Stopping or disposing it both clear IsListening and make a pending GetContext throw, so no path
+            // keeps accepting after shutdown.
+            while (listener.IsListening)
             {
                 HttpListenerContext ctx;
                 try
@@ -75,6 +78,10 @@ namespace DevOnBike.Overfit.Server
                     ctx = listener.GetContext();
                 }
                 catch (HttpListenerException)
+                {
+                    break;
+                }
+                catch (ObjectDisposedException)
                 {
                     break;
                 }

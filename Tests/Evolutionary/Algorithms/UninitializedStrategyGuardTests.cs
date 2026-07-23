@@ -5,7 +5,6 @@
 
 using DevOnBike.Overfit.Evolutionary.Storage;
 using DevOnBike.Overfit.Evolutionary.Strategies;
-using DevOnBike.Overfit.Exceptions;
 
 namespace DevOnBike.Overfit.Tests.Evolutionary.Algorithms
 {

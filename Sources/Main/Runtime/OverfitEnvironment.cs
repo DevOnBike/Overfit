@@ -124,6 +124,33 @@ namespace DevOnBike.Overfit.Runtime
         /// <summary>Overrides the worker count for the on-device bench.</summary>
         public const string BenchWorkers = "OVERFIT_BENCH_WORKERS";
 
+        // ── HTTP server (Sources/Server) ──────────────────────────────────────────
+
+        /// <summary>
+        /// Set to <c>1</c> to print a per-request phase trace (history replay, prompt-cache reuse, time to
+        /// first token) — the attribution used to tell server overhead apart from engine work.
+        /// </summary>
+        public const string ServerTrace = "OVERFIT_SERVER_TRACE";
+
+        /// <summary>
+        /// Set to <c>1</c> to skip the kept-end-of-prompt-logits fast path, so a re-sent prompt costs one
+        /// forward pass instead of none. Exists so both configurations can be measured side by side in the
+        /// same interleaved run rather than across processes.
+        /// </summary>
+        public const string DisableLogitsCache = "OVERFIT_DISABLE_LOGITS_CACHE";
+
+        /// <summary>
+        /// Set to <c>1</c> to emit each token after the forward pass that follows it rather than before —
+        /// the ordering that predates the early-emit change. Same purpose: an in-run A/B.
+        /// </summary>
+        public const string DisableEarlyEmit = "OVERFIT_DISABLE_EARLY_EMIT";
+
+        /// <summary>
+        /// Set to <c>1</c> to force the exact single-token decode loop instead of the speculative path.
+        /// Same purpose: an in-run A/B of speculative decode against plain decode.
+        /// </summary>
+        public const string DisableSpeculative = "OVERFIT_DISABLE_SPECULATIVE";
+
         // ── Third-party / host environment (not ours, but read by us) ─────────────
 
         /// <summary>Hugging Face API endpoint override for the model downloader.</summary>

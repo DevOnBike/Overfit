@@ -383,7 +383,6 @@ namespace DevOnBike.Overfit.Runtime
         }
 
         /// <summary>
-        /// <summary>
         /// Diagnostics only: count every real fan-out (the inline fast path is not counted, since it costs
         /// nothing to launch). Off by default and checked before the interlocked increment.
         ///
@@ -405,6 +404,7 @@ namespace DevOnBike.Overfit.Runtime
             Interlocked.Exchange(ref _dispatchCount, 0);
         }
 
+        /// <summary>
         /// Executes <paramref name="body"/> over chunks of
         /// <c>[rangeStart, rangeEnd)</c> across the worker pool. Equivalent to
         /// the grained overload with <c>minItemsPerWorker = 1</c>.

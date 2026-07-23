@@ -15,6 +15,7 @@ using DevOnBike.Overfit.LanguageModels.Embeddings;
 using DevOnBike.Overfit.Server.OpenAi;
 using DevOnBike.Overfit.Serving;
 using DevOnBike.Overfit.Diagnostics;
+using DevOnBike.Overfit.Runtime;
 
 namespace DevOnBike.Overfit.Server
 {
@@ -383,7 +384,7 @@ namespace DevOnBike.Overfit.Server
 
         /// <summary>Opt-in per-request phase trace (<c>OVERFIT_SERVER_TRACE=1</c>) for TTFT attribution.</summary>
         private static readonly bool ServerTrace =
-            Environment.GetEnvironmentVariable("OVERFIT_SERVER_TRACE") == "1";
+            Environment.GetEnvironmentVariable(OverfitEnvironment.ServerTrace) == "1";
 
         private static void HandleChatCompletions(HttpListenerContext ctx, OverfitClient client, string modelName, string systemMessage)
         {
@@ -620,21 +621,23 @@ namespace DevOnBike.Overfit.Server
         /// request at a time (single-threaded accept loop), so a lock-free lazy init is safe here.</summary>
         private static string OpenApiYaml()
         {
-            if (_openApiYaml is null)
+            // Returning from each branch rather than falling through to a shared `return`: the field is
+            // nullable, and the two assignments above a common exit are not enough for the compiler to prove
+            // it was set (CS8603). With `else` banned, an early return per branch is the honest shape.
+            if (_openApiYaml is not null)
             {
-                using var stream = typeof(OverfitOpenAiServer).Assembly.GetManifestResourceStream("openapi.yaml");
-                if (stream is null)
-                {
-                    _openApiYaml = "openapi: 3.0.3\ninfo:\n  title: Overfit\n  version: '1.0.0'\npaths: {}\n";
-                }
-
-                if (!(stream is null))
-                {
-                    using var reader = new StreamReader(stream, Encoding.UTF8);
-                    _openApiYaml = reader.ReadToEnd();
-                }
+                return _openApiYaml;
             }
 
+            using var stream = typeof(OverfitOpenAiServer).Assembly.GetManifestResourceStream("openapi.yaml");
+            if (stream is null)
+            {
+                _openApiYaml = "openapi: 3.0.3\ninfo:\n  title: Overfit\n  version: '1.0.0'\npaths: {}\n";
+                return _openApiYaml;
+            }
+
+            using var reader = new StreamReader(stream, Encoding.UTF8);
+            _openApiYaml = reader.ReadToEnd();
             return _openApiYaml;
         }
 

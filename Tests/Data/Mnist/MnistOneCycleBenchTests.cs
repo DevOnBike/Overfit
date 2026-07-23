@@ -11,7 +11,6 @@ using DevOnBike.Overfit.Optimizers;
 using DevOnBike.Overfit.Tensors;
 using DevOnBike.Overfit.Tensors.Core;
 using DevOnBike.Overfit.Tests.TestSupport;
-using DevOnBike.Overfit.Tests.TestSupport.Helpers;
 using DevOnBike.Overfit.Training;
 using Xunit.Abstractions;
 

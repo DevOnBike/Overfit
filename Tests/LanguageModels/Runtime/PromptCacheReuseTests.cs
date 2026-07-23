@@ -193,11 +193,12 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
         }
 
         /// <summary>
-        /// Re-sending the identical prompt is the load-test shape and the degenerate case of the matcher:
-        /// everything matches, so the implementation must still hold one token back to refresh the logits.
+        /// Re-sending the identical prompt — a retry, a regenerate, a load test — must cost <b>zero</b>
+        /// forward passes: the whole prompt is in the cache and the logits it produced were kept, so there
+        /// is nothing left to derive. Restoring them has to reproduce the recomputed answer exactly.
         /// </summary>
         [SmallModelFact]
-        public void IdenticalPrompt_ReusesAllButTheLastToken()
+        public void IdenticalPrompt_ReusesEverythingAndForwardsNothing()
         {
             var path = TestModelPaths.Qwen05B.RequireQ4KmGgufPath();
 
@@ -216,7 +217,8 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
             var actual = new float[session.VocabularySize];
             session.GetLastLogits(actual);
 
-            Assert.Equal(prompt.Length - 1, reused);
+            Assert.Equal(prompt.Length, reused);
+            Assert.Equal(prompt.Length, session.CurrentPosition);
 
             var maxDiff = 0f;
             for (var i = 0; i < expected.Length; i++)
@@ -225,6 +227,61 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
             }
 
             _out.WriteLine($"reused {reused}/{prompt.Length}, maxAbsLogitDiff = {maxDiff:G6}");
+            Assert.Equal(0f, maxDiff);
+        }
+
+        /// <summary>
+        /// The kept logits describe one specific cache length. After the conversation moves on — a reply is
+        /// generated, then a longer prompt arrives — the zero-forward path must not fire on the stale
+        /// snapshot; the extended prompt has to produce the same logits a cold prefill would.
+        /// </summary>
+        [SmallModelFact]
+        public void ExtendedPromptAfterGeneration_DoesNotReuseStaleLogits()
+        {
+            var path = TestModelPaths.Qwen05B.RequireQ4KmGgufPath();
+
+            using var engine = CachedLlamaInferenceEngine.LoadGguf(path);
+            var tok = GgufTokenizer.Load(path);
+
+            var headText = "The history of computing began with mechanical calculators and evolved "
+                + "through vacuum tubes, transistors and integrated circuits into the modern era.";
+            var turn1 = tok.Encode(headText);
+            var turn2 = tok.Encode(headText
+                + " Today, running a language model on a plain desktop processor without any "
+                + "dedicated accelerator hardware is entirely practical and quite common.");
+
+            float[] reference;
+            using (var fresh = engine.CreateSession(512))
+            {
+                fresh.Reset(turn2);
+                reference = new float[fresh.VocabularySize];
+                fresh.GetLastLogits(reference);
+            }
+
+            using var session = engine.CreateSession(512);
+            session.Reset(turn1);
+
+            // Move the conversation on, so the cache holds prompt + reply while the snapshot still points at
+            // the end of the prompt.
+            for (var i = 0; i < 4; i++)
+            {
+                session.GenerateNextToken(SamplingOptions.Greedy);
+            }
+
+            var reused = session.PrefillReusingCache(turn2);
+
+            var actual = new float[session.VocabularySize];
+            session.GetLastLogits(actual);
+
+            var maxDiff = 0f;
+            for (var i = 0; i < reference.Length; i++)
+            {
+                maxDiff = Math.Max(maxDiff, Math.Abs(reference[i] - actual[i]));
+            }
+
+            _out.WriteLine($"reused {reused} of {turn2.Length}, maxAbsLogitDiff = {maxDiff:G6}");
+
+            Assert.Equal(turn1.Length, reused);
             Assert.Equal(0f, maxDiff);
         }
 

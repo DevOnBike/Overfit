@@ -4,7 +4,6 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using System.Runtime.Intrinsics.X86;
-using DevOnBike.Overfit.LanguageModels.Loading;
 using DevOnBike.Overfit.LanguageModels.Runtime;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime

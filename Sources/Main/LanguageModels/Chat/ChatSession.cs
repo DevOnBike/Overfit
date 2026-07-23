@@ -8,6 +8,7 @@ using System.Text;
 using DevOnBike.Overfit.Diagnostics;
 using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Runtime;
+using DevOnBike.Overfit.Runtime;
 
 namespace DevOnBike.Overfit.LanguageModels.Chat
 {
@@ -34,6 +35,18 @@ namespace DevOnBike.Overfit.LanguageModels.Chat
         private readonly string[] _stopSequences;
         private readonly bool _slidingWindow;
         private readonly List<ChatMessage> _history = [];
+
+        /// <summary>Test hook: restore the pre-early-emit ordering (emit after the forward pass, not before).
+        /// Defaults from <see cref="OverfitEnvironment.DisableEarlyEmit"/> so both orderings can be served by
+        /// two processes and compared inside a single interleaved run.</summary>
+        internal static bool DisableEarlyEmit =
+            Environment.GetEnvironmentVariable(OverfitEnvironment.DisableEarlyEmit) == "1";
+
+        /// <summary>Test hook: force the exact single-token decode loop instead of the speculative path.
+        /// Defaults from <see cref="OverfitEnvironment.DisableSpeculative"/> so both can be served side by
+        /// side and measured in one interleaved run.</summary>
+        internal static bool DisableSpeculative =
+            Environment.GetEnvironmentVariable(OverfitEnvironment.DisableSpeculative) == "1";
 
         /// <param name="session">Underlying SLM session that runs prefill/decode and owns the KV cache.</param>
         /// <param name="tokenizer">Tokenizer used to encode prompts and decode generated tokens.</param>
@@ -264,6 +277,23 @@ namespace DevOnBike.Overfit.LanguageModels.Chat
                 return stops.Stopped || constraint is { IsComplete: true };
             }
 
+            // Emit the token the instant it is sampled, before the forward pass that prepares the NEXT
+            // logits — otherwise every token, the first one included, arrives one whole weight-pass late.
+            // Returning the stop decision straight back lets the session skip that pass when the answer is
+            // over. Allocated once per generation, not per token.
+            var stopped = false;
+            var onSampled = new Func<int, bool>(token =>
+            {
+                stopped = EmitToken(token);
+                return stopped;
+            });
+
+            // Test hook: emit after the step instead of during it, i.e. the pre-early-emit ordering.
+            if (DisableEarlyEmit)
+            {
+                onSampled = null!;
+            }
+
             // Speculative fast path (prompt-lookup, adaptively gated): commits ≥1 token per batched
             // verify, sampling-correct, and ~free when drafts don't fire — but it can't mask the draft
             // against a per-token constraint, so it only runs unconstrained on a speculation-capable
@@ -271,7 +301,7 @@ namespace DevOnBike.Overfit.LanguageModels.Chat
             // Hoisted out of the condition: the speculative session is needed inside the branch, and a
             // second (negated) test could not re-introduce a pattern variable in the same scope.
             var spec = _session as CachedLlamaSession;
-            var useSpeculative = constraint is null && spec is not null && spec.CanSpeculate;
+            var useSpeculative = constraint is null && spec is not null && spec.CanSpeculate && !DisableSpeculative;
 
             if (useSpeculative)
             {
@@ -286,12 +316,32 @@ namespace DevOnBike.Overfit.LanguageModels.Chat
                 while (generated.Count < maxNew &&
                        (_slidingWindow || _session.CurrentPosition < _session.MaxContextLength))
                 {
-                    var n = spec!.GenerateSpeculative(CollectionsMarshal.AsSpan(history), committed, in sampling, maxDraft);
+                    var n = spec!.GenerateSpeculative(
+                        CollectionsMarshal.AsSpan(history), committed, in sampling, maxDraft, onSampled);
                     var stop = false;
                     for (var c = 0; c < n; c++)
                     {
                         var token = committed[c];
                         history.Add(token);
+
+                        // committed[0] is the token the hook already emitted before the verify forward ran;
+                        // re-emitting it would duplicate it in the stream.
+                        if (c == 0)
+                        {
+                            if (DisableEarlyEmit)
+                            {
+                                stopped = EmitToken(token);
+                            }
+
+                            if (stopped || generated.Count >= maxNew)
+                            {
+                                stop = true;
+                                break;
+                            }
+
+                            continue;
+                        }
+
                         if (EmitToken(token) || generated.Count >= maxNew)
                         {
                             stop = true;
@@ -312,7 +362,15 @@ namespace DevOnBike.Overfit.LanguageModels.Chat
                 for (var i = 0; i < maxNew &&
                      (_slidingWindow || _session.CurrentPosition < _session.MaxContextLength); i++)
                 {
-                    if (EmitToken(_session.GenerateNextToken(in sampling, constraint)))
+                    // The hook emits; `stopped` carries its verdict back out. Sessions without early-emit
+                    // support still invoke it exactly once per token, just after their forward.
+                    var produced = _session.GenerateNextToken(in sampling, constraint, onSampled);
+                    if (DisableEarlyEmit)
+                    {
+                        stopped = EmitToken(produced);
+                    }
+
+                    if (stopped)
                     {
                         break;
                     }
