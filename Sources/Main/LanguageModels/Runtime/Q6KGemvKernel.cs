@@ -332,7 +332,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             ReadOnlySpan<sbyte> actQuants,
             ReadOnlySpan<float> actScales,
             Span<float> output,
-            ReadOnlySpan<float> decodedScales = default)
+            ReadOnlySpan<float> decodedScales = default,
+            int groupStart = 0,
+            int groupCount = 0)
         {
             if (cols is < 1 or > MaxTileCols)
             {
@@ -357,7 +359,12 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             fixed (float* outp = output)
             fixed (float* dsc = decodedScales) // null when the caller did not pre-decode; see DecodeBlockScales
             {
-                for (var x = 0; x < outputSize / 8; x++)
+                // Absolute group index, so a caller can hand this kernel one band of output rows and every
+                // weight/output offset below still lands in the right place.
+                var totalGroups = outputSize / 8;
+                var groupEnd = groupCount <= 0 ? totalGroups : Math.Min(groupStart + groupCount, totalGroups);
+
+                for (var x = groupStart; x < groupEnd; x++)
                 {
                     var bptr = rep + (long)x * nb * BlockKx8Bytes;
 
@@ -481,7 +488,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             ReadOnlySpan<sbyte> actQuants,
             ReadOnlySpan<float> actScales,
             Span<float> output,
-            ReadOnlySpan<float> decodedScales = default)
+            ReadOnlySpan<float> decodedScales = default,
+            int groupStart = 0,
+            int groupCount = 0)
         {
             if (cols is < 1 or > MaxTileCols)
             {
@@ -505,7 +514,12 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             fixed (float* outp = output)
             fixed (float* dsc = decodedScales)
             {
-                for (var x = 0; x < outputSize / 8; x++)
+                // Absolute group index, so a caller can hand this kernel one band of output rows and every
+                // weight/output offset below still lands in the right place.
+                var totalGroups = outputSize / 8;
+                var groupEnd = groupCount <= 0 ? totalGroups : Math.Min(groupStart + groupCount, totalGroups);
+
+                for (var x = groupStart; x < groupEnd; x++)
                 {
                     var bptr = rep + (long)x * nb * BlockKx8Bytes;
 

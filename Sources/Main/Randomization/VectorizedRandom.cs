@@ -6,6 +6,7 @@
 using System.Buffers.Binary;
 using System.Runtime.CompilerServices;
 using System.Runtime.Intrinsics;
+using DevOnBike.Overfit.Intrinsics;
 using System.Security.Cryptography;
 
 namespace DevOnBike.Overfit.Randomization
@@ -44,7 +45,7 @@ namespace DevOnBike.Overfit.Randomization
 
         static VectorizedRandom()
         {
-            if (!Vector256.IsHardwareAccelerated)
+            if (!CpuFeatures.HasVector256)
             {
                 throw new PlatformNotSupportedException("VectorizedRandom requires 256-bit SIMD hardware acceleration.");
             }

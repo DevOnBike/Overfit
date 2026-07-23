@@ -50,6 +50,9 @@ namespace DevOnBike.Overfit.Runtime
         /// <summary>Set to 0 to force the AVX2 8×8 conv micro-kernel instead of the AVX-512 8×32 one.</summary>
         public const string ConvAvx512 = "OVERFIT_CONV_AVX512";
 
+        /// <summary>Set to 0 to decode Q4_K/Q6_K F16 scales inside the tile loop instead of once per projection.</summary>
+        public const string PrecomputedScales = "OVERFIT_PRECOMPUTED_SCALES";
+
         // ── Prefill kernel switches (all default ON where the hardware allows; set to 0 to opt out) ──
         // These exist so a measured win can be A/B'd against its predecessor without a rebuild, and so a
         // regression on unfamiliar hardware can be bisected in the field rather than only on the dev box.

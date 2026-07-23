@@ -80,6 +80,33 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         internal static bool UseOutputBlocking;
 
         /// <summary>
+        /// Chooses the parallelisation axis from the tile count: band over output rows when fanning out over
+        /// column tiles would leave most of the pool idle, tile otherwise.
+        ///
+        /// <para><b>Why this is not a preference but a measurement.</b> Prefill fans out over column tiles and
+        /// <c>tiles = rows / NR</c>, so a 16-token prompt yields <b>two</b> work items for sixteen cores while a
+        /// 672-token prompt yields eighty-four. Measured on Qwen-3B, banding versus tiling:</para>
+        ///
+        /// <list type="table">
+        ///   <item><term>16 tokens (2 tiles)</term><description>224.8 → 177.3 ms — <b>1.27×</b></description></item>
+        ///   <item><term>32 tokens (4 tiles)</term><description>267.6 → 235.0 ms — <b>1.14×</b></description></item>
+        ///   <item><term>64 tokens (8 tiles)</term><description>352.0 → 356.5 ms — 0.99× (crossover)</description></item>
+        ///   <item><term>672 tokens (84 tiles)</term><description>2231 → 2680 ms — 0.83×</description></item>
+        /// </list>
+        ///
+        /// <para>Banding was built earlier, measured at −20% on a 672-token prompt, and left off — a correct
+        /// decision from an incomplete experiment, because only the long prompt was ever tried. The property
+        /// that makes banding pointless when tiles are plentiful is exactly what is missing when they are not.
+        /// This matters for latency users actually feel: chat prompts are tens of tokens, not hundreds.</para>
+        /// </summary>
+        private static bool ShouldBandOutputRows(int tiles, int cores)
+        {
+            // Half the cores is where the measured curve crosses: at 8 tiles on 16 physical cores the two
+            // axes tie, below it banding wins, above it the extra packing cost dominates.
+            return tiles < cores / 2;
+        }
+
+        /// <summary>
         /// Decode every weight block's F16 scale/min pair to <see cref="float"/> once per projection instead of
         /// once per column tile.
         ///
@@ -89,7 +116,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// it is fixed work per block, so it is exactly the term the tile-width sweep showed being amortised
         /// across columns. Hoisting it divides the work by the tile count.</para>
         /// </summary>
-        internal static bool UsePrecomputedScales = true;
+        internal static bool UsePrecomputedScales =
+            Environment.GetEnvironmentVariable(OverfitEnvironment.PrecomputedScales) != "0";
 
         /// <summary>
         /// Route the tiled Q4_K prefill GEMM through <see cref="Q4KGemvKernel.GemmTiled512"/>, which processes
@@ -432,7 +460,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     Avx512 = UseAvx512PrefillQ4K && !DisableRepackedKernelsForParity,
                 };
 
-                if (!UseOutputBlocking)
+                if (!UseOutputBlocking && !ShouldBandOutputRows(tiles, Environment.ProcessorCount / 2))
                 {
                     OverfitParallel.For(0, tiles, &TiledChunk, &ctx);
                     return;
@@ -519,8 +547,24 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     DecodedScales = dsc,
                     DecodedScalesLength = scaleCount,
                     Avx512 = UseAvx512PrefillQ6K && !DisableRepackedKernelsForParity,
+                    Tiles = tiles,
                 };
-                OverfitParallel.For(0, tiles, &TiledQ6KChunk, &ctx);
+
+                // Same axis choice as the Q4_K path. Without it `ffn_down` — 36% of a 16-token prefill —
+                // keeps fanning out over two column tiles while fourteen cores idle.
+                if (!UseOutputBlocking && !ShouldBandOutputRows(tiles, Environment.ProcessorCount / 2))
+                {
+                    OverfitParallel.For(0, tiles, &TiledQ6KChunk, &ctx);
+                    return;
+                }
+
+                var totalGroupsQ6 = outputSize / 8;
+                ctx.GroupsPerBand = ResolveGroupsPerBand(
+                    totalGroupsQ6, spr, Q6KRepack.BlockKx8Bytes, cores);
+
+                var bandsQ6 = (totalGroupsQ6 + ctx.GroupsPerBand - 1) / ctx.GroupsPerBand;
+
+                OverfitParallel.For(0, bandsQ6, &TiledQ6KBandChunk, &ctx);
             }
         }
 
@@ -545,6 +589,49 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
             /// <summary>Route through the two-columns-per-instruction AVX-512 kernel.</summary>
             public bool Avx512;
+
+            /// <summary>Column tiles per projection — the inner loop when banding over output rows.</summary>
+            public int Tiles;
+
+            /// <summary>Output groups per band; see <see cref="ResolveGroupsPerBand"/>.</summary>
+            public int GroupsPerBand;
+        }
+
+        // One band of Q6_K output groups, swept by every column tile. Mirrors TiledBandChunk: bands are
+        // disjoint in weights (read-only) and in output rows, so no worker writes where another reads.
+        private static unsafe void TiledQ6KBandChunk(int start, int end, void* context)
+        {
+            ref var c = ref Unsafe.AsRef<TiledQ6KContext>(context);
+            var totalGroups = c.OutputSize / 8;
+
+            for (var band = start; band < end; band++)
+            {
+                var groupStart = band * c.GroupsPerBand;
+                var groupCount = Math.Min(c.GroupsPerBand, totalGroups - groupStart);
+
+                for (var t = 0; t < c.Tiles; t++)
+                {
+                    var s = t * c.Nr;
+                    var cols = Math.Min(c.Nr, c.Rows - s);
+                    var weights = new ReadOnlySpan<byte>(c.Repacked, c.RepackedLength);
+                    var quants = new ReadOnlySpan<sbyte>(c.Quants + (long)s * c.InputSize, cols * c.InputSize);
+                    var scales = new ReadOnlySpan<float>(c.Scales + (long)s * c.Spr, cols * c.Spr);
+                    var dst = new Span<float>(c.Output + (long)s * c.OutputSize, cols * c.OutputSize);
+                    var decoded = new ReadOnlySpan<float>(c.DecodedScales, c.DecodedScalesLength);
+
+                    if (c.Avx512)
+                    {
+                        Q6KGemvKernel.GemmTiled512(
+                            weights, c.OutputSize, c.InputSize, cols, quants, scales, dst, decoded,
+                            groupStart, groupCount);
+                        continue;
+                    }
+
+                    Q6KGemvKernel.GemmTiled(
+                        weights, c.OutputSize, c.InputSize, cols, quants, scales, dst, decoded,
+                        groupStart, groupCount);
+                }
+            }
         }
 
         private static unsafe void TiledQ6KChunk(int start, int end, void* context)
