@@ -8,8 +8,7 @@ namespace DevOnBike.Overfit.Server.OpenAi
     /// <summary>
     /// The transport-neutral surface the shared chat handler (<see cref="ChatCompletionExchange"/>) writes
     /// through, so the OpenAI wire protocol — request validation, the streaming SSE shape, finish-reason
-    /// logic, the response objects — lives once and both hosts (the Native-AOT <c>HttpListener</c> CLI server
-    /// and the ASP.NET Minimal-API host) supply only a thin adapter over their own response object.
+    /// logic, the response objects — lives once and a host (the AOT ASP.NET Minimal-API server) supplies only a thin adapter over its own response object.
     ///
     /// <para>Three primitives cover every write the protocol needs: a complete-body response for errors and
     /// non-streaming results, the switch into event-stream mode, and one already-serialized SSE frame. The

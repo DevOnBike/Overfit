@@ -38,23 +38,46 @@ namespace DevOnBike.Overfit.Server.AspNet.Services
         private readonly SemaphoreSlim _embedGate = new(1, 1);
         private readonly SemaphoreSlim _ttsGate = new(1, 1);
 
+        private readonly ServerMetrics _metrics;
+        private readonly IChatExchangeObserver _chatObserver;
+
         public OverfitInferenceService(
             OverfitResourcePool<OverfitClient> pool,
             string modelName,
             string systemMessage,
             SentenceEmbedder? embedder,
-            OrpheusVoiceEngine? tts)
+            OrpheusVoiceEngine? tts,
+            ServerMetrics metrics)
         {
             _pool = pool ?? throw new ArgumentNullException(nameof(pool));
             _modelName = modelName;
             _systemMessage = systemMessage;
             _embedder = embedder;
             _tts = tts;
+            _metrics = metrics ?? throw new ArgumentNullException(nameof(metrics));
             _created = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+
+            // The chat exchange takes ONE observer; metrics always record, the phase trace joins only when
+            // OVERFIT_SERVER_TRACE=1.
+            _chatObserver = Trace
+                ? new CompositeChatObserver(_metrics, ConsoleTraceObserver.Instance)
+                : _metrics;
+
+            // Publish the live pool gauges on the Meter (this service owns the pool).
+            _metrics.BindPool(() => PoolStatus);
         }
 
         public ModelsResponse ListModels()
             => new() { Data = [new ModelInfo { Id = _modelName, Created = _created }] };
+
+        public PoolStatus PoolStatus
+        {
+            get
+            {
+                var m = _pool.Metrics;
+                return new PoolStatus(m.Size, m.Active, m.Available, m.TotalRejected, m.PeakActive);
+            }
+        }
 
         public void CompleteChat(ChatCompletionRequest? request, IOpenAiResponseSink sink, CancellationToken cancellationToken)
         {
@@ -75,8 +98,7 @@ namespace DevOnBike.Overfit.Server.AspNet.Services
 
             using (lease)
             {
-                var observer = Trace ? ConsoleTraceObserver.Instance : null;
-                ChatCompletionExchange.Handle(request, lease.Value, _modelName, _systemMessage, sink, observer);
+                ChatCompletionExchange.Handle(request, lease.Value, _modelName, _systemMessage, sink, _chatObserver);
             }
         }
 
@@ -93,6 +115,7 @@ namespace DevOnBike.Overfit.Server.AspNet.Services
             try
             {
                 EmbeddingsExchange.Handle(request, _embedder, _modelName, sink);
+                _metrics.RecordEmbeddingRequest();
             }
             finally
             {
@@ -113,6 +136,7 @@ namespace DevOnBike.Overfit.Server.AspNet.Services
             try
             {
                 SpeechExchange.Handle(request, _tts, sink);
+                _metrics.RecordSpeechRequest();
             }
             finally
             {

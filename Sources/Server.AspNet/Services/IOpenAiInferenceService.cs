@@ -22,6 +22,9 @@ namespace DevOnBike.Overfit.Server.AspNet.Services
         /// <summary>The served model's id, for <c>GET /v1/models</c>.</summary>
         ModelsResponse ListModels();
 
+        /// <summary>Current session-pool snapshot for the <c>/metrics</c> gauges (size / active / free / rejected).</summary>
+        PoolStatus PoolStatus { get; }
+
         /// <summary>
         /// Runs one chat completion (streaming or not) — rents a session, replays history, generates, restores
         /// the baseline system turn — writing the whole response through <paramref name="sink"/>. Sheds with

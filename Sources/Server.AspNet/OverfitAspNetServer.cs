@@ -48,32 +48,25 @@ namespace DevOnBike.Overfit.Server.AspNet
         {
             ArgumentNullException.ThrowIfNull(pool);
 
-            using var service = new OverfitInferenceService(pool, modelName, systemMessage, embedder, tts);
+            using var metrics = new ServerMetrics();
+            using var service = new OverfitInferenceService(pool, modelName, systemMessage, embedder, tts, metrics);
 
             var builder = WebApplication.CreateSlimBuilder();
 
-            // The CLI owns the console (it prints the banner via onListening); keep Kestrel's own startup
-            // logging off the wire so `overfit serve` output stays clean.
+            // ILogger → console via the default Microsoft.Extensions.Logging (no Serilog — AOT-clean, zero
+            // extra deps), at Information so request/host lifecycle logs are visible on the console.
             builder.Logging.ClearProviders();
+            builder.Logging.AddSimpleConsole(options => options.SingleLine = true);
+            builder.Logging.SetMinimumLevel(LogLevel.Information);
 
-            // Bind and serialize every OpenAI DTO through the source-gen context — the reflection-free path
-            // Native AOT requires.
-            builder.Services.ConfigureHttpJsonOptions(options =>
-                options.SerializerOptions.TypeInfoResolverChain.Insert(0, OpenAiJsonContext.Default));
-
-            builder.Services.AddSingleton<IOpenAiInferenceService>(service);
+            // Source-gen JSON + the inference service + server metrics — the same wiring the integration tests use.
+            builder.Services.AddOverfitOpenAi(service, metrics);
 
             var app = builder.Build();
 
-            app.MapGet("/health", () => Results.Text("ok", "text/plain"));
-            app.MapGet("/", () => Results.Text("ok", "text/plain"));
-
-            // The OpenAI surface as a versioned route group, one endpoint class per resource.
-            var v1 = app.MapGroup("/v1");
-            v1.MapModels();
-            v1.MapChat();
-            v1.MapEmbeddings();
-            v1.MapSpeech();
+            // /health, docs, and the /v1 route group (models / chat / embeddings / speech). Docs are served from
+            // the AOT-clean embedded document, not a reflection-based runtime generator.
+            app.MapOverfitOpenAiApi();
 
             app.Lifetime.ApplicationStarted.Register(() => onListening?.Invoke($"http://{host}:{port}"));
 

@@ -152,8 +152,12 @@ namespace DevOnBike.Overfit.Cli
 
         private const string DefaultSystemPrompt = "You are a concise, helpful assistant running locally in pure .NET.";
 
-        public static int Serve(string model, string host, int port, string? embedModel, string? ttsModel, string? ttsSnac, int sessions = 1, bool httpListener = false)
+        public static int Serve(string model, string host, int port, string? embedModel, string? ttsModel, string? ttsSnac, int sessions = 1)
         {
+            // Time from launch to "server is listening" — dominated by the GGUF load, so it is effectively
+            // the container's cold-start time. Printed in the ready banner.
+            var startup = ValueStopwatch.StartNew();
+
             var path = ModelCache.Resolve(model);
             if (path is null)
             {
@@ -258,54 +262,32 @@ namespace DevOnBike.Overfit.Cli
                 cts.Cancel();
             };
 
-            void PrintBanner(string baseUrl, string hostKind, bool servesExtras)
+            void PrintBanner(string baseUrl)
             {
-                var embedEp = servesExtras && embedder is not null ? " | POST /v1/embeddings" : string.Empty;
-                var ttsEp = servesExtras && tts is not null ? " | POST /v1/audio/speech" : string.Empty;
+                // The server may bind 0.0.0.0 (all interfaces) but you can't *connect* to 0.0.0.0 — show a
+                // reachable address in the copy-paste examples.
+                var connectUrl = baseUrl.Replace("0.0.0.0", "127.0.0.1");
+                var embedEp = embedder is not null ? " | POST /v1/embeddings" : string.Empty;
+                var ttsEp = tts is not null ? " | POST /v1/audio/speech" : string.Empty;
                 Console.WriteLine();
-                Console.WriteLine($"Overfit OpenAI-compatible server ({hostKind}) listening on {baseUrl}");
+                Console.WriteLine($"Overfit OpenAI-compatible server (ASP.NET / Kestrel, AOT) listening on {baseUrl}");
+                Console.WriteLine($"  ready in:  {startup.GetElapsedTime().TotalSeconds:F2} s");
                 Console.WriteLine($"  model id:  {modelName}");
-                Console.WriteLine($"  endpoints: GET /v1/models | POST /v1/chat/completions (stream + non-stream){embedEp}{ttsEp} | GET /health");
+                Console.WriteLine($"  endpoints: GET /v1/models | POST /v1/chat/completions (stream + non-stream){embedEp}{ttsEp} | GET /health | GET /metrics | GET /docs");
                 Console.WriteLine();
-                Console.WriteLine($"  curl {baseUrl}/v1/chat/completions -H \"Content-Type: application/json\" \\");
-                Console.WriteLine($"       -d '{{\"model\":\"{modelName}\",\"messages\":[{{\"role\":\"user\",\"content\":\"Hello\"}}]}}'");
+                Console.WriteLine($"  reach it at {connectUrl}   (e.g. {connectUrl}/docs , {connectUrl}/metrics)");
+                Console.WriteLine($"  curl -N {connectUrl}/v1/chat/completions -H \"Content-Type: application/json\" \\");
+                Console.WriteLine($"       -d '{{\"model\":\"{modelName}\",\"stream\":true,\"messages\":[{{\"role\":\"user\",\"content\":\"Hello\"}}]}}'");
                 Console.WriteLine();
                 Console.WriteLine("Press Ctrl+C to stop.");
             }
 
-            // Default: the AOT-ready ASP.NET (Kestrel) host. The dependency-free HttpListener server is kept
-            // only behind --http-listener as a legacy escape hatch.
-            if (!httpListener)
+            try
             {
                 OverfitAspNetServer.Serve(
                     pool, modelName, host, port, DefaultSystemPrompt, embedder, tts,
-                    onListening: baseUrl => PrintBanner(baseUrl, "ASP.NET / Kestrel, AOT-ready", servesExtras: true),
+                    onListening: PrintBanner,
                     cancellationToken: cts.Token);
-
-                embedder?.Dispose();
-                tts?.Dispose();
-                pool.Dispose();
-                return 0;
-            }
-
-            try
-            {
-                OverfitOpenAiServer.Serve(
-                    pool,
-                    modelName,
-                    host,
-                    port,
-                    DefaultSystemPrompt,
-                    embedder,
-                    tts,
-                    onListening: baseUrl => PrintBanner(baseUrl, "HttpListener (legacy)", servesExtras: true),
-                    cancellationToken: cts.Token);
-            }
-            catch (HttpListenerException ex)
-            {
-                Console.Error.WriteLine($"Could not bind http://{host}:{port}/ : {ex.Message}");
-                Console.Error.WriteLine("The port may be in use, or binding to a non-local host needs elevation / a URL ACL on Windows.");
-                return 1;
             }
             finally
             {
