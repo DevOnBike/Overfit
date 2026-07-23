@@ -53,8 +53,6 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MnistWpfDemo", "Demo\MnistW
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AgentFrameworkDemo", "Demo\AgentFrameworkDemo\AgentFrameworkDemo.csproj", "{B790BE61-A6E4-4556-8019-08778CF2172A}"
 EndProject
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Sources", "Sources", "{C16B2082-E6A6-C480-36D0-FC08AA18D453}"
-EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU

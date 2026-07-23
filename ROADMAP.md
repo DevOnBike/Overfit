@@ -194,8 +194,238 @@ clean serial/parallel split does not describe this system: Conv's scaling is imp
 and imperfect scaling reads as "serial fraction" to that fit. **Treat Amdahl fits as a pointer, not a
 measurement — it was right that something was wrong, and wrong about what and how much.**
 
-**So the next lever is kernel quality, not parallelism.** Conv does 15.5 GFLOP in 72.1 ms = **215 GFLOP/s
-against a 2190 GFLOP/s ceiling — 10%**. Parallelising MaxPool + ReLU is real but capped at ~1.1× overall.
+**So the next lever is kernel quality, not parallelism.** Parallelising MaxPool + ReLU is real but capped at
+~1.1× overall.
+
+#### ★ im2col vs GEMM, and a FLOP-counting correction that changes the target
+
+`Conv2DGemmKernels.ProfileParts` (opt-in) + `ConvGemmPartProfileTests` split conv time on VGG-16:
+
+| part | per run | share of conv |
+|---|---:|---:|
+| im2col gather | 9.33 ms | 14.7% |
+| **GEMM** | **54.22 ms** | **85.3%** |
+
+So after parallelising the gather, **the micro-kernel is the target** — confirmed rather than assumed.
+
+**Correction to every VGG GFLOP/s figure above.** They used "15.5 GFLOPs/inference", which is the commonly
+quoted VGG-16 **MAC** count. Under this project's convention (MAC = 2 ops, matching `Throughput` and
+llama.cpp's `test-backend-ops`) VGG-16's conv layers are **30.7 GFLOP**. The earlier rates were understated 2×:
+
+| | time | GFLOP/s | % of the 2190 GFLOP/s ceiling |
+|---|---:|---:|---:|
+| our GEMM alone | 54.2 ms | **566** | **26%** |
+| whole model, Overfit | 73 ms | 420 | — |
+| whole model, ORT | 11.6 ms | **2647** | **121%** ⚠ |
+
+**ORT "achieves" 121% of this machine's measured float ceiling, which is impossible** — so it is executing
+fewer operations than the formula counts. That is direct evidence for the Winograd hypothesis flagged
+earlier: MLAS uses a FLOP-reducing transform on 3×3 convs (F(2,3) cuts FLOPs 2.25×). Corrected, ORT runs at
+roughly **1176 GFLOP/s ≈ 54% of ceiling**.
+
+**This reframes the gap: part of ORT's lead is algorithmic, not kernel craft.** Our GEMM at 26% against
+their ~54% is about **2×** of kernel-quality difference, with the rest coming from doing less work.
+
+#### ▶ REFUTED — the micro-kernel tile shape is NOT the problem; it is already at hardware peak
+
+The hypothesis was that `Mr=8 × Nr=8` is load-port bound (9 loads per 8 FMAs) and that a `6×16` tile would
+pay. `GemmMicroKernelShapeBenchmark` measured the candidate shapes single-threaded, accumulators in named
+locals, panels L1-resident:
+
+| shape (1 thread) | GFLOP/s | vs today |
+|---|---:|---:|
+| **AVX2 8×8 (today)** | **148** | 1.00× |
+| AVX2 6×16 | 182 | 1.23× |
+| AVX2 4×24 | 182 | 1.23× |
+| AVX-512 8×16 | 276 | 1.86× |
+| **AVX-512 8×32** | **337** | **2.27×** |
+| AVX-512 6×48 | 337 | 2.27× |
+
+**AVX2's single-core FMA peak is ≈138 GFLOP/s** (8 lanes × 2 ops × 2 FMA units × ~4.3 GHz), and the current
+shape measures **148** — it is already at the hardware ceiling, boost clock and all. The load-port argument
+was wrong: Zen 5 sustains those loads. Reshaping the AVX2 tile is worth ~1.2×, not the 4× the production
+deficit implies.
+
+**What this reveals instead.** The micro-kernel can do 148 GFLOP/s per core → ~2370 GFLOP/s across 16 cores.
+Production conv GEMM does **566 — 24% of what its own micro-kernel achieves when fed properly.** The kernel
+is fine; **everything around it is not**: B-panel packing, the memory traffic of a `[K, N]` im2col matrix
+(conv1_2's is 115 MB, far past any cache), and panel scheduling. That is the target, not the tile.
+
+AVX-512 is separately worth **2.27×** on the micro-kernel — but only to the extent production is
+compute-bound, and at 24% efficiency it plainly is not. Expect far less than 2.27× end to end.
+
+#### ▶ REFUTED AGAIN — packing is not it either. The micro-kernel is starved by the cache hierarchy
+
+Ablation inside `GemmNPanelWorker` (`AblatePackB` / `AblateMicroKernel`, measurement-only), VGG-16:
+
+| arm | ms/run | share |
+|---|---:|---:|
+| baseline (pack + micro) | 76.04 | 100% |
+| pack only | 27.61 | 36.3% |
+| micro only | 67.66 | 89.0% |
+
+Netting out the rest of the model (im2col 9.3, MaxPool+ReLU 7.1): **packing ≈ 11 ms, micro-kernel ≈ 51 ms.**
+The negative "unattributed" (−19 ms) is expected overlap — removing either side frees cache for the other —
+so both figures are upper bounds. Either way the micro-kernel dominates the GEMM, and the strided scalar
+pack, plausible as it looked, is the minority cost.
+
+**The one number that matters.** The same micro-kernel measures **148 GFLOP/s per core in isolation** and
+**~38 GFLOP/s per core in production** (51 ms for 30.7 GFLOP over 16 cores) — **4× slower running the same
+instructions.** The difference is the memory feed: `packB` is `K × Nr` floats, which at K=2304 is **73 KB
+against a 32–48 KB L1**, so every row-block re-streams the panel from L2, and the A rows (8 × K floats,
+another 73 KB) do the same. The isolation benchmark had both in L1, which is exactly why it hit peak.
+
+**So the target is K-blocking** — split the contraction so `packB` and the A slice fit L1. One caveat that is
+mine to state: the kernel's own comment records that a BLIS-style **K-blocked + A-packed** variant was tried
+and regressed (vgg 140 → 189 ms). That measurement predates the parallel im2col and bundled A-packing, whose
+one-time `O(M·K)` cost may have dominated it. It is not proof that K-blocking alone fails — and equally, not
+licence to repeat it blind. Measure the L1-residency effect on a single VGG layer shape first.
+
+#### ▶ REFUTED — K-blocking does not help either, and the prototype exposes where the loss really is
+
+`GemmKBlockingBenchmark` runs the full conv5_1 GEMM (M=512, K=4608, N=196) single-threaded at several
+contraction blocks. `Kc=4608` is today's unblocked kernel (144 KB packed panel); the rest bring it inside L1:
+
+| Kc | packed panel | ms | TFLOP/s |
+|---|---:|---:|---:|
+| **4608 (today)** | 144 KB | **6.99** | **0.13** |
+| 1152 | 36 KB | 7.24 | 0.13 |
+| 512 | 16 KB | 7.25 | 0.13 |
+| 256 | 8 KB | 8.00 | 0.12 |
+| 128 | 4 KB | 7.96 | 0.12 |
+
+**Unblocked wins.** Making the panel L1-resident is flat to slightly worse, so the L1-residency hypothesis is
+refuted and the earlier K-blocking negative is independently confirmed — this time without A-packing to
+confound it.
+
+**But the prototype answers a better question than the one asked.** It does everything production does —
+pack, micro-kernel, real memory — single-threaded at **132 GFLOP/s**, while production conv at one worker
+runs at **19.7 GFLOP/s** (30.7 GFLOP in 1557 ms). Same structure, **6.7× apart**. So the deficit is neither
+the tile, nor the pack, nor cache blocking: it is **shape-dependent**, and this prototype picked a shape
+where everything is fine (small N, large K).
+
+The suspicion now points at the early layers, where the arithmetic-to-overhead ratio inverts. `conv1_2` is
+M=64, K=576, **N=50176**: A (147 KB) is re-read for each of **6272 panels**, and the pack does one scalar
+branchy copy per FMA issued. **Next measurement: per-layer conv timing, not per-operator** — then each
+layer's achieved GFLOP/s against its own shape.
+
+**Four hypotheses refuted in a row on this path** — tile shape, packing, L1 blocking, and the "49 ms serial"
+model. Each cost minutes to measure; the rewrites they prevented would have cost days.
+
+#### ★★★ FOUND IT — A is re-read once per N-panel: 7.5 GB of traffic for 30.7 GFLOP of work
+
+The per-layer profile (`PerNodeProfileReport`) shows the conv layers are **uniform**, 347–581 GFLOP/s, with
+no outlier — so "the early layers are the problem" is refuted too. The shape table is where it shows:
+`GemmNPanelWorker` sweeps M *inside* the panel loop, so the whole A matrix is re-read **for every N-panel**.
+
+| layer | panels | A | A traffic |
+|---|---:|---:|---:|
+| conv2 | 6272 | 144 KB | 903 MB |
+| conv4 | 1568 | 576 KB | 903 MB |
+| conv6 / conv7 | 392 | 2304 KB | 903 MB each |
+| conv9 / conv10 | 98 | 9216 KB | 903 MB each |
+| others | | | ~2.1 GB |
+| **total** | | | **≈7.5 GB per inference** |
+
+**7.5 GB moved for 30.7 GFLOP computed = 0.24 bytes/FLOP**, where a well-blocked GEMM runs at ~0.01 — **24×
+more traffic than the arithmetic requires**. And it matches the clock: 7.5 GB in 73 ms is **103 GB/s**,
+against a measured 90 GB/s DRAM read ceiling (L3 is faster, but finite and shared by 16 cores).
+
+**The conv GEMM is bandwidth-bound on re-reading A** — which is why a single-threaded prototype hit
+132 GFLOP/s while production gets ~30 per core: one thread has the cache to itself.
+
+**Fix: block over N-panels.** Process a group of panels (e.g. 8 = 64 columns) and sweep M once per group,
+cutting A traffic by the group size — 7.5 GB → ~0.94 GB at 8 panels. This is the outer half of the standard
+Goto/BLIS structure, and it is the piece this kernel has never had.
+
+**Why every earlier hypothesis missed it:** tile shape, packing and K-blocking are all *within* one panel.
+The waste is *between* panels, which no measurement scoped to a single panel could see.
+
+#### ▶ REFUTED — N-panel grouping does nothing, and the traffic argument was wrong about *where*
+
+`Conv2DGemmKernels.NPanelGroup` (default **1**, `OVERFIT_CONV_PANEL_GROUP`) packs and sweeps several panels
+together so A is read once per group. Interleaved against an ORT canary (4% spread over the whole sweep):
+
+| group | 1 | 2 | 4 |
+|---|---:|---:|---:|
+| VGG-16 | 72.7 ms | 73.0 | 73.3 |
+
+0.8% apart — inside the noise. **The 7.5 GB figure was right; the conclusion drawn from it was not.** That
+traffic never reaches DRAM: this CPU has **128 MB of L3 (V-cache)**, so every layer's A (≤9 MB) is re-read
+from L3. Counting bytes without asking *which cache level serves them* is worthless.
+
+#### ★★ `Sources/MachineProbe` — a standalone hardware probe, and it explains both blocking failures
+
+A console app with **no reference to Overfit, no BenchmarkDotNet, no packages** — one file, `Stopwatch` only,
+so it can be run on a customer box, a CI runner or a cloud VM before anyone reads meaning into an Overfit
+number. `dotnet run -c Release --project Sources/MachineProbe`.
+
+On the 9950X3D:
+
+| peak FMA | 1 core | all cores | scaling |
+|---|---:|---:|---:|
+| 128-bit | 84 GF/s | 1336 | 15.8× |
+| 256-bit | **179** | **2310** | 12.9× |
+| 512-bit | 351 | 4200 | 12.0× |
+
+Memory: read **89.0 GB/s**, copy 74.0, triad 49.5.
+
+**Correction it forces:** the AVX2 single-core peak was *estimated* at 138 GF/s, which made the 148 GF/s
+micro-kernel look like it exceeded the hardware. Measured, the peak is **179** — the micro-kernel is at
+**83% of it**, still high, but the earlier claim was arithmetic, not measurement.
+
+**The working-set sweep is the real payload** (one core, sequential read):
+
+| 8 KB | 48 KB | 512 KB | 8 MB | 32 MB | 128 MB |
+|---:|---:|---:|---:|---:|---:|
+| 72.9 | 74.6 | 75.3 | 76.0 GB/s | 68.9 | 58.5 |
+
+**Flat from L1 to 8 MB.** One core reads ~75 GB/s *wherever the data lives* — for streaming access this
+machine has **no L1/L2/L3 cliff at all**, because the prefetcher keeps up.
+
+*The first version of that sweep was wrong and the conclusion drawn from it is withdrawn.* It used a single
+`Vector<float>` accumulator, so it measured the chain's **latency** (~75 GB/s, below every cache level's
+bandwidth) and produced a perfectly flat curve that appeared to prove "this machine has no cache cliff". With
+eight independent streams the structure appears — see below. The probe now lives in
+`Tests/Diagnostics/MachineProbeTests.cs` (xUnit, `ValueStopwatch`, asserts its own loops allocate 0 B).
+
+#### ★★★ WHY PARALLEL SCALING IS POOR — bandwidth stops scaling past ~2 MB per core
+
+| working set | 1 core | all cores | scaling |
+|---|---:|---:|---:|
+| 16 KB – 2 MB | ~76 GB/s | 700–900 GB/s | **9–12×** |
+| 8 MB | 67.3 | 112.8 | **1.7×** |
+| 32 MB | 64.4 | 67.6 | 1.1× |
+| 128 MB (DRAM) | 59.6 | 63.6 | 1.1× |
+
+**Compute scales 12–15×; bandwidth scales 10× only while the per-core working set fits private cache, then
+collapses to ~1×.** One core already draws 60% of total DRAM bandwidth; the other fifteen add 60%.
+
+The cliff lands exactly where **16 cores × 8 MB = 128 MB = this chip's L3 including V-cache** — the
+measurement validates itself against a number it was never given.
+
+**So any kernel that outruns private cache cannot be fixed by more cores or by blocking — only by needing
+fewer bytes per FLOP.** That reframes conv: the fix is arithmetic intensity, not scheduling.
+
+#### ★★ AVX-512 8×32 conv micro-kernel — VGG-16 72.7 → 63.7 ms (1.14×)
+
+An `Mr×Nr` tile loads `Mr+Nr` floats per k-step and performs `2·Mr·Nr` FLOPs, so intensity is
+`Mr·Nr / (2(Mr+Nr))`: **2.0 FLOP/byte at 8×8, 3.2 at 8×32**. AVX-512's 32 registers make 16 accumulators
+plus 2 B vectors and a broadcast fit. Interleaved A/B, three rounds, ORT canary within 2%:
+
+| | median | GFLOP/s |
+|---|---:|---:|
+| AVX2 8×8 | 72.7 ms | 422 |
+| **AVX-512 8×32** | **63.7 ms** | **482** |
+
+Parity exact in every round, conv tests 56/0, `OVERFIT_CONV_AVX512=0` falls back. **Gap to ORT 6.3× → 5.35×.**
+
+*Honest note on the model:* intensity predicted up to 1.6× and delivered 1.14×, so intensity is a real but
+not dominant term — do not extrapolate a further tile widening from it without measuring.
+
+**Machine identity, measured rather than reported** (`MachineProbeTests`): AMD Ryzen 9 9950X3D, **5.59 GHz**
+from a dependent-add chain — cross-checked against 5.53 GHz derived independently from the AVX2 FMA peak,
+agreeing to 1%.
 
 *Unexplained and therefore not built on:* the standalone driver measures 1564 ms at one worker where the
 BenchmarkDotNet sweep measured 668 ms — same variable, same box. The per-operator conclusion rests on the

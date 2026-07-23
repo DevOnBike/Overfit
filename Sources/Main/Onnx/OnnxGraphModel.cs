@@ -127,6 +127,37 @@ namespace DevOnBike.Overfit.Onnx
             _nodeCalls[index]++;
         }
 
+        /// <summary>
+        /// Every node individually — index, operator, output size and ms — rather than grouped by operator.
+        ///
+        /// <para>Grouping answers "which operator"; this answers "which <i>layer</i>", which is the question
+        /// once an operator's cost is known to be shape-dependent. On VGG-16 a standalone prototype of the conv
+        /// GEMM reached 132 GFLOP/s single-threaded on a late-layer shape while production conv averaged
+        /// 19.7 GFLOP/s across all layers — a 6.7× spread that only a per-layer view can locate.</para>
+        /// </summary>
+        public string PerNodeProfileReport()
+        {
+            if (_nodeTicks is null)
+            {
+                return "(no node profile recorded — set OnnxGraphModel.ProfileNodes before running)";
+            }
+
+            var toMs = 1000.0 / Stopwatch.Frequency;
+            var runs = _nodeCalls is null || _nodeCalls.Length == 0 ? 1L : Math.Max(1L, _nodeCalls[0]);
+            var sb = new StringBuilder();
+
+            sb.AppendLine($"=== per-node ({runs} run(s)) ===");
+
+            for (var i = 0; i < _nodes.Length; i++)
+            {
+                var node = _nodes[i];
+                sb.AppendLine(
+                    $"  [{i,2}] {node.Module.GetType().Name,-26} out={node.OutputSize,9}  {_nodeTicks[i] * toMs / runs,8:F2} ms");
+            }
+
+            return sb.ToString();
+        }
+
         /// <summary>Clears the per-node accumulators (call before the measured segment).</summary>
         public void ResetNodeProfile()
         {

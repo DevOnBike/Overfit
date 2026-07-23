@@ -44,6 +44,12 @@ namespace DevOnBike.Overfit.Runtime
         /// <summary>Set to 0 to force the serial im2col patch gather in the conv GEMM path (A/B switch).</summary>
         public const string ParallelIm2Col = "OVERFIT_PARALLEL_IM2COL";
 
+        /// <summary>N-panels packed and swept together in the conv GEMM; 1 = the original per-panel loop.</summary>
+        public const string ConvPanelGroup = "OVERFIT_CONV_PANEL_GROUP";
+
+        /// <summary>Set to 0 to force the AVX2 8×8 conv micro-kernel instead of the AVX-512 8×32 one.</summary>
+        public const string ConvAvx512 = "OVERFIT_CONV_AVX512";
+
         // ── Prefill kernel switches (all default ON where the hardware allows; set to 0 to opt out) ──
         // These exist so a measured win can be A/B'd against its predecessor without a rebuild, and so a
         // regression on unfamiliar hardware can be bisected in the field rather than only on the dev box.
