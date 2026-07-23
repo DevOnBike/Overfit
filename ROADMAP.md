@@ -175,9 +175,31 @@ Speedup over one worker **4.69× → 9.16×**; serial fraction **15.5% → 7.3%*
 (maxAbsDiff 6.7e-8, cosine 1.000000, same argmax), conv tests 56/0, suite 1499/0/232. The paired A/B run had
 ORT flat at 11.66 vs 11.75 ms as the canary.
 
-**Next: the remaining ~49 ms of serial work**, which now *dominates* at high worker counts (49 of 73 ms at
-32 workers). Candidates not yet measured: the elementwise activations, MaxPool, the FC layers, and the
-graph executor's inter-node buffer handling. Measure which before touching any of them.
+#### ▶ RETRACTED — there is no "~49 ms of serial work". Conv is simply 91% of the time
+
+The Amdahl fit above predicted ~49 ms of serial residue dominating at 32 workers. `OnnxGraphModel.ProfileNodes`
+(new, opt-in, the CNN counterpart of `PrefillProfiler`) measured it per operator instead:
+
+| operator | 32 workers | share | 1 worker |
+|---|---:|---:|---:|
+| **ConvLayer** (13 nodes) | **72.10 ms** | **90.7%** | 1557 ms |
+| MaxPool2DLayer (5) | 5.22 | 6.6% | 5.46 |
+| ReluActivation (13) | 1.92 | 2.4% | 1.70 |
+| LinearLayer (1) | 0.21 | 0.3% | 0.23 |
+| GlobalAveragePool2DLayer | 0.01 | 0.0% | 0.01 |
+
+MaxPool and ReLU *are* serial — they do not move between 1 and 32 workers — but together they are **7.1 ms,
+9% of the total, not 49 ms**. The Amdahl model overestimated the serial share by more than 6×, because a
+clean serial/parallel split does not describe this system: Conv's scaling is imperfect (21.6×), not absent,
+and imperfect scaling reads as "serial fraction" to that fit. **Treat Amdahl fits as a pointer, not a
+measurement — it was right that something was wrong, and wrong about what and how much.**
+
+**So the next lever is kernel quality, not parallelism.** Conv does 15.5 GFLOP in 72.1 ms = **215 GFLOP/s
+against a 2190 GFLOP/s ceiling — 10%**. Parallelising MaxPool + ReLU is real but capped at ~1.1× overall.
+
+*Unexplained and therefore not built on:* the standalone driver measures 1564 ms at one worker where the
+BenchmarkDotNet sweep measured 668 ms — same variable, same box. The per-operator conclusion rests on the
+default-worker numbers, where the two agree (73 vs 79.5 ms); the single-worker column is indicative only.
 
 ---
 
