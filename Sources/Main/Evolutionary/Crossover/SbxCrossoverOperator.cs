@@ -119,14 +119,9 @@ namespace DevOnBike.Overfit.Evolutionary.Crossover
 
                 float beta;
 
-                if (u <= 0.5f)
-                {
-                    beta = MathF.Pow(2f * u, inverseExponent);
-                }
-                else
-                {
-                    beta = MathF.Pow(1f / (2f * (1f - u)), inverseExponent);
-                }
+                beta = u <= 0.5f
+                    ? MathF.Pow(2f * u, inverseExponent)
+                    : MathF.Pow(1f / (2f * (1f - u)), inverseExponent);
 
                 // Symmetric recombination. child1 + child2 = p1 + p2 by construction, so the
                 // arithmetic mean is preserved — a defining property of SBX.

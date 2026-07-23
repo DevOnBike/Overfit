@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -111,19 +111,26 @@ namespace DevOnBike.Overfit.Audio.Tts
             while (i < expanded.Length)
             {
                 var c = expanded[i];
-                if (char.IsDigit(c) || (c == '-' && i + 1 < expanded.Length && char.IsDigit(expanded[i + 1])))
+
+                // Decide BEFORE dispatching: AppendNumber/AppendWord advance i, so a later test that
+                // re-read expanded[i] would be looking at a different character.
+                var isNumber = char.IsDigit(c)
+                    || (c == '-' && i + 1 < expanded.Length && char.IsDigit(expanded[i + 1]));
+
+                if (isNumber)
                 {
                     i = AppendNumber(sb, expanded, i);
+                    continue;
                 }
-                else if (IsWordChar(c))
+
+                if (IsWordChar(c))
                 {
                     i = AppendWord(sb, expanded, i);
+                    continue;
                 }
-                else
-                {
-                    sb.Append(c);
-                    i++;
-                }
+
+                sb.Append(c);
+                i++;
             }
 
             return CollapseWhitespace(sb.ToString());
@@ -170,11 +177,15 @@ namespace DevOnBike.Overfit.Audio.Tts
             }
 
             var intPart = text[start..(fracStart < 0 ? i : fracStart - 1)].Replace(",", string.Empty);
-            if (long.TryParse(intPart, out var intValue))
+            // Capture: the second test must not re-run TryParse (it would redeclare `intValue` and parse twice).
+            var parsed = long.TryParse(intPart, out var intValue);
+
+            if (parsed)
             {
                 sb.Append(EnglishNumberToWords.Convert(intValue));
             }
-            else
+
+            if (!parsed)
             {
                 // Too long for a long, or malformed → speak the digits individually.
                 AppendDigits(sb, intPart);

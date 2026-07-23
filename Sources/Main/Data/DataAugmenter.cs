@@ -20,13 +20,18 @@ namespace DevOnBike.Overfit.Data
                 var inputRow = originalBatch.GetView().AsReadOnlySpan().Slice(i * width * height, width * height);
                 var outputRow = augmentedBatch.GetView().AsSpan().Slice(i * width * height, width * height);
 
-                if (Random.Shared.NextSingle() > 0.5f)
+                // Capture the coin flip: re-evaluating Random.Shared in a second `if` would draw a
+                // different value and could both shift AND copy (or neither).
+                var shift = Random.Shared.NextSingle() > 0.5f;
+
+                if (shift)
                 {
                     var shiftX = Random.Shared.Next(-2, 3);
                     var shiftY = Random.Shared.Next(-2, 3);
                     ShiftImage(inputRow, outputRow, width, height, shiftX, shiftY);
                 }
-                else
+
+                if (!shift)
                 {
                     inputRow.CopyTo(outputRow);
                 }

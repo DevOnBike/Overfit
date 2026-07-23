@@ -22,7 +22,7 @@ Zero-allocation, pure C# deep-learning framework targeting high-performance CPU 
 | Native C# GGUF loader (F32/F16/BF16/Q8_0/Q4_K/Q6_K) | ✅ Loads `*.gguf` from Ollama/HF directly |
 | Streaming token generation (`IAsyncEnumerable`) | ✅ Stable, with stop-tokens + cancellation |
 | LoRA adapter (Enable/Disable, Save/Load) | ✅ Stable, zero-copy weight refs |
-| **Quantized weight storage at inference time** | ✅ **Q8_0 + Q4_K_M decode paths done & parity-verified — Qwen2.5-3B Q4_K_M decodes ~19 tok/s @ 3.20 GB RAM, 1 B/token (post-mmap, 2026-05-21). Same-file A/B vs LLamaSharp/llama.cpp: ~1.5× faster on raw tok/s (~29 vs ~19), RAM parity (3.20 GB both), Overfit wins on per-token allocation (1 B vs 21 220 B). Catch-up plan in "Decode throughput catch-up vs llama.cpp" section below.** |
+| **Quantized weight storage at inference time** | ✅ **Q8_0 + Q4_K_M decode & prefill paths done & parity-verified.** Decode ~24 tok/s Qwen-3B Q4_K_M, memory-bound (GEMV kernel at 82% of DRAM ceiling — `DecodeGemvRooflineBenchmark`), 1.13× behind llama.cpp. **Prefill ~299 tok/s (pp672), ~1.81× behind their AVX-512 build / 1.14× behind AVX2**, after the AVX-512 Q4_K/Q6_K prefill kernels. Both compute-side perf tracks CLOSED by measurement — see "✅ CLOSED — CPU PREFILL + DECODE PERF TRACK". |
 | Mixture-of-Experts inference (Qwen-MoE, Mixtral-8x7B) | ✅ Coherent in pure C# (Q8_0 + Q4_K_M); verified "Paris" 2026-05-27 |
 | Training: gradient checkpointing | ✅ `ComputationGraph.Checkpoint` + `CheckpointedModule` — 24× live-activation cut on 12L GPT-1 |
 | Training: data parallelism (N replicas) | ✅ `DataParallelTrainer` / `DataParallelSession` + thread-budget fix — ~6× throughput (24 workers) |
@@ -35,21 +35,21 @@ Zero-allocation, pure C# deep-learning framework targeting high-performance CPU 
 
 ---
 
-## ▶ NEXT UP AFTER RELEASE — finish the `else` sweep (OVERFIT021)
+## ✅ DONE — the `else` sweep (OVERFIT021), 322 → 0
 
-**Status: 21 of 322 done, ~301 left.** `else` / `else if` is banned in `Sources/Main` by the in-repo Roslyn
-analyzer **OVERFIT021** (`Sources/Analyzers/ElseClauseAnalyzer.cs`). It is *not* an MSBuild task and *not* a
-`BannedSymbols.txt` entry — that file bans **API symbols**, and `else` is a language keyword, so it cannot be
-expressed there. An MSBuild-task variant with an `ElseDebt.txt` ledger was built and then deleted in favour of
-the analyzer (real syntax tree, IDE squiggles, per-directory severity).
+**Status: COMPLETE (2026-07-21).** `else` / `else if` is banned by the in-repo Roslyn analyzer **OVERFIT021**
+(`Sources/Analyzers/ElseClauseAnalyzer.cs`). It is *not* an MSBuild task and *not* a `BannedSymbols.txt` entry —
+that file bans **API symbols**, and `else` is a language keyword, so it cannot be expressed there. An
+MSBuild-task variant with an `ElseDebt.txt` ledger was built and then deleted in favour of the analyzer (real
+syntax tree, IDE squiggles, per-directory severity).
 
-**Rollout is a ratchet:** `suggestion` repo-wide, `error` for directories already at zero — the scoped section
-at the **end** of `.editorconfig`. Clean a directory, add it to that list, and the ban locks in for it.
+The ratchet is finished and retired: the rule is now **`error` across every project except `Tests`**, wired
+centrally in `Directory.Build.props` rather than per-csproj, so the per-directory allow-list in `.editorconfig`
+is gone. `Tests` stays at `suggestion` (test code is local and disposable). The **only** remaining `else` sites
+in the repo are 6 in `Sources/Benchmark/ElseRefactorBenchmark.cs` — intentional, since the `else` forms are that
+benchmark's measurement subject, and the project is excluded from the analyzer.
 
-- ✅ **Done (9 dirs, 21 sites):** `Anomalies, Core, Diagnostics, Exceptions, Inference, Licensing, Maths,
-  Parameters, Randomization, Redaction, Runtime, Serving, Statistical, Tensors, Tokenization, Training, Trees`
-- ⬜ **Left:** `LanguageModels` 163, `Audio` 35, `Ops` 34, `Onnx` 14, `Data` 13, `DeepLearning` 12,
-  `Evolutionary` 10, `Kernels` 6, `Intrinsics` 4, `Autograd` 4, `Optimizers` 6, rest small
+Verified semantically rather than by grep: the solution builds clean with the rule at `error` globally.
 
 ### Cost is measured, not assumed — `Sources/Benchmark/ElseRefactorBenchmark.cs`
 
@@ -74,6 +74,1310 @@ So in-place rewrites are free and **the only real risk is extracting a method**.
 2. **`.editorconfig` scoping.** A `[section]` header scopes everything below it (so directory sections belong at
    the end of the file), the glob must be `<dir>/**.cs` not `<dir>/**/*.cs`, and an ID listed in
    `<WarningsNotAsErrors>` reverts `error` back to warning even where `.editorconfig` promotes it.
+
+---
+
+## ✅ CLOSED — CPU PREFILL + DECODE PERF TRACK (2026-07-22 → 2026-07-23)
+
+**Both compute-side performance tracks are closed, by measurement rather than assertion.** The detailed,
+chronological record is preserved below — every win, every reverted negative, and the measurement discipline
+that produced them. The headline:
+
+| | start of track | end of track |
+|---|---:|---:|
+| **prefill** | 143 tok/s (3.76× behind llama.cpp AVX-512) | **~299 tok/s (~1.81×)** — 1.14× to their AVX2 build |
+| **decode** | — | **memory-bound, 1.13× behind**, GEMV kernel at 82% of the DRAM ceiling |
+
+**What shipped this track** (all bit-identical or coherence-safe, pinned by parity tests): Q6_K tiled GEMM,
+shared activation quantization, whole-matrix O / Q / K/V projections, register-tiled prefill kernels, the
+F16-scale hoist (decode once per projection, not once per column tile), **AVX-512 Q4_K and Q6_K prefill
+kernels** (pair what is already adjacent in memory — the choice of what shares a register turned a −20%
+port into +12%), register-resident attention value accumulation, and vectorized softmax exp.
+
+**Why it is closed:**
+- **Prefill.** Our Q4_K matmul measured *faster* than llama.cpp's at equal ISA and thread count (1.70 vs
+  1.56 TFLOP/s), so the remaining gap is AVX-512 coverage (now largely done) and kernel structure (done).
+  What is left — a flash-attention GEMM for the `attn_scores` dot (~2% e2e), the scalar `Unpack` (~3.5% of
+  one kernel) — is high-effort, low-return.
+- **Decode.** `DecodeGemvRooflineBenchmark` showed the kernel's compute runs at 132.5 GB/s hot, *above* the
+  90 GB/s DRAM ceiling, and 82% of it when streaming from DRAM — so decode is memory-bound and an AVX-512
+  decode kernel cannot help (the direct measurement behind the reverted decode-port negative). The whole-model
+  shortfall is per-token overhead and layer→layer serial latency, where we are already 1.13× of llama.cpp.
+
+**The most valuable output was the measurement discipline** — roughly eleven mechanism hypotheses refuted,
+the rules that survived recorded in the `feedback-measurement-discipline` memory, and permanent infrastructure
+left behind: `MachineRooflineBenchmark`, `DecodeGemvRooflineBenchmark`, `Diagnostics/Throughput.cs`, and the
+BenchmarkDotNet throughput columns.
+
+**Next move is a business decision about product direction, not another *LLM* kernel.** Any further
+perf work should measure the ceiling before writing code — the discipline that made this track pay.
+
+#### ⚠ BUT: the largest untouched perf reserve in the project is CNN inference, not LLM — 13.2× behind ORT
+
+Measured 2026-07-23, `LargeCnnComparisonBenchmark`, VGG-16 (~15.5 GFLOPs/inference), same box:
+
+| | time | GFLOP/s | % of this box's float ceiling (2.19 TFLOP/s) |
+|---|---:|---:|---:|
+| ONNX Runtime (native MLAS) | **9.96 ms** | 1557 | **71%** |
+| Overfit (im2col + GEMM, DAG importer) | **131.7 ms** | 118 | **5.4%** |
+
+Parity is exact (maxAbsDiff 6.7e-8, cosine 1.000000, same argmax) — this is purely speed. For scale: the
+whole prefill sprint above chased a **1.8×** gap on a path already near half of its instruction mix's
+ceiling. This is a **13×** gap on a path at 5% of the machine ceiling.
+
+**A framing correction this exposes.** The README headline "~8× faster than ONNX Runtime" is measured on
+`Linear(784 → 10)`, where ORT's *per-call overhead* dominates — it is a real result for small-model,
+in-process serving, but it says nothing about kernel quality. VGG-16 is compute-dominated and is the honest
+kernel-vs-kernel test. Both statements are true; only the second describes the kernels.
+
+**Where the 13× splits — worker sweep, ORT stable at 11.8–12.0 ms throughout as the canary:**
+
+| workers | Overfit | GFLOP/s | speedup |
+|---|---:|---:|---:|
+| 1 | 663.2 ms | 23 | 1.00× |
+| 4 | 256.4 ms | 60 | 2.59× |
+| 16 | 138.4 ms | 112 | 4.79× |
+| default (32) | 141.3 ms | 110 | 4.69× |
+
+Two independent problems, both large:
+1. **Per-core kernel: 23 GFLOP/s against a ~137 GFLOP/s single-core ceiling — 17% efficiency.**
+2. **Parallel scaling: 16 workers buy 4.79×, not ~14× — 30% efficiency.**
+
+**The most useful comparison is internal.** Our Q4_K prefill GEMM runs at 2.15 TFLOP/s over 32 threads
+≈ **134 GFLOP/s per core** — the same project, the same machine, ~6× the per-core efficiency of the conv
+GEMM. We demonstrably know how to write a competitive GEMM (it measured faster than llama.cpp's at equal
+ISA); the convolution path simply does not use that class of kernel. The techniques that paid there —
+register tiling, weight-stationary reuse, hoisting fixed per-block work, counting how often work repeats —
+have not been applied here at all.
+
+*Caveat before targeting a number:* VGG-16 is entirely 3×3 convs, where ORT's MLAS may use Winograd (a
+2.25× FLOP reduction), so its 1557 GFLOP/s is not necessarily 71% of the hardware ceiling in executed FLOPs.
+This repo measured Winograd as a **negative** (+79% on deepcnn) with its current infrastructure. Wall-clock
+is what matters, and wall-clock says 13×.
+
+#### ★★ PARALLEL im2col — VGG-16 141 → 73 ms, gap to ORT 13.2× → 6.3×
+
+The GEMM was already parallel; **the im2col patch gather never was**. On VGG-16 that gather is enormous —
+`conv1_2` alone materialises a `[576 × 50176]` matrix (115 MB) one scalar element at a time — and an Amdahl
+fit over the worker sweep put the serial fraction at ~15.5%, i.e. **~103 of the 138 ms at 16 workers**.
+`Im2Col` now fans out over `krow`: each row owns a disjoint `n`-element slice of `cols` and only reads the
+input, so no synchronisation is needed and the result is bit-identical. Gated below `K·N < 65536` so small
+convs keep the serial path; `OVERFIT_PARALLEL_IM2COL=0` restores it.
+
+| workers | before | after | |
+|---|---:|---:|---|
+| 1 | 663 ms | 668 ms | unchanged — the control: no work was added, only spread |
+| 4 | 256 | 226 | |
+| 16 | 138 | **87.7** | |
+| default (32) | 141 | **73.0** | 110 → **212 GFLOP/s** |
+
+Speedup over one worker **4.69× → 9.16×**; serial fraction **15.5% → 7.3%**. Parity unchanged
+(maxAbsDiff 6.7e-8, cosine 1.000000, same argmax), conv tests 56/0, suite 1499/0/232. The paired A/B run had
+ORT flat at 11.66 vs 11.75 ms as the canary.
+
+#### ▶ RETRACTED — there is no "~49 ms of serial work". Conv is simply 91% of the time
+
+The Amdahl fit above predicted ~49 ms of serial residue dominating at 32 workers. `OnnxGraphModel.ProfileNodes`
+(new, opt-in, the CNN counterpart of `PrefillProfiler`) measured it per operator instead:
+
+| operator | 32 workers | share | 1 worker |
+|---|---:|---:|---:|
+| **ConvLayer** (13 nodes) | **72.10 ms** | **90.7%** | 1557 ms |
+| MaxPool2DLayer (5) | 5.22 | 6.6% | 5.46 |
+| ReluActivation (13) | 1.92 | 2.4% | 1.70 |
+| LinearLayer (1) | 0.21 | 0.3% | 0.23 |
+| GlobalAveragePool2DLayer | 0.01 | 0.0% | 0.01 |
+
+MaxPool and ReLU *are* serial — they do not move between 1 and 32 workers — but together they are **7.1 ms,
+9% of the total, not 49 ms**. The Amdahl model overestimated the serial share by more than 6×, because a
+clean serial/parallel split does not describe this system: Conv's scaling is imperfect (21.6×), not absent,
+and imperfect scaling reads as "serial fraction" to that fit. **Treat Amdahl fits as a pointer, not a
+measurement — it was right that something was wrong, and wrong about what and how much.**
+
+**So the next lever is kernel quality, not parallelism.** Parallelising MaxPool + ReLU is real but capped at
+~1.1× overall.
+
+#### ★ im2col vs GEMM, and a FLOP-counting correction that changes the target
+
+`Conv2DGemmKernels.ProfileParts` (opt-in) + `ConvGemmPartProfileTests` split conv time on VGG-16:
+
+| part | per run | share of conv |
+|---|---:|---:|
+| im2col gather | 9.33 ms | 14.7% |
+| **GEMM** | **54.22 ms** | **85.3%** |
+
+So after parallelising the gather, **the micro-kernel is the target** — confirmed rather than assumed.
+
+**Correction to every VGG GFLOP/s figure above.** They used "15.5 GFLOPs/inference", which is the commonly
+quoted VGG-16 **MAC** count. Under this project's convention (MAC = 2 ops, matching `Throughput` and
+llama.cpp's `test-backend-ops`) VGG-16's conv layers are **30.7 GFLOP**. The earlier rates were understated 2×:
+
+| | time | GFLOP/s | % of the 2190 GFLOP/s ceiling |
+|---|---:|---:|---:|
+| our GEMM alone | 54.2 ms | **566** | **26%** |
+| whole model, Overfit | 73 ms | 420 | — |
+| whole model, ORT | 11.6 ms | **2647** | **121%** ⚠ |
+
+**ORT "achieves" 121% of this machine's measured float ceiling, which is impossible** — so it is executing
+fewer operations than the formula counts. That is direct evidence for the Winograd hypothesis flagged
+earlier: MLAS uses a FLOP-reducing transform on 3×3 convs (F(2,3) cuts FLOPs 2.25×). Corrected, ORT runs at
+roughly **1176 GFLOP/s ≈ 54% of ceiling**.
+
+**This reframes the gap: part of ORT's lead is algorithmic, not kernel craft.** Our GEMM at 26% against
+their ~54% is about **2×** of kernel-quality difference, with the rest coming from doing less work.
+
+#### ▶ REFUTED — the micro-kernel tile shape is NOT the problem; it is already at hardware peak
+
+The hypothesis was that `Mr=8 × Nr=8` is load-port bound (9 loads per 8 FMAs) and that a `6×16` tile would
+pay. `GemmMicroKernelShapeBenchmark` measured the candidate shapes single-threaded, accumulators in named
+locals, panels L1-resident:
+
+| shape (1 thread) | GFLOP/s | vs today |
+|---|---:|---:|
+| **AVX2 8×8 (today)** | **148** | 1.00× |
+| AVX2 6×16 | 182 | 1.23× |
+| AVX2 4×24 | 182 | 1.23× |
+| AVX-512 8×16 | 276 | 1.86× |
+| **AVX-512 8×32** | **337** | **2.27×** |
+| AVX-512 6×48 | 337 | 2.27× |
+
+**AVX2's single-core FMA peak is ≈138 GFLOP/s** (8 lanes × 2 ops × 2 FMA units × ~4.3 GHz), and the current
+shape measures **148** — it is already at the hardware ceiling, boost clock and all. The load-port argument
+was wrong: Zen 5 sustains those loads. Reshaping the AVX2 tile is worth ~1.2×, not the 4× the production
+deficit implies.
+
+**What this reveals instead.** The micro-kernel can do 148 GFLOP/s per core → ~2370 GFLOP/s across 16 cores.
+Production conv GEMM does **566 — 24% of what its own micro-kernel achieves when fed properly.** The kernel
+is fine; **everything around it is not**: B-panel packing, the memory traffic of a `[K, N]` im2col matrix
+(conv1_2's is 115 MB, far past any cache), and panel scheduling. That is the target, not the tile.
+
+AVX-512 is separately worth **2.27×** on the micro-kernel — but only to the extent production is
+compute-bound, and at 24% efficiency it plainly is not. Expect far less than 2.27× end to end.
+
+#### ▶ REFUTED AGAIN — packing is not it either. The micro-kernel is starved by the cache hierarchy
+
+Ablation inside `GemmNPanelWorker` (`AblatePackB` / `AblateMicroKernel`, measurement-only), VGG-16:
+
+| arm | ms/run | share |
+|---|---:|---:|
+| baseline (pack + micro) | 76.04 | 100% |
+| pack only | 27.61 | 36.3% |
+| micro only | 67.66 | 89.0% |
+
+Netting out the rest of the model (im2col 9.3, MaxPool+ReLU 7.1): **packing ≈ 11 ms, micro-kernel ≈ 51 ms.**
+The negative "unattributed" (−19 ms) is expected overlap — removing either side frees cache for the other —
+so both figures are upper bounds. Either way the micro-kernel dominates the GEMM, and the strided scalar
+pack, plausible as it looked, is the minority cost.
+
+**The one number that matters.** The same micro-kernel measures **148 GFLOP/s per core in isolation** and
+**~38 GFLOP/s per core in production** (51 ms for 30.7 GFLOP over 16 cores) — **4× slower running the same
+instructions.** The difference is the memory feed: `packB` is `K × Nr` floats, which at K=2304 is **73 KB
+against a 32–48 KB L1**, so every row-block re-streams the panel from L2, and the A rows (8 × K floats,
+another 73 KB) do the same. The isolation benchmark had both in L1, which is exactly why it hit peak.
+
+**So the target is K-blocking** — split the contraction so `packB` and the A slice fit L1. One caveat that is
+mine to state: the kernel's own comment records that a BLIS-style **K-blocked + A-packed** variant was tried
+and regressed (vgg 140 → 189 ms). That measurement predates the parallel im2col and bundled A-packing, whose
+one-time `O(M·K)` cost may have dominated it. It is not proof that K-blocking alone fails — and equally, not
+licence to repeat it blind. Measure the L1-residency effect on a single VGG layer shape first.
+
+#### ▶ REFUTED — K-blocking does not help either, and the prototype exposes where the loss really is
+
+`GemmKBlockingBenchmark` runs the full conv5_1 GEMM (M=512, K=4608, N=196) single-threaded at several
+contraction blocks. `Kc=4608` is today's unblocked kernel (144 KB packed panel); the rest bring it inside L1:
+
+| Kc | packed panel | ms | TFLOP/s |
+|---|---:|---:|---:|
+| **4608 (today)** | 144 KB | **6.99** | **0.13** |
+| 1152 | 36 KB | 7.24 | 0.13 |
+| 512 | 16 KB | 7.25 | 0.13 |
+| 256 | 8 KB | 8.00 | 0.12 |
+| 128 | 4 KB | 7.96 | 0.12 |
+
+**Unblocked wins.** Making the panel L1-resident is flat to slightly worse, so the L1-residency hypothesis is
+refuted and the earlier K-blocking negative is independently confirmed — this time without A-packing to
+confound it.
+
+**But the prototype answers a better question than the one asked.** It does everything production does —
+pack, micro-kernel, real memory — single-threaded at **132 GFLOP/s**, while production conv at one worker
+runs at **19.7 GFLOP/s** (30.7 GFLOP in 1557 ms). Same structure, **6.7× apart**. So the deficit is neither
+the tile, nor the pack, nor cache blocking: it is **shape-dependent**, and this prototype picked a shape
+where everything is fine (small N, large K).
+
+The suspicion now points at the early layers, where the arithmetic-to-overhead ratio inverts. `conv1_2` is
+M=64, K=576, **N=50176**: A (147 KB) is re-read for each of **6272 panels**, and the pack does one scalar
+branchy copy per FMA issued. **Next measurement: per-layer conv timing, not per-operator** — then each
+layer's achieved GFLOP/s against its own shape.
+
+**Four hypotheses refuted in a row on this path** — tile shape, packing, L1 blocking, and the "49 ms serial"
+model. Each cost minutes to measure; the rewrites they prevented would have cost days.
+
+#### ★★★ FOUND IT — A is re-read once per N-panel: 7.5 GB of traffic for 30.7 GFLOP of work
+
+The per-layer profile (`PerNodeProfileReport`) shows the conv layers are **uniform**, 347–581 GFLOP/s, with
+no outlier — so "the early layers are the problem" is refuted too. The shape table is where it shows:
+`GemmNPanelWorker` sweeps M *inside* the panel loop, so the whole A matrix is re-read **for every N-panel**.
+
+| layer | panels | A | A traffic |
+|---|---:|---:|---:|
+| conv2 | 6272 | 144 KB | 903 MB |
+| conv4 | 1568 | 576 KB | 903 MB |
+| conv6 / conv7 | 392 | 2304 KB | 903 MB each |
+| conv9 / conv10 | 98 | 9216 KB | 903 MB each |
+| others | | | ~2.1 GB |
+| **total** | | | **≈7.5 GB per inference** |
+
+**7.5 GB moved for 30.7 GFLOP computed = 0.24 bytes/FLOP**, where a well-blocked GEMM runs at ~0.01 — **24×
+more traffic than the arithmetic requires**. And it matches the clock: 7.5 GB in 73 ms is **103 GB/s**,
+against a measured 90 GB/s DRAM read ceiling (L3 is faster, but finite and shared by 16 cores).
+
+**The conv GEMM is bandwidth-bound on re-reading A** — which is why a single-threaded prototype hit
+132 GFLOP/s while production gets ~30 per core: one thread has the cache to itself.
+
+**Fix: block over N-panels.** Process a group of panels (e.g. 8 = 64 columns) and sweep M once per group,
+cutting A traffic by the group size — 7.5 GB → ~0.94 GB at 8 panels. This is the outer half of the standard
+Goto/BLIS structure, and it is the piece this kernel has never had.
+
+**Why every earlier hypothesis missed it:** tile shape, packing and K-blocking are all *within* one panel.
+The waste is *between* panels, which no measurement scoped to a single panel could see.
+
+#### ▶ REFUTED — N-panel grouping does nothing, and the traffic argument was wrong about *where*
+
+`Conv2DGemmKernels.NPanelGroup` (default **1**, `OVERFIT_CONV_PANEL_GROUP`) packs and sweeps several panels
+together so A is read once per group. Interleaved against an ORT canary (4% spread over the whole sweep):
+
+| group | 1 | 2 | 4 |
+|---|---:|---:|---:|
+| VGG-16 | 72.7 ms | 73.0 | 73.3 |
+
+0.8% apart — inside the noise. **The 7.5 GB figure was right; the conclusion drawn from it was not.** That
+traffic never reaches DRAM: this CPU has **128 MB of L3 (V-cache)**, so every layer's A (≤9 MB) is re-read
+from L3. Counting bytes without asking *which cache level serves them* is worthless.
+
+#### ★★ `Sources/MachineProbe` — a standalone hardware probe, and it explains both blocking failures
+
+A console app with **no reference to Overfit, no BenchmarkDotNet, no packages** — one file, `Stopwatch` only,
+so it can be run on a customer box, a CI runner or a cloud VM before anyone reads meaning into an Overfit
+number. `dotnet run -c Release --project Sources/MachineProbe`.
+
+On the 9950X3D:
+
+| peak FMA | 1 core | all cores | scaling |
+|---|---:|---:|---:|
+| 128-bit | 84 GF/s | 1336 | 15.8× |
+| 256-bit | **179** | **2310** | 12.9× |
+| 512-bit | 351 | 4200 | 12.0× |
+
+Memory: read **89.0 GB/s**, copy 74.0, triad 49.5.
+
+**Correction it forces:** the AVX2 single-core peak was *estimated* at 138 GF/s, which made the 148 GF/s
+micro-kernel look like it exceeded the hardware. Measured, the peak is **179** — the micro-kernel is at
+**83% of it**, still high, but the earlier claim was arithmetic, not measurement.
+
+**The working-set sweep is the real payload** (one core, sequential read):
+
+| 8 KB | 48 KB | 512 KB | 8 MB | 32 MB | 128 MB |
+|---:|---:|---:|---:|---:|---:|
+| 72.9 | 74.6 | 75.3 | 76.0 GB/s | 68.9 | 58.5 |
+
+**Flat from L1 to 8 MB.** One core reads ~75 GB/s *wherever the data lives* — for streaming access this
+machine has **no L1/L2/L3 cliff at all**, because the prefetcher keeps up.
+
+*The first version of that sweep was wrong and the conclusion drawn from it is withdrawn.* It used a single
+`Vector<float>` accumulator, so it measured the chain's **latency** (~75 GB/s, below every cache level's
+bandwidth) and produced a perfectly flat curve that appeared to prove "this machine has no cache cliff". With
+eight independent streams the structure appears — see below. The probe now lives in
+`Tests/Diagnostics/MachineProbeTests.cs` (xUnit, `ValueStopwatch`, asserts its own loops allocate 0 B).
+
+#### ★★★ WHY PARALLEL SCALING IS POOR — bandwidth stops scaling past ~2 MB per core
+
+| working set | 1 core | all cores | scaling |
+|---|---:|---:|---:|
+| 16 KB – 2 MB | ~76 GB/s | 700–900 GB/s | **9–12×** |
+| 8 MB | 67.3 | 112.8 | **1.7×** |
+| 32 MB | 64.4 | 67.6 | 1.1× |
+| 128 MB (DRAM) | 59.6 | 63.6 | 1.1× |
+
+**Compute scales 12–15×; bandwidth scales 10× only while the per-core working set fits private cache, then
+collapses to ~1×.** One core already draws 60% of total DRAM bandwidth; the other fifteen add 60%.
+
+The cliff lands exactly where **16 cores × 8 MB = 128 MB = this chip's L3 including V-cache** — the
+measurement validates itself against a number it was never given.
+
+**So any kernel that outruns private cache cannot be fixed by more cores or by blocking — only by needing
+fewer bytes per FLOP.** That reframes conv: the fix is arithmetic intensity, not scheduling.
+
+#### ★★ AVX-512 8×32 conv micro-kernel — VGG-16 72.7 → 63.7 ms (1.14×)
+
+An `Mr×Nr` tile loads `Mr+Nr` floats per k-step and performs `2·Mr·Nr` FLOPs, so intensity is
+`Mr·Nr / (2(Mr+Nr))`: **2.0 FLOP/byte at 8×8, 3.2 at 8×32**. AVX-512's 32 registers make 16 accumulators
+plus 2 B vectors and a broadcast fit. Interleaved A/B, three rounds, ORT canary within 2%:
+
+| | median | GFLOP/s |
+|---|---:|---:|
+| AVX2 8×8 | 72.7 ms | 422 |
+| **AVX-512 8×32** | **63.7 ms** | **482** |
+
+Parity exact in every round, conv tests 56/0, `OVERFIT_CONV_AVX512=0` falls back. **Gap to ORT 6.3× → 5.35×.**
+
+*Honest note on the model:* intensity predicted up to 1.6× and delivered 1.14×, so intensity is a real but
+not dominant term — do not extrapolate a further tile widening from it without measuring.
+
+**Machine identity, measured rather than reported** (`MachineProbeTests`): AMD Ryzen 9 9950X3D, **5.59 GHz**
+from a dependent-add chain — cross-checked against 5.53 GHz derived independently from the AVX2 FMA peak,
+agreeing to 1%.
+
+*Unexplained and therefore not built on:* the standalone driver measures 1564 ms at one worker where the
+BenchmarkDotNet sweep measured 668 ms — same variable, same box. The per-operator conclusion rests on the
+default-worker numbers, where the two agree (73 vs 79.5 ms); the single-worker column is indicative only.
+
+---
+
+<details>
+<summary>▼ Full chronological record of the perf track (preserved)</summary>
+
+### PREFILL — starting point: measured 3.76× behind llama.cpp, compute-bound
+
+**Measured 2026-07-22, same file (`qwen.q4km.gguf`), same 672-token prompt, best configuration on both sides:**
+
+| | prefill (pp672) | notes |
+|---|---:|---|
+| llama.cpp b10088 (built from `D:\llamacpp-tmp`, `/arch:AVX512`, 16 threads) | **541.7 ± 2.6 tok/s** | `llama-bench -p 672 -n 0 -r 3` |
+| Overfit (sidecar `.repack` present, 32 workers) | **144 tok/s** | `PrefillProfileTests` |
+| | **3.76×** | |
+
+**Not a thread-configuration artefact.** Worker sweep: 8 → 92, 16 → 122, 24 → 130, 32 (default) → 144 tok/s —
+monotonic, default is best. Prefill *scales* with cores, unlike decode (which has a cliff at
+`workers == procCount`). The gap is algorithmic.
+
+**This corrects the previous heading here, which read "the cheap CPU-perf levers are exhausted".** That was
+true of **decode** and was wrongly generalised to performance as a whole. The two paths are not alike:
+
+| path | gap to llama.cpp | why |
+|---|---|---|
+| decode | **1.13×**, uniform across context | memory-bound, sitting on the DRAM floor |
+| **prefill** | **3.76×** | compute-bound — there is no floor here |
+
+**The reference kernel is NOT tinyBLAS.** `ggml/src/ggml-cpu/llamafile/sgemm.cpp` contains no
+`GGML_TYPE_Q4_K` case at all. The Q4_K prefill path is `ggml_gemm_q4_K_8x8_q8_K` in
+`ggml/src/ggml-cpu/arch/x86/repack.cpp` (~1450 lines) — the same `block_q4_Kx8` repacked layout Overfit
+already uses. So this is not a missing algorithm; it is the same algorithm implemented far better.
+
+**Per-projection micro-bench (2026-07-22, `Q4KPrefillProjectionBenchmark`, 672 rows, real Qwen-3B shapes) —
+this REFUTED the first hypothesis written here, which claimed the tiled kernel "wins nothing":**
+
+| shape | Tiled | WeightStationary | ReDecodePerRow | Tiled 1-thread |
+|---|---:|---:|---:|---:|
+| `ffn_gate_up` (2048→11008) | **15.44 ms** | 53.62 ms | 86.55 ms | 169.3 ms |
+| `ffn_down` (11008→2048) | **17.27 ms** | 55.55 ms | 85.61 ms | 169.7 ms |
+| `attn_qo` (2048→2048) | **4.41 ms** | 11.85 ms | 20.64 ms | 32.2 ms |
+
+`GemmTiled` is **~3.2–3.4× faster than weight-stationary**, exactly as its own docs claim. It is a real GEMM
+and it already carries the FFN in production (a `.repack` sidecar sets `IsPrepacked`, which routes every
+bias-free projection through it).
+
+**So why did the 2026-07-21 end-to-end A/B tie at 0.999×?** Because that A/B only moved the *biased*
+projections — attention Q/K/V. Those are **88% of the dispatch count but only ~6% of the FLOPs**: Q is
+dispatched per head at 2048→128, while one FFN layer is 3 × 30.3 GFLOP. The tie was real and correctly
+measured; it simply measured the small projections. **Dispatch count is not work — always weight a path
+census by FLOPs before drawing a conclusion from it.**
+
+**The real gap is kernel throughput.** At 672 rows a projection is 30.3 GFLOP, so our best kernel runs at
+**≈1.9 TFLOP/s** (15.4 ms) against llama.cpp's **≈3.7 TFLOP/s** whole-model rate — a **~1.9× kernel gap**,
+not a missing algorithm. The residual beyond that is dispatch overhead in the per-head attention path, where
+the same activation matrix is re-quantized once per head.
+**The gap decomposes — measured, not assumed.** llama.cpp was rebuilt AVX2-only
+(`-DGGML_NATIVE=OFF -DGGML_AVX2=ON -DGGML_AVX512=OFF`, `D:\llamacpp-tmp\build-avx2`) and re-benched on the
+same file:
+
+| build | pp672 |
+|---|---:|
+| llama.cpp, AVX-512 | 539.9 tok/s |
+| llama.cpp, AVX2 only | 336.7 tok/s |
+| Overfit, AVX2 | 144 tok/s |
+
+**3.76× = 2.34× (kernel quality at equal ISA) × 1.60× (AVX-512).**
+
+This **refutes the ranking first written here**, which called AVX-512 "the most likely source of ~2×". It is
+the *smaller* factor. Porting the kernel to AVX-512 caps out at 1.60×; the larger 2.34× is available without
+touching the instruction set. Note also that the old "AVX-512 ≈ 0" result stands for **decode** (memory-bound,
+where wider SIMD cannot help by construction) — here it is worth 1.60×, so that negative genuinely does not
+transfer to compute-bound prefill.
+
+### Prefill component breakdown — measured 2026-07-22 (`PrefillProfiler`, first time in the project)
+
+Qwen-3B Q4_K_M, 672-token prompt, median of 3 (`PrefillProfileTests.Prefill_ComponentBreakdown`):
+
+```
+total/request : 4697.5 ms (143 tok/s)
+  attention   : 1595.7 ms  34.0%   (36 calls)
+  ffn         : 3000.8 ms  63.9%   (36 calls)
+    attn_kv   :  179.7 ms   3.8%   ( 72)
+    attn_q    :  624.1 ms  13.3%   (576)   <- per head
+    attn_scores: 263.9 ms   5.6%   (576)
+    attn_out  :  427.9 ms   9.1%   (576)   <- per head
+    ffn_gateup: 1222.5 ms  26.0%   ( 36)
+    ffn_down  : 1778.1 ms  37.9%   ( 36)   <- biggest single item
+  other       :  101.0 ms   2.1%
+```
+
+### ▶▶ THE NEXT LEVER: Q6_K has no batched prefill kernel
+
+`ffn_down` costs **more** than `ffn_gateup` while doing **half** the work (one 30.3 GFLOP projection vs two).
+Per layer that is 0.61 TFLOP/s against gate_up's 1.78 — a 2.9× efficiency gap that the micro-bench did *not*
+show (Tiled: 17.27 vs 15.44 ms). So production is not taking the same path. Cause, confirmed by dumping the
+GGUF tensor types:
+
+- **`ffn_down` is Q4_K ×18 + Q6_K ×18** (and `attn_v` likewise) — half the layers are Q6_K.
+- In `BatchedQuantProjection`, the Q6_K branch has **only `Q6KDotKernel.ProjectBatched`** (re-decode per row).
+  There is **no `ProjectBatchedWeightStationary` and no `GemmTiled` for Q6_K**, while Q4_K has both.
+- Arithmetic checks out: 18 layers × 17.3 ms (tiled) + 18 × X = 1778 ms ⇒ X ≈ 81.5 ms, and the micro-bench
+  measured `ReDecodePerRow` at 85.6 ms for that shape.
+
+**The repack layout for Q6_K already exists** (`Q6KRepack`, `RowsInterleaved = 8`, `Q6KGemvKernel.GemvParallel`)
+— it is wired for *decode* only. So this is filling a gap in an existing kernel family, not inventing one.
+
+**Estimated payoff: `ffn_down` 1778 → ~670 ms ≈ 1.1 s of 4.7 s (~23%), i.e. 143 → ~187 tok/s (1.31×).**
+An estimate, not a promise — Q6_K does more work per weight (6-bit vs 4-bit) than the Q4_K kernel it is
+modelled on.
+
+**Attack order, by value/risk rather than by ceiling:**
+
+| lever | ceiling | risk |
+|---|---|---|
+| **Q6_K batched prefill kernel** | ~1.31× | **low** — layout exists, structure copied from Q4_K |
+| AVX-512 port | 1.60× | high — intrinsics rewritten from scratch |
+| per-head attention (`attn_q` + `attn_out` = 22.4%, 576 dispatches each) | unknown | medium — dispatch restructuring |
+
+#### ✗ Q6_K weight-stationary — BUILT, MEASURED +13.5% SLOWER, REVERTED (2026-07-22)
+
+`Q6KDotKernel.ProjectBatchedWeightStationary` was written on the Q4_K model: unpack each super-block once
+into scratch, contract against a 64-row tile. Bit-identical (12/12 parity tests, including tile-boundary and
+no-bias cases). Measured on the real model:
+
+| component | before | after | Δ |
+|---|---:|---:|---:|
+| `ffn_down` | 1778.1 ms | **2018.0 ms** | **+13.5%** |
+| `ffn_gateup` *(canary)* | 1222.5 ms | 1247.5 ms | +2.0% |
+| `attention` *(canary)* | 1595.7 ms | 1616.7 ms | +1.3% |
+
+Canaries drifted 1–2%, `ffn_down` moved 13.5% — a real regression, reverted.
+
+**Two mistakes in the analogy, both worth remembering.** (1) Q4_K's weight-stationary hoists only the
+*scale/min* decode; the 4-bit nibble unpack still happens **in registers, per row**. I hoisted the entire
+6-bit unpack into a 256-byte stack buffer, so every row now stores and reloads it through L1 instead of
+consuming it from registers. (2) Inverting the loop order made activation reads strided (one 256-byte slice
+per row, 11 008 bytes apart) instead of streaming a row contiguously.
+
+**So the Q6_K gap is not closed by the obvious transform.** The right analogue to Q4_K's 3.3× is the *tiled*
+kernel over the repacked `block_q6_Kx8` layout — and `Q6KRepack` already produces that layout for decode.
+
+#### ✅ Q6_K tiled GEMM — SHIPPED, prefill 143 → 185 tok/s (1.29×)
+
+`Q6KGemvKernel.GemmTiled` unpacks each weight super-block once and holds it **in registers** across a tile of
+up to 16 activation columns — the opposite of the reverted weight-stationary attempt, which pushed the unpack
+through a stack buffer. Wired into `BatchedQuantProjection` via `DispatchTiledQ6K` (gate:
+`UseTiledPrefillQ6K && bias.IsEmpty && CanRepack && AVX2 && FMA`).
+
+| component | before | after | Δ |
+|---|---:|---:|---:|
+| `ffn_down` | 1778.1 ms | **713.6 ms** | **−59.9%** (2.49×) |
+| `ffn_gateup` *(canary)* | 1222.5 ms | 1242.3 ms | +1.6% |
+| `attention` *(canary)* | 1595.7 ms | 1571.5 ms | −1.5% |
+| **prefill total** | **4697.5 ms · 143 tok/s** | **3632.6 ms · 185 tok/s** | **−22.7% · 1.29×** |
+
+Canaries within ±1.6%, and an independent run of `PrefillPathAbTests` measured 186 tok/s. The estimate that
+motivated the work (1778 → ~670 ms, 143 → ~187 tok/s) landed almost exactly.
+
+**Correctness.** `Q6KTiledGemmParityTests` pins `GemmTiled` bit-identical to `GemvAvx2` per column (6 cases).
+End-to-end the first generated token is **576, unchanged** from before the kernel. Note this is *coherence*
+evidence, not byte-parity: the old path (`ProjectBatched`, non-repacked) associates the reduction differently
+from the repacked kernels, so outputs differ in the low bits — the same standard `OVERFIT_REPACK_ATTN` is held
+to.
+
+**Cost:** `Q6KWeight` has no prepacked-sidecar path, so `EnsureRepacked()` allocates a heap copy of the Q6_K
+tensors on first use. Worth revisiting if RAM matters more than TTFT.
+
+**Gap to llama.cpp: 3.76× → 2.93×.** Remaining, by measured share: `ffn_gateup` 34.2%, `attn_q` + `attn_out`
+28.9% (the per-head dispatches, 576 calls each), `attn_scores` 6.8%. AVX-512 (ceiling 1.60×) still last.
+
+#### ▶▶ NEXT LEVER (sized 2026-07-22): hoist activation quantization out of the per-head loop — ~18.8%
+
+`Q4KPrefillProjectionBenchmark.QuantizeActivationsOnly` measures Q8_K quantization of `672 × 2048`
+activations at **~1.0 ms**. Against the profile:
+
+| | dispatches over `hidden` | quantization cost | actually needed |
+|---|---:|---:|---:|
+| `attn_q` (621.7 ms / 576 calls = 1.079 ms) | 576 | ~576 ms | — |
+| `attn_kv` (181.4 ms) | 144 | ~144 ms | — |
+| **total** | **720** | **~720 ms** | **36** (once per layer) |
+
+So **~93% of a Q-head dispatch is activation quantization** — the projection itself is 2048→128, roughly
+0.08 ms. `hidden` is loop-invariant across heads, so the same matrix is quantized 16× per layer. `attn_out`
+is NOT affected: its input is the per-head `attn` band.
+
+**Recoverable ≈ 684 ms of 3632.6 ms ≈ 18.8% → prefill 185 → ~228 tok/s.**
+
+Decode already fixed exactly this in 2026-05 (`ProjectPreQuantized`, "hidden was re-quantized per head, now
+quantized once per layer"); the batched prefill path never got the equivalent.
+
+#### ✅ SHIPPED — shared activation quantization: 185 → 194 tok/s (1.05×), but 3.3× short of the estimate
+
+`BatchedQuantProjection.Dispatch` takes optional pre-quantized Q8_K scratch;
+`CachedMultiHeadAttention.DecodeBatchedQuant` quantizes `hidden` once per layer and passes it to every Q/K/V
+dispatch. Q4_K and Q6_K share the Q8_K format bit-for-bit, so one buffer serves all three.
+
+| component | before | after | Δ |
+|---|---:|---:|---:|
+| `attn_q` | 621.7 ms | **456.5 ms** | −26.6% |
+| `attn_kv` | 181.4 ms | **139.3 ms** | −23.2% |
+| `ffn_gateup` *(canary)* | 1242.3 ms | 1211.0 ms | −2.5% |
+| `attn_out` *(canary)* | 427.4 ms | 427.7 ms | +0.1% |
+| **prefill total** | **3632.6 ms · 185 tok/s** | **3462.3 ms · 194 tok/s** | **−4.7% · 1.05×** |
+
+**The estimate said ~684 ms; the measurement says ~207 ms — 3.3× optimistic.** Cause: the sizing benchmark
+timed quantization of a 672×2048 block **in isolation** (~1.0 ms), i.e. reading 5.5 MB cold. In production
+the 16 repeats run back-to-back on a cache-resident `hidden`, so the redundant passes were far cheaper than
+the isolated measurement implied. **Lesson: an operation benchmarked alone over-states its cost when the
+thing you are removing is a repeat on hot data — size the repeat, not the first call.**
+
+#### ✅ SHIPPED — whole-matrix O projection: 194 → 219 tok/s (1.13×)
+
+Per head the O projection is `[headDim → dModel]`, and **headDim (128) is not a multiple of the 256-element
+Q4_K super-block**, so `CanRepack` is false and all 16 dispatches per layer were stuck on the
+weight-stationary kernel. The whole matrix is `[nHeads·headDim → dModel]` = 2048 wide, which *does* repack.
+`BlockWeights.WoWhole` was already loaded **zero-copy from the mmap** (and prepacked when a sidecar exists),
+so this costs no extra RAM — it only needed the per-head bands concatenated before one dispatch.
+
+| component | before | after | Δ |
+|---|---:|---:|---:|
+| `attn_out` | 427.7 ms / 576 calls | **109.6 ms / 36 calls** | **−74.4%** (3.9×) |
+| `attn_q` *(canary)* | 456.5 ms | 459.1 ms | +0.6% |
+| `ffn_gateup` *(canary)* | 1211.0 ms | 1222.7 ms | +1.0% |
+| **prefill total** | **3462.3 ms · 194 tok/s** | **3068.5 ms · 219 tok/s** | **−11.4% · 1.13×** |
+
+**Gate on `WoWhole.IsQ4K`, NOT `HasWholeAttnQ4K`.** The latter also demands Q/K/V, and under Q4_K_M `attn_v`
+is Q6_K in half the layers — so the four-way gate enabled this in only 18 of 36. The measurement caught it:
+`attn_out` reported **306 calls** (18 layers × 16 heads + 18 × 1) instead of 36, and fixing the gate roughly
+doubled the win.
+
+Contracting all heads inside one matmul reassociates a sum the per-head path does in head order, so
+`useWholeO` also honours `DisableRepackedKernelsForParity` — without that the batched-vs-single-token parity
+test can never reach its 1e-2 bound.
+
+#### ✅ MEASURED — biased projections on the tiled kernel: 220 → 249 tok/s (1.13×)
+
+`GemmTiled` gained the optional bias again (it folds into the final store; the no-bias path keeps two
+separate store loops so its bit-identity is untouched), and `bias.IsEmpty` came out of the Q4_K tiled gate.
+
+**On its own that changed nothing — `attn_q` moved 459.1 → 463.9 ms, a tie for the second time.** The reason
+was not the shape and not the bias: per-head Q/K/V weights are *slices* of the tensor the `*.gguf.repack`
+sidecar covers, so `IsPrepacked` is false for them, and `OVERFIT_TILED_PREFILL` was unset — the gate
+`(IsPrepacked || UseTiledPrefillQ4K)` failed before `bias.IsEmpty` ever mattered. **The same dead-flag trap
+as 2026-07-21. Check that the path is taken before concluding the kernel does not help.**
+
+With `OVERFIT_TILED_PREFILL=1`:
+
+| component | before | after | Δ |
+|---|---:|---:|---:|
+| `attn_q` | 463.9 ms | **171.3 ms** | **−63%** (2.7×) |
+| `attn_kv` | 140.5 ms | **80.3 ms** | −43% |
+| `ffn_gateup` *(canary)* | 1208.5 ms | 1214.2 ms | +0.5% |
+| **prefill total** | **3056.4 ms · 220 tok/s** | **2699.6 ms · 249 tok/s** | **1.13×** |
+
+Parity green in BOTH configurations: reference path `maxAbsLogitDiff = 0`, fast path agrees on the token.
+
+**Not enabled by default — it costs RAM.** The flag makes `EnsureRepacked()` allocate a heap copy for every
+repackable Q4_K weight that the sidecar does not cover, i.e. all ~600 per-head Q/K/V slices (~100 MB on
+Qwen-3B). **The zero-RAM version is whole-matrix Q/K/V**: `WqWhole` / `WkWhole` / `WvWhole` are already loaded
+zero-copy from the mmap and prepacked by the sidecar, exactly like `WoWhole` — so the same gather/scatter
+refactor that landed for O would buy this win without the allocation. That is the next build.
+
+#### ✅ SHIPPED — whole-matrix Q: 249 tok/s at ZERO extra RAM
+
+One `[dModel → nHeads·headDim]` projection replaces 16 per-head ones, then each head gathers its columns
+(and adds its own bias, since `BlockWeights` keeps the Q bias per head and there is no concatenated form).
+
+| component | per-head | whole-matrix | Δ |
+|---|---:|---:|---:|
+| `attn_q` | 463.9 ms / 576 calls | **103.8 ms / 36 calls** | **−78%** (4.5×) |
+| **prefill total** | **3056.4 ms · 220 tok/s** | **2695.8 ms · 249 tok/s** | **1.13×** |
+
+**This is the same 249 tok/s the `OVERFIT_TILED_PREFILL=1` experiment produced, without its ~100 MB** —
+`WqWhole` is mmap'd zero-copy and covered by the sidecar, so it is prepacked without allocating anything.
+It also beats the flag on the component itself (103.8 vs 171.3 ms): one large matmul wins over sixteen small
+ones even on the same kernel.
+
+**No parity gate needed here, unlike whole-matrix O.** O contracts over `nHeads·headDim` and therefore
+reassociates a sum the per-head path performs in head order; Q's contraction is over `dModel` in both
+shapes, so every output element is the same dot product either way.
+
+#### 📖 READ — how llama.cpp's `ggml_gemm_q4_K_8x8_q8_K` differs from ours
+
+`D:\llamacpp-tmp\ggml\src\ggml-cpu\arch\x86\repack.cpp:2042`. Four variants:
+
+| ISA | tile (act rows × out cols) | accumulators |
+|---|---|---|
+| AVX-512 main | 16 × 16 | `__m512 acc_rows[16]` + `acc_min_rows[16]` = 32 ZMM |
+| AVX-512 tail | 4 × 16 | 8 ZMM |
+| AVX2 main | 16 × 8 | `__m256 acc_rows[16]` + `[16]` |
+| AVX2 tail | 4 × 8 | 8 YMM |
+| **ours (`GemmTiled`)** | **`cols` × 8** | **5 `stackalloc` spans of length `cols`** |
+
+Differences, in order of likely cost:
+
+1. **Constant vs runtime accumulator index.** Theirs are `acc_rows[0]`…`[15]` with fully unrolled updates
+   (lines 2789-2792, 3464-3467 are four explicit FMAs, not a loop), so the compiler register-allocates and
+   spills selectively. Ours are indexed by a runtime `c`, so every access is a stack read/write **and** a
+   bounds check — register allocation is impossible, not merely unlucky. Note their AVX2 path declares 32
+   `__m256` against 16 YMM, so it spills too and is still fast: the win is *selective* spilling.
+2. **Five accumulator arrays to their two.** `accRow`, `accMin`, `iaccB`, `iaccMinB`, `q8s` — 40 vectors of
+   stack traffic per iteration at `cols=8`.
+3. **Activations are repacked too** (`block_q8_Kx4`, four rows interleaved), so one load feeds four rows.
+   That is why their row tile is always a multiple of 4. Ours loads each column separately.
+4. AVX-512 is a consequence of (1), not an independent lever: 32 ZMM is what makes the 16×16 tile fit.
+
+#### ✗ ATTEMPTED — unrolled fixed-tile specialisation: INCONCLUSIVE, reverted
+
+A `cols == 4` specialisation with named accumulators was written and passed parity — **but was never
+executed**: the dispatcher picks `nr = rows/8 >= cores ? 8 : 4`, which is 8 at 672 rows on 32 cores. That is
+the **third** unreached-path mistake in one day (after the dead `OVERFIT_TILED_PREFILL` flag and the
+`IsPrepacked` gate hiding the bias change).
+
+Retargeting it to 8 columns by regex-rewriting the existing kernel text produced **incorrect code** —
+duplicate unrolled bodies (the generator reported 11 where 8 were expected, and I proceeded anyway), parity
+failed at `cols: 8`, and the kernel ran 7-9× slower (70-83× single-threaded). Reverted.
+
+#### ✗ TESTED AND REFUTED — register pressure is not the bottleneck
+
+Register accounting first, since it reframes the task: **AVX2 has 16 YMM registers**, and the kernel keeps
+**16 decoded weight vectors** live across the column loop plus 3 hot accumulators per column — 40 vectors
+wanted at `cols=8`. Naming the accumulators cannot help, because they have nowhere to go. (This also explains
+why llama.cpp's own AVX2 path spills: it declares 32 `__m256`.)
+
+That analysis produced a concrete, small change instead: the low-nibble weight vectors feed only `iacc0` and
+the high-nibble ones only `iacc1`, so they are never needed simultaneously. **Splitting the sub-block into
+two half-passes over the columns halves peak weight pressure from 16 vectors to 8** — bit-identical (parity
+5/5), and the only thing it changes is register lifetime.
+
+**Measured: a tie.** Single-thread is the low-noise signal (StdDev ~1%) and it did not move —
+`ffn_gate_up` 167.8 → 168.9 ms, `attn_qo` 31.7 → 32.1 ms, i.e. marginally *worse*. The parallel column showed
+`attn_qo` −12.7%, but that sits inside the run-to-run spread of that measurement (5050 / 5217 / 4408 µs
+across runs) and the FFN shapes — 71% of prefill — did not move at all. Reverted.
+
+**So spilling is not what costs us.** The remaining structural difference to llama.cpp is the one that
+reduces *loads*, not register pressure: `block_q8_Kx4` interleaves four activation rows so one load feeds
+four of them, where we issue four `BroadcastLo` per column. That is the next thing to size — and it is a
+change to the activation-quantization output layout, not to the kernel's register allocation.
+
+#### ★ LIKE-FOR-LIKE KERNEL COMPARISON — our Q4_K matmul is FASTER than llama.cpp's
+
+Everything above compared whole-model tok/s and *inferred* the kernel difference. That inference was wrong.
+llama.cpp's own `test-backend-ops perf -o MUL_MAT` (AVX2 build, 32 threads — it uses
+`std::thread::hardware_concurrency`) reports for `q4_K m=4096 k=14336 n=512`, 60.13 GFLOP/run:
+
+| | time | TFLOP/s |
+|---|---:|---:|
+| llama.cpp | 38 559 µs | **1.56** |
+| **Overfit `GemmTiled`** (same shape, 32 workers) | **35 308 µs** | **1.70** |
+
+**Ours is 1.09× faster**, and ~1.91 TFLOP/s with the activation quantization (3 750 µs) excluded.
+**So the Q4_K matmul is not where we lose.** Two earlier conclusions are retracted: the "2.34× kernel craft
+at equal ISA" attribution, and the register/interleaving hypotheses built on top of it.
+
+**The unexplained part, restated honestly.** Prefill FLOPs are ≈3.72 TFLOP (36 layers; the LM head runs on
+the last position only). Ours: 2.695 s = 1.38 TFLOP/s. Theirs (AVX2): 1.996 s = 1.86 TFLOP/s. Our own split:
+
+| | time | FLOPs | TFLOP/s |
+|---|---:|---:|---:|
+| FFN | 1923 ms | 3.27 T | **1.70** |
+| attention projections | 662 ms | 0.45 T | **0.68** |
+| other | 110 ms | — | — |
+
+Our FFN already matches the isolated kernel rate. **Attention runs at 0.4× the FFN's efficiency** — that is
+where the FLOP throughput collapses, and it is 25% of prefill.
+
+Also unresolved: their production run (`llama-bench`) chose **16 threads** and beat a 32-thread
+`test-backend-ops`, so thread count is worth re-sweeping on our side too. The last worker sweep
+(8→92, 16→122, 24→130, 32→144 tok/s) predates every optimisation since and may no longer hold at 249 tok/s.
+
+#### ★ MACHINE ROOFLINE — measured, in-repo (`MachineRooflineBenchmark`)
+
+Every kernel figure above was a bare number. These are the ceilings that make them readable
+(32 workers, AVX2). Rates are derived by `Helpers/WorkAmount.cs` + `Helpers/ThroughputColumn.cs`,
+declared next to each benchmark — *not* in a script, after an out-of-repo script credited a
+quantization-only benchmark with the matmul's FLOP count and reported a fictitious 29.6 TFLOP/s.
+
+| ceiling | measured |
+|---|---:|
+| peak float FMA | **2.19 TFLOP/s** |
+| peak int8 dot (`vpmaddubsw`+`vpmaddwd`) | **11.21 TOPS** |
+| DRAM read | **89.9 GB/s** |
+| copy | 73.0 GB/s |
+| STREAM triad | 47.3 GB/s |
+
+**Where our Q4_K GEMM (1.70 TFLOP/s) actually sits:** 15% of the integer ceiling, **78% of the float
+ceiling**, and 1% of DRAM bandwidth (33 MB of weights in 35.3 ms = 0.94 GB/s). So the kernel is neither
+memory-bound nor integer-issue-bound — **it is bound by the float side of dequantization** (scale
+multiplication and int32→float conversion of the accumulators). That is also why llama.cpp's AVX-512
+build wins 1.60×: AVX-512 doubles both ceilings.
+
+**Decode, for the first time with a number under it:** Qwen-3B Q4_K (~1.9 GB) at 24.4 tok/s consumes
+≈46 GB/s against an 89.9 GB/s read ceiling. The long-standing "decode is at the DRAM floor" conclusion
+was previously reasoning only; it now has a measurement.
+
+*Benchmark trap paid for here:* the first version put the accumulator chains in a `stackalloc` span and
+measured a float peak of **0.79 TFLOP/s** — below the 1.70 our real matmul achieves, which is impossible
+for a loop that touches no memory. The span forced an L1 round-trip per accumulator per iteration.
+Constant-index named locals are what keep a value in a register.
+
+#### ▶ NEGATIVE — prefill worker sweep: llama.cpp's 16-thread choice does not transfer
+
+llama.cpp's `llama-bench` picks 16 threads over the machine's 32 and beats a 32-thread
+`test-backend-ops`, so our worker count was re-swept at 249 tok/s (the previous sweep predated every
+optimisation in this section). More workers still wins for us; there is nothing to take here.
+
+| workers | 8 | 12 | 16 | 24 | 31 | 32 (default) |
+|---|---:|---:|---:|---:|---:|---:|
+| prefill | 151 | 197 | 218 | 209 | 238 | **246** |
+
+#### ▶ attn_scores — load-balanced query order: real but 6× smaller than predicted
+
+`OverfitParallel.For` splits its range into **contiguous** chunks, but under the causal mask query `i`
+attends over `basePos+i+1` keys, so work grows linearly with the index. On a 672-token prefill across
+32 workers, worker 0 got rows 0-20 (≈231 dot products) and worker 31 rows 651-671 (≈13 902).
+`BatchedAttentionKernel.BalancedQueryIndex` now pairs slot `2k`→query `k` with slot `2k+1`→query
+`rows-1-k`, so every consecutive pair costs `rows+1` wherever it lands. Bit-identical (queries are
+independent; nothing is reduced across them), zero cost, `OVERFIT_BALANCED_ATTN=0` disables it.
+
+ABAB-interleaved, 3 rounds, best-of-N, untouched FFN as the canary:
+
+| component | baseline | balanced | ratio |
+|---|---:|---:|---:|
+| **attn_scores** | 275.5 ms | **244.9 ms** | **1.12×** |
+| attn_q (canary) | 105.4 | 105.6 | 1.00× |
+| ffn_down (canary) | 725.4 | 722.2 | 1.00× |
+| total/request | 2793.4 | 2768.5 | 1.01× |
+
+Kept — clean separation across all three rounds, canaries flat. But **the prediction was 1.97× and the
+measurement was 1.12×**, so the model behind it was wrong: chunk imbalance is a real cost but not what
+dominates this kernel. Worth recording as the correction, because the same "longest chunk sets the
+duration" reasoning would misprice the next scheduling change too.
+
+**What the profile actually says about attn_scores.** Per head-layer the causal QK plus softmax·V is
+≈115.7 MFLOP; across 16 heads × 36 layers that is **66.6 GFLOP in 244.9 ms = 0.27 TFLOP/s** — **12% of
+this machine's 2.19 TFLOP/s float ceiling**, and 6× below our own Q4_K GEMM. Keys per head are 344 KB,
+so this fits L2 and is not bandwidth-bound. The kernel itself (`CachedAttentionKernel.ComputeSingleHead`,
+reached one query at a time) is the open question — that, and the float side of Q4_K dequantization, are
+the two measured candidates left.
+
+#### ★ AVX-512 GO/NO-GO GATE — PASSED, the port is worth writing
+
+Our Q4_K GEMM sits at 78% of the 256-bit float ceiling and FFN is 69% of prefill, so the only way to move
+the dominant cost is to raise the ceiling. Before writing any kernel, `MachineRooflineBenchmark` was
+extended with `Vector512` variants to check whether this silicon actually delivers the wider ceiling.
+This was a real risk: Zen 4 double-pumps 512-bit ops through a 256-bit datapath (~1.1×) and many Intel
+parts drop clocks under 512-bit load, either of which would have killed the plan.
+
+Box: **AMD Ryzen 9 9950X3D** (Zen 5), 16 physical / 32 logical, AVX-512 F+BW+CD+DQ+VL + VNNI + VBMI + IFMA.
+
+| ceiling | 256-bit | 512-bit | gain |
+|---|---:|---:|---:|
+| float FMA | 2.20 TFLOP/s | **4.15** | **1.89×** |
+| int8 dot | 11.16 TOPS | **22.87** | **2.05×** |
+
+Zen 5 has the full 512-bit datapath and the measurement shows it — essentially the theoretical 2×, with no
+visible clock penalty. **Our 1.70 TFLOP/s GEMM is 78% of the 256-bit ceiling but only 41% of the 512-bit
+one.** If the port preserves utilisation, FFN 1923 ms → ~1000 ms and prefill 2769 → ~1850 ms ≈ **373 tok/s**,
+which would be *above* llama.cpp's AVX2 build (336.7) and 1.45× off their AVX-512 (541.7).
+
+Two notes. **AVX-512 VNNI is present**: `vpdpbusd` collapses the `vpmaddubsw`+`vpmaddwd`+`add` triple our
+kernel issues into one instruction — a second-order lever here since the kernel is float-bound, but it is
+what llama.cpp uses. And the existing **"AVX-512 decode port" negative does not transfer**: decode is
+memory-bound (measured today at ~46 GB/s against an 89.9 GB/s ceiling), where wider vectors buy nothing;
+prefill is compute-bound and pinned against the float ceiling.
+
+Next: port `Q4KGemvKernel.GemmTiled` (ffn_gate_up, attn_q/o), then `Q6KGemvKernel.GemmTiled` (ffn_down) —
+parity test first, then measure. Dispatch at run time through `CpuFeatures.HasAvx512`, never at compile
+time: `Cli.csproj` pins `IlcInstructionSet=avx2` and the AOT build must keep running on machines without it.
+
+#### ★ RETRACTION + the kernel's real ceiling
+
+**Retracted: "our Q4_K GEMM runs at 78% of the float ceiling."** That divided *logical* MACs by the
+*floating-point instruction* ceiling, but the kernel performs one `vpmaddubsw` per **32** MACs and issues
+only ~6 float ops per column per block against ~160 integer/shuffle ops. Against the ceiling that actually
+applies it sits at **15% of 11.2 TOPS**, not 78%. The AVX-512 recommendation survives the correction, but
+its stated reason ("the ceiling is too low") was wrong — the real problem is instructions issued per MAC.
+
+`MachineRooflineBenchmark` now measures the ceiling **for this kernel's instruction mix** — the eight-
+statement `iacc0` block verbatim, `Blend` + two lane shuffles + `vpmaddubsw` + `Add` — rather than an
+idealised dot chain:
+
+| | TFLOP/s |
+|---|---:|
+| idealised int8 chain (3 instructions / 32 MACs) | 11.2 |
+| **kernel's instruction mix, 4 live accumulators** | **4.63** |
+| same mix, 512-bit | 7.71 |
+| **our real GEMM** | **1.70** |
+
+So the shuffles cost 2.4× against the idealised chain, and we then reach only **37% of our own mix's
+ceiling**. That residual 2.7× is not arithmetic — it is loads, weight decode, the float tail, and spills.
+
+**NEGATIVE — register pressure is not the explanation.** The suspicion was that `GemmTiled`'s `stackalloc`
+accumulator spans spill: at four columns it holds `accRow`+`accMin` (8 vectors, live across the block loop),
+`iaccB`+`iaccMinB` (8, across the sub-block loop) and `iacc0`+`iacc1` (8) — 24 vectors before a single
+weight, against 16 ymm registers. Probing it with `IntegerDotChains`' body at 12 vs 16 chains (12+3
+constants fit ymm, 16+3 do not; both fit 512-bit's 32 zmm):
+
+| live accumulators | 256-bit | 512-bit |
+|---|---:|---:|
+| 12 (fits ymm) | 11.50 | 23.52 |
+| 16 (exceeds ymm) | **14.99** | 24.19 |
+
+Sixteen chains are **30% faster** at 256-bit, not slower — more independent chains cover latency better and
+any spill hides behind the surrounding work. **There is no register cliff, and the "de-spill first" plan is
+dropped.**
+
+An earlier version of this probe reported the opposite (−41% at 256-bit, and 512-bit falling *harder* than
+256-bit, which cannot be true if the larger file helps at all). It routed each step through a helper taking
+five vector parameters; once the statements were written inline the effect vanished entirely. The tell was
+the impossible 512-bit ordering — treat that shape of result as a broken benchmark, not a discovery.
+
+**Still unexplained: 1.70 actual vs 4.64 for its own instruction mix, a 2.7× residual.** The mix benchmark
+models only the eight `iacc0` statements. Ablating the three pieces it omits, inside the real kernel
+(`Q4KGemvKernel.Ablate*` — measurement-only toggles, default off), on `ffn_gate_up` at 672 rows:
+
+| ablation | mean | vs `Tiled` |
+|---|---:|---:|
+| `Tiled` (baseline) | 15.567 ms | — |
+| no F16 scale/min decode | 13.701 ms | **−12.0%** |
+| no scalar `Unpack` of 6-bit scales | 15.016 ms | −3.5% |
+| no nibble `And`/shift | 15.679 ms | +0.7% (tie) |
+
+Error bars are ±1.0–1.1 ms on ~15 ms (≈7%), so only the F16 result clears the noise, and barely; the other
+two sit inside it. **Together they bound at ~15% and do not explain a 2.7× residual (≈63% of runtime).**
+
+The one thing the mix benchmark did not model at all is **memory traffic** — it ran on register constants.
+The real kernel issues 8×32 B weight loads per sub-block (12.7 MB streamed per projection), per-column
+activation loads, and span-backed accumulator accesses. That is the remaining suspect, and it is untested.
+
+**NEGATIVE — the F16 decode's 12% is the scalar conversions, not the memory round-trip.**
+`LoadF16x8Rearrange` used to store its shuffled vector to `stackalloc` and immediately re-read it as eight
+`ushort`s — textbook store-to-load forwarding stall. Extracting the lanes from the register with `pextrw`
+instead measured **15,269 µs vs 15,567 µs, i.e. −1.9% against ±7% noise: a tie**, with the ablation floor
+unchanged at 11.9%. The round-trip was free; the eight scalar `Half`→`float` conversions are the cost.
+
+Capturing it therefore means *eliminating* the conversions, not speeding them up: store the scales as **f32 at
+repack time**. `block_q4_Kx8` is our own layout, so this is available — +32 B on a 1152 B block (**+2.8%
+weight RAM for 12%**), at the price of a `.gguf.repack` sidecar format change. Note x86 could do this in one
+`vcvtph2ps`, but .NET exposes neither an `F16C` intrinsic class nor a `Half` overload of `Vector128.Widen`.
+
+#### ★★ THE WEIGHT STREAM IS READ 84 TIMES PER PROJECTION — no cache blocking exists
+
+Applying the standard model (Goto & van de Geijn, *Anatomy of High-Performance Matrix Multiplication* — the
+GotoBLAS/BLIS scheme, where block sizes are derived from cache sizes: an `mr×nr` tile of C in registers, a
+`kc×nr` panel of B in L1, an `mc×kc` block of A in L2, a `kc×n` panel of B in L3) exposes what the profiling
+missed all day:
+
+`GemmTiled` receives **8 columns** and walks the **entire** weight matrix. The dispatcher splits 672 rows
+into tiles of 8, so **84 tiles each stream all 12.68 MB** of `ffn_gate_up`'s weights:
+
+    84 × 12.68 MB = 1.07 GB per projection, in 15.27 ms = ~70 GB/s
+    measured DRAM read ceiling = 90 GB/s
+
+Our tiling is a *register* tile (`MaxTileCols`) only — there is **no L2/L3 blocking level at all**. This is a
+candidate for the whole remaining 1.56× residual, and unlike everything else on the list it is a structural
+fix with a textbook algorithm behind it.
+
+**Measured — the traffic argument holds, then breaks on parallel granularity.** `ffn_gate_up`, two runs each,
+agreeing on ordering:
+
+| tile | passes | 672 rows | 1024 rows |
+|---|---:|---:|---:|
+| NR=4 | rows/4 | 17.8 ms · 1.70 | 27–29 ms · 1.66 |
+| NR=8 | rows/8 | **15.2–15.9 ms · 1.95** | 23.7–24.5 ms · 1.92 |
+| NR=16 | rows/16 | 16.5–17.0 ms · 1.80 | **22.7–23.0 ms · 2.02** |
+
+Halving the traffic 4→8 buys **+17%** exactly as predicted. Halving it again 8→16 *loses* **8%** at 672 rows,
+because 42 tiles over 32 cores leaves ten workers with two and twenty-two with one — a 1.52× imbalance
+against 1.14× at NR=8. At 1024 rows there are enough tiles again and the wider tile wins by 4–7%.
+
+So `ResolveTileCols` now takes the widest tile that still gives **~2 tiles per core**, not one. That
+reproduces NR=8 at 672 (no change to the profiled prompt, prefill stays 249 tok/s) and switches to NR=16 from
+~1024 rows — a real gain for long prompts. The ≥1024 branch was measured rather than reasoned, because six
+mechanism hypotheses were refuted the same day.
+
+#### ▶ NEGATIVE — output-row banding (the "missing L2 blocking level") is 20% SLOWER
+
+Implemented as `BatchedQuantProjection.UseOutputBlocking` (default **off**, kept as the record): parallelise
+over bands of output groups instead of column tiles, so each worker owns an L2-sized slice of the weight
+matrix and re-reads it from its own cache for every column tile. `Q4KGemvKernel.GemmTiled` gained
+`groupStart`/`groupCount` for this. Two runs, agreeing:
+
+| arm | run 1 | run 2 | TFLOP/s |
+|---|---:|---:|---:|
+| **Cols8 (today's production)** | **14.91 ms** | **15.06** | **2.02** |
+| Banded16 | 16.72 | 16.04 | 1.85 |
+| Cols16 | 17.10 | 16.89 | 1.78 |
+| **Banded8** | **18.21** | **17.81** | **1.68** |
+
+**And this refutes the traffic story that motivated it.** Banding removes 84× of the weight re-reads; if that
+traffic were the constraint it had to show. It did not — this chip's 128 MB L3 (V-cache) holds the whole
+12.7 MB matrix, so those re-reads were never going to DRAM in the first place.
+
+**Unified explanation that fits every measurement taken today.** The per-block fixed work — F16 scale decode
+(ablated at **12%**), scalar `Unpack` (**3.5%**), nibble unpack (~0%) — is amortised across the columns in a
+tile. At NR=8 that is ~15% of runtime; at NR=4, ~30%; at NR=16, ~7.5%. Predicted 4→8 gain
+`1.30/1.15 = 1.13×` against **1.17× measured**; predicted 8→16 gain `1.15/1.075 = 1.07×`, overwhelmed by the
+1.52×/1.14× imbalance shift, against **−8% measured**. No bandwidth term is needed anywhere.
+
+**So the lever is to delete the fixed work, not to move the data.**
+
+#### ★ WIN — hoisting the F16 scale decode: prefill 249 → 256 tok/s
+
+`GemmTiled` decodes each block's F16 scale/min pair inline, which reads as amortised — but the kernel runs
+**once per column tile**, 84 times at 672 rows and NR=8, so every pair is widened 84 times over.
+`Q4KGemvKernel.DecodeBlockScales` now widens them once per projection into a pooled scratch
+(`BatchedQuantProjection.UsePrecomputedScales`), which the tiles share. Bit-identical — same conversions,
+fewer of them — and it needs **no format change and no extra weight RAM**, unlike storing f32 in
+`block_q4_Kx8` (+2.8% permanently, and every `.gguf.repack` sidecar invalidated).
+
+| arm (672 rows, `ffn_gate_up`, two runs) | run 1 | run 2 | TFLOP/s |
+|---|---:|---:|---:|
+| **hoisted, NR=8** | **13.88 ms** | **13.60** | **2.21** |
+| ablation floor (decode removed entirely) | 14.45 | 14.31 | 2.11 |
+| NR=8 baseline | 15.91 | 15.21 | 1.95 |
+| hoisted, NR=16 | 16.66 | 17.05 | 1.80 |
+| NR=16 baseline | 18.01 | 17.87 | 1.69 |
+
+**+13% at NR=8** — faster than the ablation floor, because ablation still built a constant vector and took the
+branch, so the full 12% was recovered and a little more.
+
+**The amortisation theory predicted this before it was measured, twice over.** Fixed per-block work is ~15% of
+runtime at NR=8 and ~7.5% at NR=16, so the gain should roughly halve with the wider tile: predicted 2.0×,
+measured 13%/6% = 2.2×. End to end it predicted `0.45 × 0.13 = 5.9%` off prefill → 2606 ms; measured
+**2622–2632 ms, 255–256 tok/s**, within 0.6%. Gap to llama.cpp's AVX-512 build: 2.18× → **2.12×**.
+
+**The same hoist for Q6_K pays 5× less than predicted.** `Q6KGemvKernel.DecodeBlockScales` mirrors the Q4_K
+one and carries `ffn_down` (27% of prefill). Predicted ~13% and another ~9 tok/s; measured **ffn_down 708.6 →
+690.4 ms, −2.6%**, worth 3 tok/s. The reason was checkable in advance and was not checked: Q6_K widens
+**eight** values per block against Q4_K's sixteen (it has no `dmin`), and its block is larger — 1680 B vs
+1152 B — with more compute in the 6-bit unpack. The fixed decode is therefore a much smaller fraction of a
+bigger block: 12% / ~4.6 ≈ 2.6%, which is what came out. The amortisation model predicts well *within* a
+kernel — it called the tile-width scaling and the end-to-end figure correctly — but extrapolating it *across*
+kernels without re-reading their inputs was a guess.
+
+**Both hoists together: prefill 249 → 258–259 tok/s, gap to llama.cpp's AVX-512 build 2.18× → 2.10×.**
+Suite 1486/0/229.
+
+#### ★★ AVX-512 Q4_K PREFILL KERNEL — prefill 259 → 280 tok/s, gap under 2× for the first time
+
+`Q4KGemvKernel.GemmTiled512` processes **two activation columns per instruction**: column `2p` in the low 256
+bits of every vector, `2p+1` in the high. Weights are identical for both, so they are broadcast into both
+halves; only activations, their scales and their block sums differ. Every shuffle in this kernel is
+per-128-bit-lane, so it widens without changing meaning — no new repack layout, `block_q4_Kx8` untouched,
+sidecars still valid.
+
+Two decisions worth keeping: pairing **columns** rather than widening the output-row group avoids a
+`block_q4_Kx16` layout and the sidecar invalidation that implies; and the pair loop stays **innermost**,
+because hoisting it would re-decode the sixteen weight vectors per pair and throw away the amortisation the
+tile-width sweep showed to dominate this kernel.
+
+| component | before | after | |
+|---|---:|---:|---:|
+| `ffn_gateup` | 1180 ms | **1017.6** | **−13.8%** |
+| `attn_out` | 106.0 | **89.4** | −15.7% |
+| `attn_q` | 100.6 | **85.6** | −14.9% |
+| `ffn_down` (Q6_K, not ported) | 691 | 658 | −4.8% |
+| `attn_scores` (different kernel) | 207.6 | 210.8 | flat |
+| **prefill** | **2597 ms / 259 tok/s** | **2398 / 280 tok/s** | **+8.2%** |
+
+`attn_scores` staying flat while every Q4_K path moves 14–16% is the internal control: this is the change,
+not box drift. **Gap to llama.cpp AVX-512 2.10× → 1.93×; to their AVX2 build 1.20×.**
+
+The kernel itself gained ~1.16×, not the 1.67× its instruction mix promised, because that mix is roughly half
+the kernel — loads, the scalar `Unpack` and the stores did not widen. The prior estimate was 1.24×.
+
+**Bit-identical**, pinned by `Avx512PrefillParityTests` (8 cases: odd and even column counts, bias, and the
+pre-decoded scale path) asserting exact equality rather than a tolerance. Gated through
+`CpuFeatures.HasAvx512`/`HasAvx512Bw` — the repo's own OVERFIT015 analyzer rejected a direct `IsSupported`
+check, which is what that rule is for. Suite 1494/0/229.
+
+#### ★★ Q6_K AVX-512, SECOND ATTEMPT — pair what is already adjacent: +12% on `ffn_down`
+
+The failure below was diagnosed as broadcast traffic, not vector width, and that diagnosis held. `ql03`/`ql47`
+are stored adjacently (`k*64` and `k*64+32`), as are `qhL03`/`qhL47` — so **one 512-bit load carries real data
+in both halves and no weight broadcast is needed at all**. Activations come from a single `vpbroadcastq`
+(`Vector512.Create(long)` replicates the 8-byte pattern), which is exactly the tiling the 256-bit path built
+by hand from two Create calls. The only cross-half move left is one `GetUpper` per reduction, unavoidable
+since AVX-512 has no `vphaddd` for zmm. Accumulators stay 256-bit, so register pressure is unchanged.
+
+ABAB-interleaved, three rounds:
+
+| component | 256-bit | 512-bit | |
+|---|---:|---:|---:|
+| **ffn_down** | 659.7 ms | **589.2** | **1.12×** |
+| ffn_gateup / attn_scores / attn_kv / attn_q / attn_out (canaries) | 1017.1 / 187.7 / 138.0 / 84.9 / 89.2 | 1011.3 / 189.0 / 139.0 / 84.7 / 89.0 | 0.99–1.01× |
+| total | 2373.6 | 2298.6 | **1.03×** |
+
+**Prefill 283 → 292 tok/s, gap 1.91× → 1.85×.** Bit-identical, `Avx512Q6KPrefillParityTests` 7/7, suite
+1501/0/229. Same kernel, same instruction set, same shape — **only the choice of what shares a register**
+turned −20% into +12%.
+
+#### ▶ NEGATIVE (superseded above) — column-pairing the Q6_K port is SLOWER
+
+`Q6KGemvKernel.GemmTiled512` exists and is bit-identical (`Avx512Q6KPrefillParityTests`, 7 cases), but
+`BatchedQuantProjection.UseAvx512PrefillQ6K` is **off**: on the same machine and prompt where the Q4_K port
+took `ffn_gateup` down 13.8%, this took `ffn_down` from 658 ms to **794–900 ms** and prefill from 280 back to
+256–265 tok/s. Reverting restored 2398.5/2399.6 ms and `ffn_down` 656/659 ms exactly.
+
+Two things marked it as real rather than drift: the Q4_K components held steady across the same runs
+(`ffn_gateup` 1023/1009, `attn_q` 86/84), and the run-to-run spread was concentrated entirely on `ffn_down`.
+
+**Why the identical technique inverts between the two kernels.** Column pairing pays for the
+`vinserti64x4` that builds each broadcast with the arithmetic subsequently done on it. Q4_K broadcasts eight
+weight vectors per sub-block and then issues sixteen paired statements against them. Q6_K broadcasts six per
+`k`, sixteen times per block, for far less arithmetic each — and its `ReduceRows` cannot widen at all, since
+AVX-512 has no `vphaddd` for zmm, adding three more cross-half moves per call across 32 calls per block. The
+lane-crossing traffic outruns the arithmetic saved. **A wider vector is not a property of the ISA alone; it
+is a ratio between broadcast cost and work done per broadcast, and that ratio is per-kernel.**
+
+#### ★ attn_scores — register-resident value accumulation: −13% on the component
+
+The softmax-weighted value sum walked every `d` for each `t`, so it loaded **and stored** the whole output
+accumulator once per `t`: 512 B of value read against 512 B of accumulator read plus 512 B written — two
+thirds of the traffic was the accumulator round-tripping through L1, ~231 MB of ~347 MB per head-layer.
+`AccumulateValuesBlocked` blocks `d` into 64 dimensions so eight accumulators stay in registers across the
+whole `t` loop; the value stream is unchanged in volume, just read in two passes. Bit-identical — ascending
+`t` order per `d` preserved, and the deliberate no-FMA property kept.
+
+ABAB-interleaved, three rounds, best-of-N:
+
+| component | baseline | blocked | |
+|---|---:|---:|---:|
+| **attn_scores** | 213.8 ms | **186.3** | **1.15×** |
+| attn_kv / attn_q / attn_out (canaries) | 137.4 / 84.6 / 88.5 | 137.9 / 85.5 / 89.2 | 1.00 / 0.99 / 0.99× |
+| ffn_gateup / ffn_down (canaries) | 1006.8 / 659.2 | 1012.8 / 662.6 | 0.99× |
+| total | 2385.7 | 2366.6 | 1.01× |
+
+**End to end this is only +0.8%**, because attn_scores is 8% of prefill. A first single-arm run appeared to
+show 280 → 292 tok/s, but `attn_kv` and `ffn_gateup` — neither touched by the change — moved with it, so that
+reading was box drift and is withdrawn. Interleaving the arms with those components as canaries is what
+separated the two. **Prefill stands at ~283 tok/s.**
+
+**On the .NET-vs-C++ gaps this work exposed.** Three are real: no `F16C` intrinsic class (nor a `Half`
+overload of `Vector128.Widen`), no first-class AVX-512 mask registers, and no `restrict`. All are
+dotnet/runtime JIT work, not something a library can supply — F16C in particular is a well-scoped ask with an
+existing pattern to follow. `TensorPrimitives` is the right home for the subset expressible as *bulk*
+buffer-to-buffer work, and does carry hardware paths not otherwise reachable; it did not fit here because the
+values are eight at a time, interleaved every 1152 bytes inside a hot loop. The deeper difference is
+optimisation budget — RyuJIT is a fast JIT, and Native AOT uses the same backend, so there is no LLVM-class
+scheduling to reach for. **None of this explains the remaining gap**: the Q4_K matmul measured faster than
+llama.cpp's at equal ISA and thread count. What is left is AVX-512 coverage and our own kernel structure.
+
+#### ▶ NEGATIVE — the unaccounted time holds no surprise; it is spread thin
+
+A claimed "~192 ms unaccounted" was an arithmetic error: it conflated time outside both blocks with time
+inside attention that no sub-slice covers. The profiler's own top-level rows split it properly:
+
+| | time | share |
+|---|---:|---:|
+| **attention** (top level) | 585.2 ms | 24.6% |
+| — sub-slices (`kv`+`q`+`scores`+`out`) | 504.0 | |
+| — **unattributed inside attention** (RoPE, QK-norm, the whole-matrix Q/O gather+scatter) | **81.2** | **3.4%** |
+| **ffn** (top level) | 1683.3 ms | 70.8% |
+| — sub-slices (`gateup`+`down`) | 1683.1 | |
+| — unattributed | **0.2** | **0%** |
+| **other** (norms / residual / embed / final norm) | 109.4 | 4.6% |
+
+**FFN is 100% accounted**, which kills the hypothesis that SwiGLU's 266M `silu` calls were a hidden cost —
+the activation lives inside `ffn_gateup` and is not separable at this granularity. The residual is genuinely
+thin: halving *both* remaining pieces would buy ~4%. The work is in the large kernels, not hiding beside them.
+
+**What F16C would be worth now, if .NET exposed it: ~0.1%.** Ablation priced the F16 decode at 12% of the
+Q4_K kernel, but hoisting already removed 83/84 of that work by decoding once per projection instead of once
+per column tile. The missing instruction would speed up what remains; the restructuring deleted it. Worth
+recording as the general shape: **a workaround that removes work beats an instruction that accelerates it**,
+and having the instruction available would likely have stopped the search at 12%. Where F16C would still pay
+is *model loading* — `GgufReader`, `GgmlDequant`, `SafetensorsReader` and the Whisper loader all widen halves
+in scalar loops, hundreds of millions of values per 3B model — but that is startup, not inference.
+
+#### ★ whole-matrix K/V — one dispatch per projection: prefill 291 → 297 tok/s
+
+Per-group K/V projects `[dModel → headDim] = [2048 → 128]`, which a micro-bench put at **0.37 TFLOP/s**:
+352 MFLOP is too little work to amortise the dispatch's fixed cost, and single-thread was only 1.9× slower
+than the pool, so the 84-tile launch — not the matmul — dominates. Ceiling measured before building: two
+narrow dispatches 3206 µs vs one wide `[2048 → 256]` 1768 µs = **1.81×** on the projection. Built it:
+project all KV heads through `WkWhole`/`WvWhole` once, gather each group's band (adding the per-KV-head bias
+in the copy). Gated on both whole handles being Q4_K, so Q6_K `attn_v` layers fall back to per-group.
+
+ABAB, canaries flat: **attn_kv 139.1 → 96.4 ms (1.44×)**. End-to-end, six paired rounds:
+
+| | median | min |
+|---|---:|---:|
+| per-group | 2311 ms / 291 tok/s | 2298 / 292 |
+| **whole** | **2262 / 297** | **2251 / 299** |
+
+**+2.2% e2e**, matching the 1.81×-on-projection ceiling. Bit-identical (each output row's dot product is
+unchanged; no reassociation), no parity gate, suite 1501/0/229, `OVERFIT_WHOLE_KV=0` disables.
+
+*Methodology note kept as a warning:* the first component table read total as 1.00× while attn_kv clearly
+dropped — an artifact of taking each component's min from a different run, so total-min and attn_kv-min came
+from different rounds. A paired total-only measurement resolved it. **Best-of-N per component does not give a
+consistent end-to-end number; measure total paired.**
+
+#### ▶ attn_scores, split by ablation — and why flash-attention is the WRONG lever
+
+Before writing a blocked kernel, ablation inside the real kernel split the 189.4 ms three ways:
+
+| removed | attn_scores | share |
+|---|---:|---:|
+| Q·Kᵀ dot | 137.7 ms | **27%** |
+| softmax exp | 128.0 ms | **32%** |
+| both | 60.7 ms | rest **32%** |
+
+**Neither dominates, and exp is the larger of the two.** A flash-attention rewrite only attacks the dot
+(27% of the component = 2.3% of prefill) — the most expensive, highest-risk change aimed at the smaller
+piece. Dropped. The exp is the better target and is a *bulk contiguous buffer*, exactly the shape
+`TensorPrimitives` serves — the same lever SwiGLU already took (`ApplySiLU` → `TensorPrimitives.Sigmoid`).
+
+Replacing the scalar `MathF.Exp` loop with `TensorPrimitives.Subtract`/`Exp`/`Sum`: **attn_scores 189.4 →
+173.2 ms (1.09×)**, e2e 297 → 299 tok/s (vector won all six paired rounds). Smaller than the 32% ablation
+because `TensorPrimitives.Exp` is not free and the fused scalar loop became three passes over a short buffer;
+exp itself went ~61 → ~45 ms. Not byte-parity vs the F32 reference (few-ULP, coherence-safe like SwiGLU), but
+prefill and decode both reach this method so they stay bit-identical to each other — parity suite green,
+1501/0/229. `OVERFIT_ATTN_VEXP=0` disables.
+
+**attn_scores is now optimised across all three parts** (value sum register-resident, exp vectorised, the dot
+is what remains). Further gains need the flash-GEMM for the dot — ~2% e2e at high risk, not worth it now.
+
+#### ★ DECODE IS MEMORY-BOUND — measured directly, AVX-512 cannot help
+
+`DecodeGemvRooflineBenchmark` runs the production decode GEMV (`GemvParallel`, AVX2) on a Q4_K FFN weight at
+two sizes — one that fits this box's 128 MB L3, one that does not — to separate the kernel's compute rate
+from the memory rate it is fed:
+
+| weight | source | GB/s |
+|---|---|---:|
+| 12.7 MB (fits L3) | hot cache | **132.5** |
+| 203 MB (exceeds L3) | DRAM | **73.5** |
+| DRAM read ceiling | — | ~90 |
+
+**The kernel's compute (132.5 GB/s hot) is well above the DRAM ceiling (90)**, so the dequant consumes bytes
+faster than DRAM delivers them: decode is not compute-bound, and an AVX-512 / VNNI decode kernel cannot help.
+This is the direct measurement behind the earlier reverted "AVX-512 decode port" negative. Streaming from
+DRAM the GEMV hits **73.5 GB/s = 82% of the ceiling** — the kernel itself is near-optimal.
+
+The whole-model decode figure (~46 GB/s) is well below the isolated GEMV's 73.5, so that shortfall is **not**
+the weight kernel — it is per-token overhead (attention over the growing KV cache, RoPE, norms, sampling) and
+the serial layer→layer dependency that leaves memory idle between GEMVs. That is an overlap/latency problem,
+not a compute one, and we are already at 1.13× of llama.cpp there. **Decode's compute levers are exhausted,
+by measurement.**
+
+**Remaining measured item:** the scalar `Unpack` at ~3.5% of the Q4_K kernel.
+
+*Invalidated run, kept as a warning:* the first tile sweep ran inside an 11-benchmark class and reported
+`Tiled` and `Tiled_Cols8` — **the same configuration** — 21% apart, far outside their ±9% bars. Two identical
+arms in one table is the cheapest canary there is; narrowing the filter so the arms sit adjacent in time made
+the result reproducible.
+
+#### ▶ WHAT IS LEFT — profile at 249 tok/s, gap 2.18×
+
+```
+ffn_gateup  1222.7 ms  39.8%   (36)   <- Q4_K tiled already
+ffn_down     720.1 ms  23.5%   (36)   <- Q6_K tiled already
+attn_q       459.1 ms  15.0%  (576)   <- weight-stationary: blocked by `bias.IsEmpty`
+attn_scores  251.1 ms   8.2%  (576)
+attn_kv      140.3 ms   4.6%   (72)
+attn_out     109.6 ms   3.6%   (36)   <- done
+other        105.1 ms   3.4%
+```
+
+**The structural waste is spent.** Every remaining component is already on the best kernel Overfit has, with
+two exceptions:
+
+1. **`attn_q` — 15.0%, and it is blocked by one gate, not by shape.** Per-head Q is `[2048 → 128]`:
+   `inputSize % 256 == 0` ✓ and `outputSize % 8 == 0` ✓, so **`CanRepack` is TRUE** — the only thing keeping
+   it off the tiled kernel is `bias.IsEmpty` (Qwen puts a bias on Q/K/V). Micro-bench for that shape class:
+   tiled 4.41 ms vs weight-stationary 12.95 ms; measured `attn_q` is 12.75 ms/layer. **Ceiling ≈ 300 ms of
+   3068 ≈ 9.8% → ~243 tok/s.**
+   Bias support in `GemmTiled` was built once and reverted on a measured **0.999× tie** — but that tie was
+   taken when the biased projections were ~6% of FLOPs and the FFN dwarfed them. The composition has changed;
+   **re-measure before rebuilding, and re-measure with the FLOP-weighted census, not the dispatch count.**
+
+2. **`attn_scores` — 8.2%, never examined.** `BatchedAttentionKernel.ComputeParallel` has had no profiling
+   pass at all.
+
+**Everything else is kernel quality, i.e. writing better SIMD.** The measured headline: llama.cpp built
+AVX2-only does 336.7 tok/s against our 219 — so **1.54× of the remaining 2.47× is pure kernel craft at equal
+instruction set**, and AVX-512 accounts for the other 1.60×. Both are intrinsics work on `GemmTiled`
+(register-blocking the accumulators, 512-bit lanes), not structural fixes. Expect weeks, not evenings, and
+size each step against its share before building.
+
+#### ✅ RESOLVED — `BatchedPrefillParityTests` (was failing since before this work)
+
+`BatchedPrefill_MatchesSingleToken_OnRealQwen` asserts `maxAbsLogitDiff == 0` between batched prefill and the
+single-token path. It now reports `argmax batched=11 single=13, maxAbsLogitDiff ≈ 0.44`.
+
+**Not caused by the changes above.** Disabling *both* repacked paths (Q6_K tiled off AND the `IsPrepacked`
+short-circuit removed from the Q4_K gate) makes it pass 5/5 — with the shared quantization still enabled,
+which also proves that change is bit-identical. The trigger is the `*.gguf.repack` sidecar created
+2026-07-20: it sets `IsPrepacked`, routing bias-free Q4_K projections through the repacked `GemmTiled`, whose
+reduction is associated differently. The Q6_K tiled kernel is the same class of change and breaks it
+independently.
+
+**Nobody noticed because the test is `[LongFact]`** — skipped by default, so a numerics regression sat
+unobserved for two days. Decision needed: either make the test explicitly disable the repacked paths (so it
+keeps testing the batched-vs-single-token *math* it claims to), or replace the exact-equality gate with a
+coherence check, as `OVERFIT_REPACK_ATTN` already is. Do not silently relax it.
+
+**Plan.** Q4_K and Q6_K share the Q8_K scratch format bit-for-bit (`SuperBlockElements 256`, `GroupSize 16`,
+and `Q6KDotKernel.QuantizeActivationQ8K` delegates to Q4_K's), so ONE pre-quantized buffer serves Q, K and V
+regardless of whether V is Q4_K or Q6_K. Steps: (1) add `bool preQuantized = false` to the three batched
+kernel entry points — `Q4KDotKernel.ProjectBatched` / `ProjectBatchedWeightStationary`,
+`Q6KDotKernel.ProjectBatched` — guarding their internal quantize loop (anchor: the
+`"Activation quantization scratch is too small for rows."` validation, which occurs exactly at those three);
+(2) give `BatchedQuantProjection.Dispatch` optional pre-quantized scratch spans, defaulting to today's
+pooled-and-quantize behaviour; (3) quantize `hidden` once at the top of
+`CachedMultiHeadAttention.DecodeBatchedQuant` and pass it to the Q/K/V dispatches. Output must stay
+bit-identical — quantization is deterministic, so this is a pure de-duplication.
+
+At 3.4 B params × 672 tokens the gap is ≈3.7 TFLOP/s-equivalent for them against ≈1.0 for us.
+
+**Why this lever is different from the five that were refuted:** it has a measured ceiling, a named cause, and
+a working reference implementation to read. The earlier register-/cache-blocking negatives were on
+*memory-bound* paths, where blocking cannot help by construction. Prefill is compute-bound.
+**Honest expectation: 3.76× is the ceiling, not a promise — 2× would be a good outcome.** Size a single
+projection with a micro-bench against `sgemm.cpp` before writing any kernel.
+
+---
+
+### Refuted levers — do not re-open without new evidence
+
+**Three candidates were sized and all three died on measurement (2026-07-21).**
+
+1. **`SearchValues` / tokenizer-level work — CLOSED.** A prefill profile (Qwen-3B Q4_K_M, 672-token prompt,
+   median of 5) puts tokenization at **0.04% of time-to-first-token** — 1.8 ms against 4731 ms of prefill
+   forward (366 000 tok/s vs 142 tok/s). Infinite tokenizer speedup buys 0.04%.
+   `Tests/LanguageModels/Diagnostics/PrefillProfileTests.cs`.
+2. **Struct-operator (static-abstract interface) dispatch — CLOSED without building.** The premise does not
+   hold here: `ElementwiseKernels` contains **no delegates** (14 hand-written span loops), the hot parallel
+   paths already use `delegate*<int,int,void*,void>`, and the whole elementwise slice is **0.5% of decode**.
+   The scalar operator shape also cannot express the `TensorPrimitives` fast path, which is itself built on
+   this pattern inside the BCL.
+3. **Bias support in the Q4_K tiled prefill GEMM — BUILT, MEASURED 0.999×, REVERTED.** A path census showed
+   `bias.IsEmpty` barred **88% of Q4_K prefill dispatches** (all attention Q/K/V) from `GemmTiled`. Lifting
+   it was an exact tie, because `ProjectBatchedWeightStationary` already amortises weight decode across the
+   row tile — the same thing the tiling does. The "~3×" in the kernel docs is measured against
+   `ProjectBatched` (re-decode per row), **not** against weight-stationary. Recorded in `CLAUDE.md`.
+
+Decode is ~88% quantized GEMV sitting at the DRAM floor (`ffn 69.3% · attention 19.3% · lm_head 10.3%`), so
+there is no cheap **decode** kernel win left — this was later confirmed directly by `DecodeGemvRooflineBenchmark`
+(kernel compute above the DRAM ceiling; see the closing summary at the top of this track).
+The product direction (perf course vs. the on-prem commercial track) remains deferred and is a separate,
+non-technical decision.
+
+</details>
 
 ---
 

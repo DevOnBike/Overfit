@@ -128,7 +128,8 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints.Schema
                     {
                         values.Add(e.GetString() ?? string.Empty);
                     }
-                    else
+
+                    if (!(e.ValueKind == JsonValueKind.String))
                     {
                         allStrings = false;
                     }

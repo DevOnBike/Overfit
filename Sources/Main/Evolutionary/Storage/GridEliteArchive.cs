@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -486,25 +486,12 @@ namespace DevOnBike.Overfit.Evolutionary.Storage
                     return false;
                 }
 
-                int bin;
-                if (value == max)
-                {
-                    bin = _binsPerDimension[d] - 1;
-                }
-                else
-                {
-                    var normalized = (value - min) * _descriptorInvRange[d];
-                    bin = (int)(normalized * _binsPerDimension[d]);
-
-                    if (bin < 0)
-                    {
-                        bin = 0;
-                    }
-                    else if (bin >= _binsPerDimension[d])
-                    {
-                        bin = _binsPerDimension[d] - 1;
-                    }
-                }
+                // normalized is harmless when value == max (that case takes the last bin below); computing it
+                // unconditionally keeps `bin` a single definitely-assigned expression with no else.
+                var normalized = (value - min) * _descriptorInvRange[d];
+                var bin = value == max
+                    ? _binsPerDimension[d] - 1
+                    : Math.Clamp((int)(normalized * _binsPerDimension[d]), 0, _binsPerDimension[d] - 1);
 
                 index += bin * _cellStrides[d];
             }

@@ -750,7 +750,8 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                 {
                     GgmlDequant.DecodeQ5_KBlock(buf, dst.Slice(b * blockElems, blockElems));
                 }
-                else
+
+                if (!(isK))
                 {
                     GgmlDequant.DecodeQ5_0Block(buf, dst.Slice(b * blockElems, blockElems));
                 }

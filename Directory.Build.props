@@ -1,7 +1,7 @@
 ﻿<Project>
     <PropertyGroup>
-        <Version>10.0.30</Version>
-        <FileVersion>10.0.30</FileVersion>
+        <Version>10.0.31</Version>
+        <FileVersion>10.0.31</FileVersion>
         <InformationalVersion>release+id</InformationalVersion>
         <Authors>DevOnBike</Authors>
         <Company>Sharp IT</Company>
@@ -32,6 +32,43 @@
              inert for this reason; removing them from this list cost 0 new errors. -->
         <WarningsNotAsErrors>$(WarningsNotAsErrors);RS0030;OVERFIT003;OVERFIT004;OVERFIT005;OVERFIT006;OVERFIT007;OVERFIT010;OVERFIT011;OVERFIT012;OVERFIT013;OVERFIT014;OVERFIT016;OVERFIT017;OVERFIT018;OVERFIT019;OVERFIT020;IDISP001;IDISP002;IDISP003;IDISP004;IDISP005;IDISP006;IDISP007;IDISP008;IDISP009;IDISP010;IDISP011;IDISP012;IDISP013;IDISP014;IDISP015;IDISP016;IDISP017</WarningsNotAsErrors>
 
+    </PropertyGroup>
+
+    <!--
+        In-repo Roslyn analyzers (OVERFIT001+ per-call perf rules, OVERFIT021 else-ban, OVERFIT022 recursion,
+        OVERFIT023 unbounded loops) wired CENTRALLY so every project is covered and a NEW project inherits them
+        automatically. This used to live per-project in Main.csproj; a hand-maintained list drifts exactly the
+        way the .editorconfig directory list did (ten already-clean directories were silently never locked).
+
+        Wired as an ANALYZER, not a library reference — it runs inside the compiler and ships nothing.
+        NOTE: command-line -p: globals (PublishAot, RID...) flow through the whole graph; the analyzer project
+        shields itself via TreatAsLocalProperty in Analyzers.csproj (GlobalPropertiesToRemove on the reference
+        was tried and does NOT survive restore).
+
+        Excluded, each for a concrete reason:
+          Analyzers                   - would reference itself.
+          Tests / AotSmokeTest        - test code is exempt from the style rules by decision; AotSmokeTest also
+                                        publishes under TreatWarningsAsErrors, so extra analyzers there would
+                                        make the AOT guard fail for non-AOT reasons.
+          Templates + OverfitChat     - `dotnet new` template content must reference ONLY published NuGet
+                                        packages; a path into this repo would not exist in a scaffolded app.
+          Benchmarks                  - benchmark code deliberately writes the SLOW shape next to the fast one
+                                        (raw Parallel.For vs OverfitParallel, `else` vs guard clauses). The
+                                        rules would flag the very thing being measured.
+    -->
+    <ItemGroup Condition="
+        '$(MSBuildProjectName)' != 'Analyzers' AND
+        '$(MSBuildProjectName)' != 'Tests' AND
+        '$(MSBuildProjectName)' != 'AotSmokeTest' AND
+        '$(MSBuildProjectName)' != 'Benchmarks' AND
+        '$(MSBuildProjectName)' != 'DevOnBike.Overfit.Templates' AND
+        '$(MSBuildProjectName)' != 'OverfitChat'">
+        <ProjectReference Include="$(MSBuildThisFileDirectory)Sources\Analyzers\Analyzers.csproj"
+                          OutputItemType="Analyzer"
+                          ReferenceOutputAssembly="false" />
+    </ItemGroup>
+
+    <PropertyGroup>
         <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
         <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
     </PropertyGroup>

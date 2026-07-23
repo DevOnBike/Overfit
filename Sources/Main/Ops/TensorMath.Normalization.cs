@@ -61,7 +61,8 @@ namespace DevOnBike.Overfit.Ops
                 TensorPrimitives.Add(vB.Span, eps, invStdS);
                 TensorPrimitives.ReciprocalSqrt(invStdS, invStdS);
             }
-            else
+
+            if (!(isTraining))
             {
                 runningMean.AsReadOnlySpan().CopyTo(meanS);
                 TensorPrimitives.Add(runningVar.AsReadOnlySpan(), eps, invStdS);
@@ -85,7 +86,10 @@ namespace DevOnBike.Overfit.Ops
             {
                 graph?.Record(OpCode.BatchNorm1D, output, input, c0: gamma, c1: beta, c2: mean, c3: invStd, contextCount: 4);
             }
-            else if (!isTraining)
+
+            // The original else-if guard was `!(RequiresGrad && isTraining) && !isTraining`, which reduces to
+            // plain `!isTraining` — !isTraining already implies the first condition is false.
+            if (!isTraining)
             {
                 mean.Dispose();
                 invStd.Dispose();
@@ -230,7 +234,8 @@ namespace DevOnBike.Overfit.Ops
                     invStdS[c] = 1f / MathF.Sqrt(varS[c] + eps);
                 }
             }
-            else
+
+            if (!(isTraining))
             {
                 runningMean.AsReadOnlySpan().CopyTo(meanS);
                 var rv = runningVar.AsReadOnlySpan();
@@ -261,7 +266,10 @@ namespace DevOnBike.Overfit.Ops
             {
                 graph?.Record(OpCode.BatchNorm2D, output, input, c0: gamma, c1: beta, c2: mean, c3: invStd, contextCount: 4);
             }
-            else if (!isTraining)
+
+            // The original else-if guard was `!(RequiresGrad && isTraining) && !isTraining`, which reduces to
+            // plain `!isTraining` — !isTraining already implies the first condition is false.
+            if (!isTraining)
             {
                 mean.Dispose();
                 invStd.Dispose();

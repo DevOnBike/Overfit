@@ -84,7 +84,8 @@ namespace DevOnBike.Overfit.Ops
                                         Simd.MulAdd(inRow.Slice(lo - padding + kx, hi - lo), kVal, outRow.Slice(lo, hi - lo));
                                     }
                                 }
-                                else
+
+                                if (!(stride == 1))
                                 {
                                     for (var ox = 0; ox < outW; ox++)
                                     {
@@ -199,7 +200,8 @@ namespace DevOnBike.Overfit.Ops
                                         Simd.MulAdd(ogRow.Slice(lo, len), kVal, inGradPlane.Slice(inOff, len));
                                     }
                                 }
-                                else
+
+                                if (!(stride == 1))
                                 {
                                     for (var ox = 0; ox < outW; ox++)
                                     {

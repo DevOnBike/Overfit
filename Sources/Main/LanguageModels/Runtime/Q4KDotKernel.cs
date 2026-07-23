@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -637,7 +637,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 {
                     ctx.UpOutput[row] = sum;
                 }
-                else
+
+                if (!(isUp))
                 {
                     ctx.GateOutput[row] = sum;
                 }
@@ -686,7 +687,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             Span<float> output,
             Span<sbyte> activationQuants,
             Span<float> activationScales,
-            Span<short> activationBsums)
+            Span<short> activationBsums,
+            bool preQuantized = false)
         {
             ArgumentNullException.ThrowIfNull(weight);
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(rows);
@@ -715,13 +717,20 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 throw new ArgumentException("Activation quantization scratch is too small for rows.");
             }
 
-            for (var n = 0; n < rows; n++)
+            // `preQuantized` lets the caller hand in activations already in Q8_K form. Attention
+            // dispatches Q once PER HEAD over a loop-invariant `hidden`, and a benchmark put the
+            // quantization at ~93% of that dispatch, so quantizing once per layer and reusing it is
+            // pure de-duplication - bit-identical, because the quantization is deterministic.
+            if (!preQuantized)
             {
-                QuantizeActivationQ8K(
-                    input.Slice(n * inputSize, inputSize),
-                    activationQuants.Slice(n * inputSize, inputSize),
-                    activationScales.Slice(n * superBlocksPerRow, superBlocksPerRow),
-                    activationBsums.Slice(n * bsumsPerRow, bsumsPerRow));
+                for (var n = 0; n < rows; n++)
+                {
+                    QuantizeActivationQ8K(
+                        input.Slice(n * inputSize, inputSize),
+                        activationQuants.Slice(n * inputSize, inputSize),
+                        activationScales.Slice(n * superBlocksPerRow, superBlocksPerRow),
+                        activationBsums.Slice(n * bsumsPerRow, bsumsPerRow));
+                }
             }
 
             fixed (byte* blocksPtr = weight.BlockSpan)
@@ -824,7 +833,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             Span<float> output,
             Span<sbyte> activationQuants,
             Span<float> activationScales,
-            Span<short> activationBsums)
+            Span<short> activationBsums,
+            bool preQuantized = false)
         {
             ArgumentNullException.ThrowIfNull(weight);
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(rows);
@@ -853,13 +863,20 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 throw new ArgumentException("Activation quantization scratch is too small for rows.");
             }
 
-            for (var n = 0; n < rows; n++)
+            // `preQuantized` lets the caller hand in activations already in Q8_K form. Attention
+            // dispatches Q once PER HEAD over a loop-invariant `hidden`, and a benchmark put the
+            // quantization at ~93% of that dispatch, so quantizing once per layer and reusing it is
+            // pure de-duplication - bit-identical, because the quantization is deterministic.
+            if (!preQuantized)
             {
-                QuantizeActivationQ8K(
-                    input.Slice(n * inputSize, inputSize),
-                    activationQuants.Slice(n * inputSize, inputSize),
-                    activationScales.Slice(n * superBlocksPerRow, superBlocksPerRow),
-                    activationBsums.Slice(n * bsumsPerRow, bsumsPerRow));
+                for (var n = 0; n < rows; n++)
+                {
+                    QuantizeActivationQ8K(
+                        input.Slice(n * inputSize, inputSize),
+                        activationQuants.Slice(n * inputSize, inputSize),
+                        activationScales.Slice(n * superBlocksPerRow, superBlocksPerRow),
+                        activationBsums.Slice(n * bsumsPerRow, bsumsPerRow));
+                }
             }
 
             fixed (byte* blocksPtr = weight.BlockSpan)

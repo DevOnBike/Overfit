@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -118,13 +118,17 @@ namespace DevOnBike.Overfit.Onnx.Operators
             var layer = new ConvLayer(inC, outC, h, w, kH, padding, stride);
 
             // Third input is per-channel bias (optional but common in PyTorch exports)
+            var biasLoaded = false;
+
             if (node.Inputs.Count >= 3 && !string.IsNullOrEmpty(node.Inputs[2])
                 && initializers.TryGetValue(node.Inputs[2], out var biasTensor))
             {
                 var biasData = OnnxImporter.DecodeFloatTensor(biasTensor);
                 layer.LoadParameters(kernelData, biasData);
+                biasLoaded = true;
             }
-            else
+
+            if (!biasLoaded)
             {
                 layer.LoadParameters(kernelData);
             }

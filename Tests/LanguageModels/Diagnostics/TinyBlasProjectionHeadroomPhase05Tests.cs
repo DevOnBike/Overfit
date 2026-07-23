@@ -6,7 +6,6 @@
 using System.Diagnostics;
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.X86;
-using System.Threading.Tasks;
 using DevOnBike.Overfit.LanguageModels.Loading;
 using DevOnBike.Overfit.LanguageModels.Runtime;
 using Xunit.Abstractions;

@@ -3,6 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using DevOnBike.Overfit.Runtime;
 using System.Text.Json;
 using DevOnBike.Overfit.LanguageModels.Chat;
 using DevOnBike.Overfit.LanguageModels.Constraints;
@@ -28,7 +29,7 @@ namespace DevOnBike.Overfit.Demo.Agent
     {
         private static int Main()
         {
-            var dir = Environment.GetEnvironmentVariable("OVERFIT_MODEL_DIR") ?? @"C:\qwen3b";
+            var dir = Environment.GetEnvironmentVariable(OverfitEnvironment.ModelDir) ?? @"C:\qwen3b";
             var ggufPath = ResolveGguf(dir);
             if (ggufPath is null)
             {

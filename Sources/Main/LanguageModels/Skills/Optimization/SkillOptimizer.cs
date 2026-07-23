@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -79,7 +79,8 @@ namespace DevOnBike.Overfit.LanguageModels.Skills.Optimization
                     currentVal = candidateVal;
                     steps.Add(new SkillOptResult.Step(round, candidate!, candidateVal, true, "accepted (val improved)"));
                 }
-                else
+
+                if (!(candidateVal > currentVal))
                 {
                     rejected.Add(candidate!);
                     steps.Add(new SkillOptResult.Step(round, candidate!, candidateVal, false, "rejected (no val improvement)"));

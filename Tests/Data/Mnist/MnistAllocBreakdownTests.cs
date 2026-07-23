@@ -5,7 +5,6 @@
 
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning;
-using DevOnBike.Overfit.Diagnostics;
 using DevOnBike.Overfit.Ops;
 using DevOnBike.Overfit.Optimizers;
 using DevOnBike.Overfit.Tensors;

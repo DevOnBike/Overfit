@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -167,7 +167,8 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
                 {
                     tokens.Add(_specialTokens[piece]);
                 }
-                else
+
+                if (!(isSpecial))
                 {
                     foreach (Match m in _splitPattern.Matches(piece))
                     {
@@ -204,7 +205,8 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
                     }
                     sb.Append(piece);
                 }
-                else
+
+                if (!(_specialTokenIds.Contains(id)))
                 {
                     // Decode byte-level piece → raw bytes
                     foreach (var ch in piece)
@@ -383,7 +385,8 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
                 {
                     map[b] = (char)b;
                 }
-                else
+
+                if (!((b >= '!' && b <= '~') || (b >= '¡' && b <= '¬') || (b >= '®' && b <= 'ÿ')))
                 {
                     map[b] = (char)0; // placeholder
                 }

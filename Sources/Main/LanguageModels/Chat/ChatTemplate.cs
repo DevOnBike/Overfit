@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -122,17 +122,19 @@ namespace DevOnBike.Overfit.LanguageModels.Chat
                 if (m.Role == "system")
                 {
                     pendingSystem = pendingSystem is null ? m.Content : pendingSystem + "\n\n" + m.Content;
+                    continue;
                 }
-                else if (m.Role == "user")
+
+                if (m.Role == "user")
                 {
                     var content = pendingSystem is null ? m.Content : pendingSystem + "\n\n" + m.Content;
                     pendingSystem = null;
                     sb.Append("[INST] ").Append(content).Append(" [/INST]");
+                    continue;
                 }
-                else // assistant
-                {
-                    sb.Append(' ').Append(m.Content).Append("</s>");
-                }
+
+                // assistant
+                sb.Append(' ').Append(m.Content).Append("</s>");
             }
             // For Mistral the open "[INST] … [/INST]" already prompts the assistant reply,
             // so addGenerationPrompt needs no extra marker.

@@ -1,8 +1,9 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.X86;
@@ -27,6 +28,53 @@ namespace DevOnBike.Overfit.Kernels
         private const int Nr = 8; // micro-kernel cols (spatial positions) — one Vector256<float> wide
 
         public static bool IsSupported => CpuFeatures.HasFma;
+
+        /// <summary>
+        /// Opt-in split of conv time into the im2col patch gather versus the GEMM. Off by default and checked
+        /// before any timestamp, so the inference path is unchanged when it is off.
+        ///
+        /// <para>Needed because "Conv is 90.7% of VGG-16" does not say <i>which half</i>. The gather moves
+        /// O(K·N) floats and the GEMM does O(M·N·K) FLOPs, so their ratio varies enormously across layers —
+        /// and the answer decides whether the next lever is the micro-kernel or the gather. Guessing which
+        /// would be guessing about mechanism.</para>
+        /// </summary>
+        public static bool ProfileParts;
+
+        private static long _im2colTicks;
+        private static long _gemmTicks;
+
+        /// <summary>
+        /// Measurement-only: skip the B-panel pack, leaving the micro-kernel to run over whatever the previous
+        /// panel left in the buffer. Produces WRONG results by construction.
+        ///
+        /// <para>Splits the GEMM's 54 ms into packing versus arithmetic without putting timestamps inside the
+        /// parallel region (where per-thread accumulation and Interlocked would distort what is being measured).
+        /// The pack is the prime suspect: it reads <c>B[kk·n + n0]</c> with stride <c>n</c> — 200 KB apart on
+        /// VGG's early layers — one scalar element at a time with a bounds branch each, and across a whole GEMM
+        /// it moves the entire im2col matrix once more.</para>
+        /// </summary>
+        internal static bool AblatePackB;
+
+        /// <summary>Measurement-only: skip the micro-kernel, leaving only the pack. Wrong results by construction.</summary>
+        internal static bool AblateMicroKernel;
+
+        /// <summary>Clears the part accumulators (call before the measured segment).</summary>
+        public static void ResetPartProfile()
+        {
+            _im2colTicks = 0;
+            _gemmTicks = 0;
+        }
+
+        /// <summary>im2col versus GEMM, in milliseconds and as a share of the two combined.</summary>
+        public static string PartProfileReport()
+        {
+            var toMs = 1000.0 / Stopwatch.Frequency;
+            var total = _im2colTicks + _gemmTicks;
+            var share = total == 0 ? 1.0 : total;
+
+            return $"im2col {_im2colTicks * toMs,8:F2} ms {100.0 * _im2colTicks / share,5:F1}%   "
+                + $"gemm {_gemmTicks * toMs,8:F2} ms {100.0 * _gemmTicks / share,5:F1}%";
+        }
 
         public static void Forward(
             ReadOnlySpan<float> input,   // [batch, inChannels, H, W]
@@ -67,51 +115,135 @@ namespace DevOnBike.Overfit.Kernels
 
             for (var b = 0; b < batchSize; b++)
             {
+                var t0 = ProfileParts ? Stopwatch.GetTimestamp() : 0L;
+
                 Im2Col(
                     input.Slice(b * inputPlane, inputPlane), cols,
                     inChannels, inputH, inputW, kernelSize, padding, stride, outH, outW);
 
+                var t1 = ProfileParts ? Stopwatch.GetTimestamp() : 0L;
+
                 Gemm(kernels, cols, output.Slice(b * outputPlane, outputPlane), m, n, k);
+
+                if (ProfileParts)
+                {
+                    _im2colTicks += t1 - t0;
+                    _gemmTicks += Stopwatch.GetTimestamp() - t1;
+                }
             }
         }
 
+        /// <summary>
+        /// Minimum <c>K·N</c> before im2col fans out. Below this the patch gather is a fraction of a
+        /// millisecond and the dispatch would cost more than the work.
+        /// </summary>
+        private const int ParallelIm2ColMinElements = 1 << 16;
+
+        /// <summary>Set <c>OVERFIT_PARALLEL_IM2COL=0</c> to force the original serial gather (A/B switch).</summary>
+        internal static bool UseParallelIm2Col =
+            Environment.GetEnvironmentVariable(OverfitEnvironment.ParallelIm2Col) != "0";
+
         // cols[krow, pos] = input[ic, oy·stride-pad+ky, ox·stride-pad+kx] (0 outside the image), where
         // krow = (ic·k + ky)·k + kx (matches the [outC, inC, k, k] kernel's flattened K), pos = oy·outW + ox.
-        private static void Im2Col(
+        //
+        // Parallelised over krow. Each krow owns a disjoint n-element row of `cols` and only ever READS the
+        // input, so the fan-out needs no synchronisation and is bit-identical to the serial gather.
+        //
+        // This matters more than it looks. The GEMM below was already parallel but the gather was not, and on
+        // VGG-16 the gather is enormous — conv1_2 alone materialises a [576 × 50176] matrix (115 MB) one
+        // scalar element at a time. An Amdahl fit over the measured worker sweep (663 ms at 1 worker, 138 ms
+        // at 16) put the serial fraction at ~15.5%, i.e. **~103 of those 138 ms were serial**, which is why 16
+        // workers bought only 4.79× instead of ~14×.
+        private static unsafe void Im2Col(
             ReadOnlySpan<float> input, Span<float> cols,
             int inChannels, int inputH, int inputW, int kernelSize, int padding, int stride, int outH, int outW)
         {
             var n = outH * outW;
-            for (var ic = 0; ic < inChannels; ic++)
+            var kRows = inChannels * kernelSize * kernelSize;
+
+            if (!UseParallelIm2Col || (long)kRows * n < ParallelIm2ColMinElements)
             {
-                var inChanBase = ic * inputH * inputW;
-                for (var ky = 0; ky < kernelSize; ky++)
+                for (var krow = 0; krow < kRows; krow++)
                 {
-                    for (var kx = 0; kx < kernelSize; kx++)
-                    {
-                        var krow = ((ic * kernelSize) + ky) * kernelSize + kx;
-                        var dst = cols.Slice(krow * n, n);
+                    Im2ColRow(input, cols, krow, inputH, inputW, kernelSize, padding, stride, outH, outW, n);
+                }
 
-                        for (var oy = 0; oy < outH; oy++)
-                        {
-                            var iy = oy * stride - padding + ky;
-                            var rowDst = dst.Slice(oy * outW, outW);
-                            if ((uint)iy >= (uint)inputH)
-                            {
-                                rowDst.Clear();
-                                continue;
-                            }
+                return;
+            }
 
-                            var inRowBase = inChanBase + iy * inputW;
-                            for (var ox = 0; ox < outW; ox++)
-                            {
-                                var ix = ox * stride - padding + kx;
-                                rowDst[ox] = (uint)ix < (uint)inputW ? input[inRowBase + ix] : 0f;
-                            }
-                        }
-                    }
+            fixed (float* pIn = input, pCols = cols)
+            {
+                var ctx = new Im2ColCtx(
+                    pIn, pCols, inChannels, inputH, inputW, kernelSize, padding, stride, outH, outW, n);
+
+                OverfitParallel.For(0, kRows, 1, &Im2ColRowRange, &ctx);
+            }
+        }
+
+        private static unsafe void Im2ColRowRange(int start, int end, void* context)
+        {
+            ref var ctx = ref Unsafe.AsRef<Im2ColCtx>(context);
+
+            var input = new ReadOnlySpan<float>(ctx.Input, ctx.InChannels * ctx.InputH * ctx.InputW);
+            var cols = new Span<float>(ctx.Cols, ctx.KRows * ctx.N);
+
+            for (var krow = start; krow < end; krow++)
+            {
+                Im2ColRow(
+                    input, cols, krow,
+                    ctx.InputH, ctx.InputW, ctx.KernelSize, ctx.Padding, ctx.Stride, ctx.OutH, ctx.OutW, ctx.N);
+            }
+        }
+
+        /// <summary>One row of the im2col matrix — the unit of both the serial and the parallel path, so the
+        /// two cannot drift apart.</summary>
+        private static void Im2ColRow(
+            ReadOnlySpan<float> input, Span<float> cols, int krow,
+            int inputH, int inputW, int kernelSize, int padding, int stride, int outH, int outW, int n)
+        {
+            var kx = krow % kernelSize;
+            var ky = (krow / kernelSize) % kernelSize;
+            var ic = krow / (kernelSize * kernelSize);
+
+            var inChanBase = ic * inputH * inputW;
+            var dst = cols.Slice(krow * n, n);
+
+            for (var oy = 0; oy < outH; oy++)
+            {
+                var iy = oy * stride - padding + ky;
+                var rowDst = dst.Slice(oy * outW, outW);
+                if ((uint)iy >= (uint)inputH)
+                {
+                    rowDst.Clear();
+                    continue;
+                }
+
+                var inRowBase = inChanBase + iy * inputW;
+                for (var ox = 0; ox < outW; ox++)
+                {
+                    var ix = ox * stride - padding + kx;
+                    rowDst[ox] = (uint)ix < (uint)inputW ? input[inRowBase + ix] : 0f;
                 }
             }
+        }
+
+        private readonly unsafe struct Im2ColCtx(
+            float* input, float* cols,
+            int inChannels, int inputH, int inputW, int kernelSize,
+            int padding, int stride, int outH, int outW, int n)
+        {
+            public readonly float* Input = input;
+            public readonly float* Cols = cols;
+            public readonly int InChannels = inChannels;
+            public readonly int InputH = inputH;
+            public readonly int InputW = inputW;
+            public readonly int KernelSize = kernelSize;
+            public readonly int Padding = padding;
+            public readonly int Stride = stride;
+            public readonly int OutH = outH;
+            public readonly int OutW = outW;
+            public readonly int N = n;
+            public readonly int KRows = inChannels * kernelSize * kernelSize;
         }
 
         // C[M,N] = A[M,K] @ B[K,N], parallelised over N-panels (each worker packs its 8-col B panel and sweeps M
@@ -120,13 +252,187 @@ namespace DevOnBike.Overfit.Kernels
         // most im2col K values are ≤ a few hundred (single K-block → no blocking benefit) while the one-time A
         // pack adds single-threaded O(M·K) overhead. Cache-blocking pays on large dense GEMM, not CNN-shaped im2col.
         // Internal so the Winograd path can reuse the same tuned micro-kernel for its 16 element-wise GEMMs.
+        /// <summary>Micro-kernel columns for the AVX-512 path: 8 rows × 32 columns = 16 zmm accumulators.</summary>
+        private const int Nr512 = 32;
+
+        /// <summary>
+        /// Route the conv GEMM through the AVX-512 8×32 micro-kernel; <c>OVERFIT_CONV_AVX512=0</c> forces the
+        /// AVX2 8×8 path.
+        ///
+        /// <para><b>Why a wider tile and not a faster one.</b> Shape benchmarks showed the 8×8 kernel already
+        /// runs at 83% of this machine's single-core FMA peak, so there is no instruction-level headroom. What
+        /// a wider tile changes is <b>arithmetic intensity</b>: per k-step an <c>Mr×Nr</c> tile loads
+        /// <c>Mr + Nr</c> floats and performs <c>2·Mr·Nr</c> FLOPs, giving <c>Mr·Nr / (2(Mr+Nr))</c> FLOP per
+        /// byte — <b>2.0 at 8×8, 3.2 at 8×32</b>. That is 38% less memory traffic for the same arithmetic.</para>
+        ///
+        /// <para><b>Why that is the lever here.</b> The machine probe found bandwidth scales 10–13× across
+        /// cores only while the per-core working set stays under ~2 MB, and collapses to 1–2× beyond it — so a
+        /// parallel kernel that outruns its cache cannot be fixed by adding cores or by blocking, only by
+        /// needing fewer bytes per FLOP.</para>
+        /// </summary>
+        internal static bool UseAvx512Conv =
+            CpuFeatures.HasAvx512
+            && Environment.GetEnvironmentVariable(OverfitEnvironment.ConvAvx512) != "0";
+
+        // C[M,N] = A[M,K] @ B[K,N], parallelised over N-panels (each worker packs its B panel and sweeps M
+        // with the full-K register-blocked micro-kernel). NOTE: a BLIS-style K-blocked + A-packed variant was
+        // tried and MEASURED to regress on these CNN dims (deepcnn 101→125, vgg 140→189, resnet 45→118 ms) —
+        // most im2col K values are ≤ a few hundred (single K-block → no blocking benefit) while the one-time A
+        // pack adds single-threaded O(M·K) overhead. Cache-blocking pays on large dense GEMM, not CNN-shaped im2col.
+        // Internal so the Winograd path can reuse the same tuned micro-kernel for its 16 element-wise GEMMs.
         internal static unsafe void Gemm(ReadOnlySpan<float> a, ReadOnlySpan<float> b, Span<float> c, int m, int n, int k)
         {
-            var nPanels = (n + Nr - 1) / Nr;
+            var nr = UseAvx512Conv ? Nr512 : Nr;
+            var nPanels = (n + nr - 1) / nr;
+
             fixed (float* pa = a, pb = b, pc = c)
             {
                 var ctx = new GemmCtx(pa, pb, pc, m, n, k);
+
+                if (UseAvx512Conv)
+                {
+                    OverfitParallel.For(0, nPanels, 1, &GemmNPanelWorker512, &ctx);
+                    return;
+                }
+
                 OverfitParallel.For(0, nPanels, 1, &GemmNPanelWorker, &ctx);
+            }
+        }
+
+        /// <summary>
+        /// One 32-column panel per work item: pack it, then sweep M with the 8×32 AVX-512 micro-kernel.
+        /// Structurally identical to <see cref="GemmNPanelWorker"/>, only wider.
+        /// </summary>
+        private static unsafe void GemmNPanelWorker512(int npStart, int npEnd, void* ctxPtr)
+        {
+            ref readonly var c = ref Unsafe.AsRef<GemmCtx>(ctxPtr);
+            var k = c.K;
+            var n = c.N;
+            var m = c.M;
+
+            using var packBuf = new PooledBuffer<float>(checked(k * Nr512), clearMemory: false);
+            var packB = packBuf.Span;
+
+            for (var np = npStart; np < npEnd; np++)
+            {
+                var n0 = np * Nr512;
+                var nrEff = Math.Min(Nr512, n - n0);
+
+                for (var kk = 0; kk < k; kk++)
+                {
+                    var srcBase = (kk * n) + n0;
+                    var dstBase = kk * Nr512;
+
+                    for (var j = 0; j < Nr512; j++)
+                    {
+                        packB[dstBase + j] = j < nrEff ? c.B[srcBase + j] : 0f;
+                    }
+                }
+
+                fixed (float* pPackB = packB)
+                {
+                    for (var m0 = 0; m0 < m; m0 += Mr)
+                    {
+                        var mrEff = Math.Min(Mr, m - m0);
+
+                        MicroKernel8x32Avx512(c.A, m0, mrEff, k, pPackB, c.C, n, n0, nrEff);
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// 8 rows × 32 columns in sixteen <see cref="Vector512{T}"/> accumulators, held in registers across the
+        /// whole K contraction. Per k-step: two 512-bit B loads and up to eight A broadcasts feed sixteen FMAs
+        /// — 3.2 FLOP per byte loaded, against 2.0 for the 8×8 AVX2 kernel.
+        ///
+        /// <para>Handles a partial row block (<paramref name="mrEff"/> &lt; 8) and a partial column tail
+        /// (<paramref name="nrEff"/> &lt; 32) with scalar stores rather than a separate kernel; both are edge
+        /// cases of the last block, not the steady state.</para>
+        /// </summary>
+        private static unsafe void MicroKernel8x32Avx512(
+            float* a, int m0, int mrEff, int k, float* packB, float* c, int n, int n0, int nrEff)
+        {
+            // Row pointers, clamped to the last valid row so a short block reads in-bounds; the extra rows'
+            // results are simply not stored below.
+            var rows = stackalloc float*[Mr];
+            for (var r = 0; r < Mr; r++)
+            {
+                rows[r] = a + ((long)(m0 + Math.Min(r, mrEff - 1)) * k);
+            }
+
+            Vector512<float> c00 = default, c01 = default, c10 = default, c11 = default;
+            Vector512<float> c20 = default, c21 = default, c30 = default, c31 = default;
+            Vector512<float> c40 = default, c41 = default, c50 = default, c51 = default;
+            Vector512<float> c60 = default, c61 = default, c70 = default, c71 = default;
+
+            for (var kk = 0; kk < k; kk++)
+            {
+                var b0 = Vector512.Load(packB + (kk * Nr512));
+                var b1 = Vector512.Load(packB + (kk * Nr512) + 16);
+
+                var r = Vector512.Create(rows[0][kk]);
+                c00 = Avx512F.FusedMultiplyAdd(r, b0, c00);
+                c01 = Avx512F.FusedMultiplyAdd(r, b1, c01);
+                r = Vector512.Create(rows[1][kk]);
+                c10 = Avx512F.FusedMultiplyAdd(r, b0, c10);
+                c11 = Avx512F.FusedMultiplyAdd(r, b1, c11);
+                r = Vector512.Create(rows[2][kk]);
+                c20 = Avx512F.FusedMultiplyAdd(r, b0, c20);
+                c21 = Avx512F.FusedMultiplyAdd(r, b1, c21);
+                r = Vector512.Create(rows[3][kk]);
+                c30 = Avx512F.FusedMultiplyAdd(r, b0, c30);
+                c31 = Avx512F.FusedMultiplyAdd(r, b1, c31);
+                r = Vector512.Create(rows[4][kk]);
+                c40 = Avx512F.FusedMultiplyAdd(r, b0, c40);
+                c41 = Avx512F.FusedMultiplyAdd(r, b1, c41);
+                r = Vector512.Create(rows[5][kk]);
+                c50 = Avx512F.FusedMultiplyAdd(r, b0, c50);
+                c51 = Avx512F.FusedMultiplyAdd(r, b1, c51);
+                r = Vector512.Create(rows[6][kk]);
+                c60 = Avx512F.FusedMultiplyAdd(r, b0, c60);
+                c61 = Avx512F.FusedMultiplyAdd(r, b1, c61);
+                r = Vector512.Create(rows[7][kk]);
+                c70 = Avx512F.FusedMultiplyAdd(r, b0, c70);
+                c71 = Avx512F.FusedMultiplyAdd(r, b1, c71);
+            }
+
+            var tile = stackalloc float[Nr512];
+
+            StoreTile(c, n, n0, m0, 0, mrEff, nrEff, c00, c01, tile);
+            StoreTile(c, n, n0, m0, 1, mrEff, nrEff, c10, c11, tile);
+            StoreTile(c, n, n0, m0, 2, mrEff, nrEff, c20, c21, tile);
+            StoreTile(c, n, n0, m0, 3, mrEff, nrEff, c30, c31, tile);
+            StoreTile(c, n, n0, m0, 4, mrEff, nrEff, c40, c41, tile);
+            StoreTile(c, n, n0, m0, 5, mrEff, nrEff, c50, c51, tile);
+            StoreTile(c, n, n0, m0, 6, mrEff, nrEff, c60, c61, tile);
+            StoreTile(c, n, n0, m0, 7, mrEff, nrEff, c70, c71, tile);
+        }
+
+        private static unsafe void StoreTile(
+            float* c, int n, int n0, int m0, int row, int mrEff, int nrEff,
+            Vector512<float> lo, Vector512<float> hi, float* scratch)
+        {
+            if (row >= mrEff)
+            {
+                return;
+            }
+
+            var dst = c + ((long)(m0 + row) * n) + n0;
+
+            if (nrEff == Nr512)
+            {
+                lo.Store(dst);
+                hi.Store(dst + 16);
+                return;
+            }
+
+            lo.Store(scratch);
+            hi.Store(scratch + 16);
+
+            for (var j = 0; j < nrEff; j++)
+            {
+                dst[j] = scratch[j];
             }
         }
 
@@ -150,43 +456,95 @@ namespace DevOnBike.Overfit.Kernels
             }
         }
 
+        /// <summary>
+        /// N-panels packed and swept together, so the A row-block is read once per <i>group</i> rather than
+        /// once per panel. 1 reproduces the original loop exactly.
+        ///
+        /// <para><b>Measured motivation.</b> The original loop sweeps M inside the panel loop, so the whole A
+        /// matrix is re-read for every N-panel: on VGG-16 that is <b>~7.5 GB of A traffic for 30.7 GFLOP of
+        /// arithmetic — 0.24 bytes/FLOP where a blocked GEMM runs at ~0.01</b>, and 7.5 GB in 73 ms is
+        /// ≈103 GB/s against a 90 GB/s DRAM read ceiling. It is why one thread reaches 132 GFLOP/s on this
+        /// kernel while sixteen reach only ~30 each: alone, a core has the cache to itself.</para>
+        ///
+        /// <para>Grouping trades A traffic for a larger packed-B working set (<c>K · Nr · group</c> floats), so
+        /// the useful group size is bounded by cache, not by the arithmetic — hence a flag rather than a
+        /// constant, and a measurement rather than a guess.</para>
+        /// </summary>
+        internal static int NPanelGroup = ResolveNPanelGroup();
+
+        private static int ResolveNPanelGroup()
+        {
+            var raw = Environment.GetEnvironmentVariable(OverfitEnvironment.ConvPanelGroup);
+
+            // Default 1 — the original per-panel loop. Grouping was built to cut A re-reads and MEASURED to do
+            // nothing: interleaved with an ORT canary (4% spread), groups 1/2/4 came out 72.7/73.0/73.3 ms.
+            // The traffic argument that motivated it (7.5 GB of A re-reads against a 90 GB/s DRAM ceiling) was
+            // wrong about WHERE the traffic goes: this CPU has 128 MB of L3, so every layer's A (≤9 MB) is
+            // re-read from L3, not DRAM. Kept behind the flag because the negative is worth preserving.
+            return int.TryParse(raw, out var parsed) && parsed >= 1 ? parsed : 1;
+        }
+
         private static unsafe void GemmNPanelWorker(int npStart, int npEnd, void* ctxPtr)
         {
             ref readonly var c = ref Unsafe.AsRef<GemmCtx>(ctxPtr);
             var k = c.K;
             var n = c.N;
             var m = c.M;
+            var group = NPanelGroup;
 
-            using var packBuf = new PooledBuffer<float>(checked(k * Nr), clearMemory: false);
+            using var packBuf = new PooledBuffer<float>(checked(k * Nr * group), clearMemory: false);
             var packB = packBuf.Span;
 
-            for (var np = npStart; np < npEnd; np++)
+            for (var gStart = npStart; gStart < npEnd; gStart += group)
             {
-                var n0 = np * Nr;
-                var nrEff = Math.Min(Nr, n - n0);
+                var gCount = Math.Min(group, npEnd - gStart);
 
-                for (var kk = 0; kk < k; kk++)
+                if (!AblatePackB)
                 {
-                    var srcBase = kk * n + n0;
-                    var dstBase = kk * Nr;
-                    for (var j = 0; j < Nr; j++)
+                    for (var g = 0; g < gCount; g++)
                     {
-                        packB[dstBase + j] = j < nrEff ? c.B[srcBase + j] : 0f;
+                        var n0 = (gStart + g) * Nr;
+                        var nrEff = Math.Min(Nr, n - n0);
+                        var panelBase = g * k * Nr;
+
+                        for (var kk = 0; kk < k; kk++)
+                        {
+                            var srcBase = (kk * n) + n0;
+                            var dstBase = panelBase + (kk * Nr);
+                            for (var j = 0; j < Nr; j++)
+                            {
+                                packB[dstBase + j] = j < nrEff ? c.B[srcBase + j] : 0f;
+                            }
+                        }
                     }
+                }
+
+                if (AblateMicroKernel)
+                {
+                    continue;
                 }
 
                 fixed (float* pPackB = packB)
                 {
+                    // M outermost: each 8-row block of A is loaded once and reused across every panel in the
+                    // group, which is the whole point of grouping.
                     for (var m0 = 0; m0 < m; m0 += Mr)
                     {
                         var mrEff = Math.Min(Mr, m - m0);
-                        if (mrEff == Mr)
+
+                        for (var g = 0; g < gCount; g++)
                         {
-                            MicroKernel8x8(c.A, m0, k, pPackB, c.C, n, n0, nrEff);
-                        }
-                        else
-                        {
-                            MicroKernelTail(c.A, m0, mrEff, k, pPackB, c.C, n, n0, nrEff);
+                            var n0 = (gStart + g) * Nr;
+                            var nrEff = Math.Min(Nr, n - n0);
+                            var panel = pPackB + ((long)g * k * Nr);
+
+                            if (mrEff == Mr)
+                            {
+                                MicroKernel8x8(c.A, m0, k, panel, c.C, n, n0, nrEff);
+                                continue;
+                            }
+
+                            MicroKernelTail(c.A, m0, mrEff, k, panel, c.C, n, n0, nrEff);
                         }
                     }
                 }

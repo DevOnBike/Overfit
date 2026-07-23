@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -148,7 +148,8 @@ namespace Benchmarks
                         _completion.Signal();
                     }
                 }
-                else
+
+                if (!(index < _chunkCount))
                 {
                     Debug.Fail($"OverfitParallelLegacy: claim index {index} >= chunkCount {_chunkCount}.");
                 }

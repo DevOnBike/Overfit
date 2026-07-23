@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -270,7 +270,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                         output[i] = input[i] * scale;
                     }
                 }
-                else
+
+                if (!(weights.FinalNormGamma.IsEmpty))
                 {
                     for (var i = 0; i < DModel; i++)
                     {
@@ -278,7 +279,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     }
                 }
             }
-            else
+
+            if (!(weights.FinalNormBeta.IsEmpty))
             {
                 SingleTokenLayerNormKernel.Normalize(input, weights.FinalNormGamma, weights.FinalNormBeta, output, DModel, LayerNormEpsilon);
             }
@@ -348,7 +350,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                         _finalHidden[i] = lastRow[i] * scale;
                     }
                 }
-                else
+
+                if (!(weights.FinalNormGamma.IsEmpty))
                 {
                     for (var i = 0; i < DModel; i++)
                     {
@@ -356,7 +359,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     }
                 }
             }
-            else
+
+            if (!(weights.FinalNormBeta.IsEmpty))
             {
                 SingleTokenLayerNormKernel.Normalize(
                     lastRow, weights.FinalNormGamma, weights.FinalNormBeta, _finalHidden, DModel, LayerNormEpsilon);
@@ -468,7 +472,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                         dst[i] = row[i] * scale;
                     }
                 }
-                else
+
+                if (!(weights.FinalNormGamma.IsEmpty))
                 {
                     for (var i = 0; i < DModel; i++)
                     {
@@ -476,7 +481,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     }
                 }
             }
-            else
+
+            if (!(weights.FinalNormBeta.IsEmpty))
             {
                 SingleTokenLayerNormKernel.Normalize(
                     row, weights.FinalNormGamma, weights.FinalNormBeta, dst, DModel, LayerNormEpsilon);
@@ -503,25 +509,28 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         internal void ProjectLogitsFrom(ReadOnlySpan<float> finalNorm, StackWeights weights, Span<float> logits)
         {
             var lmHead = weights.LmHeadWeights;
-            if (lmHead.IsQ6K)
+            // Resident-format dispatch, classified once (see BatchedQuantProjection).
+            var kind = lmHead.IsQ6K ? 0 : lmHead.IsQ4K ? 1 : lmHead.IsQuantized ? 2 : 3;
+
+            if (kind == 0)
             {
                 Q6KDotKernel.ProjectParallel(
                     finalNorm, lmHead.Quantized6K, [], logits,
                     _lmHeadQ8KQuants, _lmHeadQ8KScales, _lmHeadQ8KBsums);
             }
-            else if (lmHead.IsQ4K)
+            if (kind == 1)
             {
                 Q4KDotKernel.ProjectParallel(
                     finalNorm, lmHead.Quantized4K, [], logits,
                     _lmHeadQ8KQuants, _lmHeadQ8KScales, _lmHeadQ8KBsums);
             }
-            else if (lmHead.IsQuantized)
+            if (kind == 2)
             {
                 Q8DotKernel.ProjectParallel(
                     finalNorm, lmHead.Quantized, [], logits,
                     _lmHeadInputQuants, _lmHeadInputScales);
             }
-            else
+            if (kind == 3)
             {
                 SingleTokenProjectionKernel.ProjectParallel(
                     finalNorm, lmHead.F32, [], logits, DModel, VocabSize);

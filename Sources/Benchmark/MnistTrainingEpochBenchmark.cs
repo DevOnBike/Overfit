@@ -3,6 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using DevOnBike.Overfit.Runtime;
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Engines;
 using DevOnBike.Overfit.Autograd;
@@ -50,7 +51,7 @@ namespace Benchmarks
         [GlobalSetup]
         public void Setup()
         {
-            var dir = Environment.GetEnvironmentVariable("OVERFIT_MNIST_DIR") ?? @"d:\ml";
+            var dir = Environment.GetEnvironmentVariable(OverfitEnvironment.MnistDir) ?? @"d:\ml";
             (_trainX, _trainY) = LoadMnist(
                 Path.Combine(dir, "train-images.idx3-ubyte"),
                 Path.Combine(dir, "train-labels.idx1-ubyte"));

@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -18,6 +18,7 @@ using DevOnBike.Overfit.Mcp;
 using DevOnBike.Overfit.Redaction;
 using DevOnBike.Overfit.Runtime;
 using DevOnBike.Overfit.Server;
+using DevOnBike.Overfit.Server.AspNet;
 using DevOnBike.Overfit.Serving;
 using DevOnBike.Overfit.Trees;
 
@@ -153,6 +154,10 @@ namespace DevOnBike.Overfit.Cli
 
         public static int Serve(string model, string host, int port, string? embedModel, string? ttsModel, string? ttsSnac, int sessions = 1)
         {
+            // Time from launch to "server is listening" — dominated by the GGUF load, so it is effectively
+            // the container's cold-start time. Printed in the ready banner.
+            var startup = ValueStopwatch.StartNew();
+
             var path = ModelCache.Resolve(model);
             if (path is null)
             {
@@ -257,37 +262,32 @@ namespace DevOnBike.Overfit.Cli
                 cts.Cancel();
             };
 
+            void PrintBanner(string baseUrl)
+            {
+                // The server may bind 0.0.0.0 (all interfaces) but you can't *connect* to 0.0.0.0 — show a
+                // reachable address in the copy-paste examples.
+                var connectUrl = baseUrl.Replace("0.0.0.0", "127.0.0.1");
+                var embedEp = embedder is not null ? " | POST /v1/embeddings" : string.Empty;
+                var ttsEp = tts is not null ? " | POST /v1/audio/speech" : string.Empty;
+                Console.WriteLine();
+                Console.WriteLine($"Overfit OpenAI-compatible server (ASP.NET / Kestrel, AOT) listening on {baseUrl}");
+                Console.WriteLine($"  ready in:  {startup.GetElapsedTime().TotalSeconds:F2} s");
+                Console.WriteLine($"  model id:  {modelName}");
+                Console.WriteLine($"  endpoints: GET /v1/models | POST /v1/chat/completions (stream + non-stream){embedEp}{ttsEp} | GET /health | GET /metrics | GET /docs");
+                Console.WriteLine();
+                Console.WriteLine($"  reach it at {connectUrl}   (e.g. {connectUrl}/docs , {connectUrl}/metrics)");
+                Console.WriteLine($"  curl -N {connectUrl}/v1/chat/completions -H \"Content-Type: application/json\" \\");
+                Console.WriteLine($"       -d '{{\"model\":\"{modelName}\",\"stream\":true,\"messages\":[{{\"role\":\"user\",\"content\":\"Hello\"}}]}}'");
+                Console.WriteLine();
+                Console.WriteLine("Press Ctrl+C to stop.");
+            }
+
             try
             {
-                OverfitOpenAiServer.Serve(
-                    pool,
-                    modelName,
-                    host,
-                    port,
-                    DefaultSystemPrompt,
-                    embedder,
-                    tts,
-                    onListening: baseUrl =>
-                    {
-                        var embedEp = embedder is null ? string.Empty : " | POST /v1/embeddings";
-                        var ttsEp = tts is null ? string.Empty : " | POST /v1/audio/speech";
-                        Console.WriteLine();
-                        Console.WriteLine($"Overfit OpenAI-compatible server listening on {baseUrl}");
-                        Console.WriteLine($"  model id:  {modelName}");
-                        Console.WriteLine($"  endpoints: GET /v1/models | POST /v1/chat/completions (stream + non-stream){embedEp}{ttsEp} | GET /health");
-                        Console.WriteLine();
-                        Console.WriteLine($"  curl {baseUrl}/v1/chat/completions -H \"Content-Type: application/json\" \\");
-                        Console.WriteLine($"       -d '{{\"model\":\"{modelName}\",\"messages\":[{{\"role\":\"user\",\"content\":\"Hello\"}}]}}'");
-                        Console.WriteLine();
-                        Console.WriteLine("Press Ctrl+C to stop.");
-                    },
+                OverfitAspNetServer.Serve(
+                    pool, modelName, host, port, DefaultSystemPrompt, embedder, tts,
+                    onListening: PrintBanner,
                     cancellationToken: cts.Token);
-            }
-            catch (HttpListenerException ex)
-            {
-                Console.Error.WriteLine($"Could not bind http://{host}:{port}/ : {ex.Message}");
-                Console.Error.WriteLine("The port may be in use, or binding to a non-local host needs elevation / a URL ACL on Windows.");
-                return 1;
             }
             finally
             {
@@ -463,8 +463,10 @@ namespace DevOnBike.Overfit.Cli
             // via /proc/<pid>/environ, inherited by child processes, or dumped from the env later.
             Environment.SetEnvironmentVariable(keyEnv, null);
 
-            Redactor redactor;
-            RedactionPolicy policy;
+            // The config / built-in pair below is exhaustive, but the compiler cannot prove that across two
+            // separate ifs; the null! initialisers only state the invariant.
+            Redactor redactor = null!;
+            RedactionPolicy policy = null!;
             string? configUpstream = null;
             IReadOnlyList<string> configClientKeys = [];
             var configScanResponses = false;
@@ -487,7 +489,8 @@ namespace DevOnBike.Overfit.Cli
                 }
                 Console.WriteLine($"config: {Path.GetFullPath(configPath)}");
             }
-            else
+
+            if (!(!string.IsNullOrEmpty(configPath)))
             {
                 // Built-in: international + Polish (checksum-validated PESEL/NIP/REGON/IBAN) detectors, default policy.
                 var intl = DefaultRedactionRules.All();
@@ -524,7 +527,8 @@ namespace DevOnBike.Overfit.Cli
             {
                 Console.WriteLine($"client auth: ON ({clientKeys.Count} gateway key(s)) — callers must send 'Authorization: Bearer <key>'");
             }
-            else
+
+            if (!(clientKeys.Count > 0))
             {
                 Console.WriteLine($"client auth: OFF — set ${clientKeysEnv} (or \"clientKeys\" in --config) before exposing the gateway.");
             }
@@ -640,7 +644,8 @@ namespace DevOnBike.Overfit.Cli
                     model.PredictRawMargins(rows[r], outputs.AsSpan(r * groups, groups));
                 }
             }
-            else
+
+            if (!(margin))
             {
                 model.PredictBatchParallel(flat, rows.Count, outputs);
             }
@@ -652,7 +657,8 @@ namespace DevOnBike.Overfit.Cli
                 {
                     Console.Out.WriteLine(text);
                 }
-                else
+
+                if (!(writer is null))
                 {
                     writer.WriteLine(text);
                 }
@@ -1327,11 +1333,12 @@ namespace DevOnBike.Overfit.Cli
 
             try
             {
-                while (true)
+                // Bound stated in the header (OVERFIT023): the REPL ends when stdin closes — ReadLine
+                // returns null on EOF, a closed pipe or Ctrl+Z/Ctrl+D. `/exit` is the interactive shortcut
+                // for the same thing and stays an explicit break.
+                for (var line = ReadCommand(); line is not null; line = ReadCommand())
                 {
-                    Console.Write("> ");
-                    var line = Console.ReadLine();
-                    if (line is null || line.Equals("/exit", StringComparison.OrdinalIgnoreCase))
+                    if (line.Equals("/exit", StringComparison.OrdinalIgnoreCase))
                     {
                         break;
                     }
@@ -1360,6 +1367,12 @@ namespace DevOnBike.Overfit.Cli
                 client.Dispose();
             }
             return 0;
+
+            static string? ReadCommand()
+            {
+                Console.Write("> ");
+                return Console.ReadLine();
+            }
         }
     }
 }

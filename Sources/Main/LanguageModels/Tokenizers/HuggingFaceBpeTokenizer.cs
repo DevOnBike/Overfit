@@ -3,8 +3,6 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using System.Collections.Generic;
-using System.IO;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -154,7 +152,8 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
                 {
                     tokens.Add(_specialTokens[piece]);
                 }
-                else
+
+                if (!(isSpecial))
                 {
                     foreach (Match m in _splitPattern.Matches(piece))
                     {
@@ -187,7 +186,8 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
                     }
                     sb.Append(piece);
                 }
-                else
+
+                if (!(_specialTokenIds.Contains(id)))
                 {
                     foreach (var ch in piece)
                     {
@@ -314,13 +314,16 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
             var rank = 0;
             foreach (var merge in mergesJson.EnumerateArray())
             {
-                string? left, right;
+                string? left = null;
+                string? right = null;
+
                 if (merge.ValueKind == JsonValueKind.Array)
                 {
                     left = merge[0].GetString();
                     right = merge[1].GetString();
                 }
-                else
+
+                if (merge.ValueKind != JsonValueKind.Array)
                 {
                     var parts = merge.GetString()!.Split(' ');
                     left = parts.Length == 2 ? parts[0] : null;

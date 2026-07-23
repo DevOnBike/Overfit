@@ -3,6 +3,8 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using DevOnBike.Overfit.Runtime;
+
 namespace DevOnBike.Overfit.Demo.LocalAgent.Infrastructure
 {
     internal static class ModelPathResolver
@@ -25,7 +27,7 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.Infrastructure
             }
 
             // 2) Env var `OVERFIT_MODEL_DIR` — a directory; prefer a *.gguf inside, else model.safetensors.
-            var fromEnv = Environment.GetEnvironmentVariable("OVERFIT_MODEL_DIR");
+            var fromEnv = Environment.GetEnvironmentVariable(OverfitEnvironment.ModelDir);
             if (!string.IsNullOrWhiteSpace(fromEnv) && Directory.Exists(fromEnv))
             {
                 var ggufs = Directory.GetFiles(fromEnv, "*.gguf");

@@ -10,7 +10,6 @@ using DevOnBike.Overfit.LanguageModels.Runtime;
 using DevOnBike.Overfit.Tensors;
 using DevOnBike.Overfit.Tensors.Core;
 using Xunit.Abstractions;
-using Ops = DevOnBike.Overfit.Ops;
 
 namespace DevOnBike.Overfit.Tests.DeepLearning
 {

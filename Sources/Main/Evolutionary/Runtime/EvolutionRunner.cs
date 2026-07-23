@@ -38,26 +38,25 @@ namespace DevOnBike.Overfit.Evolutionary.Runtime
                     clearMemory: false);
 
                 _ownsWorkspace = true;
+                return;
             }
-            else
+
+            if (workspace.PopulationSize != _algorithm.PopulationSize)
             {
-                if (workspace.PopulationSize != _algorithm.PopulationSize)
-                {
-                    throw new ArgumentException(
-                        $"Workspace population size {workspace.PopulationSize} does not match algorithm population size {_algorithm.PopulationSize}.",
-                        nameof(workspace));
-                }
-
-                if (workspace.GenomeSize != _algorithm.ParameterCount)
-                {
-                    throw new ArgumentException(
-                        $"Workspace genome size {workspace.GenomeSize} does not match algorithm parameter count {_algorithm.ParameterCount}.",
-                        nameof(workspace));
-                }
-
-                _workspace = workspace;
-                _ownsWorkspace = false;
+                throw new ArgumentException(
+                    $"Workspace population size {workspace.PopulationSize} does not match algorithm population size {_algorithm.PopulationSize}.",
+                    nameof(workspace));
             }
+
+            if (workspace.GenomeSize != _algorithm.ParameterCount)
+            {
+                throw new ArgumentException(
+                    $"Workspace genome size {workspace.GenomeSize} does not match algorithm parameter count {_algorithm.ParameterCount}.",
+                    nameof(workspace));
+            }
+
+            _workspace = workspace;
+            _ownsWorkspace = false;
         }
 
         public IEvolutionAlgorithm Algorithm

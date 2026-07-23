@@ -1,11 +1,9 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using System.Collections.Generic;
 using System.Globalization;
-using System.IO;
 using System.Text;
 using DevOnBike.Overfit.LanguageModels.Contracts;
 
@@ -200,7 +198,8 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
                 {
                     sb.Append(tok, ContinuationPrefix.Length, tok.Length - ContinuationPrefix.Length);
                 }
-                else
+
+                if (!(tok.StartsWith(ContinuationPrefix, StringComparison.Ordinal)))
                 {
                     if (sb.Length > 0)
                     {
@@ -319,7 +318,8 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
             {
                 ids.Add(_unkId);
             }
-            else
+
+            if (!(isBad))
             {
                 ids.AddRange(pieces);
             }

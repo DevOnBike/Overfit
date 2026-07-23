@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -135,7 +135,12 @@ namespace DevOnBike.Overfit.Audio.Mp3
                     y = e & 0xf;
                     return true;
                 }
-                if (br.ReadBit())
+                // ReadBit CONSUMES a bit, so it must be called exactly once per tree step — capture it.
+                // Two separate `if (br.ReadBit())` / `if (!br.ReadBit())` tests would advance the bitstream
+                // twice per node and silently desynchronise the whole Huffman decode.
+                var bit = br.ReadBit();
+
+                if (bit)
                 {
                     while ((ht[off + point] & 0xff) >= 250)
                     {
@@ -143,7 +148,8 @@ namespace DevOnBike.Overfit.Audio.Mp3
                     }
                     point += ht[off + point] & 0xff;
                 }
-                else
+
+                if (!bit)
                 {
                     while ((ht[off + point] >> 8) >= 250)
                     {

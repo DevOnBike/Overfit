@@ -177,6 +177,15 @@ build *errors* in the kernels, and `[OverfitHotPath]` escalates every per-call r
 error inside a marked method) with a CI tripwire that proves the analyzer itself is
 alive ([`Sources/Analyzers/README.md`](Sources/Analyzers/README.md)).
 
+Readability is held to the same standard: `else` and `else if` are build errors everywhere
+outside the test project (`OVERFIT021`), and the sweep that introduced the rule removed all
+322 occurrences from the library. That was done only after measuring what the refactor costs,
+because a style rule that quietly slows the hot path is not worth having: guard clauses,
+ternaries and loop `continue` are **free** (1.00–1.01×), and the one shape that does cost —
+extracting a branch into a method the JIT then declines to inline — was measured at 2.25× and
+is avoided rather than assumed away ([`Sources/Benchmark/ElseRefactorBenchmark.cs`](Sources/Benchmark/ElseRefactorBenchmark.cs),
+the sole intentional exemption since the `else` forms are its measurement subject).
+
 ### 5. Bounded parsing of untrusted model files
 
 Overfit runs **inside your process**, so a malformed model file must not be able to take
@@ -430,16 +439,18 @@ More details:
 
 ## Benchmarks: honest headline
 
-Test machine for current headline numbers: AMD Ryzen 9 9950X3D, Windows 11,
-.NET 10, BenchmarkDotNet 0.15.8.
+Test machine for current headline numbers: AMD Ryzen 9 9950X3D (Zen 5, 16 cores, AVX-512), Windows 11,
+.NET 10, BenchmarkDotNet 0.15.8. LLM figures use Qwen2.5-3B Q4_K_M unless stated. Kernels that need
+AVX-512 fall back to AVX2 automatically — the suite is green in both configurations, but the prefill
+figure below is the AVX-512 one.
 
 | Workload | Result | Allocation |
 |---|---:|---:|
-| Single inference `Linear(784 -> 10)` | ~7.6x faster than ONNX Runtime | 0 B |
+| Single inference `Linear(784 -> 10)` | ~8.0x faster than ONNX Runtime (234 ns vs 1883 ns) | 0 B |
 | GPT-2 Small KV-cache decode | ~6.5x faster than naive O(N²), parity vs PyTorch | 0 B/token |
-| Qwen2.5-3B Q4_K_M decode | ~19 tok/s default, **~24 tok/s** with opt-in repacked GEMV (`OVERFIT_REPACK_GEMV=1` + `OVERFIT_DECODE_WORKERS=16`) | ~1 B/token |
+| Qwen2.5-3B Q4_K_M decode | ~19 tok/s default, **~25 tok/s** with opt-in repacked GEMV (`OVERFIT_REPACK_GEMV=1` + `OVERFIT_DECODE_WORKERS=16`) | ~1 B/token |
 | Bielik-4.5B Q4_K_M decode | ~17 tok/s, −36% working set vs same-file llama.cpp | ~1 B/token |
-| Bielik-4.5B Q4_K_M prefill / TTFT (410-token prompt) | **1.44× faster** with the weight-stationary Q4_K matmul (10.7 → 7.5 s, bit-identical) | 0 B/request |
+| **Qwen2.5-3B Q4_K_M prefill (672-token prompt)** | **~299 tok/s — 2.1× faster than the previous release** (143 → 299), bit-identical. AVX-512 Q4_K/Q6_K kernels where the CPU has them, plus whole-matrix Q/K/V/O projections and hoisted F16 scale decode | **0 B/request** |
 | MNIST CNN training (60k) | **503 ± 4 ms/epoch** (BenchmarkDotNet) — on par with PyTorch 2.11 CPU at its optimal threads (~524–570 ms, same box/arch); full train ~1.5–2 s with one-cycle LR — [audit](docs/mnist-cnn-training-audit.md) | 1.31 MB/epoch |
 | Concurrent inference, 8 threads | ~3.6x faster than ONNX Runtime | 0 B |
 | Batched prefill (272-token prompt, 0.6B) | allocation-free per request (was ~748 MB before pooling), bit-identical output | **0 B/request** |
@@ -447,7 +458,8 @@ Test machine for current headline numbers: AMD Ryzen 9 9950X3D, Windows 11,
 
 Honest positioning:
 
-- llama.cpp / LLamaSharp are still faster for raw CPU LLM decode (~1.2× same-file vs a current AVX-512 llama.cpp build with our repacked-GEMV flag on, narrowed from ~1.6× — single-stream CPU decode is DRAM-bandwidth-bound).
+- llama.cpp / LLamaSharp are still faster for raw CPU LLM decode (~1.15× same-file vs a current AVX-512 llama.cpp build with our repacked-GEMV flag on, narrowed from ~1.6×). Single-stream decode is DRAM-bandwidth-bound and we measured our GEMV at **82% of this box's DRAM read ceiling**, with its compute rate *above* that ceiling — so the remaining gap is memory, not kernel quality, and a wider instruction set cannot close it (`Sources/Benchmark/DecodeGemvRooflineBenchmark.cs`).
+- On **prefill** the gap is now ~1.8× against an AVX-512 llama.cpp build and **~1.15× against their AVX2 build** — i.e. on machines without AVX-512 we are close to parity. Measured on one box (Ryzen 9 9950X3D) with one model; treat it as a data point, not a general claim. Our Q4_K matmul measured *faster* than llama.cpp's at equal instruction set and thread count (1.70 vs 1.56 TFLOP/s on their own test shape).
 - PyTorch CPU is faster for large-scale training.
 - ONNX Runtime is mature and fast if native dependencies are acceptable.
 - XGBoost's C++ kernel is still ~1.5× faster for raw batch tree scoring; Overfit wins decisively on in-process online (per-request) latency where the Python/native marshalling tax dominates.

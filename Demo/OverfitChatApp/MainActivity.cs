@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -938,20 +938,10 @@ namespace DevOnBike.OverfitChat
 
         private void UpdateSelectFieldText()
         {
-            string label;
             var last = Prefs.GetString("last_model_path", null);
-            if (last != null && _modelPaths.Contains(last))
-            {
-                label = DisplayName(last);
-            }
-            else if (_modelPaths.Count > 0)
-            {
-                label = DisplayName(_modelPaths[0]);
-            }
-            else
-            {
-                label = "No models";
-            }
+            var label = last != null && _modelPaths.Contains(last) ? DisplayName(last)
+                : _modelPaths.Count > 0 ? DisplayName(_modelPaths[0])
+                : "No models";
 
             _modelSelectLabel.Text = label;
         }
@@ -1328,7 +1318,8 @@ namespace DevOnBike.OverfitChat
                 {
                     StartRecording();
                 }
-                else
+
+                if (!(grantResults.Length > 0 && grantResults[0] == Permission.Granted))
                 {
                     Toast.MakeText(this, "Microphone permission is needed for voice input.",
                         ToastLength.Short)!.Show();

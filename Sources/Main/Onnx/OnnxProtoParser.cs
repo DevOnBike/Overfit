@@ -288,7 +288,8 @@ namespace DevOnBike.Overfit.Onnx
                         {
                             floats.AddRange(reader.ReadPackedFloat());
                         }
-                        else
+
+                        if (wireType != WireType.LengthDelimited)
                         {
                             floats.Add(reader.ReadFloat());
                         }
@@ -298,7 +299,8 @@ namespace DevOnBike.Overfit.Onnx
                         {
                             ints.AddRange(reader.ReadPackedInt64());
                         }
-                        else
+
+                        if (wireType != WireType.LengthDelimited)
                         {
                             ints.Add(reader.ReadInt64());
                         }
@@ -363,7 +365,8 @@ namespace DevOnBike.Overfit.Onnx
                         {
                             dims.AddRange(reader.ReadPackedInt64());
                         }
-                        else
+
+                        if (wireType != WireType.LengthDelimited)
                         {
                             dims.Add(reader.ReadInt64());
                         }
@@ -376,7 +379,8 @@ namespace DevOnBike.Overfit.Onnx
                         {
                             floatData = reader.ReadPackedFloat();
                         }
-                        else
+
+                        if (wireType != WireType.LengthDelimited)
                         {
                             // unpacked
                             floatData ??= [];
@@ -391,7 +395,8 @@ namespace DevOnBike.Overfit.Onnx
                         {
                             int64Data = reader.ReadPackedInt64().ToArray();
                         }
-                        else
+
+                        if (wireType != WireType.LengthDelimited)
                         {
                             int64Data ??= [];
                             var newArr = new long[int64Data.Length + 1];
@@ -569,7 +574,8 @@ namespace DevOnBike.Overfit.Onnx
                         }
                     }
                 }
-                else
+
+                if (fieldNum != 1)
                 {
                     reader.SkipField(wireType);
                 }
@@ -616,7 +622,8 @@ namespace DevOnBike.Overfit.Onnx
 
                     dims.Add(dim);
                 }
-                else
+
+                if (fieldNum != 1)
                 {
                     reader.SkipField(wireType);
                 }

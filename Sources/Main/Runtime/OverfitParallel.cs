@@ -383,6 +383,28 @@ namespace DevOnBike.Overfit.Runtime
         }
 
         /// <summary>
+        /// Diagnostics only: count every real fan-out (the inline fast path is not counted, since it costs
+        /// nothing to launch). Off by default and checked before the interlocked increment.
+        ///
+        /// <para>Exists because a prefill's fixed cost had to be attributed. Prompt-length sweeps showed
+        /// ~175 ms that does not scale with the prompt — 8% of a 672-token prefill but ~70% of a chat-sized
+        /// one — and the two candidates were per-dispatch launch overhead and the unavoidable walk over the
+        /// weight matrix. Counting the dispatches turns that from an argument into arithmetic.</para>
+        /// </summary>
+        public static bool CountDispatches;
+
+        private static long _dispatchCount;
+
+        /// <summary>Fan-outs since the last <see cref="ResetDispatchCount"/>.</summary>
+        public static long DispatchCount => Interlocked.Read(ref _dispatchCount);
+
+        /// <summary>Clears the dispatch counter.</summary>
+        public static void ResetDispatchCount()
+        {
+            Interlocked.Exchange(ref _dispatchCount, 0);
+        }
+
+        /// <summary>
         /// Executes <paramref name="body"/> over chunks of
         /// <c>[rangeStart, rangeEnd)</c> across the worker pool. Equivalent to
         /// the grained overload with <c>minItemsPerWorker = 1</c>.
@@ -470,6 +492,11 @@ namespace DevOnBike.Overfit.Runtime
             {
                 body(rangeStart, rangeEnd, context);
                 return;
+            }
+
+            if (CountDispatches)
+            {
+                Interlocked.Increment(ref _dispatchCount);
             }
 
             var cap = maxWorkers < 1 ? 1 : Math.Min(maxWorkers, _workerCount);

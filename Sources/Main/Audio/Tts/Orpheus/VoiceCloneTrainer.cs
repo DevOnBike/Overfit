@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -64,7 +64,8 @@ namespace DevOnBike.Overfit.Audio.Tts.Orpheus
                 _outputStart = Math.Min(Tokenizer.EndOfTextTokenId, audioBase);
                 _vocab = fullVocab - _outputStart;
             }
-            else
+
+            if (!(restrictToAudioVocab))
             {
                 _outputStart = 0;
                 _vocab = fullVocab;
@@ -137,7 +138,8 @@ namespace DevOnBike.Overfit.Audio.Tts.Orpheus
                         {
                             targets[i] = IgnoreIndex;
                         }
-                        else
+
+                        if (!(i < ex.PromptLength - 1))
                         {
                             targets[i] -= _outputStart;
                         }

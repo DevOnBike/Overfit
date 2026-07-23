@@ -135,6 +135,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
             }
 
             using var engine = CachedLlamaInferenceEngine.LoadGguf(ModelPath);
+            using var kernels = UseNonRepackedKernels();
 
             // A ≥16-token prompt to trigger the batched path; arbitrary in-vocab ids.
             var prompt = new int[40];
@@ -174,6 +175,78 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
             // Same predicted token, and logits agree to within accumulated FP noise across 36 layers.
             Assert.Equal(argS, argB);
             Assert.True(maxDiff < 1e-2f, $"batched vs single logit divergence {maxDiff:G4} (> 1e-2).");
+        }
+
+        /// <summary>
+        /// Guards the DEFAULT prefill configuration — the repacked <c>block_q*_Kx8</c> GEMMs — at the standard
+        /// they can actually meet: <b>same predicted token</b>, not bit-equality.
+        ///
+        /// <para>Those kernels associate their reduction differently from the per-row ones, so they diverge
+        /// from the single-token reference by ~0.44 in absolute logits on Qwen-3B. That is why
+        /// <see cref="BatchedPrefill_MatchesSingleToken_OnRealQwen"/> pins the layout via
+        /// <see cref="UseNonRepackedKernels"/> — and why the fast path needs its own, looser gate rather than
+        /// simply being untested. Without this test, turning a repacked kernel on by default would be covered
+        /// by nothing at all.</para>
+        ///
+        /// <para>The tolerance is deliberately not tightened to the point of pinning today's exact numerics:
+        /// the contract being asserted is "the reassociation does not change what the model says", which is
+        /// the same bar <c>OVERFIT_REPACK_ATTN</c> is held to.</para>
+        ///
+        /// <para><b>The prompt is real text, not the synthetic id ramp its neighbours use.</b> An arbitrary
+        /// in-vocab sequence like <c>100 + 37·i</c> is out-of-distribution, so the top logits come out nearly
+        /// tied and the argmax flips on any numerical perturbation — this test failed exactly that way with
+        /// the ramp (argmax 11 vs 13 at maxAbsLogitDiff 0.42) while the same kernels agree on the first
+        /// generated token for real text. Argmax stability is only a meaningful assertion where the model is
+        /// actually confident.</para>
+        /// </summary>
+        [LongFact]
+        public void RepackedPrefill_AgreesWithNonRepacked_OnArgmax()
+        {
+            if (!File.Exists(ModelPath))
+            {
+                _out.WriteLine($"missing {ModelPath}");
+                return;
+            }
+
+            using var engine = CachedLlamaInferenceEngine.LoadGguf(ModelPath);
+            var tokenizer = GgufTokenizer.Load(ModelPath);
+            var prompt = tokenizer.Encode(
+                "The history of computing began with mechanical calculators and evolved through vacuum tubes, "
+                + "transistors, integrated circuits and finally the microprocessor era. The next paragraph "
+                + "explains why that progression mattered for modern software.");
+
+            // Default configuration: whatever the repacked gates decide (sidecar / env flag / Q6_K tiled).
+            using var fast = engine.CreateSession(256);
+            fast.Reset(prompt);
+            var fastLogits = fast.LastLogits.ToArray();
+
+            float[] referenceLogits;
+            using (var kernels = UseNonRepackedKernels())
+            {
+                using var reference = engine.CreateSession(256);
+                reference.Reset(prompt);
+                referenceLogits = reference.LastLogits.ToArray();
+            }
+
+            var maxDiff = 0f;
+            int argFast = 0, argReference = 0;
+            for (var i = 0; i < referenceLogits.Length; i++)
+            {
+                maxDiff = MathF.Max(maxDiff, MathF.Abs(fastLogits[i] - referenceLogits[i]));
+                if (fastLogits[i] > fastLogits[argFast])
+                {
+                    argFast = i;
+                }
+                if (referenceLogits[i] > referenceLogits[argReference])
+                {
+                    argReference = i;
+                }
+            }
+
+            _out.WriteLine(
+                $"repacked argmax={argFast} non-repacked argmax={argReference}  maxAbsLogitDiff={maxDiff:G4}");
+
+            Assert.Equal(argReference, argFast);
         }
 
         [LongFact]
@@ -262,5 +335,29 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
             var batched = Time(disableBatched: false);
             _out.WriteLine($"TTFT {prompt.Length}-token prompt: single={single:F1} ms  batched={batched:F1} ms  speedup={single / batched:F2}×");
         }
+        /// <summary>
+        /// Forces the NON-repacked batched kernels for the duration of the scope.
+        ///
+        /// <para>Without this a batched-vs-single-token parity test silently stops testing what it claims.
+        /// The repacked <c>block_q*_Kx8</c> GEMMs associate their reduction differently from the per-row
+        /// kernels the single-token path uses, so they are NOT bit-identical - measured at
+        /// <c>maxAbsLogitDiff ~ 0.44</c> on Qwen-3B, enough to flip an argmax. Worse, a <c>*.gguf.repack</c>
+        /// sidecar sets <c>IsPrepacked</c> and switches that path on regardless of the env flag, which is
+        /// how this test came to fail unnoticed for two days (it is <c>[LongFact]</c>, so it never ran).
+        /// The repacked kernels are held to end-to-end coherence instead - see
+        /// <see cref="RepackedPrefill_AgreesWithNonRepacked_OnArgmax"/>.</para>
+        ///
+        /// <para>The flag is process-global, so these tests must not run concurrently with other prefill
+        /// tests - they are <c>[LongFact]</c> and run one at a time in practice.</para>
+        /// </summary>
+        private static NonRepackedScope UseNonRepackedKernels() => new();
+
+        private readonly struct NonRepackedScope : IDisposable
+        {
+            public NonRepackedScope() => BatchedQuantProjection.DisableRepackedKernelsForParity = true;
+
+            public void Dispose() => BatchedQuantProjection.DisableRepackedKernelsForParity = false;
+        }
+
     }
 }

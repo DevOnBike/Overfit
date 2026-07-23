@@ -1,7 +1,9 @@
 # Native-AOT build of the `overfit` CLI, exposing the OpenAI-compatible HTTP server (`overfit serve`).
 #
-# Identity: a single self-contained NATIVE binary (no .NET runtime, no ASP.NET) on a chiselled base —
-# tiny image, fast cold start. The model is NOT baked in (GGUF files are large + licensed separately):
+# Identity: a single self-contained NATIVE binary (no .NET runtime) on a chiselled base — tiny image,
+# fast cold start. `overfit serve` runs the AOT-ready ASP.NET (Kestrel + Minimal API) host by default;
+# the whole ASP.NET Core graph is Native-AOT compiled into this binary (verified by the aot-guard CI job).
+# The model is NOT baked in (GGUF files are large + licensed separately):
 # provide it at runtime via a mounted volume, e.g.
 #
 #   docker build -f Sources/Cli/Dockerfile -t overfit .            # build context = REPO ROOT

@@ -1,8 +1,9 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using DevOnBike.Overfit.Runtime;
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
@@ -260,7 +261,8 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.Rag
                         File.Delete(meanPath);
                     }
                 }
-                else
+
+                if (!(mean is null))
                 {
                     using var stream = new FileStream(meanPath, FileMode.Create, FileAccess.Write);
                     using var writer = new BinaryWriter(stream);
@@ -512,7 +514,7 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.Rag
             }
 
             // 2) Env var OVERFIT_EMBEDDING_DIR.
-            var fromEnv = Environment.GetEnvironmentVariable("OVERFIT_EMBEDDING_DIR");
+            var fromEnv = Environment.GetEnvironmentVariable(OverfitEnvironment.EmbeddingDir);
             if (!string.IsNullOrWhiteSpace(fromEnv) && Directory.Exists(fromEnv))
             {
                 return fromEnv;

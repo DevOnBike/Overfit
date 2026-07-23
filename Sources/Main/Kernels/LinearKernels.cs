@@ -105,8 +105,10 @@ namespace DevOnBike.Overfit.Kernels
                         outSlice,
                         inputSize,
                         outputSize);
+
+                    continue;
                 }
-                else
+
                 {
                     ForwardOutputMajorDot(
                         inSlice,

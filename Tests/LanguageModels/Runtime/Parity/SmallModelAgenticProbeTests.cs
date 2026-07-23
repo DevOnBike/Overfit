@@ -4,7 +4,6 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using DevOnBike.Overfit.LanguageModels.Chat;
-using DevOnBike.Overfit.LanguageModels.Constraints;
 using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Loading;
 using DevOnBike.Overfit.LanguageModels.Tokenizers;

@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -185,7 +185,8 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                 {
                     heads[h] = Q8Weight.QuantizeRows(rowMajor, headDim, dModel);
                 }
-                else
+
+                if (!(quantize))
                 {
                     var storage = TensorStorage<float>.Unpooled(dModel * headDim);
                     var dst = storage.AsSpan();
@@ -246,7 +247,8 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                     }
                     heads[h] = Q8Weight.QuantizeRows(gather.Span, dModel, headDim);
                 }
-                else
+
+                if (!(quantize))
                 {
                     var storage = TensorStorage<float>.Unpooled(headDim * dModel);
                     var dst = storage.AsSpan();
@@ -363,7 +365,8 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                 {
                     PermuteRopeRows(src, dst, headDim, width: 1);
                 }
-                else
+
+                if (!(ropePermute))
                 {
                     src.CopyTo(dst);
                 }

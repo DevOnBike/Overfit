@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -44,8 +44,10 @@ namespace DevOnBike.Overfit.Audio.Tts
                     bw.Write(embedding![k]);
                 }
             }
-            else if (File.Exists(binPath))
+            if (embeddingDim <= 0 && File.Exists(binPath))
             {
+                // Gated on embeddingDim: the branch above CREATES binPath, so an ungated File.Exists
+                // here would delete the file that was just written.
                 File.Delete(binPath);   // a preset voice has no embedding — drop a stale one
             }
         }

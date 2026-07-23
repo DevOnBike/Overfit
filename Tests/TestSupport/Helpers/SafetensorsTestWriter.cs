@@ -4,7 +4,6 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using System.Buffers.Binary;
-using System.Collections.Generic;
 using System.Text;
 
 namespace DevOnBike.Overfit.Tests.TestSupport.Helpers

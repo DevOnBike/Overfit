@@ -1,9 +1,8 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using System.IO;
 using System.Text;
 
 namespace DevOnBike.Overfit.LanguageModels.Whisper
@@ -103,14 +102,15 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
                         data[i] = br.ReadSingle();
                     }
                 }
-                else if (ftype == 1)
+                if (ftype == 1)
                 {
                     for (var i = 0L; i < count; i++)
                     {
                         data[i] = (float)BitConverter.UInt16BitsToHalf(br.ReadUInt16());
                     }
                 }
-                else
+
+                if (ftype is not (0 or 1))
                 {
                     throw new OverfitRuntimeException($"Tensor '{name}' has unsupported ftype {ftype} (only F32/F16 supported so far).");
                 }

@@ -4,7 +4,6 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using System.Buffers;
-using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text.Json;
 using DevOnBike.Overfit.Diagnostics;

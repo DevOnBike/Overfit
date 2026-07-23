@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -234,7 +234,8 @@ namespace DevOnBike.Overfit.LanguageModels.Tools
                                 _stage = Stage.Args;
                                 _args = default;
                             }
-                            else
+
+                            if (!(schemas[_toolIndex] is null))
                             {
                                 _stage = Stage.ArgsSchema;
                                 _segIndex = 0;
@@ -327,7 +328,8 @@ namespace DevOnBike.Overfit.LanguageModels.Tools
                         _valueStarted = false;
                         _valueKind = schema.Kinds[_segIndex];
                     }
-                    else
+
+                    if (!(_segIndex < schema.Kinds.Length))
                     {
                         // Matched the final "}" that closes the arguments object; one more "}" (the
                         // envelope's own close) follows.

@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -494,7 +494,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                         heads[h] = new SingleHeadWeights(
                             wq: layer.Wq[h], bq: layer.Bq[h], wo: layer.Wo[h]);
                     }
-                    else
+
+                    if (!(useGqa))
                     {
                         // MHA: all weights in SingleHeadWeights
                         var kv = h % kvCount;

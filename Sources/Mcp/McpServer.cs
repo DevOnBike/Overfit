@@ -19,7 +19,7 @@ namespace DevOnBike.Overfit.Mcp
     /// Implements the tools surface of the protocol: <c>initialize</c> (version negotiation +
     /// capabilities), <c>notifications/initialized</c>, <c>ping</c>, <c>tools/list</c> and
     /// <c>tools/call</c>. Requests are served strictly one at a time on the caller's thread
-    /// (single-tenant model session underneath — same stance as <c>OverfitOpenAiServer</c>).
+    /// (single-tenant model session underneath — same stance as the `overfit serve` host).
     /// </summary>
     public sealed class McpServer
     {

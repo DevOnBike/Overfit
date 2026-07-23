@@ -1,9 +1,8 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using System.Collections.Generic;
 using System.Text;
 using System.Text.RegularExpressions;
 using DevOnBike.Overfit.LanguageModels.Loading;
@@ -204,7 +203,8 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
             {
                 BpeEncode(text, output);
             }
-            else
+
+            if (!(_model == "gpt2"))
             {
                 SpmEncode(text, output);
             }
@@ -254,18 +254,20 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
                     {
                         bytes.Add(_charToByte![piece[c]]);
                     }
+
+                    continue;
                 }
-                else if (_idToByte[id] >= 0)
+
+                if (_idToByte[id] >= 0)
                 {
                     bytes.Add((byte)_idToByte[id]);
+                    continue;
                 }
-                else
+
+                var pieceBytes = Encoding.UTF8.GetBytes(_tokens[id].Replace(SpaceMarker, ' '));
+                for (var b = 0; b < pieceBytes.Length; b++)
                 {
-                    var pieceBytes = Encoding.UTF8.GetBytes(_tokens[id].Replace(SpaceMarker, ' '));
-                    for (var b = 0; b < pieceBytes.Length; b++)
-                    {
-                        bytes.Add(pieceBytes[b]);
-                    }
+                    bytes.Add(pieceBytes[b]);
                 }
             }
 

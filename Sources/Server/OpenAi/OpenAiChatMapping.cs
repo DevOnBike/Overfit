@@ -1,10 +1,9 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using System.Text.Json;
-using DevOnBike.Overfit.LanguageModels;
 using DevOnBike.Overfit.LanguageModels.Chat;
 using DevOnBike.Overfit.LanguageModels.Constraints;
 using DevOnBike.Overfit.LanguageModels.Contracts;
@@ -30,19 +29,9 @@ namespace DevOnBike.Overfit.Server.OpenAi
             }
 
             var temperature = req.Temperature ?? 1.0f;
-            SamplingOptions sampling;
-            if (temperature <= 0.0001f)
-            {
-                sampling = SamplingOptions.Greedy;
-            }
-            else if (req.MinP is > 0f and < 1f)
-            {
-                sampling = SamplingOptions.WithMinP(req.MinP.Value, temperature);
-            }
-            else
-            {
-                sampling = new SamplingOptions(SamplingStrategy.TopP, temperature, topK: 0, topP: req.TopP ?? 1.0f, seed: 0);
-            }
+            var sampling = temperature <= 0.0001f ? SamplingOptions.Greedy
+                : req.MinP is > 0f and < 1f ? SamplingOptions.WithMinP(req.MinP.Value, temperature)
+                : new SamplingOptions(SamplingStrategy.TopP, temperature, topK: 0, topP: req.TopP ?? 1.0f, seed: 0);
 
             return (sampling, maxTokens);
         }
@@ -116,7 +105,7 @@ namespace DevOnBike.Overfit.Server.OpenAi
             {
                 list.Add(input.GetString() ?? string.Empty);
             }
-            else if (input.ValueKind == JsonValueKind.Array)
+            if (input.ValueKind == JsonValueKind.Array)
             {
                 foreach (var e in input.EnumerateArray())
                 {

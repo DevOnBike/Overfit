@@ -83,11 +83,10 @@ namespace DevOnBike.Overfit.DeepLearning
                     var hNextOut = output.Slice(t * batchSize * hSize, batchSize * hSize);
                     _cell.ForwardInference(batchSize, x_t, hBuf.Span, cBuf.Span, hNextOut, cBuf.Span);
                     hNextOut.CopyTo(hBuf.Span);
+                    continue;
                 }
-                else
-                {
-                    _cell.ForwardInference(batchSize, x_t, hBuf.Span, cBuf.Span, hBuf.Span, cBuf.Span);
-                }
+
+                _cell.ForwardInference(batchSize, x_t, hBuf.Span, cBuf.Span, hBuf.Span, cBuf.Span);
             }
 
             if (!_returnSequences)

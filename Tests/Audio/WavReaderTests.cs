@@ -4,7 +4,6 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using System.Buffers.Binary;
-using System.IO;
 using System.Text;
 using DevOnBike.Overfit.Audio;
 

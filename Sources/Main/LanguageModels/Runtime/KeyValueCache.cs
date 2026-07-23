@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -69,25 +69,20 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             Dtype = dtype;
 
             var elems = (int)shape.ElementsPerCache;
-            if (dtype == KvCacheDType.Q8)
-            {
-                var vectors = shape.LayerCount * shape.KvHeadCount * shape.MaxSequenceLength;
-                _keysQ = new sbyte[elems];
-                _valuesQ = new sbyte[elems];
-                _keyScales = new float[vectors];
-                _valueScales = new float[vectors];
-                _keys = [];
-                _values = [];
-            }
-            else
-            {
-                _keys = new float[elems];
-                _values = new float[elems];
-                _keysQ = [];
-                _valuesQ = [];
-                _keyScales = [];
-                _valueScales = [];
-            }
+            var vectors = shape.LayerCount * shape.KvHeadCount * shape.MaxSequenceLength;
+            var quantized = dtype == KvCacheDType.Q8;
+
+            // Conditional expressions rather than two mirrored `if` blocks: the compiler cannot see that a pair
+            // of `if (x)` / `if (!x)` statements is exhaustive, so every field read as CS8618 "uninitialised"
+            // and the AOT guard (which promotes warnings to errors) failed on it. A ternary is one definite
+            // assignment per field, needs no `else` (OVERFIT021), and the unused side is `[]` = Array.Empty,
+            // so the discarded branch allocates nothing.
+            _keys = quantized ? [] : new float[elems];
+            _values = quantized ? [] : new float[elems];
+            _keysQ = quantized ? new sbyte[elems] : [];
+            _valuesQ = quantized ? new sbyte[elems] : [];
+            _keyScales = quantized ? new float[vectors] : [];
+            _valueScales = quantized ? new float[vectors] : [];
         }
 
         public KeyValueCacheShape Shape
@@ -160,7 +155,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 Array.Clear(_keyScales);
                 Array.Clear(_valueScales);
             }
-            else
+
+            if (!(IsQuantized))
             {
                 Array.Clear(_keys);
                 Array.Clear(_values);
@@ -208,7 +204,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                             _keyScales.AsSpan(scaleBase + count, keep).CopyTo(_keyScales.AsSpan(scaleBase, keep));
                             _valueScales.AsSpan(scaleBase + count, keep).CopyTo(_valueScales.AsSpan(scaleBase, keep));
                         }
-                        else
+
+                        if (!(IsQuantized))
                         {
                             _keys.AsSpan(baseOffset + shift, keepElems).CopyTo(_keys.AsSpan(baseOffset, keepElems));
                             _values.AsSpan(baseOffset + shift, keepElems).CopyTo(_values.AsSpan(baseOffset, keepElems));
@@ -465,7 +462,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             {
                 scales[ScaleOffset(layerIndex, headIndex, position)] = Q8KvQuant.Quantize(vector.Slice(0, hd), q8.AsSpan(offset, hd));
             }
-            else
+
+            if (!(IsQuantized))
             {
                 vector.Slice(0, hd).CopyTo(f32.AsSpan(offset, hd));
             }

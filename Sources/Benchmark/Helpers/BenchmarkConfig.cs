@@ -25,6 +25,11 @@ namespace Benchmarks.Helpers
             AddDiagnoser(MemoryDiagnoser.Default);
             AddColumn(RankColumn.Arabic);
 
+            // Rates are derived in-repo from the benchmark's own declared WorkAmount; classes that declare
+            // none get empty cells. See WorkAmount for why this is not computed in an external script.
+            AddColumn(ThroughputColumn.Teraflops);
+            AddColumn(ThroughputColumn.Gigabytes);
+
             WithOrderer(new DefaultOrderer(SummaryOrderPolicy.FastestToSlowest));
         }
     }

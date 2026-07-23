@@ -28,4 +28,5 @@ OVERFIT020 | Performance | Warning | Primitive-array parameter that never escape
 OVERFIT021 | Style | Warning | else / else if — use a guard clause + early return, continue, a ternary, or a switch expression
 OVERFIT022 | Reliability | Warning | Direct recursion — unbounded stack depth; StackOverflowException is uncatchable in .NET
 OVERFIT023 | Reliability | Warning | Loop with no exit condition in its header (while(true) / for(;;)) — state the bound
+OVERFIT024 | Maintainability | Warning | Environment-variable name literal — declare it in OverfitEnvironment so every switch has one audit point
 OVERFIT900 | Performance | Error | A per-call OVERFIT rule fired inside an [OverfitHotPath] member/type — escalated to a build error

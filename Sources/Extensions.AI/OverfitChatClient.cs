@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -199,15 +199,16 @@ namespace DevOnBike.Overfit.Extensions.AI
                 if (role == ChatRole.System)
                 {
                     _session.AddSystem(text);
+                    continue;
                 }
-                else if (role == ChatRole.Assistant)
+
+                if (role == ChatRole.Assistant)
                 {
                     _session.AddAssistant(text);
+                    continue;
                 }
-                else
-                {
-                    _session.AddUser(text);
-                }   // user / tool / unknown → user turn
+
+                _session.AddUser(text);   // user / tool / unknown → user turn
             }
 
             return messages[^1].Text ?? string.Empty;

@@ -392,11 +392,16 @@ namespace DevOnBike.Overfit.DeepLearning
 
             _wqHeads[0].Load(reader);
 
-            if (IsNewQkvBiasCheckpointFormat(reader))
+            // Capture: IsNewQkvBiasCheckpointFormat consumes bytes from the reader, so calling it a second
+            // time in a negated `if` would advance the stream twice and desynchronise the load.
+            var isNewFormat = IsNewQkvBiasCheckpointFormat(reader);
+
+            if (isNewFormat)
             {
                 LoadNewFormatAfterFirstWq(reader);
             }
-            else
+
+            if (!isNewFormat)
             {
                 LoadLegacyFormatAfterFirstWq(reader);
             }

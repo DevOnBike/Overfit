@@ -55,7 +55,8 @@ namespace DevOnBike.Overfit.Data.Prepare
                 {
                     IdentifyByUniqueRatio(span, rows, cols, keptList);
                 }
-                else
+
+                if (_minUniqueRatio <= 0f)
                 {
                     IdentifyByVariance(span, rows, cols, keptList);
                 }
@@ -118,7 +119,8 @@ namespace DevOnBike.Overfit.Data.Prepare
                         }
                     }
                 }
-                else
+
+                if (_epsilon != 0f)
                 {
                     for (var r = 1; r < rows; r++)
                     {

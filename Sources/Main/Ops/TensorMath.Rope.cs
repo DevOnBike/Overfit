@@ -73,7 +73,8 @@ namespace DevOnBike.Overfit.Ops
                     RopeForwardRow(inS, outS, cosS, sinS, r, D, headDim, halfDim, headsPerRow, splitHalf);
                 }
             }
-            else
+
+            if (!((long)rows * D < ParallelThreshold))
             {
                 unsafe
                 {
@@ -132,7 +133,8 @@ namespace DevOnBike.Overfit.Ops
                     RopeBackwardRow(dOutS, dInS, cosS, sinS, r, D, headDim, halfDim, headsPerRow, splitHalf);
                 }
             }
-            else
+
+            if (!((long)rows * D < ParallelThreshold))
             {
                 unsafe
                 {

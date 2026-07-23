@@ -106,7 +106,8 @@ namespace DevOnBike.Overfit.Ops
                     Simd.Add(inS.Slice(i * C, C), bS, outS.Slice(i * C, C));
                 }
             }
-            else
+
+            if (!(N < BatchSequentialThreshold))
             {
                 var inSpan = input.DataView.AsReadOnlySpan();
                 var bSpan = bias.DataView.AsReadOnlySpan();
@@ -209,7 +210,8 @@ namespace DevOnBike.Overfit.Ops
             {
                 MatMulRawSeq(A.DataView.AsReadOnlySpan(), B.DataView.AsReadOnlySpan(), aR, aC, bC, C.DataView.AsSpan());
             }
-            else
+
+            if (!((long)aR * aC * bC < ParallelThreshold))
             {
                 var aSpan = A.DataView.AsReadOnlySpan();
                 var bSpan = B.DataView.AsReadOnlySpan();
@@ -306,7 +308,8 @@ namespace DevOnBike.Overfit.Ops
                     bGrad ? B.GradView.AsReadOnlySpan() : B.DataView.AsReadOnlySpan(),
                     C.GradView.AsSpan(), N, K, M);
             }
-            else
+
+            if (!((long)N * K * M < ParallelThreshold))
             {
                 var aSpan = aGrad ? A.GradView.AsReadOnlySpan() : A.DataView.AsReadOnlySpan();
                 var bSpan = bGrad ? B.GradView.AsReadOnlySpan() : B.DataView.AsReadOnlySpan();
@@ -377,7 +380,8 @@ namespace DevOnBike.Overfit.Ops
                     bGrad ? B.GradView.AsReadOnlySpan() : B.DataView.AsReadOnlySpan(),
                     C.GradView.AsSpan(), K, N, M);
             }
-            else
+
+            if (!((long)K * N * M < ParallelThreshold))
             {
                 var aSpan = aGrad ? A.GradView.AsReadOnlySpan() : A.DataView.AsReadOnlySpan();
                 var bSpan = bGrad ? B.GradView.AsReadOnlySpan() : B.DataView.AsReadOnlySpan();
@@ -523,7 +527,8 @@ namespace DevOnBike.Overfit.Ops
                         batchSize, inputSize, outputSize);
                 }
             }
-            else
+
+            if (!(ops < LinearBackwardSequentialThreshold))
             {
                 // Large matrix: existing parallel MatMul.
                 MatMulBackward(input, weights, output);

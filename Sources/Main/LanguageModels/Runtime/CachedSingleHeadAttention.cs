@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -401,40 +401,44 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             ReadOnlySpan<short> sharedBsums,
             bool sharedValid)
         {
-            if (weight.IsQ6K)
+            var kind = weight.IsQ6K ? 0 : weight.IsQ4K ? 1 : weight.IsQuantized ? 2 : 3;
+
+            if (kind == 0)
             {
                 if (sharedValid)
                 {
                     Q6KDotKernel.ProjectPreQuantized(
                         weight.Quantized6K, bias, output, sharedQuants, sharedScales, sharedBsums);
                 }
-                else
+
+                if (!(sharedValid))
                 {
                     Q6KDotKernel.Project(
                         hidden, weight.Quantized6K, bias, output,
                         _q8kInputQuants, _q8kInputScales, _q8kInputBsums);
                 }
             }
-            else if (weight.IsQ4K)
+            if (kind == 1)
             {
                 if (sharedValid)
                 {
                     Q4KDotKernel.ProjectPreQuantized(
                         weight.Quantized4K, bias, output, sharedQuants, sharedScales, sharedBsums);
                 }
-                else
+
+                if (!(sharedValid))
                 {
                     Q4KDotKernel.Project(
                         hidden, weight.Quantized4K, bias, output,
                         _q8kInputQuants, _q8kInputScales, _q8kInputBsums);
                 }
             }
-            else if (weight.IsQuantized)
+            if (kind == 2)
             {
                 Q8DotKernel.Project(
                     hidden, weight.Quantized, bias, output, _q8InputQuants, _q8InputScales);
             }
-            else
+            if (kind == 3)
             {
                 SingleTokenProjectionKernel.Project(
                     hidden, weight.F32, bias, output, DModel, HeadDimension);
@@ -455,25 +459,27 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             int inputSize,
             int outputSize)
         {
-            if (weight.IsQ6K)
+            var kind = weight.IsQ6K ? 0 : weight.IsQ4K ? 1 : weight.IsQuantized ? 2 : 3;
+
+            if (kind == 0)
             {
                 Q6KDotKernel.Project(
                     input, weight.Quantized6K, bias, output,
                     _q8kInputQuants, _q8kInputScales, _q8kInputBsums);
             }
-            else if (weight.IsQ4K)
+            if (kind == 1)
             {
                 Q4KDotKernel.Project(
                     input, weight.Quantized4K, bias, output,
                     _q8kInputQuants, _q8kInputScales, _q8kInputBsums);
             }
-            else if (weight.IsQuantized)
+            if (kind == 2)
             {
                 Q8DotKernel.Project(
                     input, weight.Quantized, bias, output,
                     _q8InputQuants, _q8InputScales);
             }
-            else
+            if (kind == 3)
             {
                 SingleTokenProjectionKernel.Project(
                     input, weight.F32, bias, output, inputSize, outputSize);

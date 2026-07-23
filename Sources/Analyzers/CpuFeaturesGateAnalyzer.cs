@@ -27,7 +27,7 @@ namespace DevOnBike.Overfit.Analyzers
         private static readonly DiagnosticDescriptor Rule = new(
             DiagnosticId,
             title: "Direct intrinsics IsSupported — use CpuFeatures",
-            messageFormat: "Direct '{0}.IsSupported' — gate ISA paths through CpuFeatures (CpuFeatures.Has{0}): one audit point, composed flags, same JIT constant-folding",
+            messageFormat: "Direct '{0}.{1}' — gate ISA and vector-width checks through CpuFeatures (CpuFeatures.Has{0}): one audit point, composed flags, same JIT constant-folding",
             category: "Performance",
             defaultSeverity: DiagnosticSeverity.Warning,
             isEnabledByDefault: true,
@@ -47,7 +47,10 @@ namespace DevOnBike.Overfit.Analyzers
             var operation = (IPropertyReferenceOperation)context.Operation;
             var property = operation.Property;
 
-            if (property.Name != "IsSupported" || !property.IsStatic)
+            // IsHardwareAccelerated is the portable width check (Vector128/256/512) that TensorPrimitives and
+            // ImageSharp both use; it is a second door to the same room and belongs behind the same facade, or
+            // the centralisation only holds for the x86 half.
+            if (property.Name is not ("IsSupported" or "IsHardwareAccelerated") || !property.IsStatic)
             {
                 return;
             }
@@ -64,7 +67,7 @@ namespace DevOnBike.Overfit.Analyzers
             }
 
             context.ReportDiagnostic(Diagnostic.Create(
-                Rule, operation.Syntax.GetLocation(), property.ContainingType.Name));
+                Rule, operation.Syntax.GetLocation(), property.ContainingType.Name, property.Name));
         }
 
         private static bool IsHardwareIntrinsicsType(INamedTypeSymbol? type)

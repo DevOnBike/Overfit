@@ -65,7 +65,8 @@ namespace DevOnBike.Overfit.Ops
             {
                 LayerNormForwardSeq(inS, outS, gammaS, betaS, meanS, invStdS, numRows, C, eps);
             }
-            else
+
+            if (!((long)numRows * C < ParallelThreshold))
             {
                 unsafe
                 {
@@ -96,7 +97,8 @@ namespace DevOnBike.Overfit.Ops
                     c0: gamma, c1: beta, c2: mean, c3: invStd,
                     contextCount: 4);
             }
-            else
+
+            if (!(requiresGrad))
             {
                 mean.Dispose();
                 invStd.Dispose();

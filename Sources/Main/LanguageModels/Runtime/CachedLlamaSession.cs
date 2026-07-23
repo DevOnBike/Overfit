@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -7,8 +7,8 @@ using System.Runtime.CompilerServices;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Rope;
+using DevOnBike.Overfit.Runtime;
 using DevOnBike.Overfit.Tensors;
-using DevOnBike.Overfit.Tensors.Core;
 
 namespace DevOnBike.Overfit.LanguageModels.Runtime
 {
@@ -53,6 +53,31 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         private readonly int[] _dryRev = new int[DryHistoryCap];
         private readonly int[] _dryZ = new int[DryHistoryCap];
 
+        // Prompt cache: the token ids currently represented in the KV cache, indexed BY CACHE POSITION.
+        // The live region is always [0, _cache.CurrentLength) — which is what makes truncation free
+        // bookkeeping-wise: dropping KV state past N automatically drops these too, and the stale tail is
+        // overwritten when the cache refills. Sized to the context length once, so recording a token is a
+        // single array store and the zero-allocation decode invariant is preserved.
+        private readonly int[] _cacheTokens;
+
+        // Cleared whenever cache positions stop corresponding to recorded ids — sliding-window eviction
+        // (every id shifts down) and prefix restore (ids belong to whoever took the snapshot). Reuse then
+        // falls back to a full prefill rather than attending over K/V that does not match the prompt.
+        private bool _cacheTokensValid = true;
+
+        // The logits left by the most recent prefill, plus the cache length they belong to (-1 = none).
+        //
+        // K/V reuse alone still costs one forward pass, because logits are a by-product of the stack rather
+        // than cache state: even a prompt the cache holds in full has to re-run its last token to learn what
+        // comes next. Keeping the end-of-prompt logits removes that last pass — an exact match restores them
+        // with a copy and forwards nothing at all. Valid for as long as tokens [0, position) are untouched,
+        // which a whole turn of generation is, since decoding only ever appends.
+        //
+        // Costs one float[vocab] per session (~608 KB for Qwen-3B's 151936-wide vocabulary) against a KV
+        // cache measured in tens of megabytes, and one memcpy per prefill.
+        private readonly float[] _promptLogits;
+        private int _promptLogitsPosition = -1;
+
         private bool _disposed;
         private bool _slidingWindow;
         private int _evictBlock;
@@ -79,6 +104,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             _logits = new float[config.VocabSize];
             _indexScratch = new int[config.VocabSize];
             _scoreScratch = new float[config.VocabSize];
+            _cacheTokens = new int[cache.MaxLength];
+            _promptLogits = new float[config.VocabSize];
             _random = new Random();
         }
 
@@ -137,6 +164,11 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             var count = Math.Min(_evictBlock, _cache.CurrentLength - 1);
             if (count > 0)
             {
+                // Eviction shifts every surviving token down by `count`, so the recorded ids no longer sit
+                // at their own positions. Rebuilding the map would be cheap, but a slid session's prompt no
+                // longer starts at position 0 either — prefix reuse is meaningless once the head is gone.
+                _cacheTokensValid = false;
+                _promptLogitsPosition = -1;
                 _cache.Evict(count);
             }
         }
@@ -155,6 +187,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             ThrowIfDisposed();
             _cache.Reset();
             _generatedTokens.Clear();
+            _cacheTokensValid = true;
+            _promptLogitsPosition = -1;
         }
 
         /// <summary>
@@ -192,7 +226,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 && _config.FfnActivation is FeedForwardActivation.SwiGLU or FeedForwardActivation.GeGLU
                 && _cache.CurrentLength + promptTokens.Length <= _cache.MaxLength)
             {
+                PrefillProfiler.BeginRequest(promptTokens.Length);
                 PrefillBatchedQuant(promptTokens);
+                PrefillProfiler.EndRequest();
+                SnapshotPromptLogits();
                 return;
             }
 
@@ -214,11 +251,24 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 {
                     DecodeTokenWithoutLogits(promptTokens[i]);
                 }
-                else
+
+                if (!(i < lastIndex))
                 {
                     DecodeToken(promptTokens[i]);
                 }
             }
+
+            SnapshotPromptLogits();
+        }
+
+        /// <summary>
+        /// Records the logits this prefill just produced against the cache length they describe, so a later
+        /// prompt that the cache already holds in full can skip the forward pass entirely.
+        /// </summary>
+        private void SnapshotPromptLogits()
+        {
+            _logits.AsSpan(0, VocabularySize).CopyTo(_promptLogits.AsSpan(0, VocabularySize));
+            _promptLogitsPosition = _cache.CurrentLength;
         }
 
         /// <summary>
@@ -252,7 +302,107 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         {
             ThrowIfDisposed();
             ArgumentNullException.ThrowIfNull(prefix);
+
+            // The restored K/V belongs to whoever took the snapshot; this session never saw those token ids,
+            // so it cannot claim any prefix matches them.
+            _cacheTokensValid = false;
+            _promptLogitsPosition = -1;
             _cache.RestoreFrom(prefix);
+        }
+
+        /// <summary>
+        /// Prefills <paramref name="promptTokens"/> <b>reusing the longest prefix already present in the KV
+        /// cache</b>, and returns how many tokens that reuse saved. The remainder is prefilled normally, so
+        /// the resulting state is the same one <see cref="Reset(System.ReadOnlySpan{int})"/> would leave —
+        /// this trades no accuracy for the saving, because K/V for a given position depends only on the
+        /// tokens at and before it, which are by construction identical across the matched prefix.
+        ///
+        /// <para><b>What it is for.</b> In a chat server every turn re-sends the whole conversation, so turn
+        /// N re-encodes everything turns 1..N-1 already encoded. Measured against a competing pure-.NET
+        /// engine through the same load driver, its prompt cache answered a repeated prompt in 47 ms where
+        /// its own cold prefill of the same prompt took 865 ms — an 18x difference that has nothing to do
+        /// with kernel quality and everything to do with not doing the work twice.</para>
+        ///
+        /// <para><b>One token is always re-forwarded.</b> Even on an exact match the last token is dropped
+        /// and re-run, because <c>_logits</c> must predict the token that follows the prompt, and those
+        /// logits are a by-product of the forward pass rather than cache state. So a fully cached prompt
+        /// still costs one decode step, not zero.</para>
+        ///
+        /// <para>Falls back to a full reset+prefill when the recorded ids cannot be trusted (after
+        /// sliding-window eviction or <see cref="RestorePrefix"/>) or when nothing matches. The DRY history
+        /// is deliberately <i>not</i> rewound — it is a bounded anti-repetition heuristic over what this
+        /// session emitted, not part of the cache contract.</para>
+        /// </summary>
+        public int PrefillReusingCache(ReadOnlySpan<int> promptTokens)
+        {
+            ThrowIfDisposed();
+
+            var match = MatchingPrefixLength(promptTokens);
+
+            if (DisableLogitsCache)
+            {
+                return PrefillReusingKeyValuesOnly(promptTokens, match);
+            }
+
+            // Everything matches AND we kept the logits this exact prompt produced: restore them and forward
+            // nothing. This is the re-sent-prompt case (a retry, a regenerate, a load test), where even the
+            // one-token fallback below would be re-deriving something already computed.
+            if (match == promptTokens.Length && _promptLogitsPosition == promptTokens.Length)
+            {
+                _cache.TruncateTo(promptTokens.Length);
+                _promptLogits.AsSpan(0, VocabularySize).CopyTo(_logits.AsSpan(0, VocabularySize));
+                return promptTokens.Length;
+            }
+
+            return PrefillReusingKeyValuesOnly(promptTokens, match);
+        }
+
+        /// <summary>Test hook: skip the kept-logits fast path so the K/V-only behaviour can be A/B'd against
+        /// it. Defaults from <see cref="OverfitEnvironment.DisableLogitsCache"/> so a server process can be
+        /// started in either configuration and both measured in one interleaved run.</summary>
+        internal static bool DisableLogitsCache =
+            Environment.GetEnvironmentVariable(OverfitEnvironment.DisableLogitsCache) == "1";
+
+        /// <summary>
+        /// Reuse K/V only: hold one token back — logits are a by-product of the stack, so the last token has
+        /// to go through it for the session to learn what follows the prompt.
+        /// </summary>
+        private int PrefillReusingKeyValuesOnly(ReadOnlySpan<int> promptTokens, int match)
+        {
+            var reusable = Math.Min(match, promptTokens.Length - 1);
+            if (reusable <= 0)
+            {
+                Reset(promptTokens);
+                return 0;
+            }
+
+            // Any truncation below the snapshot leaves it describing K/V the cache no longer holds. The
+            // Prefill below re-establishes it; dropping it first means no window where it could be believed.
+            _promptLogitsPosition = -1;
+            _cache.TruncateTo(reusable);
+            Prefill(promptTokens[reusable..]);
+            return reusable;
+        }
+
+        /// <summary>
+        /// How many leading tokens of <paramref name="promptTokens"/> are already in the cache at the very
+        /// positions they would occupy — the raw match, before any decision about holding a token back.
+        /// </summary>
+        private int MatchingPrefixLength(ReadOnlySpan<int> promptTokens)
+        {
+            if (!_cacheTokensValid || _slidingWindow || _cache.BasePosition != 0)
+            {
+                return 0;
+            }
+
+            var limit = Math.Min(_cache.CurrentLength, promptTokens.Length);
+            var match = 0;
+            while (match < limit && _cacheTokens[match] == promptTokens[match])
+            {
+                match++;
+            }
+
+            return match;
         }
 
         /// <summary>
@@ -271,6 +421,29 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// logits, overwritten by the next decode, so masking in place is safe.
         /// </summary>
         public int GenerateNextToken(in SamplingOptions sampling, ITokenConstraint? constraint)
+            => GenerateNextToken(in sampling, constraint, onSampled: null);
+
+        /// <summary>
+        /// As <see cref="GenerateNextToken(in SamplingOptions, ITokenConstraint?)"/>, but hands the sampled
+        /// token to <paramref name="onSampled"/> <b>before</b> the forward pass that follows it.
+        ///
+        /// <para><b>Why the ordering is worth an API.</b> A decode step samples token N from the logits it
+        /// already holds, then runs a full pass over the weights so that logits predict token N+1. Emitting
+        /// after that pass makes every token — including the first — arrive one whole pass late. Measured
+        /// through the server on Qwen-3B with a fully cached prompt: time to first token was 74.8 ms against
+        /// an inter-token latency of 37.2 ms, i.e. exactly two passes, where one is all the answer needs.</para>
+        ///
+        /// <para>Returning <c>true</c> from the hook means the caller is finished with this token (a stop
+        /// sequence, end-of-text, a closed constraint), so the trailing pass is skipped entirely — it would
+        /// only have prepared logits nobody reads. The token is then <b>not</b> fed back into the cache, which
+        /// is the honest state: the cache holds what was forwarded. Do not continue generating on the same
+        /// session after returning <c>true</c> without resetting or prefilling — the logits still predict the
+        /// token just sampled, so the next step would draw it again.</para>
+        /// </summary>
+        public int GenerateNextToken(
+            in SamplingOptions sampling,
+            ITokenConstraint? constraint,
+            Func<int, bool>? onSampled)
         {
             ThrowIfDisposed();
 
@@ -297,6 +470,16 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
             constraint?.Accept(token);
             TrackGenerated(token);
+
+            // Hand the token over before the pass that prepares the NEXT logits, so a streaming caller can
+            // put it on the wire a full weight-pass earlier — and can tell us the answer is finished, in
+            // which case that pass is pure waste and is skipped.
+            if (onSampled is not null && onSampled(token))
+            {
+                DecodeProfiler.EndToken();
+                return token;
+            }
+
             DecodeToken(token);
             DecodeProfiler.EndToken();
             return token;
@@ -416,7 +599,25 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             int maxDraft = 4,
             int ngramMin = 1,
             int ngramMax = 3)
-            => GenerateSpeculativeCore(history, committed, in sampling, maxDraft, ngramMin, ngramMax, drafter: null);
+            => GenerateSpeculativeCore(
+                history, committed, in sampling, maxDraft, ngramMin, ngramMax, drafter: null, onSampled: null);
+
+        /// <summary>
+        /// Speculative step with the same early-emit hook as
+        /// <see cref="GenerateNextToken(in SamplingOptions, ITokenConstraint?, Func{int, bool})"/>: the first
+        /// token of the step is drawn from the logits already held, so it can go out before the verify
+        /// forward runs. Returning <c>true</c> ends the step immediately — the whole verify is skipped, not
+        /// just a single pass.
+        /// </summary>
+        public int GenerateSpeculative(
+            ReadOnlySpan<int> history,
+            Span<int> committed,
+            in SamplingOptions sampling,
+            int maxDraft,
+            Func<int, bool>? onSampled)
+            => GenerateSpeculativeCore(
+                history, committed, in sampling, maxDraft, ngramMin: 1, ngramMax: 3, drafter: null,
+                onSampled: onSampled);
 
         /// <summary>
         /// Draft-MODEL speculative overload: proposals come from <paramref name="drafter"/> (a small draft
@@ -429,7 +630,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             in SamplingOptions sampling,
             int maxDraft,
             ISpeculativeDrafter drafter)
-            => GenerateSpeculativeCore(history, committed, in sampling, maxDraft, ngramMin: 1, ngramMax: 3, drafter: drafter);
+            => GenerateSpeculativeCore(
+                history, committed, in sampling, maxDraft, ngramMin: 1, ngramMax: 3, drafter: drafter,
+                onSampled: null);
 
         private int GenerateSpeculativeCore(
             ReadOnlySpan<int> history,
@@ -438,7 +641,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             int maxDraft,
             int ngramMin,
             int ngramMax,
-            ISpeculativeDrafter? drafter)
+            ISpeculativeDrafter? drafter,
+            Func<int, bool>? onSampled)
         {
             ThrowIfDisposed();
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxDraft);
@@ -457,6 +661,14 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             // Next token from the current (target) distribution — the same draw a normal step would make.
             var t0 = TokenSampler.Sample(_logits, in sampling, _random, _indexScratch, _scoreScratch);
 
+            // Early emit: t0 comes from logits we already hold, so it can reach the client before the verify
+            // forward. If the caller says the answer ends here, the entire verify is wasted work — skip it.
+            if (onSampled is not null && onSampled(t0))
+            {
+                committed[0] = t0;
+                return 1;
+            }
+
             var canSpeculate = !_slidingWindow
                 && _config.FfnActivation is FeedForwardActivation.SwiGLU or FeedForwardActivation.GeGLU
                 && maxDraft > 0;
@@ -471,11 +683,16 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             var probe = false;
             if (gated)
             {
-                if (_specProbeCountdown > 0)
+                // Capture BEFORE decrementing: a second `_specProbeCountdown > 0` test would read the
+                // already-decremented value, so countdown == 1 would both decrement AND probe.
+                var countingDown = _specProbeCountdown > 0;
+
+                if (countingDown)
                 {
                     _specProbeCountdown--;
                 }
-                else
+
+                if (!countingDown)
                 {
                     probe = true;
                     _specProbeCountdown = SpecProbeInterval;
@@ -493,7 +710,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     dn = drafter.Draft(t0, draft);
                 }
             }
-            else if (canSpeculate && (!gated || probe))
+            if (drafter is null && canSpeculate && (!gated || probe))
             {
 #pragma warning disable OVERFIT001 // exact-length contract: PromptLookupDrafter.Draft reads anchor.Length; tiny per-step array
                 var anchor = new int[history.Length + 1];
@@ -525,10 +742,16 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             var hidden = hiddenArr.Span;
             _embedWeights.DequantizeRow(t0, hidden.Slice(0, dModel));
             ApplyEmbeddingScale(hidden.Slice(0, dModel));
+            _cacheTokens[basePosition] = t0;
             for (var j = 0; j < dn; j++)
             {
                 _embedWeights.DequantizeRow(draft[j], hidden.Slice((1 + j) * dModel, dModel));
                 ApplyEmbeddingScale(hidden.Slice((1 + j) * dModel, dModel));
+
+                // Record the drafts too: this batch bypasses EmbedAndAdvance, and the truncation below keeps
+                // exactly the accepted prefix — so recording all of them and letting TruncateTo cut the
+                // rejected tail leaves the map correct without a second pass.
+                _cacheTokens[basePosition + 1 + j] = draft[j];
             }
             _cache.Advance(batch);
 
@@ -557,7 +780,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     committed[1 + j] = draft[j];
                     accepted++;
                 }
-                else
+
+                if (!(token == draft[j]))
                 {
                     correction = token;
                     break;
@@ -767,7 +991,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                         dst[j] += h[j];
                     }
                 }
-                else if (i == tokens.Length - 1)
+                if (pooling != EmbeddingPooling.Mean && i == tokens.Length - 1)
                 {
                     h[..d].CopyTo(dst);
                 }
@@ -883,6 +1107,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             {
                 _embedWeights.DequantizeRow(promptTokens[i], hidden.Span.Slice(i * dModel, dModel));
                 ApplyEmbeddingScale(hidden.Span.Slice(i * dModel, dModel));
+                _cacheTokens[basePosition + i] = promptTokens[i];
                 _cache.Advance();
             }
 
@@ -919,6 +1144,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             // No additive positional embedding — RoPE handles positions inside attention.
 
             var position = _cache.CurrentLength;
+            _cacheTokens[position] = tokenId;
             _cache.Advance();
             return position;
         }

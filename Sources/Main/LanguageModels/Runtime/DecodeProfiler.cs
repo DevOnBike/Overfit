@@ -129,14 +129,22 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             sb.AppendLine(
                 $"  total / token : {tokenMs,9:F3} ms   ({(tokenMs > 0 ? 1000.0 / tokenMs : 0),6:F2} tok/s)");
 
+
+            // Only the TOP-LEVEL components count toward "accounted": ffn_gateup / ffn_down / ffn_multiply
+            // are a breakdown of `ffn`, so summing them too would subtract the FFN twice and drive `other`
+            // negative (it read -67% before this was fixed, which made the whole report untrustworthy).
             long accounted = 0;
             for (var i = 0; i < ComponentCount; i++)
             {
                 var ms = _ticks[i] * toMs / tokens;
-                accounted += _ticks[i];
+                if (i <= (int)Component.Sampler)
+                {
+                    accounted += _ticks[i];
+                }
                 var pct = _tokenTicks > 0 ? 100.0 * _ticks[i] / _tokenTicks : 0;
                 var perTok = (double)_calls[i] / tokens;
-                sb.AppendLine($"  {ComponentName(i),-13} : {ms,9:F3} ms   {pct,5:F1}%   ({perTok,5:F0}/tok)");
+                var indent = i > (int)Component.Sampler ? "  " : string.Empty;
+                sb.AppendLine($"  {indent + ComponentName(i),-13} : {ms,9:F3} ms   {pct,5:F1}%   ({perTok,5:F0}/tok)");
             }
 
             var otherTicks = _tokenTicks - accounted;

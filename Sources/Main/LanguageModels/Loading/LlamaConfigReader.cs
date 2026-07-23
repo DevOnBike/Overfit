@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -91,58 +91,79 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                 {
                     reader.Read();
                     layers = reader.GetInt32();
+                    continue;
                 }
-                else if (reader.ValueTextEquals("hidden_size"))
+
+                if (reader.ValueTextEquals("hidden_size"))
                 {
                     reader.Read();
                     dModel = reader.GetInt32();
+                    continue;
                 }
-                else if (reader.ValueTextEquals("num_attention_heads"))
+
+                if (reader.ValueTextEquals("num_attention_heads"))
                 {
                     reader.Read();
                     nHeads = reader.GetInt32();
+                    continue;
                 }
-                else if (reader.ValueTextEquals("num_key_value_heads"))
+
+                if (reader.ValueTextEquals("num_key_value_heads"))
                 {
                     reader.Read();
                     nKvHeads = reader.GetInt32();
+                    continue;
                 }
-                else if (reader.ValueTextEquals("intermediate_size"))
+
+                if (reader.ValueTextEquals("intermediate_size"))
                 {
                     reader.Read();
                     dFF = reader.GetInt32();
+                    continue;
                 }
-                else if (reader.ValueTextEquals("max_position_embeddings"))
+
+                if (reader.ValueTextEquals("max_position_embeddings"))
                 {
                     reader.Read();
                     maxPos = reader.GetInt32();
+                    continue;
                 }
-                else if (reader.ValueTextEquals("vocab_size"))
+
+                if (reader.ValueTextEquals("vocab_size"))
                 {
                     reader.Read();
                     vocab = reader.GetInt32();
+                    continue;
                 }
-                else if (reader.ValueTextEquals("head_dim"))
+
+                if (reader.ValueTextEquals("head_dim"))
                 {
                     reader.Read();
                     headDim = reader.GetInt32();
+                    continue;
                 }
-                else if (reader.ValueTextEquals("rope_theta"))
+
+                if (reader.ValueTextEquals("rope_theta"))
                 {
                     reader.Read();
                     ropeTheta = (float)reader.GetDouble();
+                    continue;
                 }
-                else if (reader.ValueTextEquals("tie_word_embeddings"))
+
+                if (reader.ValueTextEquals("tie_word_embeddings"))
                 {
                     reader.Read();
                     tie = reader.TokenType == JsonTokenType.True;
+                    continue;
                 }
-                else if (reader.ValueTextEquals("rope_scaling"))
+
+                if (reader.ValueTextEquals("rope_scaling"))
                 {
                     reader.Read();
                     scaling = ReadRopeScaling(ref reader);
+                    continue;
                 }
-                else
+
                 {
                     reader.Read();
                     if (reader.TokenType is JsonTokenType.StartObject or JsonTokenType.StartArray)
@@ -237,28 +258,37 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                 {
                     reader.Read();
                     type = reader.GetString();
+                    continue;
                 }
-                else if (reader.ValueTextEquals("factor"))
+
+                if (reader.ValueTextEquals("factor"))
                 {
                     reader.Read();
                     factor = (float)reader.GetDouble();
+                    continue;
                 }
-                else if (reader.ValueTextEquals("low_freq_factor"))
+
+                if (reader.ValueTextEquals("low_freq_factor"))
                 {
                     reader.Read();
                     lowFreq = (float)reader.GetDouble();
+                    continue;
                 }
-                else if (reader.ValueTextEquals("high_freq_factor"))
+
+                if (reader.ValueTextEquals("high_freq_factor"))
                 {
                     reader.Read();
                     highFreq = (float)reader.GetDouble();
+                    continue;
                 }
-                else if (reader.ValueTextEquals("original_max_position_embeddings"))
+
+                if (reader.ValueTextEquals("original_max_position_embeddings"))
                 {
                     reader.Read();
                     origCtx = reader.GetInt32();
+                    continue;
                 }
-                else
+
                 {
                     reader.Read();
                     if (reader.TokenType is JsonTokenType.StartObject or JsonTokenType.StartArray)

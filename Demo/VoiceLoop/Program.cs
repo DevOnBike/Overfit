@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -56,14 +56,16 @@ Console.WriteLine("Ready. The whole loop runs on this CPU — nothing leaves the
 
 do
 {
-    float[] micSamples;
+    // Exhaustive across the wav-input / microphone pair below (see VoiceClone for the same note).
+    float[] micSamples = [];
     if (wavInput is not null)
     {
         var raw = AudioFile.ReadMono(wavInput, out var rate);
         micSamples = rate == MicCapture.SampleRate ? raw : AudioResampler.Resample(raw, rate, MicCapture.SampleRate);
         Console.WriteLine($"[input] {Path.GetFileName(wavInput)} ({micSamples.Length / (double)MicCapture.SampleRate:F1}s)");
     }
-    else
+
+    if (!(wavInput is not null))
     {
         Console.Write($"Press Enter to record {seconds}s (or type 'q' to quit): ");
         if (string.Equals(Console.ReadLine()?.Trim(), "q", StringComparison.OrdinalIgnoreCase))
@@ -126,11 +128,16 @@ static Options ParseArgs(string[] argv)
             continue;
         }
         var key = argv[i][2..];
-        if (i + 1 < argv.Length && !argv[i + 1].StartsWith("--", StringComparison.Ordinal))
+        // Capture BEFORE consuming the value: `argv[++i]` advances i, so re-testing would look at the
+        // NEXT argument and could null out the value that was just parsed.
+        var hasValue = i + 1 < argv.Length && !argv[i + 1].StartsWith("--", StringComparison.Ordinal);
+
+        if (hasValue)
         {
             map[key] = argv[++i];
         }
-        else
+
+        if (!hasValue)
         {
             map[key] = null; // flag
         }

@@ -354,11 +354,10 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
             if (_crossoverOperator is null)
             {
                 CreateChildrenMutationOnly(currentPopulation, nextPopulation, eliteIndices);
+                return;
             }
-            else
-            {
-                CreateChildrenWithCrossover(currentPopulation, nextPopulation, eliteIndices);
-            }
+
+            CreateChildrenWithCrossover(currentPopulation, nextPopulation, eliteIndices);
         }
 
         private void CreateChildrenMutationOnly(

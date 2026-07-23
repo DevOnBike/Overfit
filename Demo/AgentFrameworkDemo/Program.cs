@@ -13,6 +13,7 @@
 //
 // Verified against Microsoft.Agents.AI 1.13.0 + DevOnBike.Overfit 10.0.x on a Qwen2.5-0.5B Q4_K_M.
 
+using DevOnBike.Overfit.Runtime;
 using DevOnBike.Overfit.Extensions.AI;
 using DevOnBike.Overfit.LanguageModels;
 using Microsoft.Agents.AI;
@@ -26,7 +27,7 @@ namespace DevOnBike.Overfit.Demo.AgentFramework
         {
             var modelPath = args.Length > 0
                 ? args[0]
-                : Environment.GetEnvironmentVariable("OVERFIT_MODEL_PATH");
+                : Environment.GetEnvironmentVariable(OverfitEnvironment.ModelPath);
 
             if (string.IsNullOrWhiteSpace(modelPath) || !File.Exists(modelPath))
             {

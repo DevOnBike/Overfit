@@ -113,16 +113,15 @@ namespace DevOnBike.Overfit.Optimizers
                         negativeLearningRate,
                         p.Data.AsReadOnlySpan(),
                         p.Data.AsSpan());
+                    continue;
                 }
-                else
-                {
-                    var n = _nodes[i]!;
-                    ElementwiseKernels.MultiplyAdd(
-                        n.GradView.AsReadOnlySpan(),
-                        negativeLearningRate,
-                        n.DataView.AsReadOnlySpan(),
-                        n.DataView.AsSpan());
-                }
+
+                var n = _nodes[i]!;
+                ElementwiseKernels.MultiplyAdd(
+                    n.GradView.AsReadOnlySpan(),
+                    negativeLearningRate,
+                    n.DataView.AsReadOnlySpan(),
+                    n.DataView.AsSpan());
             }
         }
 
@@ -137,11 +136,10 @@ namespace DevOnBike.Overfit.Optimizers
                 if (_params[i] != null)
                 {
                     _params[i]!.ZeroGrad();
+                    continue;
                 }
-                else
-                {
-                    _nodes[i]!.ZeroGrad();
-                }
+
+                _nodes[i]!.ZeroGrad();
             }
         }
     }

@@ -1,8 +1,9 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using DevOnBike.Overfit.Runtime;
 using DevOnBike.Overfit.Anomalies.Adaptive;
 using DevOnBike.Overfit.Anomalies.Baseline;
 using DevOnBike.Overfit.Anomalies.Gpt;
@@ -54,7 +55,8 @@ namespace DevOnBike.Overfit.Demo.AnomalyConsole
                     {
                         RunMultiPodAdaptiveScenario(model);
                     }
-                    else
+
+                    if (!(HasFlag(args, "--multipod")))
                     {
                         RunScenario(model, config);
                     }
@@ -73,7 +75,11 @@ namespace DevOnBike.Overfit.Demo.AnomalyConsole
         private static async Task<(GPT1Model model, GptTrainingConfig config)> GetModelAsync(
             string? csv, string checkpoint, GptTrainingConfig config)
         {
-            if (!File.Exists(checkpoint))
+            // Capture BEFORE training: RunAsync WRITES the checkpoint, so a second File.Exists test would
+            // see the file it just produced and announce "Loading checkpoint" right after training one.
+            var hadCheckpoint = File.Exists(checkpoint);
+
+            if (!hadCheckpoint)
             {
                 if (csv is null || !File.Exists(csv))
                 {
@@ -95,7 +101,8 @@ namespace DevOnBike.Overfit.Demo.AnomalyConsole
                 Console.WriteLine($"Trained: {result.SnapshotsLoaded:N0} snapshots, " +
                     $"val loss {result.InitialLoss:F2} → {result.FinalValLoss:F2}, {result.TrainingTime:mm\\:ss}.");
             }
-            else
+
+            if (hadCheckpoint)
             {
                 Console.WriteLine($"Loading {config.DModel}d/{config.NLayers}L checkpoint {checkpoint} ...");
             }
@@ -463,7 +470,7 @@ namespace DevOnBike.Overfit.Demo.AnomalyConsole
                 return explicitPath;
             }
 
-            var dir = Environment.GetEnvironmentVariable("OVERFIT_MODEL_DIR");
+            var dir = Environment.GetEnvironmentVariable(OverfitEnvironment.ModelDir);
             var candidates = new[]
             {
                 dir is null ? null : Path.Combine(dir, "k8s_metrics.csv"),

@@ -1,11 +1,10 @@
-
+﻿
 // Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using System.Buffers.Binary;
-using System.IO;
 
 namespace DevOnBike.Overfit.Audio
 {
@@ -59,11 +58,12 @@ namespace DevOnBike.Overfit.Audio
                         br.ReadBytes(chunkSize - consumed);
                     } // skip extension
                 }
-                else if (chunkId == "data")
+                if (chunkId == "data")
                 {
                     data = br.ReadBytes(chunkSize);
                 }
-                else
+
+                if (chunkId != "fmt " && chunkId != "data")
                 {
                     br.ReadBytes(chunkSize);        // skip unknown chunk
                     if ((chunkSize & 1) == 1)
@@ -87,28 +87,33 @@ namespace DevOnBike.Overfit.Audio
         private static float[] Decode(byte[] data, int audioFormat, int channels, int bitsPerSample)
         {
             var span = data.AsSpan();
-            float[] interleaved;
-            if (audioFormat == 1 && bitsPerSample == 16)
+
+            var is16BitPcm = audioFormat == 1 && bitsPerSample == 16;
+            var is32BitFloat = audioFormat == 3 && bitsPerSample == 32;
+
+            // Reject up front, so the two supported paths below leave `interleaved` definitely assigned.
+            if (!is16BitPcm && !is32BitFloat)
             {
-                var count = data.Length / 2;
-                interleaved = new float[count];
-                for (var i = 0; i < count; i++)
+                throw new OverfitRuntimeException($"Unsupported WAV format (audioFormat={audioFormat}, bits={bitsPerSample}). Use 16-bit PCM or 32-bit float.");
+            }
+
+            var bytesPerSample = is16BitPcm ? 2 : 4;
+            var interleaved = new float[data.Length / bytesPerSample];
+
+            if (is16BitPcm)
+            {
+                for (var i = 0; i < interleaved.Length; i++)
                 {
                     interleaved[i] = BinaryPrimitives.ReadInt16LittleEndian(span.Slice(i * 2, 2)) / 32768f;
                 }
             }
-            else if (audioFormat == 3 && bitsPerSample == 32)
+
+            if (is32BitFloat)
             {
-                var count = data.Length / 4;
-                interleaved = new float[count];
-                for (var i = 0; i < count; i++)
+                for (var i = 0; i < interleaved.Length; i++)
                 {
                     interleaved[i] = BinaryPrimitives.ReadSingleLittleEndian(span.Slice(i * 4, 4));
                 }
-            }
-            else
-            {
-                throw new OverfitRuntimeException($"Unsupported WAV format (audioFormat={audioFormat}, bits={bitsPerSample}). Use 16-bit PCM or 32-bit float.");
             }
 
             if (channels == 1)

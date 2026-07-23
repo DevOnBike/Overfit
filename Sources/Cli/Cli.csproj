@@ -37,6 +37,8 @@
         <PackageId>DevOnBike.Overfit.Cli</PackageId>
         <Title>Overfit CLI</Title>
         <Description>Overfit CLI — a pure-.NET, OpenAI-compatible local LLM server (`overfit serve`) plus model pull/chat/embed/tts. No Python, no native engine. Also distributed as a Native-AOT binary and a Docker image.</Description>
+        <PackageReadmeFile>README.md</PackageReadmeFile>
+        <PackageLicenseFile>LICENSE.md</PackageLicenseFile>
         <PackageTags>llm;gguf;openai;cli;ai;inference;local;dotnet-tool</PackageTags>
     </PropertyGroup>
 
@@ -44,7 +46,13 @@
         <ProjectReference Include="..\Main\Main.csproj" />
         <ProjectReference Include="..\Mcp\Mcp.csproj" />
         <ProjectReference Include="..\Server\Server.csproj" />
+        <ProjectReference Include="..\Server.AspNet\Server.AspNet.csproj" />
         <PackageReference Include="System.CommandLine" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <None Include="README.md" Pack="true" PackagePath="\" />
+        <None Include="..\..\LICENSE.md" Pack="true" PackagePath="\" />
     </ItemGroup>
 
     <ItemGroup>

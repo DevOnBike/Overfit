@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -8,6 +8,7 @@ using System.Text;
 using DevOnBike.Overfit.Diagnostics;
 using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Runtime;
+using DevOnBike.Overfit.Runtime;
 
 namespace DevOnBike.Overfit.LanguageModels.Chat
 {
@@ -34,6 +35,18 @@ namespace DevOnBike.Overfit.LanguageModels.Chat
         private readonly string[] _stopSequences;
         private readonly bool _slidingWindow;
         private readonly List<ChatMessage> _history = [];
+
+        /// <summary>Test hook: restore the pre-early-emit ordering (emit after the forward pass, not before).
+        /// Defaults from <see cref="OverfitEnvironment.DisableEarlyEmit"/> so both orderings can be served by
+        /// two processes and compared inside a single interleaved run.</summary>
+        internal static bool DisableEarlyEmit =
+            Environment.GetEnvironmentVariable(OverfitEnvironment.DisableEarlyEmit) == "1";
+
+        /// <summary>Test hook: force the exact single-token decode loop instead of the speculative path.
+        /// Defaults from <see cref="OverfitEnvironment.DisableSpeculative"/> so both can be served side by
+        /// side and measured in one interleaved run.</summary>
+        internal static bool DisableSpeculative =
+            Environment.GetEnvironmentVariable(OverfitEnvironment.DisableSpeculative) == "1";
 
         /// <param name="session">Underlying SLM session that runs prefill/decode and owns the KV cache.</param>
         /// <param name="tokenizer">Tokenizer used to encode prompts and decode generated tokens.</param>
@@ -86,6 +99,16 @@ namespace DevOnBike.Overfit.LanguageModels.Chat
         /// decode loop only (prompt prefill excluded), so it reflects steady-state throughput.
         /// </summary>
         public GenerationStats LastStats
+        {
+            get; private set;
+        }
+
+        /// <summary>
+        /// How many prompt tokens the most recent turn took from the KV cache instead of re-encoding —
+        /// 0 on the first turn of a conversation, and typically the whole preceding conversation
+        /// afterwards. <c>LastStats.PromptTokens</c> minus this is what was actually forwarded.
+        /// </summary>
+        public int CachedPromptTokens
         {
             get; private set;
         }
@@ -183,7 +206,12 @@ namespace DevOnBike.Overfit.LanguageModels.Chat
             var tokenCount = _tokenizer.CountTokens(promptText);
             var promptTokens = new int[tokenCount];
             var written = _tokenizer.Encode(promptText, promptTokens);
-            _session.Reset(promptTokens.AsSpan(0, written));
+
+            // Reuse the KV already built for the shared prefix of the previous turn. Every turn re-sends the
+            // whole conversation, so the tokens up to the end of the last assistant reply are byte-identical
+            // to what this session just encoded — re-prefilling them is pure duplicate work. Falls back to a
+            // full prefill on its own when the session is fresh or the conversation diverged.
+            CachedPromptTokens = _session.PrefillReusingCache(promptTokens.AsSpan(0, written));
 
             var stopwatch = ValueStopwatch.StartNew();
             var reply = Generate(promptTokens.AsSpan(0, written), in options, onText, constraint, out var generatedTokens);
@@ -249,11 +277,33 @@ namespace DevOnBike.Overfit.LanguageModels.Chat
                 return stops.Stopped || constraint is { IsComplete: true };
             }
 
+            // Emit the token the instant it is sampled, before the forward pass that prepares the NEXT
+            // logits — otherwise every token, the first one included, arrives one whole weight-pass late.
+            // Returning the stop decision straight back lets the session skip that pass when the answer is
+            // over. Allocated once per generation, not per token.
+            var stopped = false;
+            var onSampled = new Func<int, bool>(token =>
+            {
+                stopped = EmitToken(token);
+                return stopped;
+            });
+
+            // Test hook: emit after the step instead of during it, i.e. the pre-early-emit ordering.
+            if (DisableEarlyEmit)
+            {
+                onSampled = null!;
+            }
+
             // Speculative fast path (prompt-lookup, adaptively gated): commits ≥1 token per batched
             // verify, sampling-correct, and ~free when drafts don't fire — but it can't mask the draft
             // against a per-token constraint, so it only runs unconstrained on a speculation-capable
             // session. Everything else falls back to the exact single-token loop.
-            if (constraint is null && _session is CachedLlamaSession spec && spec.CanSpeculate)
+            // Hoisted out of the condition: the speculative session is needed inside the branch, and a
+            // second (negated) test could not re-introduce a pattern variable in the same scope.
+            var spec = _session as CachedLlamaSession;
+            var useSpeculative = constraint is null && spec is not null && spec.CanSpeculate && !DisableSpeculative;
+
+            if (useSpeculative)
             {
                 const int maxDraft = 8;
                 var history = new List<int>(promptTokens.Length + Math.Min(maxNew, 4096));
@@ -266,12 +316,32 @@ namespace DevOnBike.Overfit.LanguageModels.Chat
                 while (generated.Count < maxNew &&
                        (_slidingWindow || _session.CurrentPosition < _session.MaxContextLength))
                 {
-                    var n = spec.GenerateSpeculative(CollectionsMarshal.AsSpan(history), committed, in sampling, maxDraft);
+                    var n = spec!.GenerateSpeculative(
+                        CollectionsMarshal.AsSpan(history), committed, in sampling, maxDraft, onSampled);
                     var stop = false;
                     for (var c = 0; c < n; c++)
                     {
                         var token = committed[c];
                         history.Add(token);
+
+                        // committed[0] is the token the hook already emitted before the verify forward ran;
+                        // re-emitting it would duplicate it in the stream.
+                        if (c == 0)
+                        {
+                            if (DisableEarlyEmit)
+                            {
+                                stopped = EmitToken(token);
+                            }
+
+                            if (stopped || generated.Count >= maxNew)
+                            {
+                                stop = true;
+                                break;
+                            }
+
+                            continue;
+                        }
+
                         if (EmitToken(token) || generated.Count >= maxNew)
                         {
                             stop = true;
@@ -284,14 +354,23 @@ namespace DevOnBike.Overfit.LanguageModels.Chat
                     }
                 }
             }
-            else
+
+            if (!useSpeculative)
             {
                 // With sliding-window enabled the cache never overflows (oldest tokens roll off), so we
                 // bound generation by MaxNewTokens only; otherwise we stop when the context fills.
                 for (var i = 0; i < maxNew &&
                      (_slidingWindow || _session.CurrentPosition < _session.MaxContextLength); i++)
                 {
-                    if (EmitToken(_session.GenerateNextToken(in sampling, constraint)))
+                    // The hook emits; `stopped` carries its verdict back out. Sessions without early-emit
+                    // support still invoke it exactly once per token, just after their forward.
+                    var produced = _session.GenerateNextToken(in sampling, constraint, onSampled);
+                    if (DisableEarlyEmit)
+                    {
+                        stopped = EmitToken(produced);
+                    }
+
+                    if (stopped)
                     {
                         break;
                     }

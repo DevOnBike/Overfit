@@ -3,11 +3,14 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using System.Net;
 using System.Text;
 using System.Text.Json;
 using DevOnBike.Overfit.Redaction;
+using DevOnBike.Overfit.Server.AspNet.Endpoints;
 using DevOnBike.Overfit.Server.OpenAi;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging;
 
 namespace DevOnBike.Overfit.Server
 {
@@ -17,16 +20,18 @@ namespace DevOnBike.Overfit.Server
     /// never see it), restores the placeholders on the way back, and audits every redaction. "Change one base URL."
     ///
     /// <para><c>/v1/chat/completions</c>, streaming (SSE) and non-streaming, restore-on-response, BLOCK policy,
-    /// JSON-lines audit. Response-side scanning and client authentication are follow-ons.</para>
+    /// JSON-lines audit. Runs on the AOT-ready Kestrel host (terminal middleware — no routing/reflection), so the
+    /// gateway ships in the single self-contained binary alongside <c>overfit serve</c>.</para>
     /// </summary>
     public static class RedactionGateway
     {
         /// <summary>
-        /// Binds an HTTP listener on <paramref name="host"/>:<paramref name="port"/> and proxies chat completions
-        /// to <paramref name="upstreamBaseUrl"/> (e.g. <c>https://api.openai.com/v1</c>), redacting via
+        /// Binds Kestrel on <paramref name="host"/>:<paramref name="port"/> and proxies chat completions to
+        /// <paramref name="upstreamBaseUrl"/> (e.g. <c>https://api.openai.com/v1</c>), redacting via
         /// <paramref name="redactor"/> and auditing via <paramref name="audit"/>. <paramref name="upstreamApiKey"/>
         /// is the gateway-held secret injected as the upstream <c>Authorization</c> — clients authenticate to the
-        /// gateway, not the upstream. Blocks until the process is stopped.
+        /// gateway, not the upstream. Blocks until <paramref name="cancellationToken"/> is cancelled (or the process
+        /// stops).
         /// </summary>
         public static void Serve(
             string host,
@@ -37,7 +42,8 @@ namespace DevOnBike.Overfit.Server
             IRedactionAuditSink audit,
             RedactionPolicy policy,
             IReadOnlyCollection<string>? clientKeys = null,
-            bool scanResponses = false)
+            bool scanResponses = false,
+            CancellationToken cancellationToken = default)
         {
             ArgumentException.ThrowIfNullOrEmpty(upstreamBaseUrl);
             ArgumentNullException.ThrowIfNull(redactor);
@@ -52,13 +58,25 @@ namespace DevOnBike.Overfit.Server
                 Timeout = TimeSpan.FromSeconds(120)
             };
 
-            using var listener = new HttpListener();
-            listener.Prefixes.Add($"http://{host}:{port}/");
-            listener.Start();
+            var builder = WebApplication.CreateSlimBuilder();
+            builder.Logging.ClearProviders();
+            var app = builder.Build();
+
+            // Terminal middleware handles EVERY request — a transparent proxy needs no routing table, and this
+            // keeps the whole path reflection-free for Native AOT.
+            app.Run(ctx =>
+            {
+                EndpointHelpers.EnableSynchronousIO(ctx);
+                HandleRequest(ctx, upstream, upstreamApiKey, redactor, audit, policy, auth, scanResponses, http);
+                return Task.CompletedTask;
+            });
+
+            app.Urls.Add($"http://{host}:{port}");
+            app.StartAsync(cancellationToken).GetAwaiter().GetResult();
 
             Console.WriteLine($"Redaction gateway listening on http://{host}:{port}");
             Console.WriteLine($"  → forwarding to {upstream}   (outbound PII/secrets redaction, audit on)");
-            Console.WriteLine($"  point your OpenAI client's base_url here; the real upstream key never leaves the gateway.");
+            Console.WriteLine("  point your OpenAI client's base_url here; the real upstream key never leaves the gateway.");
             Console.WriteLine(auth.Enabled
                 ? "  client authentication: ON (callers must present a configured gateway key)."
                 : "  client authentication: OFF — any caller can reach this gateway. Set gateway keys before exposing it.");
@@ -67,23 +85,18 @@ namespace DevOnBike.Overfit.Server
                 Console.WriteLine("  response scanning: ON (model-generated secrets/PII masked on non-streaming responses).");
             }
 
-            while (true)
+            // Block until cancelled; with CancellationToken.None this waits for the lifetime of the process
+            // (the test harness runs Serve on a background thread and lets it die at process end).
+            try
             {
-                HttpListenerContext ctx;
-                try
-                {
-                    ctx = listener.GetContext();
-                }
-                catch (HttpListenerException)
-                {
-                    break;
-                }
-
-                // Dispatch each request to the thread pool so a slow (or streaming) call never blocks the next caller.
-                var captured = ctx;
-                ThreadPool.QueueUserWorkItem(
-                    _ => HandleRequest(captured, upstream, upstreamApiKey, redactor, audit, policy, auth, scanResponses, http));
+                Task.Delay(Timeout.Infinite, cancellationToken).GetAwaiter().GetResult();
             }
+            catch (OperationCanceledException)
+            {
+                // graceful shutdown requested
+            }
+
+            app.StopAsync().GetAwaiter().GetResult();
         }
 
         /// <summary>
@@ -162,7 +175,7 @@ namespace DevOnBike.Overfit.Server
         }
 
         private static void HandleRequest(
-            HttpListenerContext ctx,
+            HttpContext ctx,
             string upstream,
             string? upstreamApiKey,
             Redactor redactor,
@@ -174,20 +187,20 @@ namespace DevOnBike.Overfit.Server
         {
             try
             {
-                var path = ctx.Request.Url?.AbsolutePath ?? string.Empty;
-                var method = ctx.Request.HttpMethod;
+                var path = ctx.Request.Path.Value ?? string.Empty;
+                var method = ctx.Request.Method;
 
                 // /health is unauthenticated so liveness probes work without a key.
                 if (method == "GET" && path == "/health")
                 {
-                    WriteText(ctx.Response, HttpStatusCode.OK, "ok");
+                    WriteText(ctx.Response, StatusCodes.Status200OK, "ok");
                     return;
                 }
 
                 // Everything that proxies upstream requires a valid gateway client key (when auth is enabled).
-                if (!auth.IsAuthorized(ctx.Request.Headers["Authorization"]))
+                if (!auth.IsAuthorized(ctx.Request.Headers.Authorization))
                 {
-                    WriteText(ctx.Response, HttpStatusCode.Unauthorized,
+                    WriteText(ctx.Response, StatusCodes.Status401Unauthorized,
                         "Unauthorized: present a valid gateway key as 'Authorization: Bearer <key>'. "
                         + "The gateway holds the real upstream key — clients authenticate to the gateway, not upstream.");
                     return;
@@ -209,7 +222,7 @@ namespace DevOnBike.Overfit.Server
             {
                 try
                 {
-                    WriteText(ctx.Response, HttpStatusCode.BadGateway, $"gateway error: {ex.Message}");
+                    WriteText(ctx.Response, StatusCodes.Status502BadGateway, $"gateway error: {ex.Message}");
                 }
                 catch
                 {
@@ -219,7 +232,7 @@ namespace DevOnBike.Overfit.Server
         }
 
         private static void HandleChatCompletions(
-            HttpListenerContext ctx,
+            HttpContext ctx,
             string upstream,
             string? upstreamApiKey,
             Redactor redactor,
@@ -228,10 +241,10 @@ namespace DevOnBike.Overfit.Server
             bool scanResponses,
             HttpClient http)
         {
-            var req = JsonSerializer.Deserialize(ctx.Request.InputStream, OpenAiJsonContext.Default.ChatCompletionRequest);
+            var req = JsonSerializer.Deserialize(ctx.Request.Body, OpenAiJsonContext.Default.ChatCompletionRequest);
             if (req is null)
             {
-                WriteText(ctx.Response, HttpStatusCode.BadRequest, "invalid request body");
+                WriteText(ctx.Response, StatusCodes.Status400BadRequest, "invalid request body");
                 return;
             }
 
@@ -324,7 +337,7 @@ namespace DevOnBike.Overfit.Server
         /// stream is never fully buffered — chunks are rewritten and forwarded as they arrive.
         /// </summary>
         private static void StreamResponse(
-            HttpListenerContext ctx,
+            HttpContext ctx,
             HttpRequestMessage upstreamRequest,
             IReadOnlyList<RedactionMatch> matches,
             Redactor redactor,
@@ -341,11 +354,10 @@ namespace DevOnBike.Overfit.Server
             // Set the SSE-framing headers AFTER forwarding so the gateway's values win over any upstream duplicates.
             clientResponse.ContentType = "text/event-stream";
             clientResponse.Headers["Cache-Control"] = "no-cache";
-            clientResponse.SendChunked = true;
 
             using var upstreamStream = upstreamResponse.Content.ReadAsStream();
             using var reader = new StreamReader(upstreamStream, Encoding.UTF8);
-            var output = clientResponse.OutputStream;
+            var output = clientResponse.Body;
 
             // Per choice index (usually one, but n>1 is legal): a response scanner (mask model-generated secrets) and
             // a restorer (re-hydrate the caller's own placeholders). The scanner runs first while the caller's values
@@ -390,8 +402,6 @@ namespace DevOnBike.Overfit.Server
                 WriteLine(output, string.Empty);
                 output.Flush();
             }
-
-            output.Close();
         }
 
         // Scans (model secrets) then restores (caller placeholders) a single SSE chunk's delta content per choice,
@@ -451,7 +461,7 @@ namespace DevOnBike.Overfit.Server
         // Emits any text the scanners/restorers held back, as a final synthetic chunk per choice, before [DONE].
         // Per choice: flush the scanner (mask remaining model secrets) → feed through the restorer → flush it.
         private static void FlushStreams(
-            System.IO.Stream output,
+            Stream output,
             Dictionary<int, StreamingResponseScanner>? scanners,
             Dictionary<int, StreamingRestorer> restorers)
         {
@@ -493,7 +503,7 @@ namespace DevOnBike.Overfit.Server
             AuditRedactions(audit, masked);
         }
 
-        private static void WriteLine(System.IO.Stream output, string text)
+        private static void WriteLine(Stream output, string text)
         {
             var bytes = Encoding.UTF8.GetBytes(text + "\n");
             output.Write(bytes, 0, bytes.Length);
@@ -508,7 +518,7 @@ namespace DevOnBike.Overfit.Server
         /// only the upstream key is injected.
         /// </summary>
         private static void HandleGenericProxy(
-            HttpListenerContext ctx,
+            HttpContext ctx,
             string upstream,
             string? upstreamApiKey,
             Redactor redactor,
@@ -518,8 +528,8 @@ namespace DevOnBike.Overfit.Server
             HttpClient http)
         {
             var request = ctx.Request;
-            var method = request.HttpMethod;
-            var targetUrl = BuildUpstreamUrl(upstream, request.Url?.AbsolutePath ?? "/") + (request.Url?.Query ?? string.Empty);
+            var method = request.Method;
+            var targetUrl = BuildUpstreamUrl(upstream, request.Path.Value ?? "/") + (request.QueryString.Value ?? string.Empty);
 
             using var upstreamRequest = new HttpRequestMessage(new HttpMethod(method), targetUrl);
 
@@ -529,7 +539,7 @@ namespace DevOnBike.Overfit.Server
             if (carriesBody)
             {
                 string body;
-                using (var reader = new StreamReader(request.InputStream, Encoding.UTF8))
+                using (var reader = new StreamReader(request.Body, Encoding.UTF8))
                 {
                     body = reader.ReadToEnd();
                 }
@@ -610,28 +620,22 @@ namespace DevOnBike.Overfit.Server
         // Passes the caller's request headers (OpenAI-Beta, OpenAI-Organization/Project, X-*, User-Agent, Accept, …)
         // through to the upstream so client features keep working — minus the security/framing denylist. The client's
         // Authorization (its gateway key) is dropped here; the real upstream key is injected separately by the caller.
-        private static void ForwardRequestHeaders(HttpListenerRequest src, HttpRequestMessage dst)
+        private static void ForwardRequestHeaders(HttpRequest src, HttpRequestMessage dst)
         {
-            var headers = src.Headers;
-            for (var i = 0; i < headers.Count; i++)
+            foreach (var header in src.Headers)
             {
-                var name = headers.GetKey(i);
-                if (name is null || NonForwardableRequestHeaders.Contains(name))
+                if (NonForwardableRequestHeaders.Contains(header.Key))
                 {
                     continue;
                 }
 
-                var values = headers.GetValues(i);
-                if (values is not null)
-                {
-                    dst.Headers.TryAddWithoutValidation(name, values);
-                }
+                dst.Headers.TryAddWithoutValidation(header.Key, header.Value.ToArray());
             }
         }
 
         // Passes upstream response headers (x-request-id, x-ratelimit-*, openai-*, …) back to the caller so clients
         // can see rate limits and request ids — minus headers the gateway manages itself.
-        private static void ForwardResponseHeaders(HttpResponseMessage upstream, HttpListenerResponse client)
+        private static void ForwardResponseHeaders(HttpResponseMessage upstream, HttpResponse client)
         {
             CopyResponseHeaders(upstream.Headers, client);
             if (upstream.Content is not null)
@@ -640,7 +644,7 @@ namespace DevOnBike.Overfit.Server
             }
         }
 
-        private static void CopyResponseHeaders(System.Net.Http.Headers.HttpHeaders headers, HttpListenerResponse client)
+        private static void CopyResponseHeaders(System.Net.Http.Headers.HttpHeaders headers, HttpResponse client)
         {
             foreach (var header in headers)
             {
@@ -653,9 +657,9 @@ namespace DevOnBike.Overfit.Server
                 {
                     client.Headers[header.Key] = string.Join(", ", header.Value);
                 }
-                catch (ArgumentException)
+                catch (InvalidOperationException)
                 {
-                    // Restricted header the HttpListener manages itself — skip it.
+                    // Restricted header Kestrel manages itself — skip it.
                 }
             }
         }
@@ -679,7 +683,7 @@ namespace DevOnBike.Overfit.Server
         }
 
         // Refuses a request whose payload carried a Block-policy category: 403, audit the blocked category, no forward.
-        private static void RespondBlocked(HttpListenerContext ctx, IRedactionAuditSink audit, IReadOnlyList<string> blockedCategories)
+        private static void RespondBlocked(HttpContext ctx, IRedactionAuditSink audit, IReadOnlyList<string> blockedCategories)
         {
             var blockCounts = new Dictionary<string, int>(StringComparer.Ordinal);
             foreach (var category in blockedCategories)
@@ -689,34 +693,32 @@ namespace DevOnBike.Overfit.Server
             audit.Record(new RedactionAuditRecord(
                 Guid.NewGuid().ToString("N"), DateTimeOffset.UtcNow, blockedCategories.Count, blockCounts));
 
-            WriteText(ctx.Response, HttpStatusCode.Forbidden,
+            WriteText(ctx.Response, StatusCodes.Status403Forbidden,
                 $"Request refused by the redaction gateway: it contains forbidden category(ies) "
                 + $"[{string.Join(", ", blockedCategories)}] that must not leave the box. Nothing was forwarded.");
         }
 
-        private static void WriteRaw(HttpListenerResponse response, int status, string json)
+        private static void WriteRaw(HttpResponse response, int status, string json)
         {
             WriteRaw(response, status, json, "application/json");
         }
 
-        private static void WriteRaw(HttpListenerResponse response, int status, string body, string contentType)
+        private static void WriteRaw(HttpResponse response, int status, string body, string contentType)
         {
             var bytes = Encoding.UTF8.GetBytes(body);
             response.StatusCode = status;
             response.ContentType = contentType;
-            response.ContentLength64 = bytes.Length;
-            response.OutputStream.Write(bytes, 0, bytes.Length);
-            response.OutputStream.Close();
+            response.ContentLength = bytes.Length;
+            response.Body.Write(bytes, 0, bytes.Length);
         }
 
-        private static void WriteText(HttpListenerResponse response, HttpStatusCode status, string text)
+        private static void WriteText(HttpResponse response, int status, string text)
         {
             var bytes = Encoding.UTF8.GetBytes(text);
-            response.StatusCode = (int)status;
+            response.StatusCode = status;
             response.ContentType = "text/plain";
-            response.ContentLength64 = bytes.Length;
-            response.OutputStream.Write(bytes, 0, bytes.Length);
-            response.OutputStream.Close();
+            response.ContentLength = bytes.Length;
+            response.Body.Write(bytes, 0, bytes.Length);
         }
     }
 }

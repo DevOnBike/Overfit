@@ -51,11 +51,11 @@ namespace DevOnBike.Overfit.Data.Tabular
                     var categories = categoriesList.ToArray();
                     _categoryMaps[col.Name] = categories;
                     _featureWidth += categories.Length;
+
+                    continue;
                 }
-                else
-                {
-                    _featureWidth += 1;
-                }
+
+                _featureWidth += 1;
             }
         }
 
@@ -79,23 +79,25 @@ namespace DevOnBike.Overfit.Data.Tabular
                 {
                     var val = GetValue(data[i], col.Name);
 
-                    if (col.Type == ColumnType.Numeric)
+                    switch (col.Type)
                     {
-                        fSpan[rowOffset + currentPos++] = System.Convert.ToSingle(val);
-                    }
-                    else if (col.Type == ColumnType.Binary)
-                    {
-                        fSpan[rowOffset + currentPos++] = System.Convert.ToBoolean(val) ? 1f : 0f;
-                    }
-                    else if (col.Type == ColumnType.Categorical)
-                    {
-                        var categories = _categoryMaps[col.Name];
-                        var currentVal = val?.ToString();
+                        case ColumnType.Numeric:
+                            fSpan[rowOffset + currentPos++] = System.Convert.ToSingle(val);
+                            break;
 
-                        for (var c = 0; c < categories.Length; c++)
-                        {
-                            fSpan[rowOffset + currentPos++] = categories[c] == currentVal ? 1f : 0f;
-                        }
+                        case ColumnType.Binary:
+                            fSpan[rowOffset + currentPos++] = System.Convert.ToBoolean(val) ? 1f : 0f;
+                            break;
+
+                        case ColumnType.Categorical:
+                            var categories = _categoryMaps[col.Name];
+                            var currentVal = val?.ToString();
+
+                            for (var c = 0; c < categories.Length; c++)
+                            {
+                                fSpan[rowOffset + currentPos++] = categories[c] == currentVal ? 1f : 0f;
+                            }
+                            break;
                     }
                 }
 

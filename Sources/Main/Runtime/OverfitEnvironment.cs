@@ -41,6 +41,44 @@ namespace DevOnBike.Overfit.Runtime
         /// <summary>KV-cache element type — e.g. <c>q8</c> for the int8 KV cache (default F32).</summary>
         public const string KvDType = "OVERFIT_KV_DTYPE";
 
+        /// <summary>Set to 0 to force the serial im2col patch gather in the conv GEMM path (A/B switch).</summary>
+        public const string ParallelIm2Col = "OVERFIT_PARALLEL_IM2COL";
+
+        /// <summary>N-panels packed and swept together in the conv GEMM; 1 = the original per-panel loop.</summary>
+        public const string ConvPanelGroup = "OVERFIT_CONV_PANEL_GROUP";
+
+        /// <summary>Set to 0 to force the AVX2 8×8 conv micro-kernel instead of the AVX-512 8×32 one.</summary>
+        public const string ConvAvx512 = "OVERFIT_CONV_AVX512";
+
+        /// <summary>Set to 0 to decode Q4_K/Q6_K F16 scales inside the tile loop instead of once per projection.</summary>
+        public const string PrecomputedScales = "OVERFIT_PRECOMPUTED_SCALES";
+
+        // ── Prefill kernel switches (all default ON where the hardware allows; set to 0 to opt out) ──
+        // These exist so a measured win can be A/B'd against its predecessor without a rebuild, and so a
+        // regression on unfamiliar hardware can be bisected in the field rather than only on the dev box.
+
+        /// <summary>Set to 0 to force the 256-bit Q4_K prefill GEMM instead of the AVX-512 two-column kernel.</summary>
+        public const string Avx512PrefillQ4K = "OVERFIT_AVX512_Q4K";
+
+        /// <summary>Set to 0 to force the 256-bit Q6_K prefill GEMM instead of the AVX-512 kernel.</summary>
+        public const string Avx512PrefillQ6K = "OVERFIT_AVX512_Q6K";
+
+        /// <summary>Set to 0 to project K/V once per KV head instead of one whole-matrix dispatch.</summary>
+        public const string WholeMatrixKv = "OVERFIT_WHOLE_KV";
+
+        /// <summary>Set to 0 to hand attention queries to workers in raw order instead of load-balanced pairs.</summary>
+        public const string BalancedAttention = "OVERFIT_BALANCED_ATTN";
+
+        /// <summary>Set to 0 to accumulate the attention value sum through memory instead of in registers.</summary>
+        public const string AttentionRegisterAccumulate = "OVERFIT_ATTN_REGACC";
+
+        /// <summary>Set to 0 to use scalar <c>MathF.Exp</c> for the softmax instead of the vectorized path.</summary>
+        public const string AttentionVectorizedExp = "OVERFIT_ATTN_VEXP";
+
+        /// <summary>Diagnostics only: <c>dot</c> / <c>exp</c> / <c>both</c> removes that part of the attention
+        /// kernel to size its share. Produces WRONG results by construction — never set in production.</summary>
+        public const string AttentionAblate = "OVERFIT_ATTN_ABLATE";
+
         /// <summary>Diagnostics A/B switch: set to 1/true to force the scalar Q4_K main-dot (skip AVX2/NEON).
         /// For measuring SIMD-vs-scalar on one device — not a production tuning knob.</summary>
         public const string ForceScalar = "OVERFIT_FORCE_SCALAR";
@@ -57,5 +95,71 @@ namespace DevOnBike.Overfit.Runtime
 
         /// <summary>Default SNAC decoder-weights directory for the TTS commands.</summary>
         public const string SnacDir = "OVERFIT_SNAC_DIR";
+
+        // ── Model/asset path hints read by the CLI, demos and benchmarks ──────────
+
+        /// <summary>Directory holding the default model for the demos and the local-agent host.</summary>
+        public const string ModelDir = "OVERFIT_MODEL_DIR";
+
+        /// <summary>Explicit path to a single model file, where a demo takes a file rather than a directory.</summary>
+        public const string ModelPath = "OVERFIT_MODEL_PATH";
+
+        /// <summary>Directory holding the sentence-embedding model used by the RAG demo.</summary>
+        public const string EmbeddingDir = "OVERFIT_EMBEDDING_DIR";
+
+        /// <summary>Model used as the judge in the evaluation demo.</summary>
+        public const string Judge = "OVERFIT_JUDGE";
+
+        /// <summary>ONNX model path for the large-CNN comparison benchmark.</summary>
+        public const string CnnOnnx = "OVERFIT_CNN_ONNX";
+
+        /// <summary>MNIST data directory for the training benchmarks.</summary>
+        public const string MnistDir = "OVERFIT_MNIST_DIR";
+
+        // ── Android decode bench (Sources/AndroidBench) ───────────────────────────
+
+        /// <summary>Overrides the decode-pool setting for the on-device bench.</summary>
+        public const string BenchPool = "OVERFIT_BENCH_POOL";
+
+        /// <summary>Overrides the worker count for the on-device bench.</summary>
+        public const string BenchWorkers = "OVERFIT_BENCH_WORKERS";
+
+        // ── HTTP server (Sources/Server) ──────────────────────────────────────────
+
+        /// <summary>
+        /// Set to <c>1</c> to print a per-request phase trace (history replay, prompt-cache reuse, time to
+        /// first token) — the attribution used to tell server overhead apart from engine work.
+        /// </summary>
+        public const string ServerTrace = "OVERFIT_SERVER_TRACE";
+
+        /// <summary>
+        /// Set to <c>1</c> to skip the kept-end-of-prompt-logits fast path, so a re-sent prompt costs one
+        /// forward pass instead of none. Exists so both configurations can be measured side by side in the
+        /// same interleaved run rather than across processes.
+        /// </summary>
+        public const string DisableLogitsCache = "OVERFIT_DISABLE_LOGITS_CACHE";
+
+        /// <summary>
+        /// Set to <c>1</c> to emit each token after the forward pass that follows it rather than before —
+        /// the ordering that predates the early-emit change. Same purpose: an in-run A/B.
+        /// </summary>
+        public const string DisableEarlyEmit = "OVERFIT_DISABLE_EARLY_EMIT";
+
+        /// <summary>
+        /// Set to <c>1</c> to force the exact single-token decode loop instead of the speculative path.
+        /// Same purpose: an in-run A/B of speculative decode against plain decode.
+        /// </summary>
+        public const string DisableSpeculative = "OVERFIT_DISABLE_SPECULATIVE";
+
+        // ── Third-party / host environment (not ours, but read by us) ─────────────
+
+        /// <summary>Hugging Face API endpoint override for the model downloader.</summary>
+        public const string HuggingFaceEndpoint = "HF_ENDPOINT";
+
+        /// <summary>Hugging Face access token for gated repositories.</summary>
+        public const string HuggingFaceToken = "HF_TOKEN";
+
+        /// <summary>Set by GitHub Actions; used to detect a CI run.</summary>
+        public const string GitHubActions = "GITHUB_ACTIONS";
     }
 }

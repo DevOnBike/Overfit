@@ -43,8 +43,10 @@ namespace DevOnBike.Overfit.Intrinsics
                 }
                 // Fall through to scalar for remainder
             }
-            // AVX2 path (original code, unchanged)
-            else if (CpuFeatures.HasAvx)
+
+            // AVX2 path (original code, unchanged). CpuFeatures.HasXxx are static readonly bools the JIT
+            // constant-folds, so restating the AVX-512 guard here costs nothing at runtime.
+            if (!(CpuFeatures.HasAvx512 && len >= Avx512Threshold) && CpuFeatures.HasAvx)
             {
                 var simdCount = Vector256<float>.Count;
                 for (; i <= len - simdCount; i += simdCount)
@@ -92,8 +94,10 @@ namespace DevOnBike.Overfit.Intrinsics
                 }
                 // Fall through to scalar for remainder
             }
-            // AVX2 path (original code, unchanged)
-            else if (CpuFeatures.HasAvx)
+
+            // AVX2 path (original code, unchanged). CpuFeatures.HasXxx are static readonly bools the JIT
+            // constant-folds, so restating the AVX-512 guard here costs nothing at runtime.
+            if (!(CpuFeatures.HasAvx512 && len >= Avx512Threshold) && CpuFeatures.HasAvx)
             {
                 var simdCount = Vector256<float>.Count;
                 var vs = Vector256.Create(scalar);
@@ -156,7 +160,8 @@ namespace DevOnBike.Overfit.Intrinsics
                     sum128 = Sse3.HorizontalAdd(sum128, sum128);
                     sum128 = Sse3.HorizontalAdd(sum128, sum128);
                 }
-                else
+
+                if (!CpuFeatures.HasSse3)
                 {
                     sum128 = Sse.Add(sum128, Sse.Shuffle(sum128, sum128, 0b10_11_00_01));
                     sum128 = Sse.Add(sum128, Sse.Shuffle(sum128, sum128, 0b00_01_10_11));
@@ -236,8 +241,10 @@ namespace DevOnBike.Overfit.Intrinsics
                 }
                 // Fall through to scalar for remainder
             }
-            // AVX2 path (original code, unchanged)
-            else if (CpuFeatures.HasAvx)
+
+            // AVX2 path (original code, unchanged). CpuFeatures.HasXxx are static readonly bools the JIT
+            // constant-folds, so restating the AVX-512 guard here costs nothing at runtime.
+            if (!(CpuFeatures.HasAvx512 && len >= Avx512Threshold) && CpuFeatures.HasAvx)
             {
                 var simdCount = Vector256<float>.Count;
                 var zero = Vector256<float>.Zero;

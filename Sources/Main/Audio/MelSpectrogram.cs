@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -62,18 +62,16 @@ namespace DevOnBike.Overfit.Audio
                 _hann[n] = 0.5f * (1f - MathF.Cos(2f * MathF.PI * n / NFft));
             }
 
-            if (melFilters.IsEmpty)
+            if (!melFilters.IsEmpty && melFilters.Length != nMels * _nFreqs)
             {
-                _melFilters = BuildSlaneyMelFilters(nMels, _nFreqs, SampleRate, NFft);
+                throw new ArgumentException($"melFilters must be [{nMels} × {_nFreqs}] = {nMels * _nFreqs}, got {melFilters.Length}.", nameof(melFilters));
             }
-            else
-            {
-                if (melFilters.Length != nMels * _nFreqs)
-                {
-                    throw new ArgumentException($"melFilters must be [{nMels} × {_nFreqs}] = {nMels * _nFreqs}, got {melFilters.Length}.", nameof(melFilters));
-                }
-                _melFilters = melFilters.ToArray();
-            }
+
+            // One conditional expression rather than two mirrored `if` blocks: the compiler cannot see such a
+            // pair as exhaustive, so the field read as CS8618 "uninitialised" and broke the AOT guard.
+            _melFilters = melFilters.IsEmpty
+                ? BuildSlaneyMelFilters(nMels, _nFreqs, SampleRate, NFft)
+                : melFilters.ToArray();
 
             // ── Bluestein tables ──
             var m = 1;

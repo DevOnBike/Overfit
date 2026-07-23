@@ -1,9 +1,8 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using System.Collections.Generic;
 using DevOnBike.Overfit.LanguageModels.Chat;
 
 namespace DevOnBike.Overfit.LanguageModels.Memory
@@ -42,7 +41,8 @@ namespace DevOnBike.Overfit.LanguageModels.Memory
                 {
                     systemMessages.Add(m);
                 }
-                else
+
+                if (!(string.Equals(m.Role, "system", StringComparison.Ordinal)))
                 {
                     nonSystem.Add(m);
                     nonSystemChars += m.Content.Length;

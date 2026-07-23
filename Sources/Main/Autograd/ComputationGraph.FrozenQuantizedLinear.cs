@@ -8,7 +8,6 @@ using System.Runtime.CompilerServices;
 using DevOnBike.Overfit.Intrinsics;
 using DevOnBike.Overfit.Runtime;
 using DevOnBike.Overfit.Tensors;
-using DevOnBike.Overfit.Tensors.Core;
 
 namespace DevOnBike.Overfit.Autograd
 {

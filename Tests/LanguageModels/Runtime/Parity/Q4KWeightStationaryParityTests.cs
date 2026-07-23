@@ -4,7 +4,6 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using System.Buffers.Binary;
-using DevOnBike.Overfit.LanguageModels.Loading;
 using DevOnBike.Overfit.LanguageModels.Runtime;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity

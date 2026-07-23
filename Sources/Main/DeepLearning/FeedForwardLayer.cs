@@ -137,51 +137,27 @@ namespace DevOnBike.Overfit.DeepLearning
 
             // [B*T, dModel] @ W1 + b1 → [B*T, dFF]. QLoRA output hook owns the whole projection;
             // else weight-level LoRA (W_eff = W1 + A@B) or the plain cached parameter node.
-            AutogradNode h1;
-            if (W1OutputProvider is not null)
-            {
-                h1 = W1OutputProvider(graph, flat);
-            }
-            else
-            {
-                AutogradNode w1Node;
-                if (W1WeightProvider is not null)
-                {
-                    w1Node = W1WeightProvider(graph);
-                }
-                else
-                {
-                    _w1Node ??= W1.AsNode();
-                    w1Node = _w1Node;
-                }
-
-                h1 = graph.Linear(flat, w1Node, _b1Node);
-            }
+            // Nested ternaries, not if/else: C# evaluates only the taken branch, so a hook that is NOT set
+            // is never invoked. Hoisting the weight resolution out would call W1WeightProvider even when the
+            // output hook owns the projection — that delegate records nodes on the graph, so it would be a
+            // behaviour change, not a refactor.
+            var h1 = W1OutputProvider is not null
+                ? W1OutputProvider(graph, flat)
+                : graph.Linear(
+                    flat,
+                    W1WeightProvider is not null ? W1WeightProvider(graph) : (_w1Node ??= W1.AsNode()),
+                    _b1Node);
 
             // GELU([B*T, dFF])
             var act = TensorMath.Gelu(graph, h1);
 
             // [B*T, dFF] @ W2 + b2 → [B*T, dModel]
-            AutogradNode h2;
-            if (W2OutputProvider is not null)
-            {
-                h2 = W2OutputProvider(graph, act);
-            }
-            else
-            {
-                AutogradNode w2Node;
-                if (W2WeightProvider is not null)
-                {
-                    w2Node = W2WeightProvider(graph);
-                }
-                else
-                {
-                    _w2Node ??= W2.AsNode();
-                    w2Node = _w2Node;
-                }
-
-                h2 = graph.Linear(act, w2Node, _b2Node);
-            }
+            var h2 = W2OutputProvider is not null
+                ? W2OutputProvider(graph, act)
+                : graph.Linear(
+                    act,
+                    W2WeightProvider is not null ? W2WeightProvider(graph) : (_w2Node ??= W2.AsNode()),
+                    _b2Node);
 
             // Reshape back to [B, T, dModel]
             return graph.Reshape(h2, b, t, _dModel);
