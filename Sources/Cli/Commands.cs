@@ -18,6 +18,7 @@ using DevOnBike.Overfit.Mcp;
 using DevOnBike.Overfit.Redaction;
 using DevOnBike.Overfit.Runtime;
 using DevOnBike.Overfit.Server;
+using DevOnBike.Overfit.Server.AspNet;
 using DevOnBike.Overfit.Serving;
 using DevOnBike.Overfit.Trees;
 
@@ -151,7 +152,7 @@ namespace DevOnBike.Overfit.Cli
 
         private const string DefaultSystemPrompt = "You are a concise, helpful assistant running locally in pure .NET.";
 
-        public static int Serve(string model, string host, int port, string? embedModel, string? ttsModel, string? ttsSnac, int sessions = 1)
+        public static int Serve(string model, string host, int port, string? embedModel, string? ttsModel, string? ttsSnac, int sessions = 1, bool httpListener = false)
         {
             var path = ModelCache.Resolve(model);
             if (path is null)
@@ -257,6 +258,36 @@ namespace DevOnBike.Overfit.Cli
                 cts.Cancel();
             };
 
+            void PrintBanner(string baseUrl, string hostKind, bool servesExtras)
+            {
+                var embedEp = servesExtras && embedder is not null ? " | POST /v1/embeddings" : string.Empty;
+                var ttsEp = servesExtras && tts is not null ? " | POST /v1/audio/speech" : string.Empty;
+                Console.WriteLine();
+                Console.WriteLine($"Overfit OpenAI-compatible server ({hostKind}) listening on {baseUrl}");
+                Console.WriteLine($"  model id:  {modelName}");
+                Console.WriteLine($"  endpoints: GET /v1/models | POST /v1/chat/completions (stream + non-stream){embedEp}{ttsEp} | GET /health");
+                Console.WriteLine();
+                Console.WriteLine($"  curl {baseUrl}/v1/chat/completions -H \"Content-Type: application/json\" \\");
+                Console.WriteLine($"       -d '{{\"model\":\"{modelName}\",\"messages\":[{{\"role\":\"user\",\"content\":\"Hello\"}}]}}'");
+                Console.WriteLine();
+                Console.WriteLine("Press Ctrl+C to stop.");
+            }
+
+            // Default: the AOT-ready ASP.NET (Kestrel) host. The dependency-free HttpListener server is kept
+            // only behind --http-listener as a legacy escape hatch.
+            if (!httpListener)
+            {
+                OverfitAspNetServer.Serve(
+                    pool, modelName, host, port, DefaultSystemPrompt, embedder, tts,
+                    onListening: baseUrl => PrintBanner(baseUrl, "ASP.NET / Kestrel, AOT-ready", servesExtras: true),
+                    cancellationToken: cts.Token);
+
+                embedder?.Dispose();
+                tts?.Dispose();
+                pool.Dispose();
+                return 0;
+            }
+
             try
             {
                 OverfitOpenAiServer.Serve(
@@ -267,20 +298,7 @@ namespace DevOnBike.Overfit.Cli
                     DefaultSystemPrompt,
                     embedder,
                     tts,
-                    onListening: baseUrl =>
-                    {
-                        var embedEp = embedder is null ? string.Empty : " | POST /v1/embeddings";
-                        var ttsEp = tts is null ? string.Empty : " | POST /v1/audio/speech";
-                        Console.WriteLine();
-                        Console.WriteLine($"Overfit OpenAI-compatible server listening on {baseUrl}");
-                        Console.WriteLine($"  model id:  {modelName}");
-                        Console.WriteLine($"  endpoints: GET /v1/models | POST /v1/chat/completions (stream + non-stream){embedEp}{ttsEp} | GET /health");
-                        Console.WriteLine();
-                        Console.WriteLine($"  curl {baseUrl}/v1/chat/completions -H \"Content-Type: application/json\" \\");
-                        Console.WriteLine($"       -d '{{\"model\":\"{modelName}\",\"messages\":[{{\"role\":\"user\",\"content\":\"Hello\"}}]}}'");
-                        Console.WriteLine();
-                        Console.WriteLine("Press Ctrl+C to stop.");
-                    },
+                    onListening: baseUrl => PrintBanner(baseUrl, "HttpListener (legacy)", servesExtras: true),
                     cancellationToken: cts.Token);
             }
             catch (HttpListenerException ex)

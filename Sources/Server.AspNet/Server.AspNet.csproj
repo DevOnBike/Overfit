@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <!--
+      The AOT-ready ASP.NET (Kestrel + Minimal API) host for Overfit's OpenAI-compatible server — the
+      shipping server behind the NuGet package and the Docker image. It reuses the transport-neutral
+      ChatCompletionExchange from DevOnBike.Overfit.Server, so it is a thin Kestrel adapter, not a second
+      implementation of the protocol.
+
+      AOT: kept trim/AOT-clean (IsAotCompatible) and built with the Request Delegate Generator so the
+      endpoint routing carries no reflection. The consuming executable (the `overfit` CLI) sets
+      PublishAot=true; the CI aot-guard job publishes it under Native AOT with warnings-as-errors, which
+      is where ILComplier actually verifies this graph.
+    -->
+
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <Nullable>enable</Nullable>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <IsAotCompatible>true</IsAotCompatible>
+        <EnableRequestDelegateGenerator>true</EnableRequestDelegateGenerator>
+        <PackageId>DevOnBike.Overfit.Server.AspNet</PackageId>
+        <RootNamespace>DevOnBike.Overfit.Server.AspNet</RootNamespace>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <FrameworkReference Include="Microsoft.AspNetCore.App" />
+        <!-- The shared protocol handler, DTOs and the source-gen JSON context live here. -->
+        <ProjectReference Include="..\Server\Server.csproj" />
+        <ProjectReference Include="..\Main\Main.csproj" />
+    </ItemGroup>
+
+</Project>

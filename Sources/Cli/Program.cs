@@ -99,6 +99,11 @@ var serveSessions = new Option<int>("--sessions")
         + "(serialized, like llama.cpp). N>1 decodes N chats at once at the cost of N× KV-cache RAM.",
     DefaultValueFactory = _ => 1,
 };
+var serveHttpListener = new Option<bool>("--http-listener")
+{
+    Description = "Legacy: serve through the dependency-free HttpListener server instead of the default "
+        + "AOT-ready ASP.NET (Kestrel) host. Kept as an escape hatch; the Kestrel host is the shipping default.",
+};
 var serveCommand = new Command("serve", "Start an OpenAI-compatible HTTP server for a model.")
 {
     serveModel,
@@ -108,6 +113,7 @@ var serveCommand = new Command("serve", "Start an OpenAI-compatible HTTP server 
     serveTtsModel,
     serveTtsSnac,
     serveSessions,
+    serveHttpListener,
 };
 serveCommand.SetAction(parseResult => Commands.Serve(
     parseResult.GetValue(serveModel)!,
@@ -116,7 +122,8 @@ serveCommand.SetAction(parseResult => Commands.Serve(
     parseResult.GetValue(serveEmbedModel),
     parseResult.GetValue(serveTtsModel),
     parseResult.GetValue(serveTtsSnac),
-    parseResult.GetValue(serveSessions)));
+    parseResult.GetValue(serveSessions),
+    parseResult.GetValue(serveHttpListener)));
 
 // ── tts: text → speech (WAV), in-process, watermarked. Placeholder engine until the neural backend lands. ──
 var ttsText = new Option<string>("--text")

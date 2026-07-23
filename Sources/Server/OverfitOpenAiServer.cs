@@ -330,56 +330,7 @@ namespace DevOnBike.Overfit.Server
                 return;
             }
 
-            if (req is null || string.IsNullOrWhiteSpace(req.Input))
-            {
-                TryWriteError(ctx.Response, HttpStatusCode.BadRequest, "'input' is required.");
-                return;
-            }
-
-            var format = (req.ResponseFormat ?? "wav").ToLowerInvariant();
-            if (format is not ("wav" or "pcm"))
-            {
-                TryWriteError(ctx.Response, HttpStatusCode.BadRequest,
-                    $"response_format '{req.ResponseFormat}' is not supported; use 'wav' or 'pcm'.");
-                return;
-            }
-
-            var voice = string.IsNullOrWhiteSpace(req.Voice) ? OrpheusPrompt.DefaultVoice : req.Voice!;
-            var audio = tts.Synthesize(req.Input!, voice);
-
-            // Both outputs are read below, so they must be definitely assigned; split ifs the compiler
-            // cannot prove exhaustive would not do that. The WAV branch keeps its `using` scope in a block.
-            var isPcm = format == "pcm";
-            var contentType = isPcm ? "audio/pcm" : "audio/wav";
-            var bytes = isPcm ? ToPcm16Bytes(audio) : ToWavBytes(audio, tts.SampleRate, voice);
-
-            ctx.Response.StatusCode = (int)HttpStatusCode.OK;
-            ctx.Response.ContentType = contentType;
-            ctx.Response.ContentLength64 = bytes.Length;
-            ctx.Response.OutputStream.Write(bytes, 0, bytes.Length);
-        }
-
-        /// <summary>WAV-encodes the synthesized audio. Split out of the caller so the `using MemoryStream`
-        /// keeps a scope of its own while the caller stays a single definitely-assigned expression.</summary>
-        private static byte[] ToWavBytes(float[] audio, int sampleRate, string voice)
-        {
-            using var ms = new MemoryStream();
-            WavWriter.WriteMono(ms, audio, sampleRate, WavSampleFormat.Pcm16,
-                SyntheticSpeechMetadata.ForNow(voice).ToInfoComment());
-            return ms.ToArray();
-        }
-
-        private static byte[] ToPcm16Bytes(float[] samples)
-        {
-            var bytes = new byte[samples.Length * 2];
-            for (var i = 0; i < samples.Length; i++)
-            {
-                var clamped = Math.Clamp(samples[i], -1f, 1f);
-                var v = (short)MathF.Round(clamped * 32767f);
-                bytes[i * 2] = (byte)(v & 0xFF);
-                bytes[(i * 2) + 1] = (byte)((v >> 8) & 0xFF);
-            }
-            return bytes;
+            SpeechExchange.Handle(req, tts, new HttpListenerResponseSink(ctx.Response));
         }
 
         /// <summary>Opt-in per-request phase trace (<c>OVERFIT_SERVER_TRACE=1</c>) for TTFT attribution.</summary>
@@ -399,134 +350,12 @@ namespace DevOnBike.Overfit.Server
                 return;
             }
 
-            if (req is null || req.Messages is not { Count: > 0 })
-            {
-                TryWriteError(ctx.Response, HttpStatusCode.BadRequest, "'messages' is required and must be non-empty.");
-                return;
-            }
-
-            var last = req.Messages[^1];
-            if (!string.Equals(last.Role, "user", StringComparison.OrdinalIgnoreCase))
-            {
-                TryWriteError(ctx.Response, HttpStatusCode.BadRequest, "the last message must have role 'user'.");
-                return;
-            }
-
-            var (sampling, maxTokens) = OpenAiChatMapping.BuildSampling(req);
-            var options = new GenerationOptions(maxTokens, maxContextLength: 8192, sampling, stopOnEndOfTextToken: true);
-            var id = "chatcmpl-" + Guid.NewGuid().ToString("N");
-            var ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-
-            ITokenConstraint? constraint;
-            try
-            {
-                constraint = OpenAiChatMapping.BuildResponseFormatConstraint(req.ResponseFormat, client.Tokenizer);
-            }
-            catch (JsonException ex)
-            {
-                TryWriteError(ctx.Response, HttpStatusCode.BadRequest, $"invalid response_format: {ex.Message}");
-                return;
-            }
-
-            try
-            {
-                // (A GcLatencyScope.SustainedLowLatency() was tried here and MEASURED to be a no-op — Overfit's
-                // generation is zero-allocation (0 GC, 0 B over 150 prefill+decode cycles), so there are no gen-2
-                // pauses to suppress, while the mode would only trade RAM for nothing. Left off by design;
-                // GcLatencyScope stays an opt-in primitive for genuinely allocation-heavy host workloads.)
-                // Opt-in phase timing (OVERFIT_SERVER_TRACE=1). TTFT measured through this server ran ~405 ms
-                // while the engine's own prefill for the same prompt measured ~150 ms — so most of the latency
-                // a client feels is NOT the prefill kernel. Rather than guess which of replay, templating or
-                // the first decode holds it, each phase is timed.
-                var trace = ServerTrace;
-                var phase = trace ? ValueStopwatch.StartNew() : default;
-
-                OpenAiChatMapping.ReplayHistory(client.Chat, req.Messages);
-
-                if (trace)
-                {
-                    Console.WriteLine($"[trace] replay {phase.GetElapsedTime().TotalMilliseconds:F1} ms "
-                        + $"({req.Messages.Count} message(s))");
-                }
-
-                var userContent = last.Content ?? string.Empty;
-
-                if (!req.Stream)
-                {
-                    var reply = client.Chat.Send(userContent, in options, onText: null, constraint: constraint);
-                    var s = client.Chat.LastStats;
-
-                    var response = new ChatCompletionResponse
-                    {
-                        Id = id,
-                        Created = ts,
-                        Model = modelName,
-                        Choices =
-                        [
-                            new ChatChoice
-                            {
-                                Index = 0,
-                                Message = new OpenAiMessage { Role = "assistant", Content = reply },
-                                FinishReason = s.GeneratedTokens >= maxTokens ? "length" : "stop",
-                            },
-                        ],
-                        Usage = new OpenAiUsage
-                        {
-                            PromptTokens = s.PromptTokens,
-                            CompletionTokens = s.GeneratedTokens,
-                            TotalTokens = s.PromptTokens + s.GeneratedTokens,
-                        },
-                    };
-                    WriteJson(ctx.Response, HttpStatusCode.OK, response, OpenAiJsonContext.Default.ChatCompletionResponse);
-                    return;
-                }
-
-                // Streaming (SSE). One in-flight request at a time, so the request thread owns the stream.
-                var resp = ctx.Response;
-                resp.StatusCode = (int)HttpStatusCode.OK;
-                resp.ContentType = "text/event-stream";
-                resp.Headers["Cache-Control"] = "no-cache";
-                resp.SendChunked = true;
-
-                WriteChunk(resp, id, ts, modelName, new OpenAiMessage { Role = "assistant" }, finishReason: null);
-
-                var sendStarted = trace ? ValueStopwatch.StartNew() : default;
-                var firstDelta = true;
-
-                client.Chat.Send(userContent, in options,
-                    onText: delta =>
-                    {
-                        if (trace && firstDelta)
-                        {
-                            firstDelta = false;
-                            Console.WriteLine($"[trace] first token {sendStarted.GetElapsedTime().TotalMilliseconds:F1} ms");
-                        }
-
-                        WriteChunk(resp, id, ts, modelName, new OpenAiMessage { Content = delta }, finishReason: null);
-                    },
-                    constraint: constraint);
-
-                var streamStats = client.Chat.LastStats;
-
-                if (trace)
-                {
-                    Console.WriteLine($"[trace] prompt {streamStats.PromptTokens} tok, "
-                        + $"{client.Chat.CachedPromptTokens} reused from the KV cache");
-                }
-
-                var streamFinish = streamStats.GeneratedTokens >= maxTokens ? "length" : "stop";
-                WriteChunk(resp, id, ts, modelName, new OpenAiMessage(), finishReason: streamFinish);
-                WriteSseRaw(resp, "[DONE]");
-            }
-            finally
-            {
-                // Restore the baseline system turn so the shared single-tenant session stays clean.
-                client.Reset();
-                if (!string.IsNullOrEmpty(systemMessage))
-                {
-                    client.AddSystem(systemMessage);
-                }
-            }
+            // Everything past the body parse — validation, sampling, replay, streaming shape, finish-reason,
+            // system-turn restore — is the shared protocol, run once in ChatCompletionExchange. This host
+            // supplies only the wire adapter and (opt-in) the phase trace.
+            var sink = new HttpListenerResponseSink(ctx.Response);
+            var observer = ServerTrace ? ConsoleTraceObserver.Instance : null;
+            ChatCompletionExchange.Handle(req, client, modelName, systemMessage, sink, observer);
         }
 
         private static void HandleEmbeddings(HttpListenerContext ctx, SentenceEmbedder embedder, string modelName)
@@ -542,48 +371,7 @@ namespace DevOnBike.Overfit.Server
                 return;
             }
 
-            var inputs = req is null ? [] : OpenAiChatMapping.ParseInputs(req.Input);
-            if (inputs.Count == 0)
-            {
-                TryWriteError(ctx.Response, HttpStatusCode.BadRequest, "'input' is required (a string or an array of strings).");
-                return;
-            }
-
-            // In-process, pure .NET embeddings — nothing leaves the box.
-            var data = new List<EmbeddingData>(inputs.Count);
-            var approxTokens = 0;
-            for (var i = 0; i < inputs.Count; i++)
-            {
-                data.Add(new EmbeddingData { Index = i, Embedding = embedder.Embed(inputs[i]) });
-                approxTokens += Math.Max(1, inputs[i].Length / 4);   // rough proxy; we don't bill tokens
-            }
-
-            var response = new EmbeddingsResponse
-            {
-                Model = modelName,
-                Data = data,
-                Usage = new OpenAiUsage { PromptTokens = approxTokens, TotalTokens = approxTokens },
-            };
-            WriteJson(ctx.Response, HttpStatusCode.OK, response, OpenAiJsonContext.Default.EmbeddingsResponse);
-        }
-
-        private static void WriteChunk(HttpListenerResponse resp, string id, long created, string model, OpenAiMessage delta, string? finishReason)
-        {
-            var chunk = new ChatCompletionChunk
-            {
-                Id = id,
-                Created = created,
-                Model = model,
-                Choices = [new ChatChoice { Index = 0, Delta = delta, FinishReason = finishReason }],
-            };
-            WriteSseRaw(resp, JsonSerializer.Serialize(chunk, OpenAiJsonContext.Default.ChatCompletionChunk));
-        }
-
-        private static void WriteSseRaw(HttpListenerResponse resp, string data)
-        {
-            var bytes = Encoding.UTF8.GetBytes($"data: {data}\n\n");
-            resp.OutputStream.Write(bytes, 0, bytes.Length);
-            resp.OutputStream.Flush();
+            EmbeddingsExchange.Handle(req, embedder, modelName, new HttpListenerResponseSink(ctx.Response));
         }
 
         private static void WriteJson<T>(HttpListenerResponse resp, HttpStatusCode status, T body, System.Text.Json.Serialization.Metadata.JsonTypeInfo<T> typeInfo)

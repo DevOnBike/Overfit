@@ -46,6 +46,7 @@
         <ProjectReference Include="..\Main\Main.csproj" />
         <ProjectReference Include="..\Mcp\Mcp.csproj" />
         <ProjectReference Include="..\Server\Server.csproj" />
+        <ProjectReference Include="..\Server.AspNet\Server.AspNet.csproj" />
         <PackageReference Include="System.CommandLine" />
     </ItemGroup>
 
