@@ -79,9 +79,12 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// </summary>
         internal static bool UseOutputBlocking;
 
+        /// <summary>Test hook: pin the column-tile axis so the automatic rule can be A/B'd against it.</summary>
+        internal static bool DisableAutoAxisSelection;
+
         /// <summary>
-        /// Chooses the parallelisation axis from the tile count: band over output rows when fanning out over
-        /// column tiles would leave most of the pool idle, tile otherwise.
+        /// Chooses the parallelisation axis: band over output rows when column tiling at the <b>widest</b> tile
+        /// the kernel supports could not fill the machine, tile otherwise.
         ///
         /// <para><b>Why this is not a preference but a measurement.</b> Prefill fans out over column tiles and
         /// <c>tiles = rows / NR</c>, so a 16-token prompt yields <b>two</b> work items for sixteen cores while a
@@ -98,12 +101,53 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// decision from an incomplete experiment, because only the long prompt was ever tried. The property
         /// that makes banding pointless when tiles are plentiful is exactly what is missing when they are not.
         /// This matters for latency users actually feel: chat prompts are tens of tokens, not hundreds.</para>
+        ///
+        /// <para><b>Why the count is taken at the maximum width, not at the resolved one.</b> The first version
+        /// of this rule fed it <see cref="ResolveTileCols"/>'s answer, which collapses to NR=4 exactly when rows
+        /// are scarce — so a 48-token prompt reported twelve tiles, cleared the threshold and never banded, and
+        /// the rule fired only below 32 tokens. The question the axis decision is actually asking is "can column
+        /// tiling fill the machine at a width worth using", so it must be evaluated at that width. Measured on
+        /// Qwen-3B with the width free to follow the axis (best of three, ms):</para>
+        ///
+        /// <list type="table">
+        ///   <item><term>96 tokens (6 tiles)</term><description>442.1 tiled → 428.8 banded</description></item>
+        ///   <item><term>128 tokens (8 tiles)</term><description>610.2 → <b>545.4</b></description></item>
+        ///   <item><term>192 tokens (12 tiles)</term><description>807.7 → 799.6</description></item>
+        ///   <item><term>256 tokens (16 tiles)</term><description>1114.6 → <b>1034.9</b></description></item>
+        ///   <item><term>384 tokens (24 tiles)</term><description>1303.1 tiled → 1476.9 banded (banding loses)</description></item>
+        /// </list>
         /// </summary>
-        private static bool ShouldBandOutputRows(int tiles, int cores)
+        private static bool ShouldBandOutputRows(int tilesAtMaxWidth, int cores)
         {
-            // Half the cores is where the measured curve crosses: at 8 tiles on 16 physical cores the two
-            // axes tie, below it banding wins, above it the extra packing cost dominates.
-            return tiles < cores / 2;
+            // One tile per physical core is where the measured curve crosses: at 16 tiles on 16 physical cores
+            // banding still wins by 7%, at 24 it loses by 13%.
+            return tilesAtMaxWidth <= cores;
+        }
+
+        /// <summary>
+        /// Column-tile width once the axis is known: the widest the kernel supports whenever the work is
+        /// banded over output rows, and <see cref="ResolveTileCols"/>'s parallelism-constrained choice
+        /// otherwise.
+        ///
+        /// <para><b>Why the two decisions are linked.</b> <c>ResolveTileCols</c> caps the width so that
+        /// <c>rows / NR</c> still leaves a tile per core — a necessary rule while tiles <i>are</i> the work
+        /// items. Banding makes output-row bands the work items, so tile count stops driving parallelism and
+        /// the cap has nothing left to protect. Widening then costs nothing and halves the number of passes
+        /// over the weights.</para>
+        ///
+        /// <para>Measured on Qwen-3B at chat prompt lengths, NR=8 against NR=16 with banding in effect:
+        /// 24 tokens 165.2 → 154.2 ms, <b>48 tokens 281.6 → 238.8 ms</b>, 96 tokens 441.0 → 417.3 ms.
+        /// The same NR=16 with tiling forced instead is 457–640 ms, which is why the width can only be
+        /// widened together with the axis change and not on its own.</para>
+        /// </summary>
+        private static int ResolveTileColsForAxis(int rows, int cores, int maxTileCols, bool banding)
+        {
+            if (TileColsOverride > 0)
+            {
+                return Math.Min(TileColsOverride, maxTileCols);
+            }
+
+            return banding ? maxTileCols : ResolveTileCols(rows, cores, maxTileCols);
         }
 
         /// <summary>
@@ -220,7 +264,13 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 }
             }
 
-            return 4;
+            // Nothing reaches two tiles per core, so narrowing cannot buy the granularity it is meant to buy —
+            // it only multiplies passes over the weights. Measured at 384 rows, where the old fallback of 4
+            // (96 tiles) ran 1617.9 ms against 1303.1 ms at NR=16 (24 tiles): a 1.24x loss for a tile count the
+            // machine could not use anyway. Falling back to the widest tile is the opposite direction from the
+            // rule above and deliberately so — the rule protects granularity while granularity is still
+            // purchasable, and this handles the case where it is not.
+            return maxTileCols;
         }
 
         /// <summary>
@@ -413,7 +463,14 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             var repacked = w.EnsureRepacked();
 
             var cores = Environment.ProcessorCount;
-            var nr = ResolveTileCols(rows, cores, Q4KGemvKernel.MaxTileCols);
+
+            // Decide the axis first from the width the old rule would pick, then let the axis choose the
+            // final width: banding frees the tile width from the parallelism constraint that capped it.
+            var banding = !DisableAutoAxisSelection
+                && ShouldBandOutputRows(
+                    (rows + Q4KGemvKernel.MaxTileCols - 1) / Q4KGemvKernel.MaxTileCols, cores / 2);
+
+            var nr = ResolveTileColsForAxis(rows, cores, Q4KGemvKernel.MaxTileCols, banding);
             var tiles = (rows + nr - 1) / nr;
 
             // One decode of the F16 scales for the whole projection, reused by every column tile. Skipped when
@@ -460,7 +517,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     Avx512 = UseAvx512PrefillQ4K && !DisableRepackedKernelsForParity,
                 };
 
-                if (!UseOutputBlocking && !ShouldBandOutputRows(tiles, Environment.ProcessorCount / 2))
+                if (!UseOutputBlocking && !banding)
                 {
                     OverfitParallel.For(0, tiles, &TiledChunk, &ctx);
                     return;
@@ -509,7 +566,12 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             var repacked = w.EnsureRepacked();
 
             var cores = Environment.ProcessorCount;
-            var nr = ResolveTileCols(rows, cores, Q6KGemvKernel.MaxTileCols);
+
+            var banding = !DisableAutoAxisSelection
+                && ShouldBandOutputRows(
+                    (rows + Q6KGemvKernel.MaxTileCols - 1) / Q6KGemvKernel.MaxTileCols, cores / 2);
+
+            var nr = ResolveTileColsForAxis(rows, cores, Q6KGemvKernel.MaxTileCols, banding);
             var tiles = (rows + nr - 1) / nr;
 
             // Same hoist as the Q4_K path: widen the F16 row scales once per projection rather than once per
@@ -552,7 +614,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
                 // Same axis choice as the Q4_K path. Without it `ffn_down` — 36% of a 16-token prefill —
                 // keeps fanning out over two column tiles while fourteen cores idle.
-                if (!UseOutputBlocking && !ShouldBandOutputRows(tiles, Environment.ProcessorCount / 2))
+                if (!UseOutputBlocking && !banding)
                 {
                     OverfitParallel.For(0, tiles, &TiledQ6KChunk, &ctx);
                     return;

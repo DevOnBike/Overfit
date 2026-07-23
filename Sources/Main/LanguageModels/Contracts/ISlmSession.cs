@@ -31,6 +31,22 @@ namespace DevOnBike.Overfit.LanguageModels.Contracts
 
         void Reset(ReadOnlySpan<int> promptTokens);
 
+        /// <summary>
+        /// Prefills <paramref name="promptTokens"/>, reusing whatever leading portion is already in this
+        /// session's KV cache, and returns how many tokens that saved. The end state matches
+        /// <see cref="Reset(System.ReadOnlySpan{int})"/> exactly — reuse is an optimisation, never a
+        /// behaviour change. The default implementation reuses nothing, so sessions that do not track
+        /// their cached tokens keep working unchanged.
+        ///
+        /// <para>This is the multi-turn chat lever: every turn re-sends the whole conversation, so without
+        /// reuse turn N re-encodes everything turns 1..N-1 already encoded.</para>
+        /// </summary>
+        int PrefillReusingCache(ReadOnlySpan<int> promptTokens)
+        {
+            Reset(promptTokens);
+            return 0;
+        }
+
         int GenerateNextToken(in SamplingOptions sampling);
 
         /// <summary>

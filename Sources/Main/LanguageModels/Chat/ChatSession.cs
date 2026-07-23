@@ -90,6 +90,16 @@ namespace DevOnBike.Overfit.LanguageModels.Chat
             get; private set;
         }
 
+        /// <summary>
+        /// How many prompt tokens the most recent turn took from the KV cache instead of re-encoding —
+        /// 0 on the first turn of a conversation, and typically the whole preceding conversation
+        /// afterwards. <c>LastStats.PromptTokens</c> minus this is what was actually forwarded.
+        /// </summary>
+        public int CachedPromptTokens
+        {
+            get; private set;
+        }
+
         public void AddSystem(string content) => _history.Add(ChatMessage.System(content));
 
         /// <summary>
@@ -183,7 +193,12 @@ namespace DevOnBike.Overfit.LanguageModels.Chat
             var tokenCount = _tokenizer.CountTokens(promptText);
             var promptTokens = new int[tokenCount];
             var written = _tokenizer.Encode(promptText, promptTokens);
-            _session.Reset(promptTokens.AsSpan(0, written));
+
+            // Reuse the KV already built for the shared prefix of the previous turn. Every turn re-sends the
+            // whole conversation, so the tokens up to the end of the last assistant reply are byte-identical
+            // to what this session just encoded — re-prefilling them is pure duplicate work. Falls back to a
+            // full prefill on its own when the session is fresh or the conversation diverged.
+            CachedPromptTokens = _session.PrefillReusingCache(promptTokens.AsSpan(0, written));
 
             var stopwatch = ValueStopwatch.StartNew();
             var reply = Generate(promptTokens.AsSpan(0, written), in options, onText, constraint, out var generatedTokens);

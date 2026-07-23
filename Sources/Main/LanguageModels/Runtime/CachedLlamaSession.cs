@@ -53,6 +53,18 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         private readonly int[] _dryRev = new int[DryHistoryCap];
         private readonly int[] _dryZ = new int[DryHistoryCap];
 
+        // Prompt cache: the token ids currently represented in the KV cache, indexed BY CACHE POSITION.
+        // The live region is always [0, _cache.CurrentLength) — which is what makes truncation free
+        // bookkeeping-wise: dropping KV state past N automatically drops these too, and the stale tail is
+        // overwritten when the cache refills. Sized to the context length once, so recording a token is a
+        // single array store and the zero-allocation decode invariant is preserved.
+        private readonly int[] _cacheTokens;
+
+        // Cleared whenever cache positions stop corresponding to recorded ids — sliding-window eviction
+        // (every id shifts down) and prefix restore (ids belong to whoever took the snapshot). Reuse then
+        // falls back to a full prefill rather than attending over K/V that does not match the prompt.
+        private bool _cacheTokensValid = true;
+
         private bool _disposed;
         private bool _slidingWindow;
         private int _evictBlock;
@@ -79,6 +91,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             _logits = new float[config.VocabSize];
             _indexScratch = new int[config.VocabSize];
             _scoreScratch = new float[config.VocabSize];
+            _cacheTokens = new int[cache.MaxLength];
             _random = new Random();
         }
 
@@ -137,6 +150,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             var count = Math.Min(_evictBlock, _cache.CurrentLength - 1);
             if (count > 0)
             {
+                // Eviction shifts every surviving token down by `count`, so the recorded ids no longer sit
+                // at their own positions. Rebuilding the map would be cheap, but a slid session's prompt no
+                // longer starts at position 0 either — prefix reuse is meaningless once the head is gone.
+                _cacheTokensValid = false;
                 _cache.Evict(count);
             }
         }
@@ -155,6 +172,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             ThrowIfDisposed();
             _cache.Reset();
             _generatedTokens.Clear();
+            _cacheTokensValid = true;
         }
 
         /// <summary>
@@ -255,7 +273,73 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         {
             ThrowIfDisposed();
             ArgumentNullException.ThrowIfNull(prefix);
+
+            // The restored K/V belongs to whoever took the snapshot; this session never saw those token ids,
+            // so it cannot claim any prefix matches them.
+            _cacheTokensValid = false;
             _cache.RestoreFrom(prefix);
+        }
+
+        /// <summary>
+        /// Prefills <paramref name="promptTokens"/> <b>reusing the longest prefix already present in the KV
+        /// cache</b>, and returns how many tokens that reuse saved. The remainder is prefilled normally, so
+        /// the resulting state is the same one <see cref="Reset(System.ReadOnlySpan{int})"/> would leave —
+        /// this trades no accuracy for the saving, because K/V for a given position depends only on the
+        /// tokens at and before it, which are by construction identical across the matched prefix.
+        ///
+        /// <para><b>What it is for.</b> In a chat server every turn re-sends the whole conversation, so turn
+        /// N re-encodes everything turns 1..N-1 already encoded. Measured against a competing pure-.NET
+        /// engine through the same load driver, its prompt cache answered a repeated prompt in 47 ms where
+        /// its own cold prefill of the same prompt took 865 ms — an 18x difference that has nothing to do
+        /// with kernel quality and everything to do with not doing the work twice.</para>
+        ///
+        /// <para><b>One token is always re-forwarded.</b> Even on an exact match the last token is dropped
+        /// and re-run, because <c>_logits</c> must predict the token that follows the prompt, and those
+        /// logits are a by-product of the forward pass rather than cache state. So a fully cached prompt
+        /// still costs one decode step, not zero.</para>
+        ///
+        /// <para>Falls back to a full reset+prefill when the recorded ids cannot be trusted (after
+        /// sliding-window eviction or <see cref="RestorePrefix"/>) or when nothing matches. The DRY history
+        /// is deliberately <i>not</i> rewound — it is a bounded anti-repetition heuristic over what this
+        /// session emitted, not part of the cache contract.</para>
+        /// </summary>
+        public int PrefillReusingCache(ReadOnlySpan<int> promptTokens)
+        {
+            ThrowIfDisposed();
+
+            var reusable = ReusablePrefixLength(promptTokens);
+            if (reusable <= 0)
+            {
+                Reset(promptTokens);
+                return 0;
+            }
+
+            _cache.TruncateTo(reusable);
+            Prefill(promptTokens[reusable..]);
+            return reusable;
+        }
+
+        /// <summary>
+        /// How many leading tokens of <paramref name="promptTokens"/> are already in the cache at the very
+        /// positions they would occupy. Always leaves at least one token for <see cref="PrefillReusingCache"/>
+        /// to forward.
+        /// </summary>
+        private int ReusablePrefixLength(ReadOnlySpan<int> promptTokens)
+        {
+            if (!_cacheTokensValid || _slidingWindow || _cache.BasePosition != 0)
+            {
+                return 0;
+            }
+
+            var limit = Math.Min(_cache.CurrentLength, promptTokens.Length);
+            var match = 0;
+            while (match < limit && _cacheTokens[match] == promptTokens[match])
+            {
+                match++;
+            }
+
+            // Never reuse the whole prompt: the final token must go through the stack to produce logits.
+            return Math.Min(match, promptTokens.Length - 1);
         }
 
         /// <summary>
@@ -533,10 +617,16 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             var hidden = hiddenArr.Span;
             _embedWeights.DequantizeRow(t0, hidden.Slice(0, dModel));
             ApplyEmbeddingScale(hidden.Slice(0, dModel));
+            _cacheTokens[basePosition] = t0;
             for (var j = 0; j < dn; j++)
             {
                 _embedWeights.DequantizeRow(draft[j], hidden.Slice((1 + j) * dModel, dModel));
                 ApplyEmbeddingScale(hidden.Slice((1 + j) * dModel, dModel));
+
+                // Record the drafts too: this batch bypasses EmbedAndAdvance, and the truncation below keeps
+                // exactly the accepted prefix — so recording all of them and letting TruncateTo cut the
+                // rejected tail leaves the map correct without a second pass.
+                _cacheTokens[basePosition + 1 + j] = draft[j];
             }
             _cache.Advance(batch);
 
@@ -892,6 +982,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             {
                 _embedWeights.DequantizeRow(promptTokens[i], hidden.Span.Slice(i * dModel, dModel));
                 ApplyEmbeddingScale(hidden.Span.Slice(i * dModel, dModel));
+                _cacheTokens[basePosition + i] = promptTokens[i];
                 _cache.Advance();
             }
 
@@ -928,6 +1019,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             // No additive positional embedding — RoPE handles positions inside attention.
 
             var position = _cache.CurrentLength;
+            _cacheTokens[position] = tokenId;
             _cache.Advance();
             return position;
         }

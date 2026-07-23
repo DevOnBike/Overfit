@@ -14,6 +14,7 @@ using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Embeddings;
 using DevOnBike.Overfit.Server.OpenAi;
 using DevOnBike.Overfit.Serving;
+using DevOnBike.Overfit.Diagnostics;
 
 namespace DevOnBike.Overfit.Server
 {
@@ -380,6 +381,10 @@ namespace DevOnBike.Overfit.Server
             return bytes;
         }
 
+        /// <summary>Opt-in per-request phase trace (<c>OVERFIT_SERVER_TRACE=1</c>) for TTFT attribution.</summary>
+        private static readonly bool ServerTrace =
+            Environment.GetEnvironmentVariable("OVERFIT_SERVER_TRACE") == "1";
+
         private static void HandleChatCompletions(HttpListenerContext ctx, OverfitClient client, string modelName, string systemMessage)
         {
             ChatCompletionRequest? req;
@@ -428,7 +433,21 @@ namespace DevOnBike.Overfit.Server
                 // generation is zero-allocation (0 GC, 0 B over 150 prefill+decode cycles), so there are no gen-2
                 // pauses to suppress, while the mode would only trade RAM for nothing. Left off by design;
                 // GcLatencyScope stays an opt-in primitive for genuinely allocation-heavy host workloads.)
+                // Opt-in phase timing (OVERFIT_SERVER_TRACE=1). TTFT measured through this server ran ~405 ms
+                // while the engine's own prefill for the same prompt measured ~150 ms — so most of the latency
+                // a client feels is NOT the prefill kernel. Rather than guess which of replay, templating or
+                // the first decode holds it, each phase is timed.
+                var trace = ServerTrace;
+                var phase = trace ? ValueStopwatch.StartNew() : default;
+
                 OpenAiChatMapping.ReplayHistory(client.Chat, req.Messages);
+
+                if (trace)
+                {
+                    Console.WriteLine($"[trace] replay {phase.GetElapsedTime().TotalMilliseconds:F1} ms "
+                        + $"({req.Messages.Count} message(s))");
+                }
+
                 var userContent = last.Content ?? string.Empty;
 
                 if (!req.Stream)
@@ -469,11 +488,31 @@ namespace DevOnBike.Overfit.Server
                 resp.SendChunked = true;
 
                 WriteChunk(resp, id, ts, modelName, new OpenAiMessage { Role = "assistant" }, finishReason: null);
+
+                var sendStarted = trace ? ValueStopwatch.StartNew() : default;
+                var firstDelta = true;
+
                 client.Chat.Send(userContent, in options,
-                    onText: delta => WriteChunk(resp, id, ts, modelName, new OpenAiMessage { Content = delta }, finishReason: null),
+                    onText: delta =>
+                    {
+                        if (trace && firstDelta)
+                        {
+                            firstDelta = false;
+                            Console.WriteLine($"[trace] first token {sendStarted.GetElapsedTime().TotalMilliseconds:F1} ms");
+                        }
+
+                        WriteChunk(resp, id, ts, modelName, new OpenAiMessage { Content = delta }, finishReason: null);
+                    },
                     constraint: constraint);
 
                 var streamStats = client.Chat.LastStats;
+
+                if (trace)
+                {
+                    Console.WriteLine($"[trace] prompt {streamStats.PromptTokens} tok, "
+                        + $"{client.Chat.CachedPromptTokens} reused from the KV cache");
+                }
+
                 var streamFinish = streamStats.GeneratedTokens >= maxTokens ? "length" : "stop";
                 WriteChunk(resp, id, ts, modelName, new OpenAiMessage(), finishReason: streamFinish);
                 WriteSseRaw(resp, "[DONE]");
