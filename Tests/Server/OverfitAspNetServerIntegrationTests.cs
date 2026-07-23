@@ -181,6 +181,12 @@ namespace DevOnBike.Overfit.Tests.Server
                 Assert.Contains("overfit_pool_active_sessions ", body);
                 Assert.Contains("overfit_pool_size ", body);
 
+                // Latency histograms (TTFT + response time) in Prometheus histogram format.
+                Assert.Contains("# TYPE overfit_chat_ttft_seconds histogram", body);
+                Assert.Contains("overfit_chat_ttft_seconds_bucket{le=\"+Inf\"}", body);
+                Assert.Contains("# TYPE overfit_chat_response_time_seconds histogram", body);
+                Assert.Contains("overfit_chat_response_time_seconds_count", body);
+
                 // The resident-memory value must parse as a positive number (the working set is never zero).
                 var line = Array.Find(body.Split('\n'), l => l.StartsWith("process_resident_memory_bytes ", StringComparison.Ordinal));
                 Assert.NotNull(line);

@@ -5,6 +5,7 @@
 
 using System.Text.Json;
 using DevOnBike.Overfit.Audio.Tts.Orpheus;
+using DevOnBike.Overfit.Diagnostics;
 using DevOnBike.Overfit.LanguageModels;
 using DevOnBike.Overfit.LanguageModels.Embeddings;
 using DevOnBike.Overfit.Runtime;
@@ -96,10 +97,12 @@ namespace DevOnBike.Overfit.Server.AspNet.Services
                 return;
             }
 
+            var started = ValueStopwatch.StartNew();
             using (lease)
             {
                 ChatCompletionExchange.Handle(request, lease.Value, _modelName, _systemMessage, sink, _chatObserver);
             }
+            _metrics.RecordResponseTime(started.GetElapsedTime().TotalSeconds);
         }
 
         public void Embed(EmbeddingsRequest? request, IOpenAiResponseSink sink, CancellationToken cancellationToken)
