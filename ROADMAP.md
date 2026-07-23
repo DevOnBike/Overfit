@@ -109,7 +109,7 @@ the rules that survived recorded in the `feedback-measurement-discipline` memory
 left behind: `MachineRooflineBenchmark`, `DecodeGemvRooflineBenchmark`, `Diagnostics/Throughput.cs`, and the
 BenchmarkDotNet throughput columns.
 
-**Next move is a business decision (perf course vs Redaction Gateway), not another *LLM* kernel.** Any further
+**Next move is a business decision about product direction, not another *LLM* kernel.** Any further
 perf work should measure the ceiling before writing code — the discipline that made this track pay.
 
 #### ⚠ BUT: the largest untouched perf reserve in the project is CNN inference, not LLM — 13.2× behind ORT
