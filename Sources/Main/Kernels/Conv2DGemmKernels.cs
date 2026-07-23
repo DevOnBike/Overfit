@@ -75,43 +75,117 @@ namespace DevOnBike.Overfit.Kernels
             }
         }
 
+        /// <summary>
+        /// Minimum <c>K·N</c> before im2col fans out. Below this the patch gather is a fraction of a
+        /// millisecond and the dispatch would cost more than the work.
+        /// </summary>
+        private const int ParallelIm2ColMinElements = 1 << 16;
+
+        /// <summary>Set <c>OVERFIT_PARALLEL_IM2COL=0</c> to force the original serial gather (A/B switch).</summary>
+        internal static bool UseParallelIm2Col =
+            Environment.GetEnvironmentVariable(OverfitEnvironment.ParallelIm2Col) != "0";
+
         // cols[krow, pos] = input[ic, oy·stride-pad+ky, ox·stride-pad+kx] (0 outside the image), where
         // krow = (ic·k + ky)·k + kx (matches the [outC, inC, k, k] kernel's flattened K), pos = oy·outW + ox.
-        private static void Im2Col(
+        //
+        // Parallelised over krow. Each krow owns a disjoint n-element row of `cols` and only ever READS the
+        // input, so the fan-out needs no synchronisation and is bit-identical to the serial gather.
+        //
+        // This matters more than it looks. The GEMM below was already parallel but the gather was not, and on
+        // VGG-16 the gather is enormous — conv1_2 alone materialises a [576 × 50176] matrix (115 MB) one
+        // scalar element at a time. An Amdahl fit over the measured worker sweep (663 ms at 1 worker, 138 ms
+        // at 16) put the serial fraction at ~15.5%, i.e. **~103 of those 138 ms were serial**, which is why 16
+        // workers bought only 4.79× instead of ~14×.
+        private static unsafe void Im2Col(
             ReadOnlySpan<float> input, Span<float> cols,
             int inChannels, int inputH, int inputW, int kernelSize, int padding, int stride, int outH, int outW)
         {
             var n = outH * outW;
-            for (var ic = 0; ic < inChannels; ic++)
+            var kRows = inChannels * kernelSize * kernelSize;
+
+            if (!UseParallelIm2Col || (long)kRows * n < ParallelIm2ColMinElements)
             {
-                var inChanBase = ic * inputH * inputW;
-                for (var ky = 0; ky < kernelSize; ky++)
+                for (var krow = 0; krow < kRows; krow++)
                 {
-                    for (var kx = 0; kx < kernelSize; kx++)
-                    {
-                        var krow = ((ic * kernelSize) + ky) * kernelSize + kx;
-                        var dst = cols.Slice(krow * n, n);
+                    Im2ColRow(input, cols, krow, inputH, inputW, kernelSize, padding, stride, outH, outW, n);
+                }
 
-                        for (var oy = 0; oy < outH; oy++)
-                        {
-                            var iy = oy * stride - padding + ky;
-                            var rowDst = dst.Slice(oy * outW, outW);
-                            if ((uint)iy >= (uint)inputH)
-                            {
-                                rowDst.Clear();
-                                continue;
-                            }
+                return;
+            }
 
-                            var inRowBase = inChanBase + iy * inputW;
-                            for (var ox = 0; ox < outW; ox++)
-                            {
-                                var ix = ox * stride - padding + kx;
-                                rowDst[ox] = (uint)ix < (uint)inputW ? input[inRowBase + ix] : 0f;
-                            }
-                        }
-                    }
+            fixed (float* pIn = input, pCols = cols)
+            {
+                var ctx = new Im2ColCtx(
+                    pIn, pCols, inChannels, inputH, inputW, kernelSize, padding, stride, outH, outW, n);
+
+                OverfitParallel.For(0, kRows, 1, &Im2ColRowRange, &ctx);
+            }
+        }
+
+        private static unsafe void Im2ColRowRange(int start, int end, void* context)
+        {
+            ref var ctx = ref Unsafe.AsRef<Im2ColCtx>(context);
+
+            var input = new ReadOnlySpan<float>(ctx.Input, ctx.InChannels * ctx.InputH * ctx.InputW);
+            var cols = new Span<float>(ctx.Cols, ctx.KRows * ctx.N);
+
+            for (var krow = start; krow < end; krow++)
+            {
+                Im2ColRow(
+                    input, cols, krow,
+                    ctx.InputH, ctx.InputW, ctx.KernelSize, ctx.Padding, ctx.Stride, ctx.OutH, ctx.OutW, ctx.N);
+            }
+        }
+
+        /// <summary>One row of the im2col matrix — the unit of both the serial and the parallel path, so the
+        /// two cannot drift apart.</summary>
+        private static void Im2ColRow(
+            ReadOnlySpan<float> input, Span<float> cols, int krow,
+            int inputH, int inputW, int kernelSize, int padding, int stride, int outH, int outW, int n)
+        {
+            var kx = krow % kernelSize;
+            var ky = (krow / kernelSize) % kernelSize;
+            var ic = krow / (kernelSize * kernelSize);
+
+            var inChanBase = ic * inputH * inputW;
+            var dst = cols.Slice(krow * n, n);
+
+            for (var oy = 0; oy < outH; oy++)
+            {
+                var iy = oy * stride - padding + ky;
+                var rowDst = dst.Slice(oy * outW, outW);
+                if ((uint)iy >= (uint)inputH)
+                {
+                    rowDst.Clear();
+                    continue;
+                }
+
+                var inRowBase = inChanBase + iy * inputW;
+                for (var ox = 0; ox < outW; ox++)
+                {
+                    var ix = ox * stride - padding + kx;
+                    rowDst[ox] = (uint)ix < (uint)inputW ? input[inRowBase + ix] : 0f;
                 }
             }
+        }
+
+        private readonly unsafe struct Im2ColCtx(
+            float* input, float* cols,
+            int inChannels, int inputH, int inputW, int kernelSize,
+            int padding, int stride, int outH, int outW, int n)
+        {
+            public readonly float* Input = input;
+            public readonly float* Cols = cols;
+            public readonly int InChannels = inChannels;
+            public readonly int InputH = inputH;
+            public readonly int InputW = inputW;
+            public readonly int KernelSize = kernelSize;
+            public readonly int Padding = padding;
+            public readonly int Stride = stride;
+            public readonly int OutH = outH;
+            public readonly int OutW = outW;
+            public readonly int N = n;
+            public readonly int KRows = inChannels * kernelSize * kernelSize;
         }
 
         // C[M,N] = A[M,K] @ B[K,N], parallelised over N-panels (each worker packs its 8-col B panel and sweeps M

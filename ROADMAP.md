@@ -130,6 +130,55 @@ ceiling. This is a **13×** gap on a path at 5% of the machine ceiling.
 in-process serving, but it says nothing about kernel quality. VGG-16 is compute-dominated and is the honest
 kernel-vs-kernel test. Both statements are true; only the second describes the kernels.
 
+**Where the 13× splits — worker sweep, ORT stable at 11.8–12.0 ms throughout as the canary:**
+
+| workers | Overfit | GFLOP/s | speedup |
+|---|---:|---:|---:|
+| 1 | 663.2 ms | 23 | 1.00× |
+| 4 | 256.4 ms | 60 | 2.59× |
+| 16 | 138.4 ms | 112 | 4.79× |
+| default (32) | 141.3 ms | 110 | 4.69× |
+
+Two independent problems, both large:
+1. **Per-core kernel: 23 GFLOP/s against a ~137 GFLOP/s single-core ceiling — 17% efficiency.**
+2. **Parallel scaling: 16 workers buy 4.79×, not ~14× — 30% efficiency.**
+
+**The most useful comparison is internal.** Our Q4_K prefill GEMM runs at 2.15 TFLOP/s over 32 threads
+≈ **134 GFLOP/s per core** — the same project, the same machine, ~6× the per-core efficiency of the conv
+GEMM. We demonstrably know how to write a competitive GEMM (it measured faster than llama.cpp's at equal
+ISA); the convolution path simply does not use that class of kernel. The techniques that paid there —
+register tiling, weight-stationary reuse, hoisting fixed per-block work, counting how often work repeats —
+have not been applied here at all.
+
+*Caveat before targeting a number:* VGG-16 is entirely 3×3 convs, where ORT's MLAS may use Winograd (a
+2.25× FLOP reduction), so its 1557 GFLOP/s is not necessarily 71% of the hardware ceiling in executed FLOPs.
+This repo measured Winograd as a **negative** (+79% on deepcnn) with its current infrastructure. Wall-clock
+is what matters, and wall-clock says 13×.
+
+#### ★★ PARALLEL im2col — VGG-16 141 → 73 ms, gap to ORT 13.2× → 6.3×
+
+The GEMM was already parallel; **the im2col patch gather never was**. On VGG-16 that gather is enormous —
+`conv1_2` alone materialises a `[576 × 50176]` matrix (115 MB) one scalar element at a time — and an Amdahl
+fit over the worker sweep put the serial fraction at ~15.5%, i.e. **~103 of the 138 ms at 16 workers**.
+`Im2Col` now fans out over `krow`: each row owns a disjoint `n`-element slice of `cols` and only reads the
+input, so no synchronisation is needed and the result is bit-identical. Gated below `K·N < 65536` so small
+convs keep the serial path; `OVERFIT_PARALLEL_IM2COL=0` restores it.
+
+| workers | before | after | |
+|---|---:|---:|---|
+| 1 | 663 ms | 668 ms | unchanged — the control: no work was added, only spread |
+| 4 | 256 | 226 | |
+| 16 | 138 | **87.7** | |
+| default (32) | 141 | **73.0** | 110 → **212 GFLOP/s** |
+
+Speedup over one worker **4.69× → 9.16×**; serial fraction **15.5% → 7.3%**. Parity unchanged
+(maxAbsDiff 6.7e-8, cosine 1.000000, same argmax), conv tests 56/0, suite 1499/0/232. The paired A/B run had
+ORT flat at 11.66 vs 11.75 ms as the canary.
+
+**Next: the remaining ~49 ms of serial work**, which now *dominates* at high worker counts (49 of 73 ms at
+32 workers). Candidates not yet measured: the elementwise activations, MaxPool, the FC layers, and the
+graph executor's inter-node buffer handling. Measure which before touching any of them.
+
 ---
 
 <details>

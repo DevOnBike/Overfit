@@ -41,6 +41,9 @@ namespace DevOnBike.Overfit.Runtime
         /// <summary>KV-cache element type — e.g. <c>q8</c> for the int8 KV cache (default F32).</summary>
         public const string KvDType = "OVERFIT_KV_DTYPE";
 
+        /// <summary>Set to 0 to force the serial im2col patch gather in the conv GEMM path (A/B switch).</summary>
+        public const string ParallelIm2Col = "OVERFIT_PARALLEL_IM2COL";
+
         // ── Prefill kernel switches (all default ON where the hardware allows; set to 0 to opt out) ──
         // These exist so a measured win can be A/B'd against its predecessor without a rebuild, and so a
         // regression on unfamiliar hardware can be bisected in the field rather than only on the dev box.

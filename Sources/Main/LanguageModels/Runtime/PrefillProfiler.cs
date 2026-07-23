@@ -126,6 +126,30 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// <summary>Prompt tokens prefilled since the last <see cref="Reset"/>.</summary>
         public static long Rows => _rows;
 
+        /// <summary>Requests measured since the last <see cref="Reset"/>.</summary>
+        public static long Requests => _requests;
+
+        /// <summary>
+        /// How many times <paramref name="component"/> ran per request — the number that exposes *redundant*
+        /// work, as opposed to slow work.
+        ///
+        /// <para>A component's cost can be perfectly optimised internally and still be paid many more times
+        /// than the algorithm requires; that is invisible in a timing column and obvious in a call count. Two
+        /// real cases in this project: <c>attn_out</c> reported <b>306</b> calls instead of 36, which is how a
+        /// too-strict whole-matrix gate was found (it engaged in 18 of 36 layers); and the per-block F16 scale
+        /// decode looked amortised at "once per weight block" while the kernel holding it ran once per column
+        /// tile — 84 times per projection — which ablation priced at 12% of the kernel.</para>
+        ///
+        /// <para>Pinned by <c>PrefillCallCountTests</c> so a future gate or dispatch change that multiplies the
+        /// work fails a test instead of quietly costing throughput.</para>
+        /// </summary>
+        public static double CallsPerRequest(Component component)
+        {
+            var requests = _requests == 0 ? 1 : _requests;
+
+            return (double)_calls[(int)component] / requests;
+        }
+
         /// <summary>
         /// Per-request breakdown: ms, % of prefill wall time, and calls. Also prints the prefill rate in
         /// tok/s, which is directly comparable to <c>llama-bench -p N -n 0</c>.
