@@ -175,6 +175,8 @@ dotnet_diagnostic.OVERFIT025.severity = suggestion
 # wall; ERROR in Sources/Main below.
 dotnet_diagnostic.OVERFIT027.severity = suggestion
 dotnet_diagnostic.OVERFIT028.severity = suggestion
+dotnet_diagnostic.OVERFIT029.severity = suggestion
+dotnet_diagnostic.OVERFIT030.severity = suggestion
 dotnet_diagnostic.OVERFIT026.severity = suggestion
 # OVERFIT900 — the [OverfitHotPath] escalation. Any per-call rule (001-007, 009-011, 013-014) that
 # fires inside a member or type marked [DevOnBike.Overfit.Diagnostics.OverfitHotPath] is reported as
@@ -307,6 +309,14 @@ dotnet_diagnostic.OVERFIT022.severity = error
 # OVERFIT021 (else) — Tests are the one exemption: test code is local and disposable, so the ban's rationale
 # (shipped library, read by strangers, hot paths) does not apply. Kept at suggestion so it still shows in the
 # IDE. MUST stay at the END of this file — a [section] header scopes every setting below it.
+# OVERFIT030 — ERROR in the CLI too. HfDownloader was the whole backlog: five multi-gigabyte fetches
+# that ignored Ctrl+C. Fixed properly rather than with an ignored parameter — the token reaches the socket
+# and the file write, Console.CancelKeyPress signals it, and the swallowing catch blocks now rethrow
+# OperationCanceledException so an interrupt cannot masquerade as "metadata unavailable, skipping
+# verification". Interrupting is safe by construction: the .part temp is kept and the next run resumes it.
+[Sources/Cli/**.cs]
+dotnet_diagnostic.OVERFIT030.severity = error
+
 [Tests/**.cs]
 dotnet_diagnostic.OVERFIT021.severity = suggestion
 
@@ -338,6 +348,14 @@ dotnet_diagnostic.OVERFIT026.severity = error
 # length), 3 rewritten by hand, 1 pragma'd where a 64-bit guard already proves the 32-bit product safe.
 # Demo/ and Server keep the global suggestion.
 dotnet_diagnostic.OVERFIT028.severity = error
+# OVERFIT029 / OVERFIT030 (Async suffix / CancellationToken) — ERROR in the library, ZERO sites there.
+# 029: the single real hit was CachedLlamaSession.StreamGenerate, renamed to StreamGenerateAsync (19
+#      references, pre-1.0, so a rename beat a suppression).
+# 030: Sources/Main already offers a token on every awaitable public method — the rule locks that in.
+#      Sources/Cli keeps the suggestion: HfDownloader has 5 uncancellable downloads (a multi-GB fetch
+#      that ignores Ctrl+C), and fixing that means wiring a real token, not adding an ignored parameter.
+dotnet_diagnostic.OVERFIT029.severity = error
+dotnet_diagnostic.OVERFIT030.severity = error
 # OVERFIT027 — ERROR on the same criteria as OVERFIT008/015/025: ZERO existing sites in the whole
 # solution at introduction (2026-07-24), unconditional rule, trivial fix (return Task), and the
 # miss-cost is an uncatchable kill of the hosting process. A tripwire, not a sweep.

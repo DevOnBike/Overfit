@@ -55,9 +55,13 @@ namespace DevOnBike.Overfit.Cli
         /// <summary>Picks the GGUF file to download from <paramref name="repo"/>: an explicit name, else the
         /// one matching <paramref name="pattern"/> (a quant like "q4_k_m"), else the first. Throws with the
         /// available files if nothing matches.</summary>
-        public static async Task<string> ResolveFileAsync(string repo, string? pattern, string? explicitFile)
+        public static async Task<string> ResolveFileAsync(
+            string repo,
+            string? pattern,
+            string? explicitFile,
+            CancellationToken cancellationToken = default)
         {
-            using var response = await Http.GetAsync($"{Endpoint}/api/models/{repo}");
+            using var response = await Http.GetAsync($"{Endpoint}/api/models/{repo}", cancellationToken);
 
             if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
             {
@@ -71,7 +75,7 @@ namespace DevOnBike.Overfit.Cli
 
             response.EnsureSuccessStatusCode();
 
-            var json = await response.Content.ReadAsStringAsync();
+            var json = await response.Content.ReadAsStringAsync(cancellationToken);
             using var doc = JsonDocument.Parse(json);
 
             var ggufs = new List<string>();
@@ -125,17 +129,21 @@ namespace DevOnBike.Overfit.Cli
         /// LFS-backed or the metadata can't be retrieved — the caller then skips verification rather than
         /// failing the download (a transient API hiccup shouldn't block a pull).
         /// </summary>
-        public static async Task<string?> GetExpectedSha256Async(string repo, string file)
+        public static async Task<string?> GetExpectedSha256Async(
+            string repo,
+            string file,
+            CancellationToken cancellationToken = default)
         {
             try
             {
-                using var response = await Http.GetAsync($"{Endpoint}/api/models/{repo}/tree/main?recursive=true");
+                using var response = await Http.GetAsync(
+                    $"{Endpoint}/api/models/{repo}/tree/main?recursive=true", cancellationToken);
                 if (!response.IsSuccessStatusCode)
                 {
                     return null;
                 }
 
-                var json = await response.Content.ReadAsStringAsync();
+                var json = await response.Content.ReadAsStringAsync(cancellationToken);
                 using var doc = JsonDocument.Parse(json);
                 if (doc.RootElement.ValueKind != JsonValueKind.Array)
                 {
@@ -154,6 +162,13 @@ namespace DevOnBike.Overfit.Cli
 
                 return null;
             }
+            catch (OperationCanceledException)
+            {
+                // The blanket catch below exists to downgrade a flaky metadata call into "skip
+                // verification". A cancellation is not that: swallowing it here would turn Ctrl+C into a
+                // silently unverified download.
+                throw;
+            }
             catch
             {
                 return null;   // network / parse issue → skip verification, don't abort the pull.
@@ -165,17 +180,19 @@ namespace DevOnBike.Overfit.Cli
         /// whitespace-delimited token is the hex digest, per <c>sha256sum</c> output). Returns null when absent or
         /// malformed — verification is then skipped rather than failing the download.
         /// </summary>
-        public static async Task<string?> GetSiblingSha256Async(string url)
+        public static async Task<string?> GetSiblingSha256Async(
+            string url,
+            CancellationToken cancellationToken = default)
         {
             try
             {
-                using var response = await Http.GetAsync($"{url}.sha256");
+                using var response = await Http.GetAsync($"{url}.sha256", cancellationToken);
                 if (!response.IsSuccessStatusCode)
                 {
                     return null;
                 }
 
-                var text = await response.Content.ReadAsStringAsync();
+                var text = await response.Content.ReadAsStringAsync(cancellationToken);
                 var parts = text.Split([' ', '\t', '\r', '\n'], StringSplitOptions.RemoveEmptyEntries);
                 if (parts.Length > 0 && parts[0].Length == 64 && IsHex(parts[0]))
                 {
@@ -183,6 +200,10 @@ namespace DevOnBike.Overfit.Cli
                 }
 
                 return null;
+            }
+            catch (OperationCanceledException)
+            {
+                throw;   // see GetExpectedSha256Async: cancellation is not a "skip verification" case.
             }
             catch
             {
@@ -210,16 +231,36 @@ namespace DevOnBike.Overfit.Cli
         /// content's SHA-256 while streaming — including the bytes already on disk on resume — and, when
         /// <paramref name="expectedSha256"/> is supplied, verifies it BEFORE the temp is promoted to the final
         /// path, so a corrupt or mis-resumed download is discarded and never lands under its real name.</summary>
-        public static Task DownloadAsync(string repo, string file, string destPath, string? expectedSha256)
-            => StreamWithResumeAsync($"{Endpoint}/{repo}/resolve/main/{file}", file, destPath, expectedSha256);
+        /// <para>Cancellation is honoured all the way down to the socket and the file write. Abandoning a
+        /// download is safe by construction: bytes land in a <c>.part</c> temp and the next run resumes from
+        /// its length via an HTTP Range request, so Ctrl+C costs the current buffer, not the gigabytes already
+        /// fetched.</para>
+        public static Task DownloadAsync(
+            string repo,
+            string file,
+            string destPath,
+            string? expectedSha256,
+            CancellationToken cancellationToken = default)
+            => StreamWithResumeAsync(
+                $"{Endpoint}/{repo}/resolve/main/{file}", file, destPath, expectedSha256, cancellationToken);
 
         /// <summary>Downloads a GGUF straight from an absolute <paramref name="url"/> (e.g. an internal artifact
         /// repository or an approved mirror when HuggingFace is unreachable) into <paramref name="destPath"/>,
         /// with the same resume + SHA-256 verification as the repo path. The display name comes from the URL.</summary>
-        public static Task DownloadUrlAsync(string url, string destPath, string? expectedSha256)
-            => StreamWithResumeAsync(url, Path.GetFileName(new Uri(url).AbsolutePath), destPath, expectedSha256);
+        public static Task DownloadUrlAsync(
+            string url,
+            string destPath,
+            string? expectedSha256,
+            CancellationToken cancellationToken = default)
+            => StreamWithResumeAsync(
+                url, Path.GetFileName(new Uri(url).AbsolutePath), destPath, expectedSha256, cancellationToken);
 
-        private static async Task StreamWithResumeAsync(string url, string file, string destPath, string? expectedSha256)
+        private static async Task StreamWithResumeAsync(
+            string url,
+            string file,
+            string destPath,
+            string? expectedSha256,
+            CancellationToken cancellationToken)
         {
             var tmp = destPath + ".part";
             var existing = File.Exists(tmp) ? new FileInfo(tmp).Length : 0L;
@@ -232,13 +273,14 @@ namespace DevOnBike.Overfit.Cli
                 request.Headers.Range = new RangeHeaderValue(existing, null);
             }
 
-            using var response = await Http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
+            using var response = await Http.SendAsync(
+                request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
 
             if (existing > 0 && response.StatusCode == HttpStatusCode.RequestedRangeNotSatisfiable)
             {
                 // The .part already holds the whole file (a prior run finished the bytes but was interrupted
                 // before verification) — hash what's on disk and fall straight through to verify + promote.
-                await HashExistingAsync(tmp, hasher);
+                await HashExistingAsync(tmp, hasher, cancellationToken);
                 Console.WriteLine($"  {file}  already downloaded ({existing / (1024.0 * 1024):F1} MB) — verifying");
             }
 
@@ -259,11 +301,11 @@ namespace DevOnBike.Overfit.Cli
                 if (resuming)
                 {
                     // Fold the already-downloaded prefix into the digest so the final hash covers the whole file.
-                    await HashExistingAsync(tmp, hasher);
+                    await HashExistingAsync(tmp, hasher, cancellationToken);
                     Console.WriteLine($"  resuming {file} from {existing / (1024.0 * 1024):F1} MB ...");
                 }
 
-                await using (var source = await response.Content.ReadAsStreamAsync())
+                await using (var source = await response.Content.ReadAsStreamAsync(cancellationToken))
                 await using (var dest = new FileStream(tmp, existing > 0 ? FileMode.Append : FileMode.Create, FileAccess.Write, FileShare.None))
                 {
                     var buffer = new byte[1 << 20];
@@ -273,9 +315,9 @@ namespace DevOnBike.Overfit.Cli
 
                     int n;
 
-                    while ((n = await source.ReadAsync(buffer)) > 0)
+                    while ((n = await source.ReadAsync(buffer, cancellationToken)) > 0)
                     {
-                        await dest.WriteAsync(buffer.AsMemory(0, n));
+                        await dest.WriteAsync(buffer.AsMemory(0, n), cancellationToken);
                         hasher.AppendData(buffer, 0, n);
                         read += n;
 
@@ -316,12 +358,15 @@ namespace DevOnBike.Overfit.Cli
 
         /// <summary>Feeds the bytes already present in <paramref name="path"/> into <paramref name="hasher"/>
         /// (used on resume so the running digest covers the whole file, not just the newly fetched tail).</summary>
-        private static async Task HashExistingAsync(string path, IncrementalHash hasher)
+        private static async Task HashExistingAsync(
+            string path,
+            IncrementalHash hasher,
+            CancellationToken cancellationToken)
         {
             await using var stream = File.OpenRead(path);
             var buffer = new byte[1 << 20];
             int n;
-            while ((n = await stream.ReadAsync(buffer)) > 0)
+            while ((n = await stream.ReadAsync(buffer, cancellationToken)) > 0)
             {
                 hasher.AppendData(buffer, 0, n);
             }

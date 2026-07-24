@@ -890,13 +890,13 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// var opts = StreamingOptions.WithStopTokens(
         ///     maxTokens: 256, QwenTokenizer.ImEnd, QwenTokenizer.EndOfText);
         ///
-        /// await foreach (var token in session.StreamGenerate(opts, ct))
+        /// await foreach (var token in session.StreamGenerateAsync(opts, ct))
         /// {
         ///     Console.Write(tokenizer.DecodeToken(token));
         /// }
         /// </code>
         /// </example>
-        public async IAsyncEnumerable<int> StreamGenerate(
+        public async IAsyncEnumerable<int> StreamGenerateAsync(
             StreamingOptions options,
             [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {

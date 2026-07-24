@@ -55,9 +55,15 @@ namespace DevOnBike.Overfit.Cli
             var (repo, pattern) = resolved.Value;
             try
             {
+                using var interrupt = CreateInterruptSource();
+                var cancellationToken = interrupt.Token;
+
                 ModelCache.Ensure();
                 Console.WriteLine($"Resolving {repo} ...");
-                var chosen = HfDownloader.ResolveFileAsync(repo, pattern, file).GetAwaiter().GetResult();
+                var chosen = HfDownloader
+                    .ResolveFileAsync(repo, pattern, file, cancellationToken)
+                    .GetAwaiter()
+                    .GetResult();
                 var dest = Path.Combine(ModelCache.Dir, Path.GetFileName(chosen));
 
                 if (File.Exists(dest))
@@ -67,16 +73,60 @@ namespace DevOnBike.Overfit.Cli
                 }
 
                 Console.WriteLine($"Downloading {chosen} into {ModelCache.Dir}");
-                var expectedSha = HfDownloader.GetExpectedSha256Async(repo, chosen).GetAwaiter().GetResult();
-                HfDownloader.DownloadAsync(repo, chosen, dest, expectedSha).GetAwaiter().GetResult();
+                var expectedSha = HfDownloader
+                    .GetExpectedSha256Async(repo, chosen, cancellationToken)
+                    .GetAwaiter()
+                    .GetResult();
+                HfDownloader
+                    .DownloadAsync(repo, chosen, dest, expectedSha, cancellationToken)
+                    .GetAwaiter()
+                    .GetResult();
                 Console.WriteLine($"Done. Chat with it:  overfit chat {Path.GetFileNameWithoutExtension(dest)}");
                 return 0;
+            }
+            catch (OperationCanceledException)
+            {
+                return ReportInterrupted();
             }
             catch (Exception ex)
             {
                 Console.Error.WriteLine($"pull failed: {ex.Message}");
                 return 1;
             }
+        }
+
+
+        /// <summary>
+        /// A cancellation source wired to Ctrl+C. Without this the token threaded through
+        /// <see cref="HfDownloader"/> would be an ornament: a parameter nobody ever signals is worse than no
+        /// parameter, because it reads like the operation can be abandoned when it cannot.
+        ///
+        /// <para><c>e.Cancel = true</c> stops the runtime from tearing the process down at the keypress, so
+        /// the download loop exits through its own cancellation path and the <c>.part</c> file is left intact
+        /// and resumable rather than truncated mid-write.</para>
+        /// </summary>
+        private static CancellationTokenSource CreateInterruptSource()
+        {
+            var source = new CancellationTokenSource();
+
+            Console.CancelKeyPress += (_, e) =>
+            {
+                e.Cancel = true;
+                source.Cancel();
+            };
+
+            return source;
+        }
+
+        /// <summary>Exit code for an interrupted download — the shell convention for SIGINT.</summary>
+        private const int InterruptedExitCode = 130;
+
+        private static int ReportInterrupted()
+        {
+            Console.WriteLine();
+            Console.WriteLine("Download interrupted. The partial file was kept — run the same command again to resume it.");
+
+            return InterruptedExitCode;
         }
 
         private static int PullFromUrl(Uri uri)
@@ -94,6 +144,9 @@ namespace DevOnBike.Overfit.Cli
 
             try
             {
+                using var interrupt = CreateInterruptSource();
+                var cancellationToken = interrupt.Token;
+
                 ModelCache.Ensure();
                 var dest = Path.Combine(ModelCache.Dir, fileName);
                 if (File.Exists(dest))
@@ -104,10 +157,20 @@ namespace DevOnBike.Overfit.Cli
 
                 Console.WriteLine($"Downloading {uri}");
                 // Optional integrity check: a sibling {url}.sha256 if the server publishes one.
-                var expectedSha = HfDownloader.GetSiblingSha256Async(uri.AbsoluteUri).GetAwaiter().GetResult();
-                HfDownloader.DownloadUrlAsync(uri.AbsoluteUri, dest, expectedSha).GetAwaiter().GetResult();
+                var expectedSha = HfDownloader
+                    .GetSiblingSha256Async(uri.AbsoluteUri, cancellationToken)
+                    .GetAwaiter()
+                    .GetResult();
+                HfDownloader
+                    .DownloadUrlAsync(uri.AbsoluteUri, dest, expectedSha, cancellationToken)
+                    .GetAwaiter()
+                    .GetResult();
                 Console.WriteLine($"Done. Chat with it:  overfit chat {Path.GetFileNameWithoutExtension(dest)}");
                 return 0;
+            }
+            catch (OperationCanceledException)
+            {
+                return ReportInterrupted();
             }
             catch (Exception ex)
             {
@@ -121,6 +184,9 @@ namespace DevOnBike.Overfit.Cli
             var dirName = repo[(repo.LastIndexOf('/') + 1)..];   // canonical folder name, e.g. all-MiniLM-L6-v2
             try
             {
+                using var interrupt = CreateInterruptSource();
+                var cancellationToken = interrupt.Token;
+
                 ModelCache.Ensure();
                 var dir = Path.Combine(ModelCache.Dir, dirName);
                 Directory.CreateDirectory(dir);
@@ -136,12 +202,22 @@ namespace DevOnBike.Overfit.Cli
                     }
 
                     Console.WriteLine($"Downloading {file} ...");
-                    var sha = HfDownloader.GetExpectedSha256Async(repo, file).GetAwaiter().GetResult();
-                    HfDownloader.DownloadAsync(repo, file, dest, sha).GetAwaiter().GetResult();
+                    var sha = HfDownloader
+                        .GetExpectedSha256Async(repo, file, cancellationToken)
+                        .GetAwaiter()
+                        .GetResult();
+                    HfDownloader
+                        .DownloadAsync(repo, file, dest, sha, cancellationToken)
+                        .GetAwaiter()
+                        .GetResult();
                 }
 
                 Console.WriteLine($"Done. Serve embeddings:  overfit serve <model> --embed-model {dirName}");
                 return 0;
+            }
+            catch (OperationCanceledException)
+            {
+                return ReportInterrupted();
             }
             catch (Exception ex)
             {

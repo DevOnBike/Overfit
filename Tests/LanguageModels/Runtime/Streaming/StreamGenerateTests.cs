@@ -17,20 +17,20 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Streaming
     /// are coupled to actual token sampling and KV cache behavior.
     /// </summary>
     [Trait("Category", "Streaming")]
-    public sealed class StreamGenerateTests
+    public sealed class StreamGenerateAsyncTests
     {
         private static string GgufModelPath => TestModelPaths.Qwen3B.GgufPath;
         private static string TokenizerDir => TestModelPaths.Qwen3B.Dir;
 
         private readonly ITestOutputHelper _output;
 
-        public StreamGenerateTests(ITestOutputHelper output)
+        public StreamGenerateAsyncTests(ITestOutputHelper output)
         {
             _output = output;
         }
 
         [LongFact]
-        public async Task StreamGenerate_YieldsMaxTokensWhenNoStopHit()
+        public async Task StreamGenerateAsync_YieldsMaxTokensWhenNoStopHit()
         {
             TestModelPaths.Qwen3B.RequireGgufPath();
 
@@ -44,7 +44,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Streaming
             var opts = new StreamingOptions(maxTokens: 5, stopTokens: [], sampling: SamplingOptions.Greedy);
             var tokens = new List<int>();
 
-            await foreach (var t in session.StreamGenerate(opts))
+            await foreach (var t in session.StreamGenerateAsync(opts))
             {
                 tokens.Add(t);
             }
@@ -54,7 +54,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Streaming
         }
 
         [LongFact]
-        public async Task StreamGenerate_TerminatesOnStopToken()
+        public async Task StreamGenerateAsync_TerminatesOnStopToken()
         {
             TestModelPaths.Qwen3B.RequireGgufPath();
 
@@ -79,7 +79,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Streaming
                 sampling: SamplingOptions.Greedy);
 
             var tokens = new List<int>();
-            await foreach (var t in session.StreamGenerate(opts))
+            await foreach (var t in session.StreamGenerateAsync(opts))
             {
                 tokens.Add(t);
             }
@@ -98,7 +98,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Streaming
         }
 
         [LongFact]
-        public async Task StreamGenerate_RespectsCancellation()
+        public async Task StreamGenerateAsync_RespectsCancellation()
         {
             TestModelPaths.Qwen3B.RequireGgufPath();
 
@@ -117,7 +117,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Streaming
             var produced = 0;
             await Assert.ThrowsAsync<OperationCanceledException>(async () =>
             {
-                await foreach (var t in session.StreamGenerate(opts, cts.Token))
+                await foreach (var t in session.StreamGenerateAsync(opts, cts.Token))
                 {
                     produced++;
                     if (produced == 3)
@@ -132,7 +132,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Streaming
         }
 
         [LongFact]
-        public async Task StreamGenerate_ThrowsWhenSessionEmpty()
+        public async Task StreamGenerateAsync_ThrowsWhenSessionEmpty()
         {
             TestModelPaths.Qwen3B.RequireGgufPath();
 
@@ -144,7 +144,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Streaming
 
             await Assert.ThrowsAsync<OverfitRuntimeException>(async () =>
             {
-                await foreach (var _ in session.StreamGenerate(opts))
+                await foreach (var _ in session.StreamGenerateAsync(opts))
                 {
                     // should never reach here
                 }
@@ -152,7 +152,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Streaming
         }
 
         [LongFact]
-        public async Task StreamGenerate_MatchesGenerateNextTokenForSamePrompt()
+        public async Task StreamGenerateAsync_MatchesGenerateNextTokenForSamePrompt()
         {
             TestModelPaths.Qwen3B.RequireGgufPath();
 
@@ -170,12 +170,12 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Streaming
                 viaClassic.Add(s1.GenerateNextToken(SamplingOptions.Greedy));
             }
 
-            // ── Path 2: StreamGenerate ──
+            // ── Path 2: StreamGenerateAsync ──
             using var s2 = engine.CreateSession(64);
             s2.Reset(prompt);
             var viaStream = new List<int>();
             var opts = new StreamingOptions(n, [], SamplingOptions.Greedy);
-            await foreach (var t in s2.StreamGenerate(opts))
+            await foreach (var t in s2.StreamGenerateAsync(opts))
             {
                 viaStream.Add(t);
             }
@@ -187,7 +187,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Streaming
         }
 
         [LongFact]
-        public async Task StreamGenerate_WithFactoryStopTokens_QwenChatTerminators()
+        public async Task StreamGenerateAsync_WithFactoryStopTokens_QwenChatTerminators()
         {
             TestModelPaths.Qwen3B.RequireGgufPath();
 
@@ -205,7 +205,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Streaming
                 QwenTokenizer.ImEnd);
 
             var tokens = new List<int>();
-            await foreach (var t in session.StreamGenerate(opts))
+            await foreach (var t in session.StreamGenerateAsync(opts))
             {
                 tokens.Add(t);
             }
