@@ -124,6 +124,58 @@ dotnet_diagnostic.OVERFIT019.severity = suggestion
 # capture; ordinary private/internal non-async non-iterator methods) so it never suggests breaking a
 # stored-weights API. An API-shape change a human reviews, never a build gate.
 dotnet_diagnostic.OVERFIT020.severity = suggestion
+# OVERFIT025 (stackalloc over the byte budget) / OVERFIT026 (stackalloc with a variable element count).
+#
+# WHY AT ALL: nothing in the shipped analyzer set bounds stackalloc SIZE — CA2014 only catches allocation
+# inside a loop. Yet size is the failure that matters in a hosted library: StackOverflowException cannot be
+# caught, cannot be logged, and takes the whole process down, on threads whose stack size we do not choose.
+#
+# BUDGET = 512 BYTES OF MEMORY, never element count: the rule multiplies length by element width, so
+# char[256], int[128], double[64] and Vector256<float>[16] all sit exactly at the limit and are treated
+# alike. An element-count rule would wave through Vector512<T>[64] (4 KB) while stopping byte[300].
+#
+# Reference points: Microsoft's stackalloc documentation uses `const int MaxStackLimit = 1024;` as its
+# worked example and instructs "be conservative when you define the actual limit value"; the BCL is
+# stricter than its own page, with StackallocCharBufferSizeLimit = 256 chars and
+# StackallocIntBufferSizeLimit = 128 ints — 512 B each — in System.String's manipulation paths. So 512 B is
+# the BCL's working figure, and a census of Sources/Main (2026-07-24) says it cuts in the right place: of
+# 63 constant-size sites, 49 are <= 512 B (48 of them <= 256 B, plus exactly one int[128] matching the BCL
+# limit to the element) and NOTHING sits between 512 B and 1 KB. Everything above that gap is a deliberate
+# tile/block buffer, so any threshold in 512..1024 B flags the same 14 sites.
+#
+# Per-directory override: `overfit_max_stackalloc_bytes = N`. A kernel that MEASURED its way to a bigger
+# buffer raises its own budget and states why — it does not raise the tree's.
+#
+# OVERFIT026: a VARIABLE element count is not allowed. `stackalloc T[n]` with non-constant n defeats the
+# byte budget entirely — the cost cannot be read off the line, so neither the rule nor a reviewer can bound
+# it. Live example in this tree: `stackalloc float[vocab]` is ~608 KB on a 152k-token vocabulary, over half
+# a default thread stack, in one call. The documented `n <= Limit ? stackalloc T[n] : new T[n]` guard is
+# reported too, deliberately: a guard is only as good as the constant it compares against and the direction
+# of the comparison, neither of which a mechanical check can confirm. Opt out per site with
+# `#pragma warning disable OVERFIT026` whose comment names what bounds the length — the same visible,
+# reviewable contract as OVERFIT022/023.
+#
+# RATCHET: both start at suggestion everywhere, as OVERFIT021 did. Backlog measured 2026-07-24 —
+#   OVERFIT025: 15 sites. Ops/TensorMath.{Gelu,SiLU,Activations} 4 KB tiles, SafetensorsReader 4 KB
+#     chunks, Q4K/Q6KRepack block buffers (1152/1680 B).
+#   OVERFIT026: 41 sites. Q4K/Q6KGemvKernel vector scratch, TrainableLlamaModel float[vocab] (~608 KB on a
+#     152k vocabulary — the worst one in the tree), MelSpectrogram, GgufReader, CachedLlamaSession,
+#     WhisperKernels, VectorizedRandom, CholeskyMultivariateGaussianLogic, LoRAWeight, FeatureExtractor.
+#     14 of these were previously invisible: they use the documented ternary guard, which this rule reports
+#     on purpose rather than blessing.
+# Escalate Sources/Main to warning once a list is at zero or each survivor carries a pragma with its bound.
+#
+# FIRST SWEEP ENTRY, and the pattern for the rest: Statistics/MannWhitneyU's radix digit histogram was
+# 8 KB of stackalloc, defended on the grounds that it is touched 8x per element and belongs in L1. A/B
+# against the identical buffer rented from the pool measured 1.006x / 0.992x / 1.025x at 500 / 2 000 /
+# 10 000 samples per arm — a tie wherever the code actually runs. The argument did not survive measurement,
+# so the site moved to PooledBuffer<int> rather than buying itself an exemption.
+dotnet_diagnostic.OVERFIT025.severity = suggestion
+# OVERFIT027 (async void) — suggestion outside the library so a WPF/demo event handler is a hint, not a
+# wall; ERROR in Sources/Main below.
+dotnet_diagnostic.OVERFIT027.severity = suggestion
+dotnet_diagnostic.OVERFIT028.severity = suggestion
+dotnet_diagnostic.OVERFIT026.severity = suggestion
 # OVERFIT900 — the [OverfitHotPath] escalation. Any per-call rule (001-007, 009-011, 013-014) that
 # fires inside a member or type marked [DevOnBike.Overfit.Diagnostics.OverfitHotPath] is reported as
 # this hard error INSTEAD of its directory-configured severity — the per-member ratchet. Always error;
@@ -269,6 +321,27 @@ dotnet_diagnostic.OVERFIT021.severity = suggestion
 dotnet_diagnostic.OVERFIT008.severity = error
 dotnet_diagnostic.OVERFIT015.severity = error
 dotnet_diagnostic.OVERFIT024.severity = warning
+# OVERFIT025 — ERROR in the shipped library. Criteria met: the backlog is at ZERO (five cold-path buffers
+# moved to PooledBuffer<T>, and Ops/ carries an explicit, scoped 4096 B budget for its activation tiles), the
+# rule is unconditional, and the miss-cost is the worst there is — a StackOverflowException in Main kills the
+# HOST process, uncatchable and unlogged. Same bar as OVERFIT008/015/022/023.
+# NOT yet error: OVERFIT026 (40 open sites, see the ratchet note above) — several are genuinely unbounded,
+# and pragma-ing them to reach `error` would rubber-stamp exactly what the rule exists to find.
+dotnet_diagnostic.OVERFIT025.severity = error
+# OVERFIT026 — ERROR in the library too. Every remaining site now carries a pragma naming its real
+# bound, in the code, next to the allocation: an analyzer that only whispers gets ignored, and a
+# deliberate exception belongs where the author signs it rather than in a directory-wide budget that
+# would also wave through code nobody has looked at yet.
+dotnet_diagnostic.OVERFIT026.severity = error
+# OVERFIT028 — ERROR in the library. Backlog swept to zero: 68 sites widened mechanically with a (long)
+# cast (free at runtime — imul r64 costs what imul r32 costs, and array creation already takes a 64-bit
+# length), 3 rewritten by hand, 1 pragma'd where a 64-bit guard already proves the 32-bit product safe.
+# Demo/ and Server keep the global suggestion.
+dotnet_diagnostic.OVERFIT028.severity = error
+# OVERFIT027 — ERROR on the same criteria as OVERFIT008/015/025: ZERO existing sites in the whole
+# solution at introduction (2026-07-24), unconditional rule, trivial fix (return Task), and the
+# miss-cost is an uncatchable kill of the hosting process. A tripwire, not a sweep.
+dotnet_diagnostic.OVERFIT027.severity = error
 dotnet_diagnostic.OVERFIT022.severity = error
 dotnet_diagnostic.OVERFIT023.severity = error
 dotnet_diagnostic.OVERFIT900.severity = error

@@ -100,8 +100,8 @@ namespace DevOnBike.Overfit.Evolutionary.Runtime
             _archive = archive;
             _evaluator = evaluator;
 
-            _candidateParameters = new float[batchSize * parameterCount];
-            _candidateDescriptors = new float[batchSize * DescriptorDimensions];
+            _candidateParameters = new float[(long)batchSize * parameterCount];
+            _candidateDescriptors = new float[(long)batchSize * DescriptorDimensions];
             _candidateFitness = new float[batchSize];
             _bestEvaluatedParameters = new float[parameterCount];
 

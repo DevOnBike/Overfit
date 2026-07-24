@@ -128,7 +128,7 @@ namespace DevOnBike.Overfit.Anomalies.Training
             var sampleTargets = new int[workerCount][];
             // Per-worker loss scratch as one CONTIGUOUS buffer (worker-major), not jagged — worker w owns the
             // disjoint slice [w*ctx, ctx) (passed as a base offset into LossAndGrad), so concurrent writes don't race.
-            var lossScratch = new float[workerCount * _cfg.ContextLength];
+            var lossScratch = new float[(long)workerCount * _cfg.ContextLength];
             var losses = new float[workerCount];
 
             // One RNG per worker, deterministically seeded — makes the parallel

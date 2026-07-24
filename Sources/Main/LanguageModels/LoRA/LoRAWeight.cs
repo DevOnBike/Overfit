@@ -4,6 +4,7 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using System.Numerics.Tensors;
+using DevOnBike.Overfit.Tensors;
 
 namespace DevOnBike.Overfit.LanguageModels.LoRA
 {
@@ -40,10 +41,10 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
             OutDim = outDim;
             Rank = rank;
 
-            _a = new float[inDim * rank];
-            _b = new float[rank * outDim];
-            _gradA = new float[inDim * rank];
-            _gradB = new float[rank * outDim];
+            _a = new float[(long)inDim * rank];
+            _b = new float[(long)rank * outDim];
+            _gradA = new float[(long)inDim * rank];
+            _gradB = new float[(long)rank * outDim];
 
             InitializeA(rng ?? new Random(42));
             // B stays zero — standard LoRA initialization
@@ -114,7 +115,10 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
             // r[] is used as accumulator below (MultiplyAdd reads r[k] then writes).
             // With `[module: SkipLocalsInit]` stackalloc no longer pre-zeroes —
             // explicit Clear() is required so the accumulation starts from 0.
-            Span<float> r = stackalloc float[Rank];
+            using var rBuffer = Rank <= 256 ? default : new PooledBuffer<float>(Rank, clearMemory: false);
+#pragma warning disable OVERFIT026 // BOUND: guarded at 256 floats = 1 KB. LoRA rank is caller-supplied and validated only as positive upstream, so the bound lives here; ranks above 256 (unheard of in practice) take the pooled branch instead of the stack.
+            Span<float> r = Rank <= 256 ? stackalloc float[Rank] : rBuffer.Span;
+#pragma warning restore OVERFIT026
             r.Clear();
 
             // r[k] = sum_i( A[i,k] * x[i] )

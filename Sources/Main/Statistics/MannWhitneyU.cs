@@ -53,7 +53,9 @@ namespace DevOnBike.Overfit.Statistics
         /// <summary>Smallest scratch that <see cref="Compare(ReadOnlySpan{double}, ReadOnlySpan{double}, Span{double})"/>
         /// will accept — enough to hold both samples sorted.</summary>
         public static int MinimumScratchLength(int baselineCount, int candidateCount)
-            => baselineCount + candidateCount;
+        {
+            return baselineCount + candidateCount;
+        }
 
         /// <summary>
         /// Scratch that additionally unlocks the radix path on large windows. Below this the comparison still
@@ -61,7 +63,9 @@ namespace DevOnBike.Overfit.Statistics
         /// observations. The pooled overload always rents this much.
         /// </summary>
         public static int RecommendedScratchLength(int baselineCount, int candidateCount)
-            => baselineCount + candidateCount + Math.Max(baselineCount, candidateCount);
+        {
+            return baselineCount + candidateCount + Math.Max(baselineCount, candidateCount);
+        }
 
         /// <summary>
         /// Compares <paramref name="candidate"/> against <paramref name="baseline"/>, testing the one-sided
@@ -113,8 +117,7 @@ namespace DevOnBike.Overfit.Statistics
 
             if (scratch.Length < n1 + n2)
             {
-                throw new ArgumentException(
-                    $"Scratch must hold at least {n1 + n2} elements.", nameof(scratch));
+                throw new ArgumentException($"Scratch must hold at least {n1 + n2} elements.", nameof(scratch));
             }
 
             // The two samples are sorted independently and then merged, rather than sorting one combined array
@@ -172,6 +175,7 @@ namespace DevOnBike.Overfit.Statistics
                 var value = takeBaseline ? sortedBaseline[i] : sortedCandidate[j];
 
                 var inBaseline = 0;
+
                 while (i < n1 && sortedBaseline[i] == value)
                 {
                     inBaseline++;
@@ -179,6 +183,7 @@ namespace DevOnBike.Overfit.Statistics
                 }
 
                 var inCandidate = 0;
+
                 while (j < n2 && sortedCandidate[j] == value)
                 {
                     inCandidate++;
@@ -188,8 +193,8 @@ namespace DevOnBike.Overfit.Statistics
                 u += inCandidate * (baselineBelow + (0.5 * inBaseline));
 
                 var tied = (double)inBaseline + inCandidate;
-                tieCorrection += (tied * tied * tied) - tied;
 
+                tieCorrection += (tied * tied * tied) - tied;
                 baselineBelow += inBaseline;
             }
 
@@ -296,8 +301,8 @@ namespace DevOnBike.Overfit.Statistics
                 u += c * (baselineBelow + (0.5 * b));
 
                 var tied = (double)b + c;
-                tieCorrection += (tied * tied * tied) - tied;
 
+                tieCorrection += (tied * tied * tied) - tied;
                 baselineBelow += b;
                 n1 += b;
                 n2 += c;
@@ -350,11 +355,25 @@ namespace DevOnBike.Overfit.Statistics
             // only the alternate half of the ping-pong.
             var primary = MemoryMarshal.Cast<double, ulong>(destination)[..n];
 
-            // 8 KB of fixed-size scratch: stackalloc rather than a pooled rent, because it is touched 8x per
-            // element and wants to stay in L1, and because a recycled pooled array would arrive cold. Fixed
-            // size, so it cannot grow with the input; safe on a 1 MB worker stack.
-            Span<int> counts = stackalloc int[8 * 256];
-            counts.Clear();
+            // Eight byte histograms, 8 KB, from the pool rather than the stack.
+            //
+            // NEGATIVE RESULT (2026-07-24, Ryzen 9 9950X3D): this was a `stackalloc int[8 * 256]`, argued for
+            // on the grounds that the histogram is touched eight times per element and wants to stay in L1
+            // while a recycled pooled array would arrive cold. Measured, that argument does not hold — pooled
+            // versus stack came out 1.006x at 500 samples per arm, 0.992x at 2 000 and 1.025x at 10 000, which
+            // is a tie across the whole range where the radix path actually runs. (At 100 000 the pooled arm
+            // read 1.22x slower, but with 5% run-to-run spread against the stack arm's 0.08%, and 100 000
+            // observations per arm is far outside any evaluation window this code is for.)
+            //
+            // Since it buys nothing measurable, it honours the OVERFIT025 budget instead: 8 KB is sixteen
+            // times the 512 B ceiling, and a StackOverflowException in a hosted library cannot be caught,
+            // cannot be logged, and kills the host.
+            //
+            // clearMemory is not optional. ArrayPool hands back dirty arrays, and the counting loop below
+            // reads each counter before writing it — exactly the same requirement the stackalloc version had
+            // under this assembly's [module: SkipLocalsInit].
+            using var histogramBuffer = new PooledBuffer<int>(8 * 256, clearMemory: true);
+            var counts = histogramBuffer.Span;
 
             for (var i = 0; i < n; i++)
             {
@@ -466,6 +485,7 @@ namespace DevOnBike.Overfit.Statistics
             // continuous normal and small samples come out anti-conservative.
             var deviation = u - meanU;
             var corrected = deviation > 0.0 ? deviation - 0.5 : deviation + 0.5;
+
             if (Math.Abs(deviation) < 0.5)
             {
                 corrected = 0.0;
@@ -473,31 +493,14 @@ namespace DevOnBike.Overfit.Statistics
 
             var z = corrected / Math.Sqrt(variance);
 
-            return new MannWhitneyResult(u, z, 1.0 - StandardNormalCdf(z), probabilitySuperior, cliffsDelta, n1, n2);
-        }
-
-        /// <summary>Φ(z) for the standard normal, via an erf approximation accurate to ~1.5e-7 — far tighter
-        /// than the sampling noise of any canary window.</summary>
-        private static double StandardNormalCdf(double z) => 0.5 * (1.0 + Erf(z / Math.Sqrt(2.0)));
-
-        // Abramowitz &amp; Stegun 7.1.26: |error| < 1.5e-7 over the whole range.
-        private static double Erf(double x)
-        {
-            const double P = 0.3275911;
-            const double A1 = 0.254829592;
-            const double A2 = -0.284496736;
-            const double A3 = 1.421413741;
-            const double A4 = -1.453152027;
-            const double A5 = 1.061405429;
-
-            var sign = x < 0.0 ? -1.0 : 1.0;
-            var absolute = Math.Abs(x);
-
-            var t = 1.0 / (1.0 + (P * absolute));
-            var poly = ((((((((A5 * t) + A4) * t) + A3) * t) + A2) * t) + A1) * t;
-            var value = 1.0 - (poly * Math.Exp(-absolute * absolute));
-
-            return sign * value;
+            return new MannWhitneyResult(
+                u,
+                z,
+                1.0 - NormalDistribution.Cdf(z),
+                probabilitySuperior,
+                cliffsDelta,
+                n1,
+                n2);
         }
     }
 }

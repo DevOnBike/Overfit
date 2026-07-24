@@ -326,7 +326,10 @@ namespace DevOnBike.Overfit.DeepLearning
             var rank = lora.Rank;
             var a = lora.A.DataView.AsReadOnlySpan(); // [inDim, rank]
             var b = lora.B.DataView.AsReadOnlySpan(); // [rank, outDim]
-            Span<float> tmp = stackalloc float[rank];
+            using var tmpBuffer = rank <= 256 ? default : new PooledBuffer<float>(rank, clearMemory: false);
+#pragma warning disable OVERFIT026 // BOUND: guarded at 256 floats = 1 KB. LoRA rank is caller-supplied and validated only as positive upstream, so the bound lives here; ranks above 256 (unheard of in practice) take the pooled branch instead of the stack.
+            Span<float> tmp = rank <= 256 ? stackalloc float[rank] : tmpBuffer.Span;
+#pragma warning restore OVERFIT026
             tmp.Clear();
             for (var i = 0; i < inDim; i++)
             {

@@ -311,9 +311,11 @@ namespace DevOnBike.Overfit.Kernels
             int outW)
         {
             using var pooledPairMax = inputW <= 128 ? default : new PooledBuffer<float>(inputW, clearMemory: false);
+#pragma warning disable OVERFIT026 // BOUND: guarded at inputW <= 128 floats = 512 B, exactly the OVERFIT025 budget; wider inputs take the pooled branch on the line above.
             var pairMax = inputW <= 128
                 ? stackalloc float[inputW]
                 : pooledPairMax.Span;
+#pragma warning restore OVERFIT026
 
             for (var c = 0; c < channels; c++)
             {
@@ -380,9 +382,11 @@ namespace DevOnBike.Overfit.Kernels
             int batchOffset)
         {
             using var pooledPairMax = inputW <= 128 ? default : new PooledBuffer<float>(inputW, clearMemory: false);
+#pragma warning disable OVERFIT026 // BOUND: guarded at inputW <= 128 floats = 512 B, exactly the OVERFIT025 budget; wider inputs take the pooled branch on the line above.
             var pairMax = inputW <= 128
                 ? stackalloc float[inputW]
                 : pooledPairMax.Span;
+#pragma warning restore OVERFIT026
 
             for (var c = 0; c < channels; c++)
             {

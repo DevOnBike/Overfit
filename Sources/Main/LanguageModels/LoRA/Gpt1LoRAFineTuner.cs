@@ -824,7 +824,7 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
 
         private Parameter[] CollectParameters()
         {
-            var parameters = new Parameter[_adapters.Length * 2];
+            var parameters = new Parameter[(long)_adapters.Length * 2];
 
             for (var i = 0; i < _adapters.Length; i++)
             {

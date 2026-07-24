@@ -96,7 +96,7 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
             var pos = T("decoder.positional_embedding");
 
             // token embedding + positional embedding
-            var x = new float[seq * _nState];
+            var x = new float[(long)seq * _nState];
             for (var t = 0; t < seq; t++)
             {
                 var emb = _tokenEmbedding.AsSpan(tokens[t] * _nState, _nState);
@@ -107,8 +107,8 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
                 }
             }
 
-            var ln = new float[seq * _nState];
-            var tmp = new float[seq * _nState];
+            var ln = new float[(long)seq * _nState];
+            var tmp = new float[(long)seq * _nState];
             for (var b = 0; b < _nLayer; b++)
             {
                 var p = $"decoder.blocks.{b}.";
@@ -139,7 +139,7 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
                 WhisperKernels.LayerNorm(x, T(p + "mlp_ln.weight"), T(p + "mlp_ln.bias"), ln, seq, _nState);
                 var w0 = _m.Tensors[p + "mlp.0.weight"];
                 var dFF = w0.Shape[0];
-                var hidden = new float[seq * dFF];
+                var hidden = new float[(long)seq * dFF];
                 WhisperKernels.Linear(ln, w0.Data, T(p + "mlp.0.bias"), hidden, seq, _nState, dFF);
                 WhisperKernels.GeluInPlace(hidden);
                 WhisperKernels.Linear(hidden, T(p + "mlp.2.weight"), T(p + "mlp.2.bias"), tmp, seq, dFF, _nState);
@@ -292,10 +292,10 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
 #pragma warning disable OVERFIT001 // Decode-state scratch allocated once per (reused) State — _reuseState keeps it across streaming steps; the per-token Step is allocation-free.
                 s = new State
                 {
-                    CrossK = new float[_nLayer * crossStride],
-                    CrossV = new float[_nLayer * crossStride],
-                    SelfK = new float[_nLayer * selfStride],
-                    SelfV = new float[_nLayer * selfStride],
+                    CrossK = new float[(long)_nLayer * crossStride],
+                    CrossV = new float[(long)_nLayer * crossStride],
+                    SelfK = new float[(long)_nLayer * selfStride],
+                    SelfV = new float[(long)_nLayer * selfStride],
                     NCtx = nCtx,
                     MaxLen = maxLen,
                     X = new float[n],

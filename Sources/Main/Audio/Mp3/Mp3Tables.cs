@@ -127,7 +127,7 @@ namespace DevOnBike.Overfit.Audio.Mp3
         private static float[] BuildCos(int n)
         {
             var half = n / 2;
-            var t = new float[half * n];
+            var t = new float[(long)half * n];
             for (var m = 0; m < half; m++)
             {
                 for (var p = 0; p < n; p++)

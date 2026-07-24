@@ -163,10 +163,20 @@ namespace DevOnBike.Overfit.Ops
             // Parallel path. Per-worker partial buffers for dGamma/dBeta avoid
             // shared-write races. Size: WorkerCount × C floats each.
             //
-            // stackalloc cap: caller-thread stack ~1 MB. For typical models
-            // (C ≤ 4096), partial size = 32 × 4096 × 4 B × 2 = 1 MB, near the
-            // edge. We bound C to keep the stack safe; over the bound, fall
-            // back to sequential. (Could promote to heap workspace later.)
+            // These were `stackalloc`, capped at C ≤ 4096 so the frame stayed
+            // "near the edge" of a ~1 MB thread stack — 32 workers × 4096 × 4 B
+            // × 2 buffers is the ENTIRE default stack, before the fixed blocks,
+            // the dispatch frames and whatever the caller was already using.
+            // A StackOverflowException cannot be caught or logged and kills the
+            // host process, so the buffers now come from the pool: same slot-per-
+            // worker layout, same zero GC allocation, no stack exposure.
+            //
+            // The C cap below is therefore vestigial — its only justification was
+            // the stack — but lifting it is a BEHAVIOUR change, not a cleanup: wide
+            // models would move from the sequential path to the parallel one, which
+            // sums the partials in a different order and so shifts the last bits of
+            // the gradients. That belongs in its own change, with the FD gradient
+            // tests as the guard.
             const int MaxStackallocC = 4096;
 
             if (C > MaxStackallocC)
@@ -184,21 +194,21 @@ namespace DevOnBike.Overfit.Ops
             var workerCount = OverfitParallel.WorkerCount;
             var partialSlots = workerCount * C;
 
+            // Rented, not stack-allocated. clearMemory is required, not tidiness: the workers accumulate into
+            // these slots, so they must start at zero, and the pool hands back dirty arrays.
+            using var dGammaBuffer = needsDGamma
+                ? new PooledBuffer<float>(partialSlots, clearMemory: true)
+                : default;
+            using var dBetaBuffer = needsDBeta
+                ? new PooledBuffer<float>(partialSlots, clearMemory: true)
+                : default;
+
             unsafe
             {
-                // Stackalloc per call — zero managed alloc. The buffer lives on
-                // this caller's stack; workers index into it by their chunkIdx.
-                var dGammaPartial = needsDGamma ? stackalloc float[partialSlots] : default;
-                var dBetaPartial = needsDBeta ? stackalloc float[partialSlots] : default;
-
-                if (needsDGamma)
-                {
-                    dGammaPartial.Clear();
-                }
-                if (needsDBeta)
-                {
-                    dBetaPartial.Clear();
-                }
+                // A default PooledBuffer yields an empty Span, which is exactly the `default` the fixed block
+                // below expects when a gradient is not required.
+                var dGammaPartial = dGammaBuffer.Span;
+                var dBetaPartial = dBetaBuffer.Span;
 
                 // Chunking math: For(0, numRows, ...) hands each worker a range
                 // [chunkStart, chunkEnd). chunkIdx = chunkStart / perChunk

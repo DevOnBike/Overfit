@@ -228,7 +228,7 @@ namespace DevOnBike.Overfit.Ops
 
         private static double[] LogSoftmaxPerTimestep(ReadOnlySpan<float> logits, int timeSteps, int classCount)
         {
-            var logp = new double[timeSteps * classCount];
+            var logp = new double[(long)timeSteps * classCount];
             for (var t = 0; t < timeSteps; t++)
             {
                 var baseT = t * classCount;

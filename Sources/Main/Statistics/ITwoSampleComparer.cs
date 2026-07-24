@@ -22,7 +22,10 @@ namespace DevOnBike.Overfit.Statistics
     public interface ITwoSampleComparer
     {
         /// <summary>Stable identifier for reports and exported metric labels, e.g. <c>mann-whitney-u</c>.</summary>
-        string Name { get; }
+        string Name
+        {
+            get;
+        }
 
         /// <summary>
         /// Compares raw observations. Higher values must mean <i>worse</i> (latency, cost, error count); for a

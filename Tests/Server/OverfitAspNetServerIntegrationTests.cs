@@ -208,7 +208,10 @@ namespace DevOnBike.Overfit.Tests.Server
             public PoolStatus PoolStatus => new(Size: 4, Active: 0, Available: 4, RejectedTotal: 0, PeakActive: 1);
 
             public ModelsResponse ListModels()
-                => new() { Data = [new ModelInfo { Id = "fake-model", Created = 0 }] };
+                => new()
+                {
+                    Data = [new ModelInfo { Id = "fake-model", Created = 0 }]
+                };
 
             public void CompleteChat(ChatCompletionRequest? request, IOpenAiResponseSink sink, CancellationToken cancellationToken)
             {

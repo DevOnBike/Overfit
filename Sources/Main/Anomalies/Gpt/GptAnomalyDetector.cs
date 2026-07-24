@@ -87,7 +87,7 @@ namespace DevOnBike.Overfit.Anomalies.Gpt
             // Tokenize full window as context
             var history = _window.ToArray();
             var contextCount = history.Length - 1;
-            var contextTokens = new int[contextCount * MetricTokenizer.TokensPerSnapshot];
+            var contextTokens = new int[(long)contextCount * MetricTokenizer.TokensPerSnapshot];
             for (var i = 0; i < contextCount; i++)
             {
                 _tokenizer.EncodeSnapshot(history[i], contextTokens, i * MetricTokenizer.TokensPerSnapshot);

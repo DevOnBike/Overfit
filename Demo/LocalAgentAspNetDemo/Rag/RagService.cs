@@ -3,7 +3,6 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using DevOnBike.Overfit.Runtime;
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
@@ -11,6 +10,7 @@ using DevOnBike.Overfit.LanguageModels;
 using DevOnBike.Overfit.LanguageModels.Embeddings;
 using DevOnBike.Overfit.LanguageModels.Retrieval;
 using DevOnBike.Overfit.LanguageModels.Retrieval.Evaluation;
+using DevOnBike.Overfit.Runtime;
 
 namespace DevOnBike.Overfit.Demo.LocalAgent.Rag
 {

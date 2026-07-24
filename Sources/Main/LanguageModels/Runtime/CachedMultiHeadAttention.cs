@@ -99,7 +99,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             AttnLogitSoftcap = attnLogitSoftcap;
 
             _heads = new CachedSingleHeadAttention[headCount];
-            _headOutputs = new float[headCount * dModel];
+            _headOutputs = new float[(long)headCount * dModel];
 
             _hiddenQuants = new sbyte[dModel];
             _hiddenScales = new float[(dModel + Q4KDotKernel.SuperBlockElements - 1) / Q4KDotKernel.SuperBlockElements];

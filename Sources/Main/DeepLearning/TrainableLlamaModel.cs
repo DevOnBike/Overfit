@@ -246,8 +246,8 @@ namespace DevOnBike.Overfit.DeepLearning
             // Per-layer KV caches as single CONTIGUOUS buffers (layer-major), not jagged — one allocation,
             // cache-friendly. Layer l's slice is [l*kvStride, kvStride) with kvStride = maxLen*kvWidth.
             var kvStride = maxLen * kvWidth;
-            var cacheK = new float[nL * kvStride];
-            var cacheV = new float[nL * kvStride];
+            var cacheK = new float[(long)nL * kvStride];
+            var cacheV = new float[(long)nL * kvStride];
 
             var tokens = new List<int>(promptTokens);
             var produced = new List<int>();
@@ -306,8 +306,8 @@ namespace DevOnBike.Overfit.DeepLearning
             var kvWidth = _nKVHeads * _dHead;
             var maxLen = promptTokens.Length + maxNewTokens;
             var kvStride = maxLen * kvWidth;
-            var cacheK = new float[nL * kvStride];
-            var cacheV = new float[nL * kvStride];
+            var cacheK = new float[(long)nL * kvStride];
+            var cacheV = new float[(long)nL * kvStride];
 
             var tokens = new List<int>(promptTokens);
             var produced = new List<int>();
@@ -374,8 +374,8 @@ namespace DevOnBike.Overfit.DeepLearning
             var nL = _blocks.Length;
             var kvWidth = _nKVHeads * _dHead;
             var kvStride = promptTokens.Length * kvWidth;
-            var cacheK = new float[nL * kvStride];
-            var cacheV = new float[nL * kvStride];
+            var cacheK = new float[(long)nL * kvStride];
+            var cacheV = new float[(long)nL * kvStride];
 
             using var hiddenB = new PooledBuffer<float>(_dModel, clearMemory: false);
             using var nextB = new PooledBuffer<float>(_dModel, false);
@@ -497,7 +497,7 @@ namespace DevOnBike.Overfit.DeepLearning
             var result = new DecodeWeight[nHeads];
             for (var h = 0; h < nHeads; h++)
             {
-                var buf = new float[dHead * dModel];
+                var buf = new float[(long)dHead * dModel];
                 for (var jj = 0; jj < dHead; jj++)
                 {
                     baseHeads[h].DequantizeRow(jj, buf.AsSpan(jj * dModel, dModel));
@@ -540,7 +540,7 @@ namespace DevOnBike.Overfit.DeepLearning
             var result = new DecodeWeight[nHeads];
             for (var h = 0; h < nHeads; h++)
             {
-                var buf = new float[dModel * dHead];
+                var buf = new float[(long)dModel * dHead];
                 for (var o = 0; o < dModel; o++)
                 {
                     baseHeads[h].DequantizeRow(o, buf.AsSpan(o * dHead, dHead));
@@ -615,7 +615,10 @@ namespace DevOnBike.Overfit.DeepLearning
             {
                 var rank = _lmHeadLora.Rank;
                 var a = _lmHeadLora.A.DataView.AsReadOnlySpan();
-                Span<float> tmp = stackalloc float[rank];
+                using var tmpBuffer = rank <= 256 ? default : new PooledBuffer<float>(rank, clearMemory: false);
+#pragma warning disable OVERFIT026 // BOUND: guarded at 256 floats = 1 KB. LoRA rank is caller-supplied and validated only as positive upstream, so the bound lives here; ranks above 256 (unheard of in practice) take the pooled branch instead of the stack.
+                Span<float> tmp = rank <= 256 ? stackalloc float[rank] : tmpBuffer.Span;
+#pragma warning restore OVERFIT026
                 tmp.Clear();
                 for (var i = 0; i < _dModel; i++)
                 {
@@ -747,7 +750,11 @@ namespace DevOnBike.Overfit.DeepLearning
             // LoRA pre-projection tmp[r] = Σ_i normed[i]·A[i,r], if an LM-head adapter is present.
             var rank = _lmHeadLora?.Rank ?? 0;
             ReadOnlySpan<float> bSpan = default;
-            Span<float> tmp = stackalloc float[Math.Max(1, rank)];
+            var tmpLength = Math.Max(1, rank);
+            using var tmpBuffer = tmpLength <= 256 ? default : new PooledBuffer<float>(tmpLength, clearMemory: false);
+#pragma warning disable OVERFIT026 // BOUND: guarded at 256 floats = 1 KB. LoRA rank is caller-supplied and validated only as positive upstream, so the bound lives here; ranks above 256 (unheard of in practice) take the pooled branch instead of the stack.
+            Span<float> tmp = tmpLength <= 256 ? stackalloc float[tmpLength] : tmpBuffer.Span;
+#pragma warning restore OVERFIT026
             tmp.Clear();
             if (_lmHeadLora is not null)
             {
@@ -931,7 +938,9 @@ namespace DevOnBike.Overfit.DeepLearning
 
             var totalMasked = 0.0;
             var scaleMasked = 1f / count;
+#pragma warning disable OVERFIT026 // BOUND: guarded at vocab <= 4096 floats = 16 KB. Thirty-two times the budget; the guard bounds it but was sized to vocabularies, not to the stack. Candidate for lowering once measured.
             Span<float> probsM = vocab <= 4096 ? stackalloc float[vocab] : new float[vocab];
+#pragma warning restore OVERFIT026
             for (var t = 0; t < T; t++)
             {
                 var tgt = targets[t];
@@ -966,7 +975,9 @@ namespace DevOnBike.Overfit.DeepLearning
             // Per-row softmax + grad seed, SIMD-batched via TensorPrimitives (vectorized Exp/Max/Sum —
             // far faster than a scalar MathF.Exp loop over a ~152k vocab). grad is fully overwritten
             // below (probs·invSum·scale per element), so no up-front Clear() is needed.
+#pragma warning disable OVERFIT026 // BOUND: guarded at vocab <= 4096 floats = 16 KB. Same caveat as the sibling site above.
             Span<float> probs = vocab <= 4096 ? stackalloc float[vocab] : new float[vocab];
+#pragma warning restore OVERFIT026
 
             for (var t = 0; t < T; t++)
             {

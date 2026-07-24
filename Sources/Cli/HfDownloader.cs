@@ -3,13 +3,13 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using DevOnBike.Overfit.Runtime;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Text.Json;
 using DevOnBike.Overfit.Diagnostics;
 using DevOnBike.Overfit.Exceptions;
+using DevOnBike.Overfit.Runtime;
 
 namespace DevOnBike.Overfit.Cli
 {

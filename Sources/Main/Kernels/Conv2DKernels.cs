@@ -382,7 +382,9 @@ namespace DevOnBike.Overfit.Kernels
             var outW = c.OutW;
 
             using var pooled = outW <= 2048 ? default : new PooledBuffer<float>(outW, clearMemory: false);
+#pragma warning disable OVERFIT026 // BOUND: guarded at outW <= 2048 floats = 8 KB. Sixteen times the budget — the guard predates this rule and tracks output width, not stack cost. Candidate for lowering once measured.
             var acc = outW <= 2048 ? stackalloc float[outW] : pooled.Span;
+#pragma warning restore OVERFIT026
 
             for (var oc = ocStart; oc < ocEnd; oc++)
             {
@@ -486,7 +488,9 @@ namespace DevOnBike.Overfit.Kernels
             var stride = c.Stride;
 
             using var pooled = outW <= 2048 ? default : new PooledBuffer<float>(outW, clearMemory: false);
+#pragma warning disable OVERFIT026 // BOUND: guarded at outW <= 2048 floats = 8 KB. Sixteen times the budget — the guard predates this rule and tracks output width, not stack cost. Candidate for lowering once measured.
             var acc = outW <= 2048 ? stackalloc float[outW] : pooled.Span;
+#pragma warning restore OVERFIT026
 
             // Gather index lanes {0, stride, 2·stride, …, 7·stride} (element offsets; gather scale = 4 bytes).
             var idx = Vector256.Create(0, stride, 2 * stride, 3 * stride, 4 * stride, 5 * stride, 6 * stride, 7 * stride);

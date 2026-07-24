@@ -350,8 +350,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             var reduce = Vector256.Create(0, 1, 4, 5, 2, 3, 6, 7);
 
             // Per-column accumulators. cols <= MaxTileCols keeps this a small bounded frame.
+#pragma warning disable OVERFIT026 // BOUND: cols is validated to [1, MaxTileCols=16] by the throw at the top of this method. Worst case 2 spans x 16 x 32 B = 1024 B.
             Span<Vector256<float>> sumf = stackalloc Vector256<float>[cols];
             Span<Vector256<int>> iacc = stackalloc Vector256<int>[cols];
+#pragma warning restore OVERFIT026
 
             fixed (byte* rep = repacked)
             fixed (sbyte* aqAll = actQuants)
@@ -505,8 +507,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             var ones = Vector512.Create((short)1);
             var reduce = Vector256.Create(0, 1, 4, 5, 2, 3, 6, 7);
 
+#pragma warning disable OVERFIT026 // BOUND: cols is validated to [1, MaxTileCols=16] by the throw at the top of this method. Worst case 2 spans x 16 x 32 B = 1024 B.
             Span<Vector256<float>> sumf = stackalloc Vector256<float>[cols];
             Span<Vector256<int>> iacc = stackalloc Vector256<int>[cols];
+#pragma warning restore OVERFIT026
 
             fixed (byte* rep = repacked)
             fixed (sbyte* aqAll = actQuants)

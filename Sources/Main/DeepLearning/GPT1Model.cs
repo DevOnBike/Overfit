@@ -496,7 +496,7 @@ namespace DevOnBike.Overfit.DeepLearning
             int batchSize,
             int seqLen)
         {
-            var allPosIds = new int[batchSize * seqLen];
+            var allPosIds = new int[(long)batchSize * seqLen];
 
             for (var b = 0; b < batchSize; b++)
             {

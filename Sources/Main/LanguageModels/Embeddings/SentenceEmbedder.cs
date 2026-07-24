@@ -170,7 +170,9 @@ namespace DevOnBike.Overfit.LanguageModels.Embeddings
         public void AddTo(VectorStore store, string id, string text)
         {
             ArgumentNullException.ThrowIfNull(store);
+#pragma warning disable OVERFIT026 // BOUND: guarded at Dimension <= 1024 floats = 4 KB. Eight times the budget — the guard constant predates this rule and was chosen for embedding widths (384/768/1024), not against a stack budget. Candidate for lowering once measured.
             Span<float> vec = Dimension <= 1024 ? stackalloc float[Dimension] : new float[Dimension];
+#pragma warning restore OVERFIT026
             Embed(text, vec);
             store.Add(id, vec, text);
         }
@@ -179,7 +181,9 @@ namespace DevOnBike.Overfit.LanguageModels.Embeddings
         public void AddPassageTo(VectorStore store, string id, string text)
         {
             ArgumentNullException.ThrowIfNull(store);
+#pragma warning disable OVERFIT026 // BOUND: guarded at Dimension <= 1024 floats = 4 KB. Eight times the budget — the guard constant predates this rule and was chosen for embedding widths (384/768/1024), not against a stack budget. Candidate for lowering once measured.
             Span<float> vec = Dimension <= 1024 ? stackalloc float[Dimension] : new float[Dimension];
+#pragma warning restore OVERFIT026
             EmbedPassage(text, vec);
             store.Add(id, vec, text);
         }

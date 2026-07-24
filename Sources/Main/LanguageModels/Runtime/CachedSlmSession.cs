@@ -4,9 +4,8 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using DevOnBike.Overfit.DeepLearning;
-using DevOnBike.Overfit.LanguageModels.Contracts;
-
 using DevOnBike.Overfit.Diagnostics;
+using DevOnBike.Overfit.LanguageModels.Contracts;
 
 namespace DevOnBike.Overfit.LanguageModels.Runtime
 {

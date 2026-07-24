@@ -23,7 +23,10 @@ namespace DevOnBike.Overfit.Server.AspNet.Services
         ModelsResponse ListModels();
 
         /// <summary>Current session-pool snapshot for the <c>/metrics</c> gauges (size / active / free / rejected).</summary>
-        PoolStatus PoolStatus { get; }
+        PoolStatus PoolStatus
+        {
+            get;
+        }
 
         /// <summary>
         /// Runs one chat completion (streaming or not) — rents a session, replays history, generates, restores

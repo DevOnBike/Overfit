@@ -3,6 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Buffers;
 using System.Runtime.CompilerServices;
 using BenchmarkDotNet.Attributes;
 using DevOnBike.Overfit.Statistics;
@@ -150,6 +151,26 @@ namespace Benchmarks
                 .PValueCandidateGreater;
         }
 
+        /// <summary>
+        /// The same radix sort with its 8 KB digit histogram rented from the pool instead of stack-allocated.
+        /// OVERFIT025 puts the stack budget at 1024 B (Microsoft's documented figure), so the shipped
+        /// implementation is 8x over it; the question this answers is whether the stack version is actually
+        /// buying anything, or whether the budget can simply be honoured.
+        /// </summary>
+        [Benchmark]
+        public double RadixSort_PooledHistogram()
+        {
+            var n1 = _baseline.Length;
+            var n2 = _candidate.Length;
+
+            RadixSortInto(_baseline, _scratch.AsSpan(0, n1), _radixKeys, _radixTemp, pooledHistogram: true);
+            RadixSortInto(_candidate, _scratch.AsSpan(n1, n2), _radixKeys, _radixTemp, pooledHistogram: true);
+
+            return MannWhitneyU
+                .CompareSorted(_scratch.AsSpan(0, n1), _scratch.AsSpan(n1, n2))
+                .PValueCandidateGreater;
+        }
+
         /// <summary>Bucketed counts, straight from a scraped histogram: O(K), independent of the window size.</summary>
         [Benchmark]
         public double Histograms()
@@ -189,7 +210,8 @@ namespace Benchmarks
             ReadOnlySpan<double> source,
             Span<double> destination,
             ulong[] keys,
-            ulong[] temp)
+            ulong[] temp,
+            bool pooledHistogram = false)
         {
             var n = source.Length;
 
@@ -199,7 +221,10 @@ namespace Benchmarks
             }
 
             // All eight byte histograms in one pass over the keys; a pass whose byte never varies is skipped.
-            Span<int> counts = stackalloc int[8 * 256];
+            // The A/B: the same 8 KB either on the stack or rented. Raw ArrayPool is fine here — the RS0030
+            // ban targets Sources/Main, and going through PooledBuffer would add its own wrapper to the timing.
+            var rented = pooledHistogram ? ArrayPool<int>.Shared.Rent(8 * 256) : null;
+            Span<int> counts = rented is null ? stackalloc int[8 * 256] : rented.AsSpan(0, 8 * 256);
             counts.Clear();
 
             for (var i = 0; i < n; i++)
@@ -242,6 +267,11 @@ namespace Benchmarks
             for (var i = 0; i < n; i++)
             {
                 destination[i] = DecodeKey(from[i]);
+            }
+
+            if (rented is not null)
+            {
+                ArrayPool<int>.Shared.Return(rented);
             }
         }
 

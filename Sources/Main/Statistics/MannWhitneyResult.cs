@@ -41,6 +41,8 @@ namespace DevOnBike.Overfit.Statistics
         /// decision has no business depending on them.
         /// </summary>
         public TwoSampleComparison ToComparison()
-            => new(PValueCandidateGreater, CliffsDelta, ProbabilitySuperior, BaselineCount, CandidateCount);
+        {
+            return new TwoSampleComparison(PValueCandidateGreater, CliffsDelta, ProbabilitySuperior, BaselineCount, CandidateCount);
+        }
     }
 }

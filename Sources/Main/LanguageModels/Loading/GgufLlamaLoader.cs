@@ -1235,8 +1235,8 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             var heads = new DecodeWeight[nHeads];
             for (var h = 0; h < nHeads; h++)
             {
-                var headQuants = new sbyte[headDim * dModel];
-                var headScales = new float[headDim * blocksPerRow];
+                var headQuants = new sbyte[(long)headDim * dModel];
+                var headScales = new float[(long)headDim * blocksPerRow];
                 quants.Span.Slice(h * headDim * dModel, headDim * dModel).CopyTo(headQuants);
                 scales.Span.Slice(h * headDim * blocksPerRow, headDim * blocksPerRow).CopyTo(headScales);
                 heads[h] = new Q8Weight(headQuants, headScales, dModel, headDim);
@@ -1267,8 +1267,8 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             var heads = new DecodeWeight[nHeads];
             for (var h = 0; h < nHeads; h++)
             {
-                var headQuants = new sbyte[dModel * headDim];
-                var headScales = new float[dModel * headBlocks];
+                var headQuants = new sbyte[(long)dModel * headDim];
+                var headScales = new float[(long)dModel * headBlocks];
                 for (var o = 0; o < dModel; o++)
                 {
                     quants.Span.Slice(o * nHeadsHeadDim + h * headDim, headDim)

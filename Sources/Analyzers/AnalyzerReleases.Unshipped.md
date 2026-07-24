@@ -29,4 +29,8 @@ OVERFIT021 | Style | Warning | else / else if — use a guard clause + early ret
 OVERFIT022 | Reliability | Warning | Direct recursion — unbounded stack depth; StackOverflowException is uncatchable in .NET
 OVERFIT023 | Reliability | Warning | Loop with no exit condition in its header (while(true) / for(;;)) — state the bound
 OVERFIT024 | Maintainability | Warning | Environment-variable name literal — declare it in OverfitEnvironment so every switch has one audit point
+OVERFIT025 | Reliability | Warning | stackalloc over the stack budget in BYTES (default 512 B, per-directory via overfit_max_stackalloc_bytes) — StackOverflowException is uncatchable and kills the host
+OVERFIT026 | Reliability | Warning | stackalloc with a variable element count — its stack cost cannot be read off the line; use a constant, pool it, or pragma with the bound
+OVERFIT027 | Reliability | Warning | async void method or lambda — the exception has no task to surface in and is rethrown on the captured context, killing the host process
+OVERFIT028 | Reliability | Warning | Array length computed by 32-bit multiplication — a positive wrap yields an undersized buffer, not an exception
 OVERFIT900 | Performance | Error | A per-call OVERFIT rule fired inside an [OverfitHotPath] member/type — escalated to a build error

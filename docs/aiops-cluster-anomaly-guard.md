@@ -387,6 +387,27 @@ ReplicaSet. MVP: at least three series, median/MAD, duration, quorum.
 > be **disabled, reporting `Insufficient Data`, when one is unavailable.** Raw per-pod resource comparison is
 > offered only for signals where uneven load cannot explain the deviation (restart count, OOMKilled, readiness).
 
+> **Status: implemented.** `PeerGroupOutlierDetector` in `Sources/Main/Statistics/`, on the §13.10 comparator,
+> 14 tests. Leave-one-out: each member's window against the pooled windows of the others, through
+> `ITwoSampleComparer`. `PeerSignalKind` makes the load precondition structural — a load-sensitive signal
+> submitted without `Work` returns `InsufficientData` instead of guessing. Scratch is pooled; the only
+> allocation is the caller's findings buffer.
+>
+> **A masking bound found while building it, worth stating because it is not obvious.** In a leave-one-out
+> design the effect available to a deviating member is capped by the fraction of clean siblings — roughly
+> **(n − k) / (n − 1)** for *k* deviants among *n* peers. So a **one-sided detector fails silently exactly
+> where it matters most**: with eight of ten pods regressed, each one's effect falls to ~0.11, under any usable
+> threshold, and the group reads as **Healthy** — the §4.1 "silently approves" failure, reappearing inside a
+> detector rather than a decision rule.
+>
+> The fix is to test **both directions**. In that same scenario the two untouched pods stand out sharply
+> *below* their peers, so the group stays visible; and when members deviate on both sides at once, the group
+> has no single norm and the verdict is `Inconclusive` rather than a confident list. What remains genuinely
+> undecidable is **attribution** — a relative method has no external reference, so "eight regressed" and "two
+> are idle" produce identical evidence. The finding therefore states the direction and stops; resolving it
+> needs the workload's own history. **This is the concrete reason peer detection and the trend/baseline
+> detector are complementary rather than alternatives**, and why the MVP ships both.
+
 Post-MVP: DBSCAN over the shape of time windows.
 
 **13.6 EWMA** — smoothing and fast adaptation. Never the sole source of a critical alarm.
@@ -398,6 +419,33 @@ as public options**.
 
 **13.9 Robust slope / Theil–Sen** — memory leaks and trends. Output carries growth rate, period, estimated
 time to limit, confidence and scope.
+
+> **Status: implemented.** `TrendDetector` in `Sources/Main/Statistics/`, 16 tests. Three rank-based pieces,
+> deliberately mirroring the peer detector's gate rather than inventing a second vocabulary: **Theil-Sen**
+> (magnitude — the median of every pairwise slope, so ~29% of the window can be garbage before it breaks),
+> **Mann-Kendall** (significance — the same concordant-minus-discordant machinery as Mann-Whitney, applied
+> against time), **Kendall's tau** (effect size — the direct analogue of Cliff's delta). Pooled scratch, zero
+> GC allocation.
+>
+> **Autocorrelation correction is not optional, and this is the finding worth carrying forward.** Mann-Kendall
+> assumes independent observations; consecutive scrapes of memory or latency are nearly identical. Feeding a
+> correlated series to a test that assumes independence **manufactures significance** — a plain random walk,
+> which by construction has no trend at all, produces a p-value that looks overwhelming. An uncorrected trend
+> detector on real Kubernetes data therefore fires constantly, delivering exactly the alert fatigue §4.2 sells
+> against. The implementation estimates lag-1 autocorrelation on the detrended residuals and inflates the
+> variance by (1+ρ)/(1−ρ) — the AR(1) effective-sample-size factor — reporting ρ on the result so a reader can
+> see how much was discounted. A test pins this: a random walk with ρ > 0.5 must come back `Healthy`.
+>
+> **Two thresholds, because either alone misleads.** Tau measures how *consistent* the movement is — a series
+> creeping up 1% but never once dipping scores near 1.0 and is not worth waking anyone — so a second gate
+> requires the fitted change to reach a fraction of the series' own median across the window. Expressed
+> relatively, one number serves bytes, seconds and counts alike.
+>
+> **Reported honestly:** time-to-limit is projected from the *end* of the window (the observed period has
+> already consumed part of the headroom), is null when the series moves away from the limit, and is null beyond
+> a decade rather than printing a number nobody can act on. A series sitting at zero — error counts, restarts —
+> has no usable relative scale, so the size gate is skipped and the reason says so, instead of dividing by
+> something arbitrarily small.
 
 **13.10 Mann-Whitney U** — for baseline versus canary. Requires minimum samples, effect size, traffic-mix
 validation, `Inconclusive`, multiple-comparison correction and a single-look verdict.
@@ -514,11 +562,11 @@ compared with threshold rules.
 | 3 | 10–15 signals | two packs, not five |
 | 4 | Hard rules | §13.1 |
 | 5 | Rolling median / MAD | zero-inflated signals excluded — §13.2 |
-| 6 | Peer outlier | on the existing comparator, with the work-metric precondition — §13.5, §13.10 |
-| 7 | One change-point / trend detector | Page-Hinkley **or** CUSUM |
+| 6 | Peer outlier | **done** — on the existing comparator, two-sided, work-metric precondition enforced (§13.5) |
+| 7 | One change-point / trend detector | **done** — Theil-Sen + Mann-Kendall, autocorrelation-corrected (§13.9) |
 | 8 | Deployment / ReplicaSet correlation | from labels |
 | 9 | Workload / node grouping | one incident, one dedup key |
-| 10 | Five data statuses | §12 |
+| 10 | Data statuses | **done** — `DetectionStatus`, shared by every detector (§12) |
 | 11 | `/metrics` endpoint | `overfit_anomaly_score` |
 | 12 | Alertmanager webhook | |
 | 13 | CLI `doctor`, `status`, `explain` | |

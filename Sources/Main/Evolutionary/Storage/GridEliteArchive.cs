@@ -91,8 +91,8 @@ namespace DevOnBike.Overfit.Evolutionary.Storage
             _fitness = new float[cellCount];
             Array.Fill(_fitness, float.NegativeInfinity);
 
-            _parameters = new float[cellCount * _parameterCount];
-            _descriptors = new float[cellCount * DescriptorDimensions];
+            _parameters = new float[(long)cellCount * _parameterCount];
+            _descriptors = new float[(long)cellCount * DescriptorDimensions];
             _occupiedCells = new int[cellCount];
 
             _occupiedCount = 0;

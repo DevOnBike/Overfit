@@ -559,7 +559,14 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         // ── Adaptive speculative gating state (see GenerateSpeculative) ──
         private const double SpecGateThreshold = 3.0;  // committed-per-verify break-even ≈ 3.5; gate below it
         private const double SpecEmaAlpha = 0.5;       // EMA responsiveness — fast so it gates after a few rejects
-        private const int SpecProbeInterval = 64;      // while gated, draft once every N steps to re-detect echo
+        private const int SpecProbeInterval = 64;
+
+        /// <summary>
+        /// Hard ceiling on the speculative-decode draft length. It exists to bound a <c>stackalloc</c>: without
+        /// it a caller-supplied draft length reaches the stack unchecked, which turns a tuning knob into a
+        /// StackOverflowException. 64 ints is 256 B, and no useful draft is anywhere near that long.
+        /// </summary>
+        private const int MaxSpeculativeDraft = 64;      // while gated, draft once every N steps to re-detect echo
         private double _specAcceptEma;                 // start pessimistic (0 → gated): single-token until a probe
                                                        // proves drafting pays. Novel text (chat) stays ≈ 1× — one
                                                        // probe per SpecProbeInterval; repetitive text ramps up fast.
@@ -700,7 +707,19 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             }
 
             var dn = 0;
+
+            // maxDraft reached the stack unvalidated: a caller passing a large value would have turned a
+            // speculative-decode knob into a stack overflow. Bounded explicitly, which also makes the
+            // allocation below provably small (64 ints = 256 B, inside the OVERFIT025 budget).
+            if (maxDraft is < 1 or > MaxSpeculativeDraft)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(maxDraft), maxDraft, $"maxDraft must be in [1, {MaxSpeculativeDraft}].");
+            }
+
+#pragma warning disable OVERFIT026 // BOUND: maxDraft is validated to [1, MaxSpeculativeDraft] directly above.
             Span<int> draft = stackalloc int[maxDraft];
+#pragma warning restore OVERFIT026
             if (drafter is not null)
             {
                 // Draft-MODEL path: always propose (a model predicts, so the echo-detection gate doesn't

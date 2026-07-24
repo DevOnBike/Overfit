@@ -105,7 +105,9 @@ namespace DevOnBike.Overfit.Ops
 
         private static void SiLUForwardSimd(ReadOnlySpan<float> input, Span<float> output)
         {
+#pragma warning disable OVERFIT025 // 4 KB activation tile. Eight times the OVERFIT025 budget, kept deliberately: GeluTile / SiLUTile are cache-blocking constants on a measured hot path, so shrinking them or pooling them is a PERFORMANCE change needing an A/B, not a cleanup. Signed here rather than hidden in a directory budget, so new code in Ops/ is still checked.
             Span<float> sBuf = stackalloc float[SiLUTile];
+#pragma warning restore OVERFIT025
 
             var len = input.Length;
             for (var offset = 0; offset < len; offset += SiLUTile)
@@ -127,8 +129,10 @@ namespace DevOnBike.Overfit.Ops
             ReadOnlySpan<float> gradOutput,
             Span<float> gradInput)
         {
+#pragma warning disable OVERFIT025 // 4 KB activation tile. Eight times the OVERFIT025 budget, kept deliberately: GeluTile / SiLUTile are cache-blocking constants on a measured hot path, so shrinking them or pooling them is a PERFORMANCE change needing an A/B, not a cleanup. Signed here rather than hidden in a directory budget, so new code in Ops/ is still checked.
             Span<float> sBuf = stackalloc float[SiLUTile];
             Span<float> tmpBuf = stackalloc float[SiLUTile];
+#pragma warning restore OVERFIT025
 
             var len = input.Length;
             for (var offset = 0; offset < len; offset += SiLUTile)

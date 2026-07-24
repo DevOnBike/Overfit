@@ -85,7 +85,7 @@ namespace DevOnBike.Overfit.Anomalies.Gpt
         /// </summary>
         public int[] EncodeSequence(IReadOnlyList<MetricSnapshot> snapshots)
         {
-            var tokens = new int[snapshots.Count * TokensPerSnapshot];
+            var tokens = new int[(long)snapshots.Count * TokensPerSnapshot];
             for (var i = 0; i < snapshots.Count; i++)
             {
                 EncodeSnapshot(snapshots[i], tokens, i * TokensPerSnapshot);

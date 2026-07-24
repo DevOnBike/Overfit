@@ -75,7 +75,7 @@ namespace DevOnBike.Overfit.LanguageModels.Skills.Evaluation
             var variance = (discordant - ((double)delta * delta / n)) / (n * n);
             var half = Z95 * Math.Sqrt(Math.Max(variance, 0.0));
             var p = McNemarPValue(helped, hurt);
-            
+
             return new LiftSignificance(
                 lift,
                 Math.Clamp(lift - half, -1.0, 1.0),
@@ -97,21 +97,21 @@ namespace DevOnBike.Overfit.LanguageModels.Skills.Evaluation
             {
                 // Continuity-corrected normal approximation; only for absurdly large evals.
                 var z = (Math.Abs(helped - hurt) - 1.0) / Math.Sqrt(n);
-                
+
                 return Math.Clamp(Erfc(Math.Max(z, 0.0) / Math.Sqrt(2.0)), 0.0, 1.0);
             }
 
             // Walk the PMF by ratio from PMF(0) = 0.5^n — no factorials, no overflow.
             var pmf = Math.Pow(0.5, n);
             var tail = 0.0;
-            
+
             for (var i = 0; i <= n; i++)
             {
                 if (i >= k)
                 {
                     tail += pmf;
                 }
-                
+
                 pmf = pmf * (n - i) / (i + 1);
             }
 
@@ -137,7 +137,7 @@ namespace DevOnBike.Overfit.LanguageModels.Skills.Evaluation
             poly = 1.00002368 + (t * poly);
 
             var ans = t * Math.Exp((-z * z) - 1.26551223 + (t * poly));
-            
+
             return x >= 0.0 ? ans : 2.0 - ans;
         }
     }

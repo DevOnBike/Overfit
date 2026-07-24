@@ -69,7 +69,10 @@ namespace DevOnBike.Overfit.Server.AspNet.Services
         }
 
         public ModelsResponse ListModels()
-            => new() { Data = [new ModelInfo { Id = _modelName, Created = _created }] };
+            => new()
+            {
+                Data = [new ModelInfo { Id = _modelName, Created = _created }]
+            };
 
         public PoolStatus PoolStatus
         {

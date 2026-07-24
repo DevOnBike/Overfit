@@ -3,10 +3,10 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using DevOnBike.Overfit.Runtime;
 using BenchmarkDotNet.Attributes;
 using DevOnBike.Overfit.Inference;
 using DevOnBike.Overfit.Onnx;
+using DevOnBike.Overfit.Runtime;
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
 

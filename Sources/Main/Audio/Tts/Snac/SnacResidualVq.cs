@@ -52,7 +52,7 @@ namespace DevOnBike.Overfit.Audio.Tts.Snac
             ReadOnlySpan<float> zE, int dim, int time, ReadOnlySpan<float> codebook, int codebookSize, Span<int> indices)
         {
             // Pre-normalize codebook rows once (matches torch F.normalize, eps 1e-12).
-            var normalized = new float[codebookSize * dim];
+            var normalized = new float[(long)codebookSize * dim];
             for (var c = 0; c < codebookSize; c++)
             {
                 double ss = 0.0;

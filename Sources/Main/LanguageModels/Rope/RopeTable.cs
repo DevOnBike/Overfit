@@ -66,8 +66,8 @@ namespace DevOnBike.Overfit.LanguageModels.Rope
 
             _halfDim = headDimension / 2;
 
-            _cos = new float[maxSequenceLength * _halfDim];
-            _sin = new float[maxSequenceLength * _halfDim];
+            _cos = new float[(long)maxSequenceLength * _halfDim];
+            _sin = new float[(long)maxSequenceLength * _halfDim];
 
             Precompute();
         }

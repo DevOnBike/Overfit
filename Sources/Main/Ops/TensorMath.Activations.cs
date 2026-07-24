@@ -87,7 +87,9 @@ namespace DevOnBike.Overfit.Ops
             var ogS = output.GradView.AsReadOnlySpan();
             var igS = input.GradView.AsSpan();
 
+#pragma warning disable OVERFIT025 // 4 KB activation tile. Eight times the OVERFIT025 budget, kept deliberately: GeluTile / SiLUTile / StackAllocThreshold are cache-blocking constants on a measured hot path, so shrinking them or moving them to the pool is a PERFORMANCE change and needs an A/B, not a cleanup pass. Signed here rather than hidden in a directory budget so new code in Ops/ is still checked.
             Span<float> buffer = stackalloc float[StackAllocThreshold];
+#pragma warning restore OVERFIT025
 
             for (var i = 0; i < igS.Length; i += StackAllocThreshold)
             {
@@ -128,7 +130,9 @@ namespace DevOnBike.Overfit.Ops
             var ogS = output.GradView.AsReadOnlySpan();
             var igS = input.GradView.AsSpan();
 
+#pragma warning disable OVERFIT025 // 4 KB activation tile. Eight times the OVERFIT025 budget, kept deliberately: GeluTile / SiLUTile / StackAllocThreshold are cache-blocking constants on a measured hot path, so shrinking them or moving them to the pool is a PERFORMANCE change and needs an A/B, not a cleanup pass. Signed here rather than hidden in a directory budget so new code in Ops/ is still checked.
             Span<float> buffer = stackalloc float[StackAllocThreshold];
+#pragma warning restore OVERFIT025
 
             for (var i = 0; i < igS.Length; i += StackAllocThreshold)
             {

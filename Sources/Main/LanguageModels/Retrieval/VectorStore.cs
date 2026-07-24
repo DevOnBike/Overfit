@@ -33,9 +33,11 @@ namespace DevOnBike.Overfit.LanguageModels.Retrieval
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(initialCapacity);
 
             Dimension = dimension;
+#pragma warning disable OVERFIT028 // BOUND: the 64-bit product on the line above is compared against int.MaxValue first, so the 32-bit one below is only evaluated when it provably cannot wrap.
             _vectors = new float[(long)initialCapacity * dimension <= int.MaxValue
                 ? initialCapacity * dimension
                 : throw new ArgumentOutOfRangeException(nameof(initialCapacity))];
+#pragma warning restore OVERFIT028
             _ids = new string[initialCapacity];
             _payloads = new string?[initialCapacity];
         }

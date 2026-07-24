@@ -99,7 +99,7 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints.Regex
                 }
             }
 
-            var flat = new int[transitions.Count * Alphabet];
+            var flat = new int[(long)transitions.Count * Alphabet];
             for (var s = 0; s < transitions.Count; s++)
             {
                 transitions[s].AsSpan().CopyTo(flat.AsSpan(s * Alphabet, Alphabet));

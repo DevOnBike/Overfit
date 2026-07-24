@@ -310,7 +310,7 @@ namespace DevOnBike.Overfit.LanguageModels
             ArgumentNullException.ThrowIfNull(text);
 
             // Byte-level BPE can emit up to ~4 tokens per char (multi-byte UTF-8), so size the scratch generously.
-            var buffer = new int[text.Length * 4 + 16];
+            var buffer = new int[((long)text.Length * 4) + 16];
             var count = _tokenizer.Encode(text, buffer);
             if (count <= 0)
             {

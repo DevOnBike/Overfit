@@ -390,11 +390,13 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
             // Per-column accumulator state, hoisted out of the group loop (stackalloc-in-loop = CA2014). Reset
             // per output-group / per-block below. cols <= MaxTileCols keeps this a small bounded frame.
+#pragma warning disable OVERFIT026 // BOUND: cols is validated to [1, MaxTileCols=16] by the throw at the top of this method. Worst case 5 spans x 16 x 32 B = 2560 B.
             Span<Vector256<float>> accRow = stackalloc Vector256<float>[cols];
             Span<Vector256<float>> accMin = stackalloc Vector256<float>[cols];
             Span<Vector256<int>> iaccB = stackalloc Vector256<int>[cols];
             Span<Vector256<int>> iaccMinB = stackalloc Vector256<int>[cols];
             Span<Vector256<short>> q8s = stackalloc Vector256<short>[cols];
+#pragma warning restore OVERFIT026
 
             var m4b = Vector256.Create((byte)0x0F);
             var deltamask = Vector128.Create((byte)0, 1, 8, 9, 2, 3, 10, 11, 4, 5, 12, 13, 6, 7, 14, 15);
@@ -635,11 +637,13 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             var nb = inputSize / 256;
             var pairs = (cols + 1) / 2;
 
+#pragma warning disable OVERFIT026 // BOUND: pairs = (cols + 1) / 2 and cols is validated to [1, MaxTileCols=16] above, so pairs <= 8. Worst case 5 spans x 8 x 64 B = 2560 B.
             Span<Vector512<float>> accRow = stackalloc Vector512<float>[pairs];
             Span<Vector512<float>> accMin = stackalloc Vector512<float>[pairs];
             Span<Vector512<int>> iaccB = stackalloc Vector512<int>[pairs];
             Span<Vector512<int>> iaccMinB = stackalloc Vector512<int>[pairs];
             Span<Vector512<short>> q8s = stackalloc Vector512<short>[pairs];
+#pragma warning restore OVERFIT026
 
             var m4b = Vector512.Create((byte)0x0F);
             var deltamask = Vector128.Create((byte)0, 1, 8, 9, 2, 3, 10, 11, 4, 5, 12, 13, 6, 7, 14, 15);

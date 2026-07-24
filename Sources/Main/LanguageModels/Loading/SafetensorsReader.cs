@@ -5,6 +5,7 @@
 
 using System.Buffers.Binary;
 using System.Text.Json;
+using DevOnBike.Overfit.Tensors;
 
 namespace DevOnBike.Overfit.LanguageModels.Loading
 {
@@ -166,9 +167,12 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         // ─── F32 / F16 / BF16 streaming dequant (little-endian) ────────────
         private void ReadF32(Span<float> dst, long count)
         {
-            // 4 KiB-element chunks keep the scratch small and AOT-friendly.
+            // 4 KiB of scratch: pooled rather than stack-allocated (OVERFIT025 budgets the stack at
+            // 512 B). This is a per-tensor load path that already blocks on stream reads, so a rent is
+            // free here — the stack was never buying anything.
             const int chunk = 1024;
-            Span<byte> buf = stackalloc byte[chunk * 4];
+            using var scratch = new PooledBuffer<byte>(chunk * 4, clearMemory: false);
+            var buf = scratch.Span;
             var done = 0L;
             while (done < count)
             {
@@ -187,7 +191,8 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         private void ReadF16(Span<float> dst, long count)
         {
             const int chunk = 2048;
-            Span<byte> buf = stackalloc byte[chunk * 2];
+            using var scratch = new PooledBuffer<byte>(chunk * 2, clearMemory: false);
+            var buf = scratch.Span;
             var done = 0L;
             while (done < count)
             {
@@ -207,7 +212,8 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         {
             // bfloat16 is the upper 16 bits of an IEEE-754 float32.
             const int chunk = 2048;
-            Span<byte> buf = stackalloc byte[chunk * 2];
+            using var scratch = new PooledBuffer<byte>(chunk * 2, clearMemory: false);
+            var buf = scratch.Span;
             var done = 0L;
             while (done < count)
             {
