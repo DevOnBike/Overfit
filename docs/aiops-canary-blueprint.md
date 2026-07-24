@@ -7,6 +7,13 @@
 > **The load-bearing parts are §3 and §4.** §3 replaces the original vision's statistics (Z-score), which are
 > the wrong tool. §4 lists decision-logic holes found on a second pass — including one that makes the engine
 > **silently approve a bad deploy**, which is the most expensive failure an auto-rollback tool can have.
+>
+> **Superseded as a standalone product, retained as the engine.**
+> [`aiops-cluster-anomaly-guard.md`](aiops-cluster-anomaly-guard.md) reframes this work as **Compare**, one
+> mode of a broader Prometheus-native anomaly-detection product that leads with cluster **Watch**. That
+> document owns the product strategy, the market read, the MVP and the go-to-market; **this one remains
+> authoritative for the statistics and the decision logic** (§3, §4), which Watch's peer-group outlier detector
+> reuses unchanged.
 
 An **Edge AIOps** engine that runs 100% on-premise inside the customer's Kubernetes cluster and performs
 **automated canary analysis** in real time — judging whether a new app version is stable versus the old one,
