@@ -78,8 +78,66 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             stream.ReadExactly(headerBytes);
 
             var (tensors, metadata) = ParseHeader(headerBytes);
+
+            RequireTensorsFitInTheDataBlock(tensors, stream.Length - _dataStart);
+
             Tensors = tensors;
             Metadata = metadata;
+        }
+
+        /// <summary>
+        /// Refuses a header whose tensor extents the file cannot contain.
+        ///
+        /// <para>The two checks that already existed compare declared numbers <i>against each other</i> — the
+        /// JSON header length against the file, and each byte range against its own dtype and shape. Neither
+        /// asks whether the byte range exists. A header naming a tensor over bytes [0, 4 TB) with a shape that
+        /// agrees is internally consistent and physically impossible, and it passes both.</para>
+        ///
+        /// <para>That is worth catching here rather than later because <see cref="ElementCount"/> is what a
+        /// caller sizes its buffer from — this class's own documentation shows
+        /// <c>new float[info.ElementCount]</c>. Reporting a trillion elements for a 200-byte file hands the
+        /// allocation to the caller, which is a worse place for it to fail.</para>
+        /// </summary>
+        private static void RequireTensorsFitInTheDataBlock(
+            IReadOnlyDictionary<string, SafetensorsTensorInfo> tensors,
+            long dataBlockLength)
+        {
+            foreach (var (name, info) in tensors)
+            {
+                foreach (var dimension in info.Shape)
+                {
+                    if (dimension < 0)
+                    {
+                        throw new OverfitFormatException(
+                            $"Tensor '{name}' declares a negative shape dimension ({dimension}).");
+                    }
+                }
+
+                if (info.Begin < 0 || info.End < info.Begin)
+                {
+                    throw new OverfitFormatException(
+                        $"Tensor '{name}' declares the byte range [{info.Begin}, {info.End}), which is not a "
+                        + "forward range starting at or after the data block.");
+                }
+
+                if (info.End > dataBlockLength)
+                {
+                    throw new OverfitFormatException(
+                        $"Tensor '{name}' declares bytes [{info.Begin}, {info.End}) but the data block holds "
+                        + $"only {dataBlockLength}. The file is truncated or corrupt.");
+                }
+
+                // Ties the element count to the byte range at header time rather than at first load. This also
+                // catches a shape whose product overflowed Int64: a wrapped count will not match the range.
+                var expectedBytes = info.ElementCount * BytesPerElement(info.DType);
+
+                if (expectedBytes != info.End - info.Begin)
+                {
+                    throw new OverfitFormatException(
+                        $"Tensor '{name}' declares {info.ElementCount} {info.DType} elements "
+                        + $"({expectedBytes} B) but a byte range of {info.End - info.Begin}.");
+                }
+            }
         }
 
         /// <summary>Tensor name → dtype / shape / byte range (offsets relative to the data block).</summary>

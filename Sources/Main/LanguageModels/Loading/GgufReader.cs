@@ -555,10 +555,14 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                     {
                         var elemType = (GgufValueType)_reader.ReadUInt32();
                         var count = _reader.ReadUInt64();
-                        if (count > int.MaxValue)
-                        {
-                            throw new OverfitFormatException("Array too large.");
-                        }
+
+                        // int.MaxValue is not a bound — it still permits a two-billion-element object[], 16 GB
+                        // of references, out of a forty-byte file. This is also the count that feeds the
+                        // tokenizer: `tokenizer.ggml.tokens` is one array entry per vocabulary item. The
+                        // smallest element type occupies one byte on disk, so the file's own remaining length
+                        // is the real limit.
+                        RequireDeclaredCountFitsInFile(count, 1, "array element");
+
                         var arr = new object[(int)count];
                         for (var i = 0; i < arr.Length; i++)
                         {

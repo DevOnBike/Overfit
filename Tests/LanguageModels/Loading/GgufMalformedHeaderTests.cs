@@ -32,7 +32,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
     {
         private const uint GgufMagic = 0x46554747; // "GGUF"
         private const uint SupportedVersion = 3;
+        private const uint Uint8Type = 0;
         private const uint Uint32Type = 4;
+        private const uint ArrayType = 9;
 
         /// <summary>A header claiming <paramref name="metaCount"/> metadata entries and
         /// <paramref name="tensorCount"/> tensors, while supplying none of either.</summary>
@@ -110,6 +112,35 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
                 w.Write(name);
 
                 w.Write(500_000_000u);  // declared dimension count
+            }
+
+            using var stream = new MemoryStream(ms.ToArray());
+
+            Assert.Throws<OverfitFormatException>(() => new GgufReader(stream));
+        }
+
+        [Fact]
+        public void MetadataArrayCountLargerThanTheFile_IsRefused_NotAllocated()
+        {
+            // The element count of an array *value* is a separate number from the KV count checked above, and
+            // it is the one that feeds the tokenizer: `tokenizer.ggml.tokens` is a string array with one entry
+            // per vocabulary item. A count of two billion asks for a two-billion-element object[] — 16 GB of
+            // references — out of ~40 bytes of file.
+            using var ms = new MemoryStream();
+            using (var w = new BinaryWriter(ms, Encoding.UTF8, leaveOpen: true))
+            {
+                w.Write(GgufMagic);
+                w.Write(SupportedVersion);
+                w.Write(0ul);   // tensor count
+                w.Write(1ul);   // metadata kv count
+
+                var key = "tokenizer.ggml.tokens"u8.ToArray();
+                w.Write((ulong)key.Length);
+                w.Write(key);
+
+                w.Write(ArrayType);
+                w.Write(Uint8Type);         // element type
+                w.Write(2_000_000_000ul);   // element count
             }
 
             using var stream = new MemoryStream(ms.ToArray());
