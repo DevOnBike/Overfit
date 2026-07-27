@@ -742,7 +742,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             _stream.Seek(_dataStart + (long)info.Offset + startBlock * blockBytes, SeekOrigin.Begin);
 
             var nBlocks = dst.Length / blockElems;
-#pragma warning disable OVERFIT026 // BOUND: blockBytes comes from the GGML block-size table, whose largest entry is Q6_K at 210 B. It is never read from the file, so a malformed model cannot widen it.
+#pragma warning disable OVERFIT026 // BOUND: the switch above assigns blockBytes only from Q5_0 (22 B) or Q5_K (176 B) and throws on anything else, so 176 B is the worst case. The value is a compile-time constant per branch, never read from the file, so a malformed model cannot widen it.
             Span<byte> buf = stackalloc byte[blockBytes];
 #pragma warning restore OVERFIT026
             for (var b = 0; b < nBlocks; b++)

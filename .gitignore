@@ -275,6 +275,14 @@ out_temp/
 # Claude Code per-user overrides
 .claude/settings.local.json
 
+# Claude Code scratch — run.py is rewritten for every command (see CLAUDE.md), so its contents are
+# never meaningful history, and the logs are process output. Everything else under .claude/ IS project
+# configuration and belongs in the repo: settings.json (the permission allow-list that makes the run.py
+# convention work), commands/, agents/, skills/.
+.claude/run*.py
+.claude/run*.ps1
+.claude/*.log
+
 # models
 *.bin
 

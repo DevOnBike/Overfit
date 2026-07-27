@@ -66,9 +66,15 @@ dotnet publish ./Tests/AotSmokeTest/AotSmokeTest.csproj -c Release -r linux-x64 
 .\cleanup.cmd                                                    # purge bin/obj/.vs caches
 ```
 
-The `Benchmark` Program.cs has a single `BenchmarkRunner.Run<…>` line at the
-bottom — most benchmarks are commented out; uncomment the one you want or use
-the `--filter` CLI form.
+`Benchmark/Program.cs` uses `BenchmarkSwitcher.FromAssembly(...)`, so the standard BenchmarkDotNet CLI
+works end to end — select a class with `--filter`, or pass nothing for the interactive picker.
+
+**Only one benchmark process may run at a time, and this is enforced.** `Program.cs` takes a `Global\`
+named mutex and a second process **exits with code 2** rather than queueing. Two concurrent runs do not
+produce two results, they produce two wrong ones: they compete for cores, L3, memory bandwidth and the
+same thermal budget — the exact set of things every measurement here is trying to hold still. If you see
+exit code 2, something else is measuring; don't start a competing run and don't build anything until it
+finishes.
 
 Python conversion scripts (run from `Scripts/`) need a local Python with
 `torch`, `transformers`, `huggingface_hub`, `numpy`:
@@ -77,6 +83,34 @@ Python conversion scripts (run from `Scripts/`) need a local Python with
 python Scripts/convert_gpt2.py --size small --out Tests/test_fixtures/
 python Scripts/convert_gguf.py ...
 ```
+
+## How Claude runs those commands here (`.claude/run.py`)
+
+The commands above are what a **human** types. Claude does not type them directly — **every shell command
+goes into `.claude/run.py` and is executed as the single invocation `python D:/Overfit/.claude/run.py`.**
+
+This is a friction rule, not a style preference. `.claude/settings.json` allow-lists exactly that one
+command plus `Write`/`Edit` on `run.py`, so a whole build-test-measure cycle costs zero permission
+prompts. Ad-hoc shell commands re-prompt every time and turn a ten-step task into ten interruptions.
+
+Practical consequences, each of which has already gone wrong at least once:
+
+- **Env vars for an A/B go through `env=` in `subprocess.run`**, never as a shell prefix. A prefix does
+  not survive the way these commands are invoked, and the arm you thought you were toggling runs
+  identical to the other one.
+- **`run.py` is scratch.** It is rewritten for each task and is gitignored — never put anything in it
+  that needs to survive, and never treat its current contents as documentation of anything.
+- **Filter the output in Python, not with `grep`/`sed`.** `dotnet build` on this solution emits far more
+  than fits in a reply; print only errors, the diagnostics you asked for, and the test summary line. When
+  a test fails, print the **test name** — twice now a real failure has been lost because the filter kept
+  only the summary.
+- **Watch the quoting.** Long scripts belong in `run.py` written with `Write`, not squeezed into
+  `python -c` — backticks, `$`, `\` and regex character classes get eaten by the shell on the way in.
+
+Repeatable versions of the three most common cycles live in `.claude/commands/` — `/check` (build + full
+suite), `/bench <filter>` (benchmark + the measurement traps to check before believing the number), and
+`/sweep <OVERFIT0xx>` (inventory every site an analyzer rule flags). `.claude/agents/` holds two
+read-only reviewers with their own context: `overfit-reviewer` and `perf-claim-auditor`.
 
 ## Native-AOT discipline (this is the trip-wire)
 
