@@ -153,17 +153,40 @@ namespace DevOnBike.Overfit.Onnx.Protobuf
         /// <summary>
         /// Reads length-delimited bytes (returns slice, no copy).
         /// </summary>
-        public ReadOnlySpan<byte> ReadBytes()
+        /// <summary>
+        /// Reads a length-delimited field's length and proves it fits in what is left of the buffer.
+        ///
+        /// <para><b>The check has to happen in 64 bits, before the cast.</b> A protobuf length is a varint, so
+        /// a crafted file can declare one whose low 32 bits are negative. Casting first and testing
+        /// <c>_pos + len &gt; _data.Length</c> afterwards passes trivially — adding a negative number never
+        /// exceeds the limit — and the caller then moves the read position <i>backwards</i>. Chosen so the
+        /// rewind cancels the bytes just consumed, that turns the parse loop into a permanent one: no
+        /// exception, no crash, just a process that stops responding. Comparing the raw <c>ulong</c> against
+        /// the remaining bytes closes both the negative case and the overflow case at once, and makes the
+        /// subsequent cast provably safe.</para>
+        /// </summary>
+        private int ReadLength()
         {
-            var len = (int)ReadVarint();
+            var declared = ReadVarint();
+            var remaining = (ulong)(_data.Length - _pos);
 
-            if (_pos + len > _data.Length)
+            if (declared > remaining)
             {
-                throw new OverfitFormatException($"Length-delimited field exceeds buffer ({len} bytes at pos {_pos}, total {_data.Length}).");
+                throw new OverfitFormatException(
+                    $"Length-delimited field declares {declared} bytes at position {_pos}, but only "
+                    + $"{remaining} of {_data.Length} remain. The model is truncated or corrupt.");
             }
 
+            return (int)declared;
+        }
+
+        public ReadOnlySpan<byte> ReadBytes()
+        {
+            var len = ReadLength();
             var slice = _data.Slice(_pos, len);
+
             _pos += len;
+
             return slice;
         }
 
@@ -191,12 +214,16 @@ namespace DevOnBike.Overfit.Onnx.Protobuf
                     _pos += 8;
                     break;
                 case WireType.LengthDelimited:
-                    var len = (int)ReadVarint();
-                    if (_pos + len > _data.Length)
-                    {
-                        throw new OverfitFormatException("Unexpected end skipping length-delimited.");
-                    }
-                    _pos += len;
+                    // Shares ReadLength with ReadBytes deliberately: this is the branch a negative length
+                    // turned into an endless loop, and a second copy of the bound is a second chance to get
+                    // it wrong.
+                    //
+                    // Two statements, not `_pos += ReadLength()`. Compound assignment evaluates its target
+                    // first, so the compressed form would read _pos, then let ReadLength advance it past the
+                    // varint, then overwrite that advance with the stale value — silently losing the length
+                    // prefix and desynchronising the whole parse.
+                    var skip = ReadLength();
+                    _pos += skip;
                     break;
                 case WireType.Fixed32:
                     if (_pos + 4 > _data.Length)

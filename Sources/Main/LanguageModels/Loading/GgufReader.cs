@@ -89,6 +89,14 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             var tensorCount = _reader.ReadUInt64();
             var metaCount = _reader.ReadUInt64();
 
+            // Both counts are attacker-controlled — a .gguf is a file the user downloads — and both are used
+            // to size a dictionary before a single entry has been read. Unvalidated, a 24-byte file declaring
+            // a billion entries costs seconds and gigabytes on a large machine and an OutOfMemoryException on
+            // a small one. The bound is exact and cheap: an entry cannot be smaller than its own fixed fields,
+            // so the declared count can never exceed the bytes left in the file divided by that minimum.
+            RequireDeclaredCountFitsInFile(metaCount, MinMetadataEntryBytes, "metadata KV");
+            RequireDeclaredCountFitsInFile(tensorCount, MinTensorInfoBytes, "tensor info");
+
             // ─── Metadata KVs ──────────────────────────────────────────────
             var meta = new Dictionary<string, object>((int)metaCount);
             for (var i = 0UL; i < metaCount; i++)
@@ -105,6 +113,11 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             {
                 var name = ReadString();
                 var nDims = _reader.ReadUInt32();
+
+                // Same reasoning as the counts above: each dimension is 8 bytes on disk, so a declared
+                // dimension count larger than the remaining file is impossible and must not size an array.
+                RequireDeclaredCountFitsInFile(nDims, sizeof(ulong), "tensor dimension");
+
                 var dims = new ulong[nDims];
                 for (var d = 0; d < nDims; d++)
                 {
@@ -430,6 +443,48 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
 
         // ─── Private I/O helpers ─────────────────────────────────────────────
 
+        /// <summary>
+        /// Smallest possible on-disk size of one metadata key/value pair: an 8-byte key length, a zero-length
+        /// key, a 4-byte value type, and at least one byte of value.
+        /// </summary>
+        private const int MinMetadataEntryBytes = 13;
+
+        /// <summary>
+        /// Smallest possible on-disk size of one tensor-info entry: an 8-byte name length, a zero-length name,
+        /// a 4-byte dimension count, a 4-byte type and an 8-byte offset.
+        /// </summary>
+        private const int MinTensorInfoBytes = 24;
+
+        /// <summary>
+        /// Refuses a count declared in the header that the rest of the file cannot possibly contain, before
+        /// that count is used to size anything.
+        ///
+        /// <para>This is the whole defence against a hostile or truncated model file turning a length field
+        /// into an allocation: every element costs at least <paramref name="minBytesPerElement"/> bytes on
+        /// disk, so a count above <c>remaining / minBytesPerElement</c> is a lie the file cannot back up.
+        /// Refusing here keeps the failure a catchable <see cref="OverfitFormatException"/> in the loader
+        /// rather than a multi-gigabyte allocation inside whichever application embeds the engine.</para>
+        /// </summary>
+        private void RequireDeclaredCountFitsInFile(ulong declared, int minBytesPerElement, string what)
+        {
+            var remaining = _stream.Length - _stream.Position;
+
+            if (remaining < 0)
+            {
+                remaining = 0;
+            }
+
+            var maximum = (ulong)remaining / (ulong)minBytesPerElement;
+
+            if (declared > maximum)
+            {
+                throw new OverfitFormatException(
+                    $"GGUF header declares {declared} {what} entries, but only {remaining} bytes remain in the "
+                    + $"file — at {minBytesPerElement} B per entry at minimum, at most {maximum} can exist. "
+                    + "The file is truncated or corrupt.");
+            }
+        }
+
         private string ReadString()
         {
             var n = _reader.ReadUInt64();
@@ -437,6 +492,11 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             {
                 throw new OverfitFormatException($"String length {n} exceeds int.MaxValue.");
             }
+
+            // A declared string length is an allocation request from the file. `int.MaxValue` is not a bound —
+            // a 32-byte file may not ask for 100 MB — so it is checked against what the file actually holds.
+            RequireDeclaredCountFitsInFile(n, 1, "string byte");
+
             var bytes = _reader.ReadBytes((int)n);
             return Encoding.UTF8.GetString(bytes);
         }

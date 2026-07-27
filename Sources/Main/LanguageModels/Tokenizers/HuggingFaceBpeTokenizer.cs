@@ -286,6 +286,44 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
 
         // ── tokenizer.json parsing ──────────────────────────────────────────
 
+        /// <summary>
+        /// Holes tolerated between the highest token id and the number of tokens that actually exist.
+        ///
+        /// <para>The decoder is a flat array indexed by token id, so its length is decided by the largest id
+        /// in the file — which is not a length and is therefore bounded by nothing about the file's size. A
+        /// two-entry <c>tokenizer.json</c> naming id 2 000 000 000 asks for a two-billion-element
+        /// <c>string[]</c>: 16 GB of references, from a few dozen bytes of JSON, and on a large machine it
+        /// <b>succeeds silently</b> rather than failing.</para>
+        ///
+        /// <para>Real vocabularies are dense. The gap comes from added/reserved tokens sitting just past the
+        /// base vocabulary — Llama-3 reserves 256, Qwen-2.5 about 293 — so 65 536 is roughly two orders of
+        /// magnitude of headroom over anything observed, while still bounding a hostile file to a 512 KB
+        /// table. The array stays flat: this is a validation, not a change to the decode hot path.</para>
+        /// </summary>
+        private const int MaxDecoderHoles = 65_536;
+
+        /// <summary>
+        /// Refuses a decoder table whose size is driven by an id far beyond the tokens the file actually
+        /// contains — see <see cref="MaxDecoderHoles"/> for why that is the right thing to bound.
+        /// </summary>
+        private static void RequireDecoderTableIsPlausible(int maxId, int tokenCount, string section)
+        {
+            if (maxId < 0)
+            {
+                throw new OverfitFormatException(
+                    $"tokenizer.json '{section}' contains a negative token id ({maxId}).");
+            }
+
+            if (maxId - tokenCount > MaxDecoderHoles)
+            {
+                throw new OverfitFormatException(
+                    $"tokenizer.json '{section}' declares token id {maxId} but holds only {tokenCount} "
+                    + $"tokens, which would size the decoder table at {(long)maxId + 1} entries for "
+                    + $"{tokenCount} of them. More than {MaxDecoderHoles} unused ids means the file is "
+                    + "corrupt, not merely sparse.");
+            }
+        }
+
         private static Dictionary<string, int> ReadVocab(JsonElement vocabJson, out string[] decoder)
         {
             var vocab = new Dictionary<string, int>();
@@ -299,6 +337,8 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
                     maxId = id;
                 }
             }
+            RequireDecoderTableIsPlausible(maxId, vocab.Count, "vocab");
+
             decoder = new string[maxId + 1];
             foreach (var kv in vocab)
             {
@@ -355,6 +395,8 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
 
                 if (id >= decoder.Length)
                 {
+                    RequireDecoderTableIsPlausible(id, decoder.Length, "added_tokens");
+
                     var extended = new string[id + 1];
 
                     decoder.AsSpan().CopyTo(extended);
