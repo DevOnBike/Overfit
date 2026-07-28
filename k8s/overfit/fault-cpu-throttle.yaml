@@ -1,0 +1,69 @@
+# A deliberately degraded fourth replica, for exercising the anomaly detectors against a real fault.
+#
+# It carries the same `app.kubernetes.io/name: overfit-server` label as the healthy Deployment, so the
+# Service and the ServiceMonitor pick it up and it lands in the same peer group — which is the point. The
+# only difference from its siblings is a hard CPU limit.
+#
+# Why a CPU limit rather than, say, a memory limit: an OOMKill shows up as a restart, and restarts are a
+# load-independent signal that any detector catches trivially. CFS throttling is the harder and more
+# interesting case — the pod stays up, stays ready, serves every request correctly, and is simply slower.
+# Nothing about its liveness says anything is wrong.
+#
+#   kubectl apply -f fault-cpu-throttle.yaml     inject
+#   kubectl delete -f fault-cpu-throttle.yaml    remove
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: overfit-server-degraded
+  namespace: overfit
+  labels:
+    app.kubernetes.io/name: overfit-server
+    overfit.dev/fault: cpu-throttle
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: overfit-server
+      overfit.dev/fault: cpu-throttle
+  template:
+    metadata:
+      labels:
+        # Both labels: the first puts it in the peer group, the second lets queries and cleanup single it out.
+        app.kubernetes.io/name: overfit-server
+        overfit.dev/fault: cpu-throttle
+    spec:
+      containers:
+        - name: overfit
+          image: overfit:latest
+          imagePullPolicy: Never
+          args:
+            - /models/qwen0.5b.q4km.gguf
+          ports:
+            - name: http
+              containerPort: 8080
+          volumeMounts:
+            - name: models
+              mountPath: /models
+              readOnly: true
+          resources:
+            requests:
+              cpu: 500m
+              memory: 768Mi
+            limits:
+              # The fault. Its siblings have no CPU limit and were observed bursting to ~5.5 cores under
+              # load, so one core is a severe constraint — enough to throttle hard while still completing
+              # every request, which is what makes it a realistic degradation rather than an outage.
+              cpu: "1"
+              memory: 2Gi
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 30
+      volumes:
+        - name: models
+          hostPath:
+            path: /run/desktop/mnt/host/c/qwen3b
+            type: Directory

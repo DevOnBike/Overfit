@@ -110,7 +110,7 @@ Practical consequences, each of which has already gone wrong at least once:
 Repeatable versions of the three most common cycles live in `.claude/commands/` — `/check` (build + full
 suite), `/bench <filter>` (benchmark + the measurement traps to check before believing the number), and
 `/sweep <OVERFIT0xx>` (inventory every site an analyzer rule flags). `.claude/agents/` holds two
-read-only reviewers with their own context: `overfit-reviewer` and `perf-claim-auditor`.
+read-only reviewers with their own context: `overfit-reviewer` and `overfit-perf-claim-auditor`.
 
 ## Native-AOT discipline (this is the trip-wire)
 
