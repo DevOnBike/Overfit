@@ -1,0 +1,431 @@
+# A Grafana dashboard for the Overfit server replicas, laid out to mirror the detector taxonomy in
+# Sources/Main/Statistics rather than "whatever was easy to chart".
+#
+# Picked up automatically by the kube-prometheus-stack Grafana sidecar, which watches for ConfigMaps
+# carrying the `grafana_dashboard: "1"` label in any namespace.
+#
+# Every metric name here was read back off the live /metrics endpoint before the panel was written — a
+# dashboard pointing at a plausible-but-absent series looks identical to one showing a genuinely flat
+# signal, and that is the worst way for a monitoring surface to be wrong.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: overfit-peers-dashboard
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  overfit-peers.json: |-
+    {
+      "panels": [
+        {
+          "collapsed": false,
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 0
+          },
+          "panels": [],
+          "title": "Peer group — load-independent signals (no application instrumentation needed)",
+          "type": "row"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "description": "(max - min) / mean, in percent. This is precisely the quantity PeerGroupOutlierDetector judges: identical pods serving one model should sit on top of each other, so this number IS the detector's noise floor. Measured at ~0.06% on three idle replicas — anything materially above that is either real skew or uneven load.",
+          "fieldConfig": {
+            "defaults": {
+              "decimals": 3,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "orange",
+                    "value": 5
+                  },
+                  {
+                    "color": "red",
+                    "value": 15
+                  }
+                ]
+              },
+              "unit": "percent"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 6,
+            "x": 0,
+            "y": 1
+          },
+          "id": 1,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            }
+          },
+          "targets": [
+            {
+              "expr": "(max(process_resident_memory_bytes{namespace=\"overfit\"}) - min(process_resident_memory_bytes{namespace=\"overfit\"})) / avg(process_resident_memory_bytes{namespace=\"overfit\"}) * 100",
+              "legendFormat": "spread",
+              "refId": "A"
+            }
+          ],
+          "title": "RSS spread across replicas",
+          "type": "stat"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "description": "The peer comparison itself. A single line drifting away from the others is the memory-leak-in-one-replica case; all of them rising together is a workload change, which peer comparison deliberately reports as Inconclusive rather than as an outlier.",
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "fillOpacity": 6,
+                "lineWidth": 2,
+                "showPoints": "never"
+              },
+              "unit": "bytes"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 9,
+            "x": 6,
+            "y": 1
+          },
+          "id": 2,
+          "targets": [
+            {
+              "expr": "process_resident_memory_bytes{namespace=\"overfit\"}",
+              "legendFormat": "{{pod}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Resident memory per replica",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "description": "Load-independent only while traffic is even. Once requests are unevenly distributed this becomes a load-sensitive signal and must be normalised per unit of work — see the third row.",
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "fillOpacity": 6,
+                "lineWidth": 2,
+                "showPoints": "never"
+              },
+              "decimals": 3,
+              "unit": "none"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 9,
+            "x": 15,
+            "y": 1
+          },
+          "id": 3,
+          "targets": [
+            {
+              "expr": "rate(process_cpu_seconds_total{namespace=\"overfit\"}[5m])",
+              "legendFormat": "{{pod}}",
+              "refId": "A"
+            }
+          ],
+          "title": "CPU per replica (cores)",
+          "type": "timeseries"
+        },
+        {
+          "collapsed": false,
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 9
+          },
+          "panels": [],
+          "title": "Throughput — the work the cost signals have to be divided by",
+          "type": "row"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "description": "Flat at zero until something drives the server. This is the per-pod work metric PeerSignalKind.LoadSensitive requires; without it the detector reports InsufficientData rather than guessing.",
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "fillOpacity": 10,
+                "lineWidth": 2,
+                "showPoints": "never"
+              },
+              "unit": "reqps"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 10
+          },
+          "id": 4,
+          "targets": [
+            {
+              "expr": "rate(overfit_chat_requests_total{namespace=\"overfit\"}[5m])",
+              "legendFormat": "{{pod}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Chat requests/s per replica",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "description": "The throughput number a model-rollout A/B would compare (blueprint §11.1) — together with TTFT and peak RSS, and deliberately without an LLM judge.",
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "fillOpacity": 10,
+                "lineWidth": 2,
+                "showPoints": "never"
+              },
+              "unit": "none"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 10
+          },
+          "id": 5,
+          "targets": [
+            {
+              "expr": "rate(overfit_generated_tokens_total{namespace=\"overfit\"}[5m])",
+              "legendFormat": "{{pod}} out",
+              "refId": "A"
+            },
+            {
+              "expr": "rate(overfit_prompt_tokens_total{namespace=\"overfit\"}[5m])",
+              "legendFormat": "{{pod}} in",
+              "refId": "B"
+            }
+          ],
+          "title": "Generated tokens/s per replica",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "description": "The normalised, load-sensitive comparison — and the FinOps framing of the same number (blueprint §11.2): 'this version made every request 12% more expensive'. Undefined while the request rate is zero, which is correct: no work means no unit cost.",
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "fillOpacity": 6,
+                "lineWidth": 2,
+                "showPoints": "never"
+              },
+              "decimals": 4,
+              "unit": "s"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 10
+          },
+          "id": 6,
+          "targets": [
+            {
+              "expr": "rate(process_cpu_seconds_total{namespace=\"overfit\"}[5m]) / rate(overfit_chat_requests_total{namespace=\"overfit\"}[5m])",
+              "legendFormat": "{{pod}}",
+              "refId": "A"
+            }
+          ],
+          "title": "CPU-seconds per request (unit cost)",
+          "type": "timeseries"
+        },
+        {
+          "collapsed": false,
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 18
+          },
+          "panels": [],
+          "title": "Saturation and hard rules — the circuit breaker's inputs, not the statistic's",
+          "type": "row"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "description": "Active versus available. Saturation here is a threshold question, not a statistical one — blueprint §3d keeps catastrophes on absolute limits and leaves the comparator for 'is this difference real'.",
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "fillOpacity": 10,
+                "lineWidth": 2,
+                "showPoints": "never"
+              },
+              "unit": "none"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 19
+          },
+          "id": 7,
+          "targets": [
+            {
+              "expr": "overfit_pool_active_sessions{namespace=\"overfit\"}",
+              "legendFormat": "{{pod}} active",
+              "refId": "A"
+            },
+            {
+              "expr": "overfit_pool_available_sessions{namespace=\"overfit\"}",
+              "legendFormat": "{{pod}} available",
+              "refId": "B"
+            }
+          ],
+          "title": "Session pool per replica",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "description": "A hard rule: any non-zero value means the pool turned work away. This is exactly the kind of signal that should abort a rollout immediately without consulting any statistic.",
+          "fieldConfig": {
+            "defaults": {
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 1
+                  }
+                ]
+              },
+              "unit": "none"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 19
+          },
+          "id": 8,
+          "options": {
+            "colorMode": "background",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            }
+          },
+          "targets": [
+            {
+              "expr": "sum(overfit_pool_rejected_total{namespace=\"overfit\"})",
+              "legendFormat": "rejected",
+              "refId": "A"
+            }
+          ],
+          "title": "Rejected requests (total)",
+          "type": "stat"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "description": "A load-independent peer signal that needs no application instrumentation at all — one replica restarting while its siblings do not is a broken pod, and it is decidable from kube-state-metrics alone.",
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "fillOpacity": 10,
+                "lineWidth": 2,
+                "showPoints": "never"
+              },
+              "unit": "none"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 19
+          },
+          "id": 9,
+          "targets": [
+            {
+              "expr": "kube_pod_container_status_restarts_total{namespace=\"overfit\"}",
+              "legendFormat": "{{pod}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Container restarts per replica",
+          "type": "timeseries"
+        }
+      ],
+      "refresh": "10s",
+      "schemaVersion": 39,
+      "tags": [
+        "overfit",
+        "aiops"
+      ],
+      "time": {
+        "from": "now-30m",
+        "to": "now"
+      },
+      "timezone": "browser",
+      "title": "Overfit — peer group & anomaly signals",
+      "uid": "overfit-peers"
+    }

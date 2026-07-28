@@ -160,6 +160,53 @@ namespace DevOnBike.Overfit.Tests.Server
         }
 
         [Fact]
+        public async Task Metrics_AreOrderedByName_WithEachFamilyIntact()
+        {
+            var (app, client) = await StartAsync(new FakeInferenceService());
+            await using (app)
+            {
+                var body = await (await client.GetAsync("/metrics")).Content.ReadAsStringAsync();
+                var lines = body.Split('\n');
+
+                var names = new List<string>();
+                var helped = new HashSet<string>(StringComparer.Ordinal);
+
+                foreach (var line in lines)
+                {
+                    if (line.StartsWith("# HELP ", StringComparison.Ordinal))
+                    {
+                        helped.Add(line.Split(' ')[2]);
+                    }
+
+                    if (line.StartsWith("# TYPE ", StringComparison.Ordinal))
+                    {
+                        names.Add(line.Split(' ')[2]);
+                    }
+                }
+
+                Assert.NotEmpty(names);
+
+                // Sorted by name. Prometheus does not require this; two readers do — a human diffing
+                // /metrics between two replicas, which is the premise of the peer comparison this server is
+                // instrumented for, and anyone scanning the endpoint for a name they expect to find.
+                for (var i = 1; i < names.Count; i++)
+                {
+                    Assert.True(
+                        string.CompareOrdinal(names[i - 1], names[i]) < 0,
+                        $"metric families are out of order: '{names[i - 1]}' precedes '{names[i]}'");
+                }
+
+                // Sorting has to happen per family, never per line: every TYPE must still be preceded by its
+                // own HELP. A flat sort of the rendered text would satisfy the check above and destroy this
+                // one, which is exactly the mistake worth guarding against.
+                foreach (var name in names)
+                {
+                    Assert.Contains(name, helped);
+                }
+            }
+        }
+
+        [Fact]
         public async Task Metrics_ExposePrometheusProcessMetrics()
         {
             var (app, client) = await StartAsync(new FakeInferenceService());

@@ -17,7 +17,7 @@
 
 ## 0. What this revision changed
 
-The original draft is intact in substance. Eight amendments were folded into the sections they belong to,
+The original draft is intact in substance. Nine amendments were folded into the sections they belong to,
 rather than appended, because a correction filed away from the claim it corrects does not get read:
 
 | # | Section | Change |
@@ -30,6 +30,7 @@ rather than appended, because a correction filed away from the claim it corrects
 | 6 | §13.3 | **Baseline poisoning gets a mechanism** — freeze updates on a series with an open incident |
 | 7 | §8, §17, §22 | **Three missing pieces added** — feedback/suppression loop, the engine's own SLO and kill switch, per-namespace profiles |
 | 8 | §23 | **Per-cluster pricing is wrong for the best segment** — site licence becomes the MSP default |
+| **9** | **§13.5** | **Amendment 4 corrected by measurement (2026-07-28): normalising by work is necessary and NOT sufficient** — residual spread 26 / 44 / 52 % at skew 2.3 / 4.4 / 8.4x, ranking inverted in every run |
 
 ---
 
@@ -386,6 +387,56 @@ ReplicaSet. MVP: at least three series, median/MAD, duration, quorum.
 > **Peer detection requires a per-pod unit-of-work metric** — memory per request, CPU per request — and must
 > be **disabled, reporting `Insufficient Data`, when one is unavailable.** Raw per-pod resource comparison is
 > offered only for signals where uneven load cannot explain the deviation (restart count, OOMKilled, readiness).
+
+> **★ Correction (2026-07-28), measured in the lab: normalising by work is necessary and NOT sufficient.**
+> The amendment above quietly assumed that dividing by a work metric restores comparability. It does not.
+> Three identical replicas in `k8s/`, one deliberately given a multiple of the others' traffic, ~600 requests
+> per run, three skews:
+>
+> | Achieved skew | requests/s spread | raw CPU spread | **CPU per request** |
+> |--:|--:|--:|--:|
+> | 2.3× | 87.9 % | 57.5 % | **26.2 %** |
+> | 4.4× | 161.6 % | 116.8 % | **44.3 %** |
+> | 8.4× | 223.7 % | 185.1 % | **51.6 %** |
+>
+> Division removes most of the apparent difference and leaves a residue that **grows with the imbalance and
+> never vanishes** — and in every run the busiest replica came out with the **lowest** cost per request. The
+> per-replica numbers show why:
+>
+> ```
+> skew 2.3   7.27  7.26  |  5.52
+> skew 4.4   7.57  6.82  |  4.74
+> skew 8.4   7.06  6.62  |  4.01
+>            └ lightly loaded ┘  └ busy ┘
+> ```
+>
+> The lightly-loaded replicas hold ~6.6–7.6 CPU-seconds per request in every run; the busy one falls
+> monotonically as its share rises. That is fixed per-process overhead (background threads, GC, idle polling)
+> amortised over more requests — a replica is cheaper per request precisely because it is busier.
+>
+> **The shape was predicted before it was measured.** An affine cost model, `cost ≈ fixed + marginal × work`,
+> puts the residue proportional to `(1 − 1/skew)`, which saturates. Normalised to the largest skew the model
+> predicts 0.571 / 0.857 / 1.0; measurement gave 0.508 / 0.859 / 1.0 — within 0.2 % at the middle point,
+> ~11 % off at the smallest. Consistent with the model, and not a fit of it: a single global
+> `(fixed, marginal)` pair does not reproduce all three runs, so the mechanism is right and the magnitude is
+> not yet characterised.
+>
+> **Consequence for the MVP.** A peer comparison on unit cost under uneven traffic will still flag a
+> difference — it will point at the *wrong* member, which is worse than flagging nothing. Three things follow:
+>
+> 1. **The verdict should rest on a load-independent signal** (restarts, OOMKilled, readiness, throttling)
+>    whenever traffic is materially uneven. Unit cost stays as supporting evidence, not as the decision.
+> 2. **The honest model is affine, not proportional** — `cost ≈ fixed + marginal × work`. Fitting the two
+>    coefficients across the peer group and comparing the *marginal* term is what "cost per request" was
+>    supposed to mean; plain division conflates it with the fixed term. That is a real piece of work, not a
+>    parameter change.
+> 3. **Traffic-mix parity is not only a canary problem.** §4.3 raised it for the canary axis; it is at least
+>    as sharp here, and it cannot be waved away by normalising.
+>
+> *Caveat kept deliberately: one run per skew, 180 s each, two-minute rate windows, on a single-node lab
+> where all three replicas share a host. The direction, the monotonic growth and the inverted ranking are
+> solid across three points; the absolute residue is not, and no threshold should be derived from these
+> numbers without repeating them on a multi-node cluster.*
 
 > **Status: implemented.** `PeerGroupOutlierDetector` in `Sources/Main/Statistics/`, on the §13.10 comparator,
 > 14 tests. Leave-one-out: each member's window against the pooled windows of the others, through

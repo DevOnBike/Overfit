@@ -39,49 +39,81 @@ namespace DevOnBike.Overfit.Server.AspNet.Endpoints
         private static string Render(ServerMetrics metrics, PoolStatus pool)
         {
             using var process = Process.GetCurrentProcess();
-            var sb = new StringBuilder(2048);
+
+            // Families are collected first and emitted in name order at the end. Sorting has to happen at
+            // this granularity, never per line: a metric's `# HELP` and `# TYPE` belong to the samples that
+            // follow them, and a flat sort of the rendered text would separate them and produce output that
+            // is no longer valid exposition format.
+            //
+            // Prometheus itself does not require any order. Two readers do: a human diffing /metrics between
+            // two replicas — which is the whole premise of the peer comparison this server is instrumented
+            // for — and anyone eyeballing the endpoint for a name they expect to be there.
+            var families = new List<(string Name, string Text)>(24);
 
             // ── Server metrics: requests, tokens (rate() -> tokens/s), and live session-pool load. ──
-            Counter(sb, "overfit_chat_requests_total", "Completed chat-completion requests.", metrics.ChatRequests);
-            Counter(sb, "overfit_embedding_requests_total", "Completed embedding requests.", metrics.EmbeddingRequests);
-            Counter(sb, "overfit_speech_requests_total", "Completed text-to-speech requests.", metrics.SpeechRequests);
-            Counter(sb, "overfit_prompt_tokens_total", "Prompt tokens processed across all chat requests.", metrics.PromptTokens);
-            Counter(sb, "overfit_generated_tokens_total",
+            Counter(families, "overfit_chat_requests_total", "Completed chat-completion requests.", metrics.ChatRequests);
+            Counter(families, "overfit_embedding_requests_total", "Completed embedding requests.", metrics.EmbeddingRequests);
+            Counter(families, "overfit_speech_requests_total", "Completed text-to-speech requests.", metrics.SpeechRequests);
+            Counter(families, "overfit_prompt_tokens_total", "Prompt tokens processed across all chat requests.", metrics.PromptTokens);
+            Counter(families, "overfit_generated_tokens_total",
                 "Tokens generated across all chat requests (rate() gives tokens/second).", metrics.GeneratedTokens);
 
-            Gauge(sb, "overfit_pool_size", "Total sessions in the pool (max concurrent decodes).", pool.Size);
-            Gauge(sb, "overfit_pool_active_sessions", "Sessions currently decoding a request.", pool.Active);
-            Gauge(sb, "overfit_pool_available_sessions", "Sessions free to serve a request right now.", pool.Available);
-            Gauge(sb, "overfit_pool_peak_active_sessions", "High-water mark of concurrent active sessions.", pool.PeakActive);
-            Counter(sb, "overfit_pool_rejected_total", "Requests shed with HTTP 503 because the pool was full.", pool.RejectedTotal);
+            Gauge(families, "overfit_pool_size", "Total sessions in the pool (max concurrent decodes).", pool.Size);
+            Gauge(families, "overfit_pool_active_sessions", "Sessions currently decoding a request.", pool.Active);
+            Gauge(families, "overfit_pool_available_sessions", "Sessions free to serve a request right now.", pool.Available);
+            Gauge(families, "overfit_pool_peak_active_sessions", "High-water mark of concurrent active sessions.", pool.PeakActive);
+            Counter(families, "overfit_pool_rejected_total", "Requests shed with HTTP 503 because the pool was full.", pool.RejectedTotal);
 
-            metrics.Ttft.Write(sb, "overfit_chat_ttft", "Server-side time to first streamed token, in seconds.");
-            metrics.ResponseTime.Write(sb, "overfit_chat_response_time", "Chat completion wall-clock time, in seconds.");
+            Histogram(families, metrics.Ttft, "overfit_chat_ttft",
+                "Server-side time to first streamed token, in seconds.");
+            Histogram(families, metrics.ResponseTime, "overfit_chat_response_time",
+                "Chat completion wall-clock time, in seconds.");
 
-            Gauge(sb, "process_resident_memory_bytes",
+            Gauge(families, "process_resident_memory_bytes",
                 "Resident set size (working set) in bytes — includes paged-in mmap'd model weights.",
                 process.WorkingSet64);
-            Gauge(sb, "process_private_memory_bytes",
+            Gauge(families, "process_private_memory_bytes",
                 "Private (committed) memory in bytes.", process.PrivateMemorySize64);
-            Gauge(sb, "process_virtual_memory_bytes",
+            Gauge(families, "process_virtual_memory_bytes",
                 "Virtual address space in bytes (includes the mmap'd model, mostly not resident).",
                 process.VirtualMemorySize64);
 
-            Counter(sb, "process_cpu_seconds_total",
+            Counter(families, "process_cpu_seconds_total",
                 "Total user + system CPU time consumed by the process, in seconds.",
                 process.TotalProcessorTime.TotalSeconds);
-            Gauge(sb, "process_start_time_seconds",
+            Gauge(families, "process_start_time_seconds",
                 "Process start time since the unix epoch, in seconds.", StartUnixSeconds);
-            Gauge(sb, "process_num_threads", "Number of OS threads.", process.Threads.Count);
+            Gauge(families, "process_num_threads", "Number of OS threads.", process.Threads.Count);
 
-            Gauge(sb, "dotnet_total_memory_bytes",
+            Gauge(families, "dotnet_total_memory_bytes",
                 "Managed GC heap memory currently allocated, in bytes.", GC.GetTotalMemory(forceFullCollection: false));
             var gc = GC.GetGCMemoryInfo();
-            Gauge(sb, "dotnet_gc_heap_size_bytes", "GC heap size after the last collection, in bytes.", gc.HeapSizeBytes);
-            Gauge(sb, "dotnet_gc_committed_bytes", "Committed GC memory, in bytes.", gc.TotalCommittedBytes);
+            Gauge(families, "dotnet_gc_heap_size_bytes", "GC heap size after the last collection, in bytes.", gc.HeapSizeBytes);
+            Gauge(families, "dotnet_gc_committed_bytes", "Committed GC memory, in bytes.", gc.TotalCommittedBytes);
+
+            families.Add(("dotnet_gc_collections_total", RenderGcCollections()));
+
+            // Ordinal, not culture-aware: metric names are identifiers, and a culture-sensitive comparison
+            // would reorder the endpoint depending on the server's locale — a difference between two
+            // replicas that means nothing and would look like a real one.
+            families.Sort(static (left, right) => string.CompareOrdinal(left.Name, right.Name));
+
+            var sb = new StringBuilder(2048);
+            for (var i = 0; i < families.Count; i++)
+            {
+                sb.Append(families[i].Text);
+            }
+
+            return sb.ToString();
+        }
+
+        private static string RenderGcCollections()
+        {
+            var sb = new StringBuilder(256);
 
             sb.Append("# HELP dotnet_gc_collections_total Number of GC collections, by generation.\n");
             sb.Append("# TYPE dotnet_gc_collections_total counter\n");
+
             for (var generation = 0; generation <= GC.MaxGeneration; generation++)
             {
                 sb.Append("dotnet_gc_collections_total{generation=\"")
@@ -94,23 +126,43 @@ namespace DevOnBike.Overfit.Server.AspNet.Endpoints
             return sb.ToString();
         }
 
-        private static void Gauge(StringBuilder sb, string name, string help, long value)
-            => Metric(sb, name, help, "gauge", value.ToString(CultureInfo.InvariantCulture));
-
-        private static void Gauge(StringBuilder sb, string name, string help, double value)
-            => Metric(sb, name, help, "gauge", Format(value));
-
-        private static void Counter(StringBuilder sb, string name, string help, double value)
-            => Metric(sb, name, help, "counter", Format(value));
-
-        private static void Counter(StringBuilder sb, string name, string help, long value)
-            => Metric(sb, name, help, "counter", value.ToString(CultureInfo.InvariantCulture));
-
-        private static void Metric(StringBuilder sb, string name, string help, string type, string value)
+        private static void Histogram(
+            List<(string Name, string Text)> families,
+            LatencyHistogram histogram,
+            string name,
+            string help)
         {
+            var sb = new StringBuilder(512);
+            histogram.Write(sb, name, help);
+            families.Add((name, sb.ToString()));
+        }
+
+        private static void Gauge(List<(string Name, string Text)> families, string name, string help, long value)
+            => Metric(families, name, help, "gauge", value.ToString(CultureInfo.InvariantCulture));
+
+        private static void Gauge(List<(string Name, string Text)> families, string name, string help, double value)
+            => Metric(families, name, help, "gauge", Format(value));
+
+        private static void Counter(List<(string Name, string Text)> families, string name, string help, double value)
+            => Metric(families, name, help, "counter", Format(value));
+
+        private static void Counter(List<(string Name, string Text)> families, string name, string help, long value)
+            => Metric(families, name, help, "counter", value.ToString(CultureInfo.InvariantCulture));
+
+        private static void Metric(
+            List<(string Name, string Text)> families,
+            string name,
+            string help,
+            string type,
+            string value)
+        {
+            var sb = new StringBuilder(160);
+
             sb.Append("# HELP ").Append(name).Append(' ').Append(help).Append('\n');
             sb.Append("# TYPE ").Append(name).Append(' ').Append(type).Append('\n');
             sb.Append(name).Append(' ').Append(value).Append('\n');
+
+            families.Add((name, sb.ToString()));
         }
 
         // Prometheus wants a plain decimal (no thousands separators, no scientific notation).
