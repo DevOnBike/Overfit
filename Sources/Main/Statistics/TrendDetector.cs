@@ -131,8 +131,9 @@ namespace DevOnBike.Overfit.Statistics
 
             var s = AccumulatePairs(times, observations, slopes);
 
-            slopes.Sort();
-            var slope = Median(slopes);
+            // Selection, not a sort: only the middle value is wanted, and at the 600-sample cap this span
+            // holds 179 700 pairwise slopes. Ordering all of them measured as 99% of this method's runtime.
+            var slope = MedianSelector.MedianInPlace(slopes);
 
             // Detrended residuals, in time order, so the autocorrelation estimate sees the noise rather than
             // the trend itself — a strong trend would otherwise read as near-perfect correlation.
@@ -143,11 +144,12 @@ namespace DevOnBike.Overfit.Statistics
 
             var autocorrelation = Lag1Autocorrelation(residuals);
 
-            residuals.Sort();
-            var intercept = Median(residuals);
+            // Must follow the autocorrelation estimate: that reads the residuals in time order, and selection
+            // permutes them.
+            var intercept = MedianSelector.MedianInPlace(residuals);
 
-            // Sorting the observations gives both the tie structure the variance needs and the median the
-            // relative-change threshold is expressed against.
+            // The observations are genuinely sorted rather than selected — the tie structure the variance
+            // correction needs is only visible in a full ordering, so there is nothing to save here.
             observations.Sort();
             var tiedPairs = CountTiedPairs(observations, out var varianceTieTerm);
             var median = Median(observations);
