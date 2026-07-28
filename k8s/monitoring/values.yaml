@@ -1,0 +1,128 @@
+# kube-prometheus-stack values for the Overfit AIOps development lab.
+#
+# Purpose: a local Prometheus + Grafana + kube-state-metrics that the anomaly detectors in
+# Sources/Main/Statistics can be developed against. See docs/aiops-cluster-anomaly-guard.md — the MVP reads
+# topology from kube-state-metrics labels (kube_pod_owner, kube_replicaset_owner) rather than the Kubernetes
+# API, so kube-state-metrics is not optional here: it is the component the design depends on.
+#
+# Tuned for Docker Desktop's single-node cluster. Anything disabled below is disabled because that control
+# plane component is not reachable on Docker Desktop, not because it is unimportant — leaving them on
+# produces permanently-red targets that train you to ignore the target page.
+
+fullnameOverride: overfit-lab
+
+prometheus:
+  prometheusSpec:
+    # 15 days covers the peer-outlier and canary detectors (which need no history at all) and the trend
+    # detector (which needs hours to days). It does NOT cover the seasonal baseline, which wants 2-4 weeks —
+    # raise this when that detector is actually being worked on, and give it more disk at the same time.
+    retention: 15d
+    retentionSize: 8GB
+
+    # 15s matches what a real kube-prometheus-stack ships with. Do not lower it to make canary windows fill
+    # faster: the detectors have to work at the resolution customers actually run, and a lab that is quietly
+    # finer than production hides sample-count problems until the pilot.
+    scrapeInterval: 15s
+    evaluationInterval: 30s
+
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: hostpath
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 10Gi
+
+    resources:
+      requests:
+        cpu: 200m
+        memory: 512Mi
+      limits:
+        memory: 2Gi
+
+    # Pick up ServiceMonitors from every namespace, not just this one — the existing RabbitMQ and Kafka
+    # workloads in this cluster are the most useful test subjects available and they live elsewhere.
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+
+grafana:
+  enabled: true
+  # Local lab on a single workstation; the dashboard is reached over `kubectl port-forward`, never exposed.
+  adminPassword: overfit
+  defaultDashboardsTimezone: browser
+  persistence:
+    enabled: true
+    storageClassName: hostpath
+    size: 2Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      memory: 512Mi
+  service:
+    type: ClusterIP
+
+alertmanager:
+  # Kept on purpose: the blueprint's output path is an Alertmanager webhook, so the lab should contain the
+  # thing the product is supposed to talk to.
+  enabled: true
+  alertmanagerSpec:
+    storage:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: hostpath
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 1Gi
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        memory: 256Mi
+
+# The two exporters the detectors actually read.
+kubeStateMetrics:
+  enabled: true
+nodeExporter:
+  enabled: true
+
+prometheus-node-exporter:
+  # Docker Desktop refuses the chart's default host-root mount: "path / is mounted on / but it is not a
+  # shared or slave mount", and the container crash-loops. The mount only exists to report filesystem usage
+  # of the host root, which on Docker Desktop is a Linux VM rather than the machine you care about — so it
+  # was measuring the wrong disk even when it worked. CPU, memory, load and network metrics are unaffected.
+  hostRootFsMount:
+    enabled: false
+  resources:
+    requests:
+      cpu: 50m
+      memory: 32Mi
+
+kube-state-metrics:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+
+# ── Not reachable on Docker Desktop ────────────────────────────────────────────────────────────────────
+# These components either do not expose a metrics port or bind to localhost inside the VM. Scraping them
+# yields targets that are down forever.
+kubeEtcd:
+  enabled: false
+kubeControllerManager:
+  enabled: false
+kubeScheduler:
+  enabled: false
+kubeProxy:
+  enabled: false
+
+# The bundled alert rules are for production clusters and fire constantly on a single-node laptop cluster
+# (no HA, no multiple nodes, deliberate resource pressure). The lab's job is to produce clean metrics for
+# our own detectors, not to be a working alerting install.
+defaultRules:
+  create: false

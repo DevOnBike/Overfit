@@ -1,0 +1,120 @@
+# The Overfit inference server, deployed into the lab cluster as a scrape target.
+#
+# Why three replicas: this is the only workload in the lab that emits *our own* metrics, and three identical
+# pods serving one model is exactly the input `PeerGroupOutlierDetector` takes — same image, same model, same
+# traffic source. Any spread between them is either real skew or the detector's own noise floor, which is the
+# cheapest possible check that its thresholds are sane before it ever sees an injected fault.
+#
+# The model is mounted, never baked in: GGUF files are large and licensed separately.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: overfit
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: overfit-server
+  namespace: overfit
+  labels:
+    app.kubernetes.io/name: overfit-server
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: overfit-server
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: overfit-server
+    spec:
+      containers:
+        - name: overfit
+          image: overfit:latest
+          # Built locally by k8s/overfit/build.cmd. Docker Desktop's Kubernetes shares the daemon's image
+          # store, so there is no registry in the loop — but that also means the node will never pull this
+          # tag, hence Never rather than IfNotPresent: a missing image should fail loudly instead of
+          # silently reaching for Docker Hub.
+          imagePullPolicy: Never
+          # The image's ENTRYPOINT is already `/app/overfit serve --host 0.0.0.0 --port 8080`, so the only
+          # thing to supply is the model path. Repeating --host/--port here appends a second copy of each
+          # and the argument parser rejects the whole command line, which surfaces as the container printing
+          # usage and exiting 1 — not as an obviously wrong flag.
+          args:
+            - /models/qwen0.5b.q4km.gguf
+          ports:
+            - name: http
+              containerPort: 8080
+          volumeMounts:
+            - name: models
+              mountPath: /models
+              readOnly: true
+          resources:
+            requests:
+              cpu: 500m
+              memory: 768Mi
+            limits:
+              # Not a tuning figure — a blast radius. Three replicas of a 0.5B Q4_K model on a laptop
+              # cluster that is also running RabbitMQ and Kafka operators.
+              memory: 2Gi
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            # Model load dominates start-up, so the probe has to tolerate it: failing readiness during a
+            # cold start would make the Deployment thrash instead of waiting.
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 120
+            periodSeconds: 20
+      volumes:
+        - name: models
+          hostPath:
+            # Docker Desktop exposes Windows drives to the Kubernetes node under /run/desktop/mnt/host/<drive>.
+            # This is C:\qwen3b on the workstation.
+            path: /run/desktop/mnt/host/c/qwen3b
+            type: Directory
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: overfit-server
+  namespace: overfit
+  labels:
+    app.kubernetes.io/name: overfit-server
+spec:
+  # Headless so every replica keeps a stable, individually addressable endpoint — the peer comparison needs
+  # per-pod series, which a load-balanced ClusterIP would blur.
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: overfit-server
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: overfit-server
+  namespace: overfit
+  labels:
+    app.kubernetes.io/name: overfit-server
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: overfit-server
+  namespaceSelector:
+    matchNames:
+      - overfit
+  endpoints:
+    - port: http
+      path: /metrics
+      # Matches the cluster-wide interval on purpose. A finer interval here would let canary windows fill
+      # faster than they would in production and hide sample-count problems until a pilot.
+      interval: 15s
