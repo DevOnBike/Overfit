@@ -91,7 +91,19 @@ namespace DevOnBike.Overfit.Server.AspNet.Endpoints
             Gauge(families, "dotnet_gc_heap_size_bytes", "GC heap size after the last collection, in bytes.", gc.HeapSizeBytes);
             Gauge(families, "dotnet_gc_committed_bytes", "Committed GC memory, in bytes.", gc.TotalCommittedBytes);
 
+            // Fraction of wall-clock time spent in GC pauses is what a consumer wants, but a ratio computed
+            // here would be a ratio over the process lifetime and would flatten out. Exposed as the cumulative
+            // counter Prometheus expects, so `rate()` gives the pause seconds per second over any window.
+            Counter(families, "dotnet_gc_pause_seconds_total",
+                "Cumulative time the runtime spent in GC pauses, in seconds (rate() gives the pause ratio).",
+                GC.GetTotalPauseDuration().TotalSeconds);
+
+            Gauge(families, "dotnet_threadpool_queue_length",
+                "Work items queued to the thread pool and not yet started — an early thread-starvation signal.",
+                ThreadPool.PendingWorkItemCount);
+
             families.Add(("dotnet_gc_collections_total", RenderGcCollections()));
+            families.Add(("overfit_http_responses_total", RenderResponsesByStatus(metrics)));
 
             // Ordinal, not culture-aware: metric names are identifiers, and a culture-sensitive comparison
             // would reorder the endpoint depending on the server's locale — a difference between two
@@ -102,6 +114,30 @@ namespace DevOnBike.Overfit.Server.AspNet.Endpoints
             for (var i = 0; i < families.Count; i++)
             {
                 sb.Append(families[i].Text);
+            }
+
+            return sb.ToString();
+        }
+
+        /// <summary>
+        /// Completed responses grouped by status class. All five classes are emitted even when zero, so that
+        /// <c>rate(...{status="5xx"})</c> resolves from the first scrape instead of returning "no data" —
+        /// which a dashboard renders identically to "no errors" and a detector cannot tell apart either.
+        /// </summary>
+        private static string RenderResponsesByStatus(ServerMetrics metrics)
+        {
+            var sb = new StringBuilder(256);
+
+            sb.Append("# HELP overfit_http_responses_total Completed HTTP responses, by status class.\n");
+            sb.Append("# TYPE overfit_http_responses_total counter\n");
+
+            for (var statusClass = 1; statusClass <= 5; statusClass++)
+            {
+                sb.Append("overfit_http_responses_total{status=\"")
+                  .Append(statusClass)
+                  .Append("xx\"} ")
+                  .Append(metrics.ResponsesInClass(statusClass).ToString(CultureInfo.InvariantCulture))
+                  .Append('\n');
             }
 
             return sb.ToString();

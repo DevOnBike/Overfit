@@ -30,6 +30,11 @@ namespace DevOnBike.Overfit.Server.AspNet.Services
     {
         private readonly Meter _meter = new("DevOnBike.Overfit.Server", "1.0.0");
 
+        /// <summary>Status classes 1xx…5xx. Indexed by <c>statusCode / 100 - 1</c>.</summary>
+        private const int StatusClasses = 5;
+
+        private readonly long[] _responsesByClass = new long[StatusClasses];
+
         private long _chatRequests;
         private long _embeddingRequests;
         private long _speechRequests;
@@ -83,6 +88,41 @@ namespace DevOnBike.Overfit.Server.AspNet.Services
                 description: "Sessions currently decoding a request.");
             _meter.CreateObservableGauge("overfit.pool.available_sessions", () => poolStatus().Available,
                 description: "Sessions free to serve a request right now.");
+        }
+
+        /// <summary>
+        /// Counts one completed response by its status class. Called from the pipeline for <b>every</b>
+        /// request, not only chat, because an error rate assembled from one endpoint's successes is not an
+        /// error rate.
+        ///
+        /// <para>Status classes rather than individual codes on purpose: the consumer is
+        /// <c>rate(5xx) / rate(all)</c>, and per-code labels would multiply the series count for a
+        /// distinction nothing downstream reads.</para>
+        /// </summary>
+        public void RecordResponse(int statusCode)
+        {
+            var index = (statusCode / 100) - 1;
+
+            if ((uint)index >= StatusClasses)
+            {
+                return;
+            }
+
+            Interlocked.Increment(ref _responsesByClass[index]);
+        }
+
+        /// <summary>Completed responses in one status class, <paramref name="statusClass"/> in 1…5.</summary>
+        public long ResponsesInClass(int statusClass)
+        {
+            var index = statusClass - 1;
+
+            if ((uint)index >= StatusClasses)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(statusClass), statusClass, "Status class must be in 1…5 (1xx…5xx).");
+            }
+
+            return Interlocked.Read(ref _responsesByClass[index]);
         }
 
         public void RecordEmbeddingRequest() => Interlocked.Increment(ref _embeddingRequests);

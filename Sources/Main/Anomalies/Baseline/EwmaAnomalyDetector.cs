@@ -33,6 +33,12 @@ namespace DevOnBike.Overfit.Anomalies.Baseline
         private readonly float _zCap;
         private readonly float[] _mean = new float[FeatureCount];
         private readonly float[] _var = new float[FeatureCount];
+
+        /// <summary>
+        /// Finite observations folded into each feature. Zero means the feature has no baseline yet — either
+        /// because the detector is new, or because that metric has never once arrived.
+        /// </summary>
+        private readonly int[] _observed = new int[FeatureCount];
         private int _seen;
 
         /// <param name="warmupSnapshots">Samples used to seed the EWMA before scoring (default 21, matching the GPT detector's window).</param>
@@ -62,31 +68,30 @@ namespace DevOnBike.Overfit.Anomalies.Baseline
             Span<float> x = stackalloc float[FeatureCount];
             snapshot.WriteFeatureVector(x);
 
-            if (_seen == 0)
-            {
-                for (var m = 0; m < FeatureCount; m++)
-                {
-                    _mean[m] = x[m];
-                    _var[m] = 0f;
-                }
-                _seen = 1;
-                return Warmup(snapshot);
-            }
-
             if (_seen < _warmup)
             {
-                UpdateEwma(x);
+                Observe(x);
                 _seen++;
                 return Warmup(snapshot);
             }
 
             var total = 0f;
-            var worst = 0;
+            var scored = 0;
+            var worst = -1;
             var worstAbsZ = -1f;
             float worstExpected = 0f, worstActual = 0f;
 
             for (var m = 0; m < FeatureCount; m++)
             {
+                // A feature that has never been observed has no baseline to deviate from, and one that is
+                // missing right now has nothing to compare. Either way it contributes no evidence — scoring
+                // it against a zero mean would invent a deviation out of an absence.
+                if (_observed[m] == 0 || !float.IsFinite(x[m]))
+                {
+                    continue;
+                }
+
+                scored++;
                 var sigma = MathF.Sqrt(_var[m]);
                 // Scale-relative floor: keeps a near-constant metric (e.g. oom_events_rate)
                 // from yielding an infinite z, without flattening a genuinely quiet metric.
@@ -110,13 +115,24 @@ namespace DevOnBike.Overfit.Anomalies.Baseline
             }
 
             // Update AFTER scoring so a snapshot is never compared against itself.
-            UpdateEwma(x);
+            Observe(x);
             _seen++;
+
+            // Every feature was missing or unseeded: there is nothing to score, and reporting 0 would say
+            // "healthy" about a snapshot we could not read at all.
+            if (scored == 0)
+            {
+                return Warmup(snapshot);
+            }
 
             return new AnomalyScore
             {
                 IsWarmup = false,
-                Score = total / FeatureCount,
+
+                // Averaged over the features that actually contributed, not over all twelve — dividing by
+                // the full count would dilute a real deviation in proportion to how much data is missing,
+                // making a half-blind detector look calmer than a fully-sighted one.
+                Score = total / scored,
                 PodName = snapshot.PodName,
                 Timestamp = snapshot.Timestamp,
                 WorstMetric = MetricTokenizer.MetricNameOf(worst * MetricTokenizer.BinsPerMetric),
@@ -130,17 +146,38 @@ namespace DevOnBike.Overfit.Anomalies.Baseline
         {
             Array.Clear(_mean);
             Array.Clear(_var);
+            Array.Clear(_observed);
             _seen = 0;
         }
 
-        private void UpdateEwma(ReadOnlySpan<float> x)
+        /// <summary>
+        /// Folds one snapshot into the baseline, per feature. A feature is seeded by its <b>first finite
+        /// value</b> rather than by the first snapshot: a metric that only starts reporting on the tenth
+        /// scrape would otherwise be seeded from a NaN and stay poisoned forever, because every arithmetic
+        /// operation on NaN yields NaN and nothing downstream ever recovers.
+        /// </summary>
+        private void Observe(ReadOnlySpan<float> x)
         {
             for (var m = 0; m < FeatureCount; m++)
             {
+                if (!float.IsFinite(x[m]))
+                {
+                    continue;
+                }
+
+                if (_observed[m] == 0)
+                {
+                    _mean[m] = x[m];
+                    _var[m] = 0f;
+                    _observed[m] = 1;
+                    continue;
+                }
+
                 var diff = x[m] - _mean[m];
                 _mean[m] += _decay * diff;
                 // RiskMetrics EWMA variance: σ²ₜ = (1−α)(σ²ₜ₋₁ + α·diff²), diff vs the prior mean.
                 _var[m] = (1f - _decay) * (_var[m] + _decay * diff * diff);
+                _observed[m]++;
             }
         }
 

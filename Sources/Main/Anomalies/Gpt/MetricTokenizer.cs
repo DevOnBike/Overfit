@@ -138,7 +138,16 @@ namespace DevOnBike.Overfit.Anomalies.Gpt
         private static int Quantize(float value, int m)
         {
             var (max, logScale) = MetricRanges[m];
-            if (value <= 0f)
+
+            // A missing feature arrives as NaN, and every comparison below is false for NaN — so without this
+            // it would fall through to (int)NaN, which the runtime saturates to 0, and land in the lowest bin
+            // by accident instead of by decision.
+            //
+            // It still lands in the lowest bin, and that is a real limitation rather than a fix: the
+            // vocabulary has no "missing" symbol, and adding one would change VocabSize and invalidate every
+            // trained checkpoint. What keeps it from mattering is upstream — PrometheusMetricSource reports
+            // per-metric coverage, so a query that matches nothing is visible before anything is trained on it.
+            if (!float.IsFinite(value) || value <= 0f)
             {
                 return 0;
             }

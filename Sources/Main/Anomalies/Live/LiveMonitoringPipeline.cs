@@ -266,6 +266,12 @@ namespace DevOnBike.Overfit.Anomalies.Live
                 if (!podFeatures.TryGetValue(podName, out var features))
                 {
                     features = new float[MetricSnapshot.FeatureCount];
+
+                    // NaN, not zero. A query that matched nothing and a metric that genuinely reads zero are
+                    // different facts, and zero-filling makes them the same one — which is how a misconfigured
+                    // query becomes a calm, flat, entirely fictional signal that a detector will learn.
+                    // Consumers treat NaN as "no observation"; see EwmaAnomalyDetector.Observe.
+                    features.AsSpan().Fill(float.NaN);
                     podFeatures[podName] = features;
                 }
 
