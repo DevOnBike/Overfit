@@ -75,7 +75,10 @@ namespace Benchmarks
                     "synthetic");
 
                 _scatteredNoSeries[i] = finding;
-                _scattered[i] = finding with { Series = series };
+                _scattered[i] = finding with
+                {
+                    Series = series
+                };
             }
         }
 

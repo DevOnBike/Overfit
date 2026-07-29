@@ -40,7 +40,10 @@ namespace DevOnBike.Overfit.Anomalies.Incidents.Contracts
         /// without bridging unrelated events; two hours of span is long enough for a slow leak to stay one
         /// incident and short enough that yesterday's problem is not today's.
         /// </summary>
-        public static IncidentGroupingOptions Balanced { get; } = new(
+        public static IncidentGroupingOptions Balanced
+        {
+            get;
+        } = new(
             MaxSeparation: TimeSpan.FromMinutes(5),
             MaxIncidentSpan: TimeSpan.FromHours(2),
             MinRelatedness: 0.35,
@@ -52,7 +55,10 @@ namespace DevOnBike.Overfit.Anomalies.Incidents.Contracts
         /// Groups only what is hard to argue with: same pod or same workload, tightly overlapping in time,
         /// no correlation-based linking. Fewer, smaller, more defensible incidents.
         /// </summary>
-        public static IncidentGroupingOptions Strict { get; } = new(
+        public static IncidentGroupingOptions Strict
+        {
+            get;
+        } = new(
             MaxSeparation: TimeSpan.FromMinutes(1),
             MaxIncidentSpan: TimeSpan.FromMinutes(30),
             MinRelatedness: 0.6,

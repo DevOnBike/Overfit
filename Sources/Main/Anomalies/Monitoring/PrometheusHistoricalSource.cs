@@ -294,9 +294,9 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
             {
                 Timeout = config.HttpTimeout
             };
-            
+
             client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-            
+
             return client;
         }
     }

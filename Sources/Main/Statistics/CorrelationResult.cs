@@ -28,7 +28,7 @@ namespace DevOnBike.Overfit.Statistics
     {
         /// <summary>Whether a coefficient was computed at all.</summary>
         public bool IsUsable => !double.IsNaN(Rho);
-        
+
         /// <summary>Strength irrespective of direction — the number a threshold is normally expressed against.</summary>
         public double Strength => double.IsNaN(Rho) ? 0.0 : Math.Abs(Rho);
 

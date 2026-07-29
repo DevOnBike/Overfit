@@ -182,7 +182,10 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Incidents
 
             var incidents = Grouper.Group(
                 findings.ToArray(),
-                IncidentGroupingOptions.Balanced with { MaxIncidentSpan = TimeSpan.FromMinutes(60) });
+                IncidentGroupingOptions.Balanced with
+                {
+                    MaxIncidentSpan = TimeSpan.FromMinutes(60)
+                });
 
             Assert.True(incidents.Count > 1, "the chain collapsed into a single unbounded incident");
 
