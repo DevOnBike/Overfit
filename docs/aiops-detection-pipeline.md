@@ -80,6 +80,44 @@ The lab made the complementarity concrete rather than theoretical:
 
 ---
 
+## The algorithms, named
+
+Every statistic here is **rank-based**, and that is one decision made once rather than a preference repeated.
+Monitoring series carry scrape spikes, restarts, saturation and gaps; a single outlier moves a Pearson
+coefficient or a least-squares slope arbitrarily far, and moves a rank statistic by one rank position. The cost
+is that ranks discard magnitude, which is exactly the defect that made the peer detector unusable until a
+separate size gate was added, so the trade-off cuts both ways.
+
+| Where | Algorithm | Computes | Why this one |
+|---|---|---|---|
+| Peer, significance | **Mann-Whitney U** (Wilcoxon rank-sum) | is one member's distribution shifted against the pooled others | assumes no distribution shape; latency is nothing like normal |
+| Peer, effect size | **Cliff's delta** | how often one distribution sits above another, -1..+1 | bounded and sample-count independent, so it is comparable across detectors |
+| Peer, family-wise error | **Bonferroni** over 2n tests | corrected alpha | two one-sided tests per member; valid under arbitrary dependence, and leave-one-out tests are dependent by construction |
+| Peer, size | **relative median gap** against the median of the other members' medians | how far, in the metric's own units | Cliff's delta is scale-free and cannot express "materially different" |
+| Trend, magnitude | **Theil-Sen** slope | median of every pairwise slope | ~29% breakdown point; least-squares has 0% and one scrape artefact steers it |
+| Trend, significance | **Mann-Kendall** | concordant minus discordant pairs against time | the same pairwise machinery as Mann-Whitney, distribution-free |
+| Trend, effect size | **Kendall's tau** | how monotone the movement is | direct analogue of Cliff's delta, so the two detectors' severities are comparable |
+| Trend, dependence | **AR(1) variance inflation** (1+rho)/(1-rho) | discounted significance | consecutive scrapes are nearly identical; uncorrected this manufactures p-values |
+| Seasonality | **median across the same phase of previous periods** | expected reading per sample | a mean would carry one bad day forward and suppress detection for a week |
+| Rules | **sustained-breach fraction** | share of the window at or above a threshold | no comparison and no history needed; the only method that reaches a metric one pod alone exports |
+| Grouping, correlation | **Spearman rho with a lag scan** | do two series move together, and which leads | rank-based; the scan is Bonferroni-corrected because picking the best of 21 offsets is a multiple comparison |
+| Grouping, clustering | **Kruskal-style agglomeration** with a span bound | which findings are one event | relatedness is not transitive, so connected components walk an incident across the cluster |
+| Learned | **GPT over tokenised snapshots** | mean negative log-probability of the next snapshot | see [Training](#training--the-fourth-family) |
+| Learned, baseline | **EWMA** mean/variance per feature | robust z per feature, averaged | the classical comparison the learned path has to beat to justify itself |
+| Learned, search | **evolutionary MLP** (`AnomalyMlp`) | a scoring function fitted by population search | no gradient needed, so it can optimise a non-differentiable fitness |
+| Internals | **introselect** (`MedianSelector`) | medians without ordering | `slopes.Sort()` was 99% of the trend detector's runtime |
+
+Two things deliberately **not** used, recorded because both were considered:
+
+- **No z-scores or sigma multipliers in the statistical layer.** They promise a normal-distribution trade-off
+  that latency and resource data do not honour. Every threshold there is a p-value, an effect size, or a
+  fraction of the metric's own scale. (The EWMA baseline does use a z, which is part of why it is a baseline.)
+- **No exact Mann-Whitney distribution.** The normal approximation with tie and continuity corrections is used
+  throughout; at the sample counts the guard works with (>=30 per arm) the difference sits below the thresholds
+  being tested.
+
+---
+
 ## Layer 1 — ingestion
 
 `PromqlCatalog` is the single place a `MetricIndex` becomes PromQL. Both sources go through it, and
@@ -184,6 +222,237 @@ correlated series to a test that assumes independence manufactures significance.
 The median of all pairwise slopes comes from `MedianSelector` — selection, not sorting. `slopes.Sort()` was
 **99% of this detector's runtime** (8.02 ms of 8.10 ms at the 600-sample cap); selection cut a full evaluation
 from 8.10 ms to 1.29 ms, **6.3×**, with a canary arm confirming the box had not moved.
+
+### Seasonality — what a window cannot contain
+
+A trend detector given twenty minutes of a twenty-four-hour cycle sees a straight line, because that is all the
+information there is: the window covers 1.4% of the period. Measured on a healthy synthetic population, the
+consequence is not marginal.
+
+| Window | raw trend | with seasonal residual | |
+|--:|--:|--:|---|
+| 20 min | 239 false incidents/day | **267** | **worse by 12%** |
+| 60 min | 93 | 93 | trend findings 2885 -> 1504 |
+| 240 min | **2551** | **376** | **6.8x better** |
+
+`SeasonalBaseline` builds an expected reading for each sample from the **median of the same phase across
+previous periods**, and `TrendDetector` then tests the **residual** — observed minus expected. That turns "is
+this rising?" into "is it rising more than it does every day at this hour?". At a four-hour window
+`RequestsPerSecond` leaves the top signals entirely.
+
+**It is worse at twenty minutes, and the reason matters more than the number.** At that window the dominant
+false positive is not the daily cycle but the **GC sawtooth**, whose period is *minutes*. Subtracting a
+24-hour-phase expectation does not remove a minute-scale sawtooth; it adds variance, because the expectation is
+itself an unsynchronised sawtooth from previous days. **The period has to match the signal.** A seasonal
+baseline is not a general noise filter, and pointed at the wrong period it makes things worse rather than merely
+failing to help.
+
+Decisions inside it, each with its reason:
+
+- **Median across periods, not mean.** One bad day — a deploy, a load test, an incident — would drag a mean and
+  then suppress detection for the following week.
+- **The scale comes from the original series, not the residual.** A residual is centred on zero, and a relative
+  materiality threshold against zero is meaningless.
+- **A phase with no usable history is `NaN`, not zero.** Zero would claim "we expected nothing here", which is a
+  different and false statement.
+- **Fewer than the required periods returns `false` rather than an expectation.** Building one from a single day
+  would make the first day of operation the definition of normal.
+
+**Still open:** 376/day at four hours and 267/day at twenty minutes are both far above anything shippable, and
+the entire remaining balance is memory and GC heap — roughly 1400 of ~2000 findings. That is the third time in
+this subsystem that the dominant lever turned out to be **signal selection rather than algorithm choice**: a
+short window on working-set memory is almost always monotonically rising because of the GC sawtooth and the
+post-restart ramp, and the live lab reported the same thing independently. The next step there is a decision not
+to trend-test memory over windows shorter than several collection cycles, not another estimator.
+
+---
+
+## Cold start — a pod with no history
+
+The layering exists so something useful is available from the first minute, and the answer differs per family.
+
+| Age of the pod | Available | Not available |
+|---|---|---|
+| **first scrape** | nothing — every detector has a minimum sample count | all |
+| **~5-10 min** (>=20-30 samples) | **hard rules**, **peer comparison** | trend, seasonal, learned |
+| **hours-days** | + **trend**, raw | seasonal, learned |
+| **>=2-3 periods** (2-3 days for a daily cycle) | + **seasonal residual** | learned |
+| **weeks** | + the learned stack, once its score can be validated | — |
+
+Concretely:
+
+- **A brand-new deployment is covered on day one**, because the two families that need no history are the two
+  answering "is this value simply too high" and "is one replica unlike its siblings". Neither consults the past.
+- **A single new pod joining an existing group is covered immediately**, for the same reason: it is compared
+  against its siblings, not against itself. That property is why peer comparison was the right thing to build
+  first.
+- **Below the sample floor the verdict is `WarmingUp`, never `Healthy`**, and `IncidentPipeline` refuses to turn
+  it into a finding. Reporting "we could not tell" as "nothing is wrong" is the failure mode that makes a
+  monitoring product untrustworthy — the same rule as "missing is NaN, not zero" one layer down.
+- **The seasonal path degrades rather than breaking.** `SeasonalBaseline.TryBuild` returns `false` and the caller
+  falls back to the raw trend test. That fallback is noisy on a seasonal signal, measurably so per the table
+  above, and the cost is stated rather than hidden.
+- **A restart resets nothing the relative detectors depend on**, but it contaminates the metrics that ramp:
+  working set drops to near zero and climbs back, and any window containing that ramp showed a 99-104%
+  within-pod spread on the lab. `EwmaAnomalyDetector.Reset()` exists for the stateful path; the stateless
+  detectors simply see a window they should not be trusted on.
+
+**What has no cold-start answer at all:** a metric only one pod in the group exports. CFS throttling is the
+worked example — the counters exist only on containers carrying a CPU limit, so the peer group can hold exactly
+one member and the relative methods are undefined, on precisely the pod being throttled. That case belongs to
+the rules family permanently, not until enough history accumulates.
+
+---
+
+## A new version goes out — the hardest thing that happens to this guard
+
+A rollout is not an edge case, it is the most common event in a cluster's life, and it breaks more assumptions at
+once than any fault does. Worth being blunt: **most of what follows is not implemented yet.** The section states
+what happens today, what the consequence is, and what would fix it.
+
+### What actually changes
+
+| At a rollout | Consequence for the guard |
+|---|---|
+| **Every pod is replaced** | no per-pod history, no seasonal expectation, and the ramp-from-zero contamination on every metric that accumulates |
+| **Pod names change** (the ReplicaSet hash moves) | every piece of per-pod state — EWMA means, LoRA adapters, trend windows — is orphaned and silently starts over |
+| **Old and new coexist for minutes** | the peer group is genuinely bimodal; half the members behave differently *by design* |
+| **Counters reset to zero** | `rate()` handles the reset, but raw gauges (working set, heap) restart low and climb |
+| **The new version's normal is legitimately different** | a build that is 15% slower is a real change, not necessarily a fault, and "unlike its own past" is now true of every pod |
+| **The learned checkpoint describes the old program** | its expectations are systematically wrong until retrained |
+
+### What the guard does today, and it is already pinned by a test
+
+During the mixed phase the peer group has no single norm, and the detector says exactly that:
+`PeerGroupOutlierDetectorTests.ASplitGroup_IsInconclusive_NotAListOfOutliers` is literally the rollout case —
+four pods on the old version, six on the new — and it asserts `Inconclusive` with "no coherent norm". That is
+the **correct** answer and it is **useless for detection**: for the duration of the rollout the peer family goes
+quiet rather than wrong.
+
+The trend family is worse off. A window straddling the boundary contains two different programs, so a step
+change reads as an enormous, perfectly monotone trend. `SeasonalBaseline` will happily take a median across the
+version boundary and hand back an expectation describing software that is no longer running.
+
+`IncidentSubject.Workload` already survives the rename — it is the pod name with the ReplicaSet and pod hashes
+stripped — so **grouping** keeps working across a rollout. Nothing else does.
+
+### How to handle it — the shape of the fix
+
+**1. Know that it happened, without a Kubernetes client.** The Pod → ReplicaSet → Deployment chain and the
+rollout timestamp are already in Prometheus, which is the claim §11 of the blueprint rests on:
+
+```promql
+kube_pod_owner{namespace="overfit", owner_kind="ReplicaSet"}
+kube_replicaset_owner{namespace="overfit"}
+kube_deployment_created{namespace="overfit"}
+sum by (owner_name) (kube_pod_owner{namespace="overfit", owner_kind="ReplicaSet"})   # the old/new split
+```
+
+`PromqlCatalog` has **no queries for any of these**, and `IncidentSubject` has **no ReplicaSet field**. That is
+the first gap and everything below depends on closing it.
+
+**2. Partition the peer group by ReplicaSet rather than by workload.** Comparing old-against-old and
+new-against-new turns one useless `Inconclusive` into two usable groups, and detection keeps running through the
+rollout instead of pausing. The old-against-new comparison is a *different question* — is the new version worse
+— and the blueprint already names it as the **Compare** mode rather than part of detection.
+
+**3. Treat the version boundary as a hard discontinuity for anything with memory.** A trend window that spans it
+must be discarded, not tested; a seasonal expectation must not be built across it. The honest verdict for a pod
+younger than the detector's requirement is `WarmingUp` — which the pipeline already refuses to turn into a
+finding, so the plumbing is right even though nothing computes the boundary yet.
+
+**4. Reset the stateful path explicitly.** `EwmaAnomalyDetector.Reset()` exists for exactly this and **nothing
+calls it**, because nothing detects the rename. Per-pod LoRA adapters in `AdaptiveAnomalyMonitor` have the same
+problem: state keyed on a pod name that no longer exists.
+
+**5. Attribute, do not suppress.** An incident whose start coincides with the deployment timestamp moving is
+*more* informative, not less — "this began when version N went out" is the attribution a bare recording rule
+cannot produce, and it is a large part of what this product is for. Suppressing alerts during a rollout is the
+common industry workaround and it hides the one class of fault most worth catching: the one the rollout caused.
+
+### What is safe to rely on during a rollout, today
+
+- **Hard rules.** `SustainedThresholdRule` needs no history and no peers, so throttling, OOM kills and restarts
+  keep being caught throughout. On a rollout this is the only family that is fully functional.
+- **Grouping and attribution.** Workload identity survives the rename, so findings still collapse into one
+  incident per workload.
+- **Peer comparison after the rollout completes**, once every member is on the new version — which is the
+  cold-start property again: a group of same-version siblings needs no history at all.
+
+### What is not safe, today
+
+- Trend and seasonal verdicts for roughly one detector window either side of the boundary, and for two to three
+  seasonal periods afterwards. They will fire, they will be arithmetically correct, and they will be about the
+  deploy rather than about a fault.
+- Any learned score, until the checkpoint is refitted on the new version.
+
+---
+
+## Training — the fourth family
+
+`Anomalies/{Gpt,Baseline,Neuro,Training}` is a complete learned stack, and it is the part of this subsystem that
+answers a question the other three cannot: **does this pod behave unlike its own past**, across all twelve
+features at once, including the correlations between them.
+
+### What is trained, on what
+
+| Piece | Trained on | Objective |
+|---|---|---|
+| `GptAnomalyDetector` + `MetricTokenizer` | sequences of `MetricSnapshot` | next-token prediction over a 768-symbol vocabulary — 12 features x 64 bins |
+| `OfflineTrainingJob` | historical CSV or a Prometheus range query | fits the above and writes a checkpoint |
+| `AnomalyMlp` + `AnomalyFitness` | the same snapshots | a scoring function fitted by population search rather than gradient |
+| `AdaptiveAnomalyMonitor` | one pod's own stream, online | per-pod LoRA adaptation on top of the shared base |
+| `EwmaAnomalyDetector` | nothing — it is online and stateful | the classical baseline the learned path must beat |
+
+`MetricTokenizer` quantises each feature into 64 bins with a per-feature range and a log or linear scale, so a
+snapshot becomes 12 integers. The anomaly score is the **mean negative log-probability** of the tokens that
+actually arrived: ~0 means the model expected this, ~3+ means it did not.
+
+### The key property: training needs no labels, validation does
+
+The GPT objective is **self-supervised** — predict the next snapshot from the previous ones — so training can
+start the moment enough history exists. Nothing has to be labelled for the loss to be computable.
+
+**What labels are needed for is knowing whether the score means anything.** A model can reach excellent
+perplexity on metric sequences and still score a real fault below a quiet Tuesday, and there is no way to find
+that out without incidents whose ground truth is known. That is the whole of the blueprint's M0 gate, and it is
+not a code problem.
+
+### When it becomes worth doing
+
+Two preconditions, in order:
+
+1. **A real source of the full feature vector.** Now satisfied: `PrometheusHistoricalSource` returns 12 of 12
+   features from the lab. Before that fix every query matched nothing, so any model trained through it would
+   have been trained on zeros.
+2. **Labelled incidents to validate against.** Not satisfied. The lab can manufacture them — the CPU-throttle
+   fault is a known-ground-truth incident — but a handful of injected faults on one single-node cluster is a
+   validation set of about one.
+
+### Why the learned path is expected to help where the statistics do not
+
+Worth stating as a prediction, before it is measured, so it can be checked rather than rationalised afterwards:
+
+- **Seasonality comes for free.** A model trained on weeks of history sees the daily cycle as ordinary and
+  should not need an explicit residual. The statistical layer needs `SeasonalBaseline` precisely because it has
+  no memory.
+- **The GC sawtooth becomes normal too.** That is the failure mode currently producing ~70% of the guard's false
+  positives, and it is exactly the kind of repeating structure a sequence model absorbs.
+- **Cross-feature correlation is available.** "p95 rose while requests/s did not" is one token pattern to a
+  model and requires a hand-written rule in the statistical layer.
+
+### The trap to avoid, already measured once
+
+`MetricSnapshot` carries CPU **and** requests/second as separate features and has no "CPU per request" field.
+That is deliberate and it matters: the lab measured that dividing one by the other produces a signal with two
+failure modes — a false alarm under uneven load, and an **inverted** reading under CPU throttling, where the
+broken replica looks 3x cheaper than its healthy siblings. A model given the two features separately can learn
+the affine relationship `cost ~ fixed + marginal x work` that division cannot express. **Feed it the ratio and
+it will learn both failure modes faithfully, with confidence and without explanation.**
+
+The corollary applies to everything else here: the measured lesson of this subsystem, three times over, is that
+**signal selection beats algorithm choice**. A learned model does not repeal that; it makes it harder to notice,
+because a model trained on a bad feature produces a plausible score instead of an obvious error.
 
 ---
 

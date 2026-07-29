@@ -146,7 +146,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Rules
             // The whole point: a signal a peer comparison cannot reach still becomes an incident. Classified as
             // Infrastructure by the catalog, so it leads any latency symptom it is grouped with.
             var pipeline = new IncidentPipeline();
-            var subject = new IncidentSubject("overfit", "overfit-server-degraded", "pod-degraded", "node-1");
+            var subject = new IncidentSubject("overfit", "overfit-server-degraded", string.Empty, "pod-degraded", "node-1");
 
             var result = Rule.Evaluate(LabWindow(breachFraction: 0.33), SustainedThresholdOptions.ForCpuThrottling);
 
@@ -164,7 +164,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Rules
         public void AHealthyVerdictProducesNothing()
         {
             var pipeline = new IncidentPipeline();
-            var subject = new IncidentSubject("overfit", "overfit-server", "pod-a", "node-1");
+            var subject = new IncidentSubject("overfit", "overfit-server", string.Empty, "pod-a", "node-1");
 
             var result = Rule.Evaluate(LabWindow(breachFraction: 0.13), SustainedThresholdOptions.ForCpuThrottling);
 

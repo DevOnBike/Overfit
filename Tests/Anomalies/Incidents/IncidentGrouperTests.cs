@@ -150,6 +150,62 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Incidents
         }
 
         [Fact]
+        public void DuringARollout_TheTwoHalvesCanBeKeptApart()
+        {
+            // The coordinate a rollout turns on. Two findings on the same Deployment but opposite sides of the
+            // ReplicaSet split are about different programs, and an operator has to be able to say so — that is
+            // exactly what was impossible while the weights were private constants and the field did not exist.
+            var oldVersion = Finding("pod-old", "latency", SignalClass.Symptom, 0, 10,
+                workload: "api", ns: "shop", node: "n1", replicaSet: "api-6d4b7c9f8x");
+            var newVersion = Finding("pod-new", "latency", SignalClass.Symptom, 1, 11,
+                workload: "api", ns: "shop", node: "n1", replicaSet: "api-7f9c2a1b4y");
+
+            var findings = new[] { oldVersion, newVersion };
+
+            // By default the shared workload still merges them: mid-rollout that is a defensible reading.
+            Assert.Single(Grouper.Group(findings, IncidentGroupingOptions.Balanced));
+
+            // Dropping the workload weight below the threshold separates the versions while leaving same-version
+            // pods merged, which is the distinction the ReplicaSet coordinate exists to make.
+            var versionAware = IncidentGroupingOptions.Balanced with
+            {
+                Topology = TopologyWeights.Default with { SameWorkload = 0.2 }
+            };
+
+            Assert.Equal(2, Grouper.Group(findings, versionAware).Count);
+        }
+
+        [Fact]
+        public void SameReplicaSet_OutranksSameWorkload()
+        {
+            // Two pods of one ReplicaSet are the same software; two pods of one workload during a rollout are
+            // not. The weight ordering has to reflect that or the field buys nothing.
+            var sameRs = new[]
+            {
+                Finding("pod-a", "latency", SignalClass.Symptom, 0, 10,
+                    workload: "api", ns: "shop", node: "n1", replicaSet: "api-6d4b7c9f8x"),
+                Finding("pod-b", "latency", SignalClass.Symptom, 1, 11,
+                    workload: "api", ns: "shop", node: "n1", replicaSet: "api-6d4b7c9f8x")
+            };
+
+            var crossRs = new[]
+            {
+                Finding("pod-a", "latency", SignalClass.Symptom, 0, 10,
+                    workload: "api", ns: "shop", node: "n1", replicaSet: "api-6d4b7c9f8x"),
+                Finding("pod-b", "latency", SignalClass.Symptom, 1, 11,
+                    workload: "api", ns: "shop", node: "n1", replicaSet: "api-7f9c2a1b4y")
+            };
+
+            // A threshold between the two weights: same-ReplicaSet clears it, cross-ReplicaSet does not.
+            var between = IncidentGroupingOptions.Balanced with { MinRelatedness = 0.75 };
+
+            Assert.Single(Grouper.Group(sameRs, between));
+            Assert.Equal(2, Grouper.Group(crossRs, between).Count);
+
+            Assert.True(TopologyWeights.Default.SameReplicaSet > TopologyWeights.Default.SameWorkload);
+        }
+
+        [Fact]
         public void InvalidWeights_AreRejectedRatherThanClamped()
         {
             var findings = new[] { Finding("pod-a", "latency", SignalClass.Symptom, 0, 5) };
@@ -357,10 +413,11 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Incidents
             double severity = 0.5,
             string workload = "overfit-server",
             string ns = "overfit",
-            string node = "node-1")
+            string node = "node-1",
+            string replicaSet = "")
         {
             return new SignalFinding(
-                new IncidentSubject(ns, workload, pod, node),
+                new IncidentSubject(ns, workload, replicaSet, pod, node),
                 signal,
                 signalClass,
                 T0.AddMinutes(startMinutes),

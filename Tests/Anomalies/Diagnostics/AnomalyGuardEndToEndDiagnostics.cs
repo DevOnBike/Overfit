@@ -8,6 +8,8 @@ using DevOnBike.Overfit.Anomalies.Incidents;
 using DevOnBike.Overfit.Anomalies.Incidents.Contracts;
 using DevOnBike.Overfit.Anomalies.Monitoring;
 using DevOnBike.Overfit.Anomalies.Monitoring.Contracts;
+using DevOnBike.Overfit.Anomalies.Rules;
+using DevOnBike.Overfit.Anomalies.Rules.Contracts;
 using DevOnBike.Overfit.Statistics;
 using Xunit.Abstractions;
 
@@ -81,6 +83,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
             var pipeline = new IncidentPipeline();
             var report = new StringBuilder();
 
+            RunHardRules(history, pipeline, report, start, end);
             RunPeerDetection(history, pipeline, report, start, end);
             RunTrendDetection(history, pipeline, report, start, end);
 
@@ -123,6 +126,67 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
 
             _output.WriteLine($"\nfindings on the degraded replica: {onDegraded}");
             _output.WriteLine($"findings on healthy replicas:      {onHealthy}   <-- the false-positive budget");
+        }
+
+        /// <summary>
+        /// Runs the absolute thresholds, per pod, per metric that has one.
+        ///
+        /// <para><b>This was missing from the first end-to-end run, and the omission was the point.</b> The
+        /// rules family is the only one that reaches CFS throttling — the counters exist solely on containers
+        /// carrying a CPU limit, so the peer group held one member and the relative methods were undefined, on
+        /// precisely the degraded pod. It is also the only family that catches a single OOM kill: measured, the
+        /// peer comparison is blind to one, because a lone event yields a non-zero rate over ~10% of the window
+        /// and Cliff's delta then lands under the materiality gate.</para>
+        /// </summary>
+        private static void RunHardRules(
+            SortedDictionary<string, Dictionary<MetricIndex, List<double>>> history,
+            IncidentPipeline pipeline,
+            StringBuilder report,
+            DateTime start,
+            DateTime end)
+        {
+            var rule = new SustainedThresholdRule();
+            report.Append("\n=== hard rules (fired only) ===\n");
+
+            var fired = 0;
+
+            foreach (var (pod, byMetric) in history)
+            {
+                foreach (var (metric, options) in RuleProfiles())
+                {
+                    if (!byMetric.TryGetValue(metric, out var values) || values.Count == 0)
+                    {
+                        continue;
+                    }
+
+                    var verdict = rule.Evaluate(values.ToArray(), options);
+
+                    if (pipeline.ObserveRule(
+                            SubjectFor(pod), NameOf(metric), verdict,
+                            new DateTimeOffset(start, TimeSpan.Zero), new DateTimeOffset(end, TimeSpan.Zero),
+                            values.ToArray()))
+                    {
+                        fired++;
+                        report.Append($"  {pod,-42} {metric,-24} {verdict.BreachFraction:P0} of window\n");
+                    }
+                }
+            }
+
+            if (fired == 0)
+            {
+                report.Append("  (none)\n");
+            }
+        }
+
+        /// <summary>
+        /// Which metrics have an absolute threshold worth stating, and which profile. Everything else is left to
+        /// the comparative families — an absolute number on latency or memory would be a per-deployment guess.
+        /// </summary>
+        private static IEnumerable<(MetricIndex Metric, SustainedThresholdOptions Options)> RuleProfiles()
+        {
+            yield return (MetricIndex.CpuThrottleRatio, SustainedThresholdOptions.ForCpuThrottling);
+            yield return (MetricIndex.OomEventsRate, SustainedThresholdOptions.ForRareEvent);
+            yield return (MetricIndex.ContainerRestarts, SustainedThresholdOptions.ForRareEvent);
         }
 
         /// <summary>Runs the peer comparison across all pods, one metric at a time.</summary>
@@ -306,7 +370,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
                 }
             }
 
-            return new IncidentSubject("overfit", workload, pod, string.Empty);
+            return new IncidentSubject("overfit", workload, string.Empty, pod, string.Empty);
         }
 
         /// <summary>Prometheus-style names, so the incident output reads like the metrics it came from.</summary>
@@ -326,6 +390,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
                 MetricIndex.GcGen2HeapBytes => "dotnet_gc_heap_size_bytes",
                 MetricIndex.GcPauseRatio => "dotnet_gc_pause_seconds_total",
                 MetricIndex.ThreadPoolQueueLength => "dotnet_threadpool_queue_length",
+                MetricIndex.ContainerRestarts => "kube_pod_container_status_restarts_total",
                 _ => metric.ToString()
             };
         }

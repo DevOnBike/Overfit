@@ -334,8 +334,12 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Incidents
             Assert.Equal(SignalClass.Infrastructure, incident.Primary.Class);
         }
 
-        private static IncidentSubject Subject(string pod, string workload = "overfit-server", string node = "node-1")
-            => new("overfit", workload, pod, node);
+        private static IncidentSubject Subject(
+            string pod,
+            string workload = "overfit-server",
+            string node = "node-1",
+            string replicaSet = "")
+            => new("overfit", workload, replicaSet, pod, node);
 
         private static (double[] Values, double[] Times) FlatSeries(int samples)
         {

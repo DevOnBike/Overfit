@@ -14,7 +14,12 @@ namespace DevOnBike.Overfit.Anomalies.Gpt
     /// Token for metric m, bin b = m * BinsPerMetric + b.
     ///
     /// One snapshot → 12 tokens (TokensPerSnapshot).
-    /// Context of 252 tokens = 21 snapshots = ~5 minutes at 15s scrape interval.
+    /// Context of 240 tokens = 20 snapshots = ~5 minutes at 15s scrape interval.
+    ///
+    /// <para><b>Every count here derives from <see cref="MetricSnapshot.FeatureCount"/>, so adding a feature
+    /// changes the vocabulary and invalidates every trained checkpoint.</b> That is why the guard's ingestion
+    /// channel list (<see cref="MetricIndex"/>) is allowed to be longer than this: a metric can be scraped and
+    /// used by the rule, peer and trend families without entering the model's vocabulary.</para>
     ///
     /// Binning:
     ///   Ratio metrics [0,1]: uniform bins
@@ -59,7 +64,7 @@ namespace DevOnBike.Overfit.Anomalies.Gpt
         ];
 
         /// <summary>
-        /// Encodes a single MetricSnapshot into TokensPerSnapshot (12) tokens.
+        /// Encodes a single MetricSnapshot into TokensPerSnapshot tokens.
         /// MetricSnapshot is a readonly struct — pass by value to avoid CS8156.
         /// </summary>
         public void EncodeSnapshot(MetricSnapshot snapshot, int[] destination, int offset = 0)
@@ -93,7 +98,7 @@ namespace DevOnBike.Overfit.Anomalies.Gpt
             return tokens;
         }
 
-        /// <summary>Metric index (0-11) for a token.</summary>
+        /// <summary>Metric index for a token.</summary>
         public static int MetricIndexOf(int token) => token / BinsPerMetric;
 
         /// <summary>Bin index (0-63) for a token.</summary>

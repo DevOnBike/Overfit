@@ -279,6 +279,13 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
                 return weights.SamePod;
             }
 
+            // Between pod and workload on purpose: same ReplicaSet is same software, same workload during a
+            // rollout is not.
+            if (Matches(first.ReplicaSet, second.ReplicaSet))
+            {
+                return weights.SameReplicaSet;
+            }
+
             if (Matches(first.Workload, second.Workload))
             {
                 return weights.SameWorkload;

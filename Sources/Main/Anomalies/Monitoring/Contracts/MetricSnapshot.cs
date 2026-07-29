@@ -22,6 +22,18 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring.Contracts
     ///     [10] GcPauseRatio           — rate(gc_pause_total_seconds, 1m)
     ///     [11] ThreadPoolQueueLength  — dotnet_threadpool_queue_length
     ///     Changing FeatureCount invalidates any trained model — full retrain required.
+    ///
+    ///     <para><b>This is deliberately NOT the same as the number of ingestion channels.</b>
+    ///     <see cref="MetricIndex"/> lists what the sources scrape and is longer: it carries
+    ///     <see cref="MetricIndex.ContainerRestarts"/>, which the rules, peer and trend families read straight
+    ///     off the raw series and which never reaches this type.</para>
+    ///
+    ///     <para>The separation was learned the expensive way. Adding restarts here as a thirteenth feature
+    ///     moved the token vocabulary from 768 to 832 and broke, in one step: two committed checkpoints
+    ///     (<c>k8s_anomaly_checkpoint.bin</c>, <c>k8s_anomaly_medium.bin</c>), a <c>ContextLength</c> of 120 that
+    ///     is no longer divisible by the tokens per snapshot, a 200k-row CSV fixture, and the Python script that
+    ///     generates it — because <c>HistoricalCsvLoader</c> validates its required columns. A model contract
+    ///     must not move every time the guard learns to scrape one more thing.</para>
     /// </summary>
     public readonly struct MetricSnapshot
     {

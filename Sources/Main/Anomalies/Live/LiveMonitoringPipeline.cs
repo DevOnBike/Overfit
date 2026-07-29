@@ -327,6 +327,10 @@ namespace DevOnBike.Overfit.Anomalies.Live
             9 => 9,
             10 => 10,
             11 => 11,
+
+            // Channel 12 (ContainerRestarts) is scraped but is NOT a model feature — see
+            // MetricSnapshot.FeatureCount. Returning -1 drops it here on purpose; the rule, peer and trend
+            // families read it from the raw series instead.
             _ => -1
         };
     }

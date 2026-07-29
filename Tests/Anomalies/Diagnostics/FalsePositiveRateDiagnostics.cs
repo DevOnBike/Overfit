@@ -115,7 +115,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
             var subjects = new IncidentSubject[pods];
             for (var p = 0; p < pods; p++)
             {
-                subjects[p] = new IncidentSubject("overfit", "overfit-server", SyntheticCluster.PodName(p), string.Empty);
+                subjects[p] = new IncidentSubject("overfit", "overfit-server", string.Empty, SyntheticCluster.PodName(p), string.Empty);
             }
 
             for (var start = warmup; start + windowSamples <= cluster.Samples; start += stepSamples)

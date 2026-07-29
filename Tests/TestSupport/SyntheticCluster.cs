@@ -180,6 +180,13 @@ namespace DevOnBike.Overfit.Tests.TestSupport
 
                 // No pod here carries a CPU limit, so CFS accounting does not exist for any of them.
                 Set(pod, MetricIndex.CpuThrottleRatio, t, double.NaN);
+
+                // increase() over the window, so a restart reads as 1 for as long as it stays inside the
+                // window and 0 afterwards. Modelling it matters: a generator that left this flat at zero would
+                // be describing a cluster where pods never restart, which is not the healthy case — it is a
+                // fictional one, and the false-positive rate measured against it would be worth nothing.
+                var sinceRestart = t - restartAt;
+                Set(pod, MetricIndex.ContainerRestarts, t, sinceRestart is >= 0 and < 80 ? 1.0 : 0.0);
             }
 
             PunchScrapeGaps(pod, rng);

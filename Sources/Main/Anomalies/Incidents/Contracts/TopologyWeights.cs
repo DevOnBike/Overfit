@@ -20,7 +20,15 @@ namespace DevOnBike.Overfit.Anomalies.Incidents.Contracts
     /// is their ordering and their distance from that threshold.</para>
     /// </summary>
     /// <param name="SamePod">Two findings about the same process — the strongest link there is.</param>
-    /// <param name="SameWorkload">Different replicas of one Deployment/StatefulSet.</param>
+    /// <param name="SameReplicaSet">
+    /// Different pods of the same ReplicaSet — same workload <i>and</i> same version.
+    ///
+    /// <para>Sits above <paramref name="SameWorkload"/> because during a rollout those are different claims:
+    /// same-ReplicaSet means the same software, while same-workload spans the old and the new build. Lowering
+    /// <paramref name="SameWorkload"/> while leaving this one high is how an operator keeps a rollout's two
+    /// halves from merging into one incident.</para>
+    /// </param>
+    /// <param name="SameWorkload">Replicas of one Deployment/StatefulSet, <b>possibly of different versions</b>.</param>
     /// <param name="SameNode">Unrelated workloads sharing failing hardware or a saturated kubelet. <b>Set to 0
     /// on a single-node cluster</b>, where it would otherwise relate every finding to every other.</param>
     /// <param name="SameNamespace">Weakest of the topological links; on its own it should not reach
@@ -30,6 +38,7 @@ namespace DevOnBike.Overfit.Anomalies.Incidents.Contracts
     /// good evidence of a shared cause, but weaker than two findings being about literally the same process.</param>
     public readonly record struct TopologyWeights(
         double SamePod,
+        double SameReplicaSet,
         double SameWorkload,
         double SameNode,
         double SameNamespace,
@@ -42,6 +51,7 @@ namespace DevOnBike.Overfit.Anomalies.Incidents.Contracts
         /// </summary>
         public static TopologyWeights Default { get; } = new(
             SamePod: 1.0,
+            SameReplicaSet: 0.8,
             SameWorkload: 0.7,
             SameNode: 0.6,
             SameNamespace: 0.25,
@@ -59,6 +69,7 @@ namespace DevOnBike.Overfit.Anomalies.Incidents.Contracts
         /// </summary>
         public bool IsValid
             => InRange(SamePod)
+               && InRange(SameReplicaSet)
                && InRange(SameWorkload)
                && InRange(SameNode)
                && InRange(SameNamespace)

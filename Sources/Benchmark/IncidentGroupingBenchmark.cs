@@ -66,7 +66,7 @@ namespace Benchmarks
 
                 // Overlapping windows, so the temporal term never short-circuits the pair away.
                 var finding = new SignalFinding(
-                    new IncidentSubject("overfit", $"workload-{i}", $"pod-{i}", $"node-{i}"),
+                    new IncidentSubject("overfit", $"workload-{i}", string.Empty, $"pod-{i}", $"node-{i}"),
                     $"signal_{i % 13}",
                     (SignalClass)(i % 3),
                     Origin.AddSeconds(i),
