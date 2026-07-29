@@ -35,4 +35,5 @@ OVERFIT027 | Reliability | Warning | async void method or lambda — the excepti
 OVERFIT028 | Reliability | Warning | Array length computed by 32-bit multiplication — a positive wrap yields an undersized buffer, not an exception
 OVERFIT029 | Naming | Warning | Awaitable method not named Async — at the call site it reads like completed work
 OVERFIT030 | Reliability | Warning | Awaitable public API with no CancellationToken — callers cannot abandon it
+OVERFIT031 | Performance | Warning | async method whose only await is its last statement — return the task and drop the state machine (not reported when a using/try would be torn down early)
 OVERFIT900 | Performance | Error | A per-call OVERFIT rule fired inside an [OverfitHotPath] member/type — escalated to a build error

@@ -5,6 +5,8 @@
 
 using System.Runtime.InteropServices;
 using DevOnBike.Overfit.Anomalies.Incidents.Contracts;
+using DevOnBike.Overfit.Anomalies.Rules;
+using DevOnBike.Overfit.Anomalies.Rules.Contracts;
 using DevOnBike.Overfit.Statistics;
 
 namespace DevOnBike.Overfit.Anomalies.Incidents
@@ -85,6 +87,58 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
                 windowStart,
                 windowEnd,
                 Severity(result.KendallTau),
+                result.Reason)
+            {
+                Series = series
+            });
+
+            return true;
+        }
+
+        /// <summary>
+        /// Records a hard-rule verdict, if it is one. Returns <c>false</c> for anything that is not a decided
+        /// anomaly.
+        ///
+        /// <para>This is the path for signals a comparison cannot reach. CPU throttling is the case that forced
+        /// it: the CFS counters exist only on containers carrying a limit, so a peer group can contain exactly
+        /// one member and the relative methods are undefined — on precisely the pod that is being throttled.</para>
+        ///
+        /// <para>Severity is the share of the window in breach rather than the height above the line, because
+        /// crossing the line is what already decided the magnitude mattered. See
+        /// <see cref="SustainedThresholdResult.Severity"/>.</para>
+        /// </summary>
+        /// <param name="subject">Who the signal belongs to.</param>
+        /// <param name="signal">Metric name.</param>
+        /// <param name="result">What <see cref="SustainedThresholdRule.Evaluate"/> returned.</param>
+        /// <param name="windowStart">Start of the evaluated window in wall-clock time.</param>
+        /// <param name="windowEnd">End of it.</param>
+        /// <param name="series">Optional observations, enabling correlation-based linking in the grouper.</param>
+        /// <param name="signalClass">Overrides <see cref="SignalCatalog"/> classification.</param>
+        public bool ObserveRule(
+            IncidentSubject subject,
+            string signal,
+            in SustainedThresholdResult result,
+            DateTimeOffset windowStart,
+            DateTimeOffset windowEnd,
+            ReadOnlyMemory<double> series = default,
+            SignalClass? signalClass = null)
+        {
+            ArgumentNullException.ThrowIfNull(signal);
+
+            if (result.Status != DetectionStatus.Anomalous)
+            {
+                return false;
+            }
+
+            RequireCapacity();
+
+            _findings.Add(new SignalFinding(
+                subject,
+                signal,
+                signalClass ?? SignalCatalog.Classify(signal),
+                windowStart,
+                windowEnd,
+                result.Severity,
                 result.Reason)
             {
                 Series = series

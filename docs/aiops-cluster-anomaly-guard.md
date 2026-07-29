@@ -7,6 +7,13 @@
 > engine in depth (Mann-Whitney, effect size, decision failure modes, ingestion cost). What that document calls
 > the *Canary Sniper* is **Compare** here — one mode of a larger product, scheduled after the core detection is
 > proven.
+>
+> **Implementation map:** [`aiops-detection-pipeline.md`](aiops-detection-pipeline.md) — **read that one when
+> the question is "how does the code work and what can I rely on".** It traces a Prometheus metric through to
+> an incident, states which of the three detector families is the only answer to which question, lists every
+> calibrated threshold with the measurement behind it, and separates what runs end to end from what is built
+> but never validated. This document holds the product reasoning; that one holds the code. Kept out of
+> `docs/README.md` on the same grounds as this file.
 
 **Working name:** Overfit AIOps — Cluster Anomaly Guard
 **Direction:** a local, Prometheus-native anomaly-detection engine for Kubernetes

@@ -167,21 +167,30 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Incidents
         }
 
         [Fact]
-        public void ASmallGroupWithOneStrongOutlier_IsInconclusive()
+        public void ASmallGroupWithOneStrongOutlier_IsDetected()
         {
-            // Masking, and the pipeline must not launder it into a finding. Leave-one-out puts the outlier
-            // inside every other member's baseline: at four peers it is 1/3 of that baseline, which drags the
-            // three healthy members far enough to clear the materiality gate in the opposite direction. The
-            // detector then sees one member High and three Low — no coherent norm — and says so rather than
-            // picking a side.
+            // Four replicas is an ordinary deployment size, and one member 1.6x above the other three has to
+            // be findable there.
+            //
+            // This test previously asserted the opposite, and was right to: leave-one-out pools the raw samples
+            // of every other member, so at four peers the outlier was a third of everybody else's baseline and
+            // dragged the three healthy members past the effect-size gate in the opposite direction. One High
+            // against three Low reads as "no coherent norm", so the detector returned Inconclusive and the
+            // pipeline correctly refused to make a finding of it — about a fault nobody could miss by eye.
+            //
+            // What fixed it was not the pooling but the missing size gate. Cliff's delta is scale-free, so a
+            // 3% median difference between tight distributions scores as high as a 300% one; adding
+            // MinRelativeGap means a direction has to be both consistent AND materially large. The healthy
+            // members' gaps are now under 8% and drop out, leaving the one real departure.
             var pipeline = new IncidentPipeline();
             var (peers, subjects) = PeerGroup(deviatingIndex: 2, factor: 1.6, members: 4);
 
             var findings = new PeerOutlierFinding[peers.Count];
             var result = Peers.Detect(peers, PeerSignalKind.LoadIndependent, PeerOutlierOptions.Balanced, findings);
 
-            Assert.Equal(DetectionStatus.Inconclusive, result.Status);
-            Assert.True(result.HighCount > 0 && result.LowCount > 0, "expected contradictory directions");
+            Assert.Equal(DetectionStatus.Anomalous, result.Status);
+            Assert.Equal(1, result.HighCount);
+            Assert.Equal(0, result.LowCount);
 
             var added = pipeline.ObservePeerGroup(
                 "kube_pod_container_status_restarts_total",
@@ -191,8 +200,67 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Incidents
                 WindowStart,
                 WindowEnd);
 
+            Assert.Equal(1, added);
+
+            var incident = Assert.Single(pipeline.Group(IncidentGroupingOptions.Balanced));
+
+            Assert.Equal("pod-2", incident.Primary.Subject.Pod);
+        }
+
+        [Fact]
+        public void AGroupWithNoNorm_IsStillInconclusive()
+        {
+            // The size gate must not tidy a genuine split into a confident list. Half the members away from
+            // the group's own centre is the absence of a norm, not a departure from one — and the verdict has
+            // to say so rather than nominate whichever half is smaller.
+            var rng = new Random(1234);
+            var peers = new List<PeerSeries>
+            {
+                Peer("pod-0", 100.0, rng),
+                Peer("pod-1", 100.0, rng),
+                Peer("pod-2", 900.0, rng),
+                Peer("pod-3", 900.0, rng)
+            };
+
+            var subjects = new[] { Subject("pod-0"), Subject("pod-1"), Subject("pod-2"), Subject("pod-3") };
+            var findings = new PeerOutlierFinding[peers.Count];
+
+            var result = Peers.Detect(peers, PeerSignalKind.LoadIndependent, PeerOutlierOptions.Balanced, findings);
+
+            Assert.Equal(DetectionStatus.Inconclusive, result.Status);
+
+            var added = pipeline_ObserveNothing(findings, subjects, result);
+
             Assert.Equal(0, added);
-            Assert.Empty(pipeline.Group(IncidentGroupingOptions.Balanced));
+        }
+
+        private static int pipeline_ObserveNothing(
+            PeerOutlierFinding[] findings,
+            IncidentSubject[] subjects,
+            PeerOutlierResult result)
+        {
+            var pipeline = new IncidentPipeline();
+
+            return pipeline.ObservePeerGroup(
+                "container_memory_working_set_bytes",
+                result,
+                findings.AsSpan(0, subjects.Length),
+                subjects.AsSpan(0, subjects.Length),
+                WindowStart,
+                WindowEnd);
+        }
+
+        /// <summary>60 samples around <paramref name="median"/> with a few percent of noise.</summary>
+        private static PeerSeries Peer(string name, double median, Random rng)
+        {
+            var values = new double[60];
+
+            for (var i = 0; i < values.Length; i++)
+            {
+                values[i] = median * (1.0 + ((rng.NextDouble() - 0.5) * 0.05));
+            }
+
+            return new PeerSeries(name, values);
         }
 
         [Fact]

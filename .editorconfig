@@ -177,6 +177,12 @@ dotnet_diagnostic.OVERFIT027.severity = suggestion
 dotnet_diagnostic.OVERFIT028.severity = suggestion
 dotnet_diagnostic.OVERFIT029.severity = suggestion
 dotnet_diagnostic.OVERFIT030.severity = suggestion
+
+# OVERFIT031 (redundant async state machine) — suggestion outside the library. Eliding changes when a
+# pre-await exception surfaces (synchronously, rather than inside the returned task), which is invisible to
+# a caller that awaits immediately and visible to one that stores the task. Outside Sources/Main that call
+# shape is not ours to police.
+dotnet_diagnostic.OVERFIT031.severity = suggestion
 dotnet_diagnostic.OVERFIT026.severity = suggestion
 # OVERFIT900 — the [OverfitHotPath] escalation. Any per-call rule (001-007, 009-011, 013-014) that
 # fires inside a member or type marked [DevOnBike.Overfit.Diagnostics.OverfitHotPath] is reported as
@@ -356,6 +362,18 @@ dotnet_diagnostic.OVERFIT028.severity = error
 #      that ignores Ctrl+C), and fixing that means wiring a real token, not adding an ignored parameter.
 dotnet_diagnostic.OVERFIT029.severity = error
 dotnet_diagnostic.OVERFIT030.severity = error
+
+# OVERFIT031 (redundant async state machine) — ERROR in the library. The whole backlog was ONE site:
+# LiveMonitoringPipeline.DisposeAsync, which disposed three resources synchronously and then awaited
+# ValueTask.CompletedTask purely to justify the keyword. Fixed, so the rule starts at zero.
+#
+# The rule is deliberately narrow, because its one dangerous false positive would be severe: eliding inside a
+# `using` returns the task before disposal and produces a use-after-dispose. It therefore stays silent on any
+# body containing a using (either form) or a try, on more than one await, on an await that is not the tail,
+# and on an awaited type that is not identical to the return type. Verified against 13 controls — 5 shapes it
+# must catch and 8 it must not — because a rule that fires once across a solution looks the same whether the
+# codebase is clean or the rule is broken.
+dotnet_diagnostic.OVERFIT031.severity = error
 # OVERFIT027 — ERROR on the same criteria as OVERFIT008/015/025: ZERO existing sites in the whole
 # solution at introduction (2026-07-24), unconditional rule, trivial fix (return Task), and the
 # miss-cost is an uncatchable kill of the hosting process. A tripwire, not a sweep.

@@ -155,10 +155,30 @@ namespace DevOnBike.Overfit.Statistics
                 }
             }
 
+            // The size gate, measured before any test runs — see PeerOutlierOptions.MinRelativeGap for why a
+            // rank effect size cannot stand in for it.
+            using var summaryBuffer = new PooledBuffer<double>(2 * peers.Count, clearMemory: false);
+            using var rawBuffer = new PooledBuffer<PeerDeviation>(peers.Count, clearMemory: true);
+
+            var medians = summaryBuffer.Span[..peers.Count];
+            var gaps = summaryBuffer.Span.Slice(peers.Count, peers.Count);
+            var rawDeviations = rawBuffer.Span[..peers.Count];
+
+            for (var i = 0; i < peers.Count; i++)
+            {
+                var span = pooled[bounds[i]..bounds[i + 1]];
+                span.CopyTo(workspace);
+                medians[i] = MedianSelector.MedianInPlace(workspace[..span.Length]);
+            }
+
+            var departures = MeasureGaps(medians, gaps, workspace, options.MinRelativeGap);
+
             // Two one-sided tests per member, so the family is twice the group size.
             var correctedAlpha = options.MaxPValue / (2.0 * peers.Count);
             var high = 0;
             var low = 0;
+            var rawHigh = 0;
+            var rawLow = 0;
 
             for (var i = 0; i < peers.Count; i++)
             {
@@ -172,6 +192,11 @@ namespace DevOnBike.Overfit.Statistics
                 var rest = workspace[..(start + (written - end))];
                 var peer = pooled[start..end];
 
+                // The size gate never changes which direction the rank test found, only whether that direction
+                // is worth reporting — so the raw verdict is kept alongside as the evidence for "this group has
+                // no norm".
+                var material = options.MinRelativeGap <= 0.0 || gaps[i] >= options.MinRelativeGap;
+
                 // Above its peers: peer as the candidate. Below: swap the arms, so the same one-sided test
                 // answers the opposite question and the effect size stays a positive magnitude.
                 var above = _comparer.Compare(rest, peer);
@@ -179,8 +204,17 @@ namespace DevOnBike.Overfit.Statistics
 
                 if (isHigh)
                 {
-                    findings[i] = new PeerOutlierFinding(peers[i].Name, above, PeerDeviation.High, end - start);
-                    high++;
+                    rawDeviations[i] = PeerDeviation.High;
+                    rawHigh++;
+
+                    findings[i] = new PeerOutlierFinding(
+                        peers[i].Name, above, material ? PeerDeviation.High : PeerDeviation.None, end - start);
+
+                    if (material)
+                    {
+                        high++;
+                    }
+
                     continue;
                 }
 
@@ -189,12 +223,41 @@ namespace DevOnBike.Overfit.Statistics
 
                 if (isLow)
                 {
-                    findings[i] = new PeerOutlierFinding(peers[i].Name, below, PeerDeviation.Low, end - start);
-                    low++;
+                    rawDeviations[i] = PeerDeviation.Low;
+                    rawLow++;
+
+                    findings[i] = new PeerOutlierFinding(
+                        peers[i].Name, below, material ? PeerDeviation.Low : PeerDeviation.None, end - start);
+
+                    if (material)
+                    {
+                        low++;
+                    }
+
                     continue;
                 }
 
                 findings[i] = new PeerOutlierFinding(peers[i].Name, above, PeerDeviation.None, end - start);
+            }
+
+            // A third or more of the group standing away from the group's own centre is not one departure from
+            // a norm — it is the absence of one, and the size gate must not be allowed to tidy that into a
+            // confident list. Reported with the RAW directions, because members pulling both ways is the
+            // evidence. Strict inequality so a single outlier among three peers still counts as an outlier.
+            if (departures * 3 > peers.Count)
+            {
+                for (var i = 0; i < peers.Count; i++)
+                {
+                    findings[i] = findings[i] with { Deviation = rawDeviations[i] };
+                }
+
+                return new PeerOutlierResult(
+                    DetectionStatus.Inconclusive,
+                    $"{departures} of {peers.Count} members sit more than {options.MinRelativeGap:P0} from the group's own median ({rawHigh} above and {rawLow} below their peers): the group has no coherent norm, which points to a workload-level change rather than an outlier. Compare against the workload's own history to attribute it.",
+                    correctedAlpha,
+                    peers.Count,
+                    rawHigh,
+                    rawLow);
             }
 
             if (high == 0 && low == 0)
@@ -228,6 +291,101 @@ namespace DevOnBike.Overfit.Statistics
                 peers.Count,
                 high,
                 low);
+        }
+
+        /// <summary>
+        /// Fills <paramref name="gaps"/> with each member's median distance from its peers', as a fraction of
+        /// theirs, and returns how many members sit that far from the <b>group's</b> own median.
+        ///
+        /// <para><b>Medians of medians, not pooled samples.</b> A pooled baseline mixes distributions, so one
+        /// deviating member drags the reference every other member is measured against; the median of the
+        /// other members' medians barely moves. That difference is the whole reason this gate can be trusted
+        /// at four replicas, which is an ordinary deployment size.</para>
+        ///
+        /// <para>A group centred on zero has no meaningful relative scale, so the gate stands down rather than
+        /// dividing by something arbitrarily small — the same guard <see cref="TrendDetector"/> applies to its
+        /// own relative-change threshold.</para>
+        /// </summary>
+        /// <param name="medians">One median per peer, index-aligned with the group.</param>
+        /// <param name="gaps">Receives each peer's relative distance from its peers' centre.</param>
+        /// <param name="scratch">At least <c>medians.Length</c> doubles; permuted.</param>
+        /// <param name="minimumGap">The gate; zero disables it, and every gap is then reported as passing.</param>
+        private static int MeasureGaps(
+            ReadOnlySpan<double> medians,
+            Span<double> gaps,
+            Span<double> scratch,
+            double minimumGap)
+        {
+            var n = medians.Length;
+
+            if (minimumGap <= 0.0)
+            {
+                gaps.Fill(double.PositiveInfinity);
+
+                return 0;
+            }
+
+            for (var i = 0; i < n; i++)
+            {
+                var written = 0;
+                for (var j = 0; j < n; j++)
+                {
+                    if (j == i)
+                    {
+                        continue;
+                    }
+
+                    scratch[written] = medians[j];
+                    written++;
+                }
+
+                var centre = MedianSelector.MedianInPlace(scratch[..written]);
+                gaps[i] = RelativeGap(medians[i], centre);
+            }
+
+            medians.CopyTo(scratch);
+            var groupCentre = MedianSelector.MedianInPlace(scratch[..n]);
+
+            // A group centred on zero has no relative scale, so "how many members sit relatively far from it"
+            // has no answer — and the answer must be none, not all.
+            //
+            // Getting this backwards was measured, not imagined: the unscaled case yields an infinite gap,
+            // which is the right reading for the per-finding gate ("cannot judge, so do not block") and
+            // exactly the wrong one here. On the cluster lab it made four identically-zero counters —
+            // container_oom_events_total, the 5xx ratio, GC pause and thread-pool queue — look like fully
+            // split groups, so the detector reported "no coherent norm" about metrics on which nobody
+            // disagreed, instead of Healthy.
+            if (Math.Abs(groupCentre) <= 1e-12)
+            {
+                return 0;
+            }
+
+            var departures = 0;
+            for (var i = 0; i < n; i++)
+            {
+                if (RelativeGap(medians[i], groupCentre) >= minimumGap)
+                {
+                    departures++;
+                }
+            }
+
+            return departures;
+        }
+
+        /// <summary>
+        /// <c>|value − centre| / |centre|</c>, or <see cref="double.PositiveInfinity"/> when the centre carries
+        /// no usable scale — an unscaled group is one the gate cannot judge, so it does not block a finding.
+        /// </summary>
+        private static double RelativeGap(double value, double centre)
+        {
+            var scale = Math.Abs(centre);
+
+            if (scale <= 1e-12)
+            {
+                return double.PositiveInfinity;
+            }
+
+            return Math.Abs(value - centre) / scale;
         }
 
         /// <summary>

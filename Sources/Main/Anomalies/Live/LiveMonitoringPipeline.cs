@@ -186,18 +186,25 @@ namespace DevOnBike.Overfit.Anomalies.Live
             }
         }
 
-        public async ValueTask DisposeAsync()
+        /// <summary>
+        /// Nothing here is asynchronous — every owned resource disposes synchronously — so the completed task
+        /// is returned rather than awaited. The <c>async</c> keyword would build a state machine, a builder and
+        /// a continuation solely to forward a task that is already finished (OVERFIT031).
+        /// </summary>
+        public ValueTask DisposeAsync()
         {
             if (_disposed)
             {
-                return;
+                return ValueTask.CompletedTask;
             }
+
             _disposed = true;
 
             _monitor.Dispose();   // un-merges adapters + disposes detectors, leaving the model clean
             _source.Dispose();
             _model.Dispose();
-            await ValueTask.CompletedTask.ConfigureAwait(false);
+
+            return ValueTask.CompletedTask;
         }
 
         // ── Private ──────────────────────────────────────────────────────────

@@ -62,6 +62,31 @@ namespace DevOnBike.Overfit.Tests.Statistics
         }
 
         [Fact]
+        public void AnIdenticallyZeroSignal_IsHealthy_NotInconclusive()
+        {
+            // Most of the signals in a healthy cluster are counters sitting at zero: OOM kills, 5xx responses,
+            // GC pause, thread-pool queue depth. A group on which nobody disagrees is Healthy.
+            //
+            // Regression for a defect the unit suite missed and the live lab caught. The size gate reports an
+            // infinite relative gap when the centre has no usable scale, which is the right reading for
+            // "should this finding be blocked" and the wrong one for "how many members depart" — every member
+            // of an all-zero group counted as a departure, so four identically-zero metrics were reported as
+            // fully split groups with no coherent norm.
+            var peers = new List<PeerSeries>();
+            for (var p = 0; p < 6; p++)
+            {
+                peers.Add(new PeerSeries($"pod-{p}", Constant(0.0, 60)));
+            }
+
+            var findings = new PeerOutlierFinding[peers.Count];
+            var result = Detector.Detect(peers, PeerSignalKind.LoadIndependent, PeerOutlierOptions.Balanced, findings);
+
+            Assert.Equal(DetectionStatus.Healthy, result.Status);
+            Assert.Equal(0, result.OutlierCount);
+            Assert.All(findings, f => Assert.Equal(PeerDeviation.None, f.Deviation));
+        }
+
+        [Fact]
         public void ASplitGroup_IsInconclusive_NotAListOfOutliers()
         {
             // A rollout moved six of ten pods. Members now deviate in both directions at once, so the group has

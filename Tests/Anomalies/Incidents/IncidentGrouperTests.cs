@@ -106,6 +106,77 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Incidents
         }
 
         [Fact]
+        public void OnASingleNodeCluster_TheNodeCoordinateCanBeSwitchedOff()
+        {
+            // Why these weights had to leave the detector as private constants. Docker Desktop, kind and
+            // minikube put every pod on one node, so "same node" is a constant there — and a constant is not
+            // evidence. Left at its default it relates every finding to every other; zeroed, the pair falls
+            // back to the namespace link, which is deliberately too weak to merge on its own.
+            var findings = new[]
+            {
+                Finding("pod-a", "latency", SignalClass.Symptom, 0, 10, workload: "api", ns: "shop", node: "n1"),
+                Finding("pod-z", "latency", SignalClass.Symptom, 1, 11, workload: "billing", ns: "shop", node: "n1")
+            };
+
+            Assert.Single(Grouper.Group(findings, IncidentGroupingOptions.Balanced));
+
+            var singleNode = IncidentGroupingOptions.Balanced with
+            {
+                Topology = TopologyWeights.SingleNode
+            };
+
+            Assert.Equal(2, Grouper.Group(findings, singleNode).Count);
+        }
+
+        [Fact]
+        public void RaisingTheNamespaceWeight_MergesWhatItOtherwiseCouldNot()
+        {
+            // The opposite environment: on a single-tenant cluster a shared namespace is nearly as strong as a
+            // shared workload, and an operator has to be able to say so.
+            var findings = new[]
+            {
+                Finding("pod-a", "latency", SignalClass.Symptom, 0, 10, workload: "api", ns: "shop", node: "n1"),
+                Finding("pod-z", "errors", SignalClass.Symptom, 0, 10, workload: "billing", ns: "shop", node: "n2")
+            };
+
+            Assert.Equal(2, Grouper.Group(findings, IncidentGroupingOptions.Balanced).Count);
+
+            var singleTenant = IncidentGroupingOptions.Balanced with
+            {
+                Topology = TopologyWeights.Default with { SameNamespace = 0.65 }
+            };
+
+            Assert.Single(Grouper.Group(findings, singleTenant));
+        }
+
+        [Fact]
+        public void InvalidWeights_AreRejectedRatherThanClamped()
+        {
+            var findings = new[] { Finding("pod-a", "latency", SignalClass.Symptom, 0, 5) };
+
+            var negative = IncidentGroupingOptions.Balanced with
+            {
+                Topology = TopologyWeights.Default with { SameNode = -0.1 }
+            };
+
+            var aboveOne = IncidentGroupingOptions.Balanced with
+            {
+                Topology = TopologyWeights.Default with { SameWorkload = 1.5 }
+            };
+
+            // Zeroing the strongest link would mean "two findings about the same process are unrelated", which
+            // is not a weakening of the evidence but a mistake.
+            var podless = IncidentGroupingOptions.Balanced with
+            {
+                Topology = TopologyWeights.Default with { SamePod = 0.0 }
+            };
+
+            Assert.Throws<ArgumentException>(() => Grouper.Group(findings, negative));
+            Assert.Throws<ArgumentException>(() => Grouper.Group(findings, aboveOne));
+            Assert.Throws<ArgumentException>(() => Grouper.Group(findings, podless));
+        }
+
+        [Fact]
         public void SameNamespaceAlone_IsNotEnoughToMerge()
         {
             var findings = new[]

@@ -27,13 +27,17 @@ namespace DevOnBike.Overfit.Anomalies.Incidents.Contracts
     /// Bonferroni correction.</param>
     /// <param name="MaxLagSamples">How far the lag scan may shift one series against the other. Zero disables
     /// the scan and correlates at lag 0 only.</param>
+    /// <param name="Topology">How much each shared cluster coordinate is worth as evidence. Environment-specific
+    /// — a single-node cluster must zero <see cref="TopologyWeights.SameNode"/>, where it would otherwise relate
+    /// every finding to every other. See <see cref="TopologyWeights"/>.</param>
     public readonly record struct IncidentGroupingOptions(
         TimeSpan MaxSeparation,
         TimeSpan MaxIncidentSpan,
         double MinRelatedness,
         double MinCorrelation,
         double MaxCorrelationPValue,
-        int MaxLagSamples)
+        int MaxLagSamples,
+        TopologyWeights Topology)
     {
         /// <summary>
         /// The default. Five minutes of separation covers detectors that evaluate on different cadences
@@ -49,7 +53,8 @@ namespace DevOnBike.Overfit.Anomalies.Incidents.Contracts
             MinRelatedness: 0.35,
             MinCorrelation: 0.8,
             MaxCorrelationPValue: 0.01,
-            MaxLagSamples: 10);
+            MaxLagSamples: 10,
+            Topology: TopologyWeights.Default);
 
         /// <summary>
         /// Groups only what is hard to argue with: same pod or same workload, tightly overlapping in time,
@@ -64,7 +69,8 @@ namespace DevOnBike.Overfit.Anomalies.Incidents.Contracts
             MinRelatedness: 0.6,
             MinCorrelation: 1.0,
             MaxCorrelationPValue: 0.001,
-            MaxLagSamples: 0);
+            MaxLagSamples: 0,
+            Topology: TopologyWeights.Default);
 
         /// <summary>Whether the thresholds are usable — guards against <c>default</c> being passed in.</summary>
         public bool IsValid
@@ -73,6 +79,7 @@ namespace DevOnBike.Overfit.Anomalies.Incidents.Contracts
                && MinRelatedness > 0.0 && MinRelatedness <= 1.0
                && MinCorrelation > 0.0 && MinCorrelation <= 1.0
                && MaxCorrelationPValue > 0.0 && MaxCorrelationPValue <= 1.0
-               && MaxLagSamples >= 0;
+               && MaxLagSamples >= 0
+               && Topology.IsValid;
     }
 }

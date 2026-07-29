@@ -40,6 +40,26 @@ namespace DevOnBike.Overfit.Tests.Server
         }
 
         [Fact]
+        public async Task DoAsync()
+        {
+            await Task.CompletedTask;
+        }
+
+        private async Task DoCoreDefaultAsync()
+        {
+            var a = "a";
+            
+            await Task.CompletedTask;
+        }
+        
+        private Task DoCoreCorrectAsync()
+        {
+            var a = "a";
+            
+            return Task.CompletedTask;
+        }
+
+        [Fact]
         public async Task Health_ReturnsOk()
         {
             var (app, client) = await StartAsync(new FakeInferenceService());

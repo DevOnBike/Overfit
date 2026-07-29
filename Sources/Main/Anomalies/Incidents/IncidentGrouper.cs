@@ -59,26 +59,6 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
         /// </summary>
         public const int MaxFindingsPerCall = 1024;
 
-        /// <summary>Relatedness contributed by two findings sharing the same pod.</summary>
-        private const double SamePodScore = 1.0;
-
-        /// <summary>Same workload — different replicas of one Deployment.</summary>
-        private const double SameWorkloadScore = 0.7;
-
-        /// <summary>Same node — unrelated workloads sharing failing hardware or a saturated kubelet.</summary>
-        private const double SameNodeScore = 0.6;
-
-        /// <summary>Same namespace only: weak, and on its own never enough to merge under Balanced.</summary>
-        private const double SameNamespaceScore = 0.25;
-
-        /// <summary>
-        /// Topological weight a strong rank correlation stands in for. Deliberately equal to
-        /// <see cref="SameWorkloadScore"/> and not to <see cref="SamePodScore"/>: series moving together is
-        /// good evidence of a shared cause, but it is weaker than two findings being about literally the same
-        /// process.
-        /// </summary>
-        private const double CorrelationScore = 0.7;
-
         /// <summary>Identifier for reports and exported metric labels.</summary>
         public string Name => "incident-grouper";
 
@@ -246,13 +226,15 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
                 return 0.0;
             }
 
-            var topology = TopologyScore(first.Subject, second.Subject);
+            var topology = TopologyScore(first.Subject, second.Subject, options.Topology);
 
             // Correlation is only consulted when topology cannot already justify the merge — it is the
             // expensive term, and computing it to confirm what is already known would be waste.
-            if (topology < CorrelationScore && options.MinCorrelation < 1.0 && IsCorrelated(first, second, options))
+            if (topology < options.Topology.Correlated
+                && options.MinCorrelation < 1.0
+                && IsCorrelated(first, second, options))
             {
-                topology = CorrelationScore;
+                topology = options.Topology.Correlated;
             }
 
             return temporal * topology;
@@ -287,26 +269,29 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
         /// The closest relationship the two subjects have in the cluster. Empty coordinates never match —
         /// two findings with no known node are not "on the same node".
         /// </summary>
-        private static double TopologyScore(in IncidentSubject first, in IncidentSubject second)
+        private static double TopologyScore(
+            in IncidentSubject first,
+            in IncidentSubject second,
+            TopologyWeights weights)
         {
             if (Matches(first.Pod, second.Pod))
             {
-                return SamePodScore;
+                return weights.SamePod;
             }
 
             if (Matches(first.Workload, second.Workload))
             {
-                return SameWorkloadScore;
+                return weights.SameWorkload;
             }
 
             if (Matches(first.Node, second.Node))
             {
-                return SameNodeScore;
+                return weights.SameNode;
             }
 
             if (Matches(first.Namespace, second.Namespace))
             {
-                return SameNamespaceScore;
+                return weights.SameNamespace;
             }
 
             return 0.0;
