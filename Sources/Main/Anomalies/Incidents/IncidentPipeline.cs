@@ -3,7 +3,6 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using DevOnBike.Overfit.Anomalies.Incidents.Contracts;
 using DevOnBike.Overfit.Statistics;

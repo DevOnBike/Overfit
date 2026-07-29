@@ -11,9 +11,7 @@ using DevOnBike.Overfit.Server.AspNet.Endpoints;
 using DevOnBike.Overfit.Server.AspNet.Services;
 using DevOnBike.Overfit.Server.OpenAi;
 using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.TestHost;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace DevOnBike.Overfit.Tests.Server

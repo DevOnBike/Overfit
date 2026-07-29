@@ -24,7 +24,6 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
     /// </summary>
     public sealed class PrometheusHistoricalSource : IDisposable
     {
-
         private static readonly JsonSerializerOptions _jsonOptions = new()
         {
             PropertyNameCaseInsensitive = true
@@ -32,6 +31,7 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
 
         private readonly PrometheusHistoricalSourceConfig _config;
         private readonly HttpClient _http;
+        private readonly int[] _seriesFromLastFetch = new int[(int)MetricIndex.Count];
         private bool _disposed;
 
         public PrometheusHistoricalSource(
@@ -42,6 +42,29 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
             _config = config;
             _http = httpClient ?? BuildHttpClient(config);
         }
+
+        /// <summary>
+        /// How many series the last <see cref="FetchAsync"/> obtained for one feature. A count of 0 on a
+        /// cluster known to be running pods means the query is wrong, not that the system was quiet — feature
+        /// assembly cannot tell those apart, so this is where the difference is visible.
+        /// </summary>
+        public int SeriesReturned(MetricIndex metric)
+        {
+            var index = (int)metric;
+
+            if ((uint)index >= (uint)MetricIndex.Count)
+            {
+                throw new ArgumentOutOfRangeException(nameof(metric), metric, "Unknown metric.");
+            }
+
+            return _seriesFromLastFetch[index];
+        }
+
+        /// <summary>
+        /// Whether this deployment has a query for <paramref name="metric"/> at all. False when the
+        /// configuration maps it to an empty template.
+        /// </summary>
+        public bool IsMapped(MetricIndex metric) => PromqlCatalog.ResolveTemplate(_config, metric).Length > 0;
 
         public void Dispose()
         {
@@ -74,30 +97,51 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
 
             // Fetch all metrics in parallel — 12 queries × 2 DCs = 24 parallel requests
             var tasks = new List<Task<List<RawMetricSeries>>>();
+            var metricOfTask = new List<MetricIndex>();
 
             foreach (var dc in Enum.GetValues<DataCenter>())
             {
-                var dcLabel = dc == DataCenter.West ? _config.DcWestLabel : _config.DcEastLabel;
+                var selector = PromqlCatalog.BuildSelector(_config, dc);
 
                 for (var m = 0; m < (int)MetricIndex.Count; m++)
                 {
                     var metric = (MetricIndex)m;
-                    var metricId = (byte)m;
-                    var query = BuildQuery(metric, _config.PodRegex, dcLabel);
-                    var capturedDc = dc;
+                    var query = PromqlCatalog.Build(_config, metric, selector);
+
+                    // No template means this deployment has no source for the feature. Issuing a query built
+                    // from a metric name that is not there returns an empty result indistinguishable from a
+                    // real one, so it is not issued at all.
+                    if (query is null)
+                    {
+                        continue;
+                    }
 
                     tasks.Add(FetchMetricSeriesAsync(
-                    query, metricId, capturedDc, startSec, endSec, stepSeconds, ct));
+                        query, (byte)m, dc, startSec, endSec, stepSeconds, ct));
+                    metricOfTask.Add(metric);
+                }
+
+                // One data centre means one pass: the selector carries no dc matcher, so a second identical
+                // round would double every query and every series.
+                if (PromqlCatalog.IsSingleDataCenter(_config))
+                {
+                    break;
                 }
             }
 
             await Task.WhenAll(tasks).ConfigureAwait(false);
 
-            // Merge all series into a flat list then group by scrape timestamp
+            // Merge all series into a flat list then group by scrape timestamp, counting coverage on the
+            // way through: a query that matched nothing is otherwise indistinguishable from a quiet system.
+            Array.Clear(_seriesFromLastFetch);
+
             var allSeries = new List<RawMetricSeries>();
-            foreach (var task in tasks)
+            for (var i = 0; i < tasks.Count; i++)
             {
-                allSeries.AddRange(await task);
+                var series = await tasks[i].ConfigureAwait(false);
+
+                _seriesFromLastFetch[(int)metricOfTask[i]] += series.Count;
+                allSeries.AddRange(series);
             }
 
             return GroupByScrapeTimestamp(allSeries, startSec, endSec, stepSeconds);
@@ -244,60 +288,15 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
         // PromQL query builders
         // ---------------------------------------------------------------------------
 
-        private static string BuildQuery(MetricIndex metric, string podRegex, string dcLabel)
-        {
-            return metric switch
-            {
-                MetricIndex.CpuUsageRatio =>
-                    $"rate(container_cpu_usage_seconds_total{{pod=~\"{podRegex}\",dc=\"{dcLabel}\"}}[1m])",
-
-                MetricIndex.CpuThrottleRatio =>
-                    $"rate(container_cpu_cfs_throttled_periods_total{{pod=~\"{podRegex}\",dc=\"{dcLabel}\"}}[1m])" +
-                    $" / rate(container_cpu_cfs_periods_total{{pod=~\"{podRegex}\",dc=\"{dcLabel}\"}}[1m])",
-
-                MetricIndex.MemoryWorkingSetBytes =>
-                    $"container_memory_working_set_bytes{{pod=~\"{podRegex}\",dc=\"{dcLabel}\"}}",
-
-                MetricIndex.OomEventsRate =>
-                    $"rate(container_oom_events_total{{pod=~\"{podRegex}\",dc=\"{dcLabel}\"}}[1m])",
-
-                MetricIndex.LatencyP50Ms =>
-                    $"histogram_quantile(0.50,rate(http_server_request_duration_seconds_bucket{{pod=~\"{podRegex}\"}}[1m]))*1000",
-
-                MetricIndex.LatencyP95Ms =>
-                    $"histogram_quantile(0.95,rate(http_server_request_duration_seconds_bucket{{pod=~\"{podRegex}\"}}[1m]))*1000",
-
-                MetricIndex.LatencyP99Ms =>
-                    $"histogram_quantile(0.99,rate(http_server_request_duration_seconds_bucket{{pod=~\"{podRegex}\"}}[1m]))*1000",
-
-                MetricIndex.RequestsPerSecond =>
-                    $"rate(http_server_request_duration_seconds_count{{pod=~\"{podRegex}\"}}[1m])",
-
-                MetricIndex.ErrorRate =>
-                    $"rate(http_server_request_duration_seconds_count{{pod=~\"{podRegex}\",http_response_status_code=~\"5..\"}}[1m])" +
-                    $" / (rate(http_server_request_duration_seconds_count{{pod=~\"{podRegex}\"}}[1m]) or vector(1))",
-
-                MetricIndex.GcGen2HeapBytes =>
-                    $"process_runtime_dotnet_gc_heap_size_bytes{{pod=~\"{podRegex}\",generation=\"2\"}}",
-
-                MetricIndex.GcPauseRatio =>
-                    $"rate(process_runtime_dotnet_gc_pause_total_seconds_total{{pod=~\"{podRegex}\"}}[1m])",
-
-                MetricIndex.ThreadPoolQueueLength =>
-                    $"process_runtime_dotnet_thread_pool_queue_length{{pod=~\"{podRegex}\"}}",
-
-                _ => throw new ArgumentOutOfRangeException(nameof(metric), metric, null)
-            };
-        }
-
         private static HttpClient BuildHttpClient(PrometheusHistoricalSourceConfig config)
         {
             var client = new HttpClient
             {
                 Timeout = config.HttpTimeout
             };
-            client.DefaultRequestHeaders.Accept.Add(
-            new MediaTypeWithQualityHeaderValue("application/json"));
+            
+            client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+            
             return client;
         }
     }

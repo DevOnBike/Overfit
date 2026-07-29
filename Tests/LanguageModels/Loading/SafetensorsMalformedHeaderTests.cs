@@ -5,7 +5,6 @@
 
 using System.Buffers.Binary;
 using System.Text;
-using DevOnBike.Overfit.Exceptions;
 using DevOnBike.Overfit.LanguageModels.Loading;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Loading

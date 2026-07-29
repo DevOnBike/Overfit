@@ -5,7 +5,6 @@
 
 using System.Globalization;
 using System.Net.Http.Headers;
-using System.Text;
 using System.Text.Json;
 using DevOnBike.Overfit.Anomalies.Monitoring.Abstractions;
 using DevOnBike.Overfit.Anomalies.Monitoring.Contracts;
@@ -80,7 +79,7 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
         /// configuration maps it to an empty template, i.e. the metric has no source here and the
         /// corresponding feature will never be populated.
         /// </summary>
-        public bool IsMapped(MetricIndex metric) => ResolveTemplate(metric).Length > 0;
+        public bool IsMapped(MetricIndex metric) => PromqlCatalog.ResolveTemplate(_config, metric).Length > 0;
 
         public void Dispose()
         {
@@ -132,7 +131,7 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
 
                 // One data centre means one pass: the selector carries no dc matcher, so a second identical
                 // round would double every query and every series.
-                if (_config.IsSingleDataCenter)
+                if (PromqlCatalog.IsSingleDataCenter(_config))
                 {
                     break;
                 }
@@ -241,120 +240,14 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
         // PromQL instant query builders
         // ---------------------------------------------------------------------------
 
-        /// <summary>
-        /// The label matcher set every template expands <c>%selector%</c> to. Built once per data centre and
-        /// shared by all twelve queries, so a namespace or pod-regex mistake is wrong everywhere at once
-        /// rather than in eleven places out of twelve.
-        /// </summary>
-        internal string BuildSelector(DataCenter dc)
-        {
-            var sb = new StringBuilder(96);
-
-            sb.Append("pod=~\"").Append(_config.PodRegex).Append('"');
-
-            if (_config.Namespace.Length > 0)
-            {
-                sb.Append(",namespace=\"").Append(_config.Namespace).Append('"');
-            }
-
-            if (_config.IsSingleDataCenter)
-            {
-                return sb.ToString();
-            }
-
-            var value = dc == DataCenter.West ? _config.DcWestLabel : _config.DcEastLabel;
-            sb.Append(',').Append(_config.DataCenterLabel).Append("=\"").Append(value).Append('"');
-
-            return sb.ToString();
-        }
+        /// <summary>Label matchers for one data centre — see <see cref="PromqlCatalog.BuildSelector"/>.</summary>
+        internal string BuildSelector(DataCenter dc) => PromqlCatalog.BuildSelector(_config, dc);
 
         /// <summary>
         /// The PromQL for one feature, or <c>null</c> when this deployment has no source for it.
         /// </summary>
         internal string? BuildInstantQuery(MetricIndex metric, string selector)
-        {
-            var template = ResolveTemplate(metric);
-
-            if (template.Length == 0)
-            {
-                return null;
-            }
-
-            return template.Replace(
-                PrometheusMetricSourceConfig.SelectorToken, selector, StringComparison.Ordinal);
-        }
-
-        /// <summary>
-        /// Configured override if one exists — <b>including an empty one</b>, which is how a deployment
-        /// declares that a feature has no source — otherwise the built-in template.
-        /// </summary>
-        private string ResolveTemplate(MetricIndex metric)
-        {
-            var overrides = _config.QueryOverrides;
-
-            if (overrides is not null && overrides.TryGetValue(metric, out var configured))
-            {
-                return configured is null || string.IsNullOrWhiteSpace(configured)
-                    ? string.Empty
-                    : configured;
-            }
-
-            return DefaultTemplate(metric);
-        }
-
-        /// <summary>
-        /// The built-in queries, in OpenTelemetry naming. They are a starting point, not a promise: metric
-        /// names are a property of whatever exports them, so any deployment whose exporter disagrees must
-        /// supply <see cref="PrometheusMetricSourceConfig.QueryOverrides"/> —
-        /// <see cref="PrometheusMetricSourceConfig.ForOverfitServer"/> is the worked example.
-        /// </summary>
-        private static string DefaultTemplate(MetricIndex metric)
-        {
-            const string S = PrometheusMetricSourceConfig.SelectorToken;
-
-            return metric switch
-            {
-                MetricIndex.CpuUsageRatio =>
-                    $"sum by (pod) (rate(container_cpu_usage_seconds_total{{{S}}}[1m]))",
-
-                MetricIndex.CpuThrottleRatio =>
-                    $"sum by (pod) (rate(container_cpu_cfs_throttled_periods_total{{{S}}}[1m]))"
-                    + $" / sum by (pod) (rate(container_cpu_cfs_periods_total{{{S}}}[1m]))",
-
-                MetricIndex.MemoryWorkingSetBytes =>
-                    $"sum by (pod) (container_memory_working_set_bytes{{{S}}})",
-
-                MetricIndex.OomEventsRate =>
-                    $"sum by (pod) (rate(container_oom_events_total{{{S}}}[1m]))",
-
-                MetricIndex.LatencyP50Ms =>
-                    $"histogram_quantile(0.50, sum by (pod, le) (rate(http_server_request_duration_seconds_bucket{{{S}}}[1m]))) * 1000",
-
-                MetricIndex.LatencyP95Ms =>
-                    $"histogram_quantile(0.95, sum by (pod, le) (rate(http_server_request_duration_seconds_bucket{{{S}}}[1m]))) * 1000",
-
-                MetricIndex.LatencyP99Ms =>
-                    $"histogram_quantile(0.99, sum by (pod, le) (rate(http_server_request_duration_seconds_bucket{{{S}}}[1m]))) * 1000",
-
-                MetricIndex.RequestsPerSecond =>
-                    $"sum by (pod) (rate(http_server_request_duration_seconds_count{{{S}}}[1m]))",
-
-                MetricIndex.ErrorRate =>
-                    $"sum by (pod) (rate(http_server_request_duration_seconds_count{{{S},http_response_status_code=~\"5..\"}}[1m]))"
-                    + $" / sum by (pod) (rate(http_server_request_duration_seconds_count{{{S}}}[1m]))",
-
-                MetricIndex.GcGen2HeapBytes =>
-                    $"sum by (pod) (process_runtime_dotnet_gc_heap_size_bytes{{{S},generation=\"2\"}})",
-
-                MetricIndex.GcPauseRatio =>
-                    $"sum by (pod) (rate(process_runtime_dotnet_gc_pause_total_seconds_total{{{S}}}[1m]))",
-
-                MetricIndex.ThreadPoolQueueLength =>
-                    $"sum by (pod) (process_runtime_dotnet_thread_pool_queue_length{{{S}}})",
-
-                _ => throw new ArgumentOutOfRangeException(nameof(metric), metric, null)
-            };
-        }
+            => PromqlCatalog.Build(_config, metric, selector);
 
         private static HttpClient BuildHttpClient(PrometheusMetricSourceConfig config)
         {

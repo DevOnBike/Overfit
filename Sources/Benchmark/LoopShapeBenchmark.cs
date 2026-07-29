@@ -4,7 +4,6 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using System.Collections;
-using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using BenchmarkDotNet.Attributes;
 
