@@ -11,16 +11,17 @@ using DevOnBike.Overfit.Anomalies.Monitoring.Contracts;
 namespace DevOnBike.Overfit.Anomalies.Monitoring
 {
     /// <summary>
-    ///     Fetches historical metric data from Prometheus for all pods matching a regex
-    ///     and produces batches of RawMetricSeries ready for MonitoringPipeline.
-    ///     Each call to FetchAsync returns one entry per scrape timestamp:
-    ///     (ScrapeTimestampMs, List&lt;RawMetricSeries&gt;)
-    ///     These are passed directly to OfflineTrainingJob:
-    ///     <code>
-    ///   using var source = new PrometheusHistoricalSource(config);
-    ///   var scrapes = await source.FetchAsync(ct);
-    ///   var result  = await job.RunAsync(scrapes, trainingConfig, log, ct);
-    /// </code>
+    /// Fetches historical metric data from Prometheus for every pod matching a regex, over a range.
+    ///
+    /// <para><b>Read <see cref="FetchAsync"/>'s remarks before consuming its result.</b> The shape it returns
+    /// is not the shape it looks like, and the mistake it invites silently turns every series into a
+    /// constant — which no detector rejects, because a constant is a perfectly well-formed series.</para>
+    ///
+    /// <para>The example that used to sit here showed the result being handed to
+    /// <c>OfflineTrainingJob.RunAsync(scrapes, ...)</c>. There is no such overload — the training job takes a
+    /// CSV path — so the documented integration did not exist and could never have compiled. It is removed
+    /// rather than corrected because the integration itself is what is missing: <b>nothing in
+    /// <c>Sources/Main</c> consumes this class.</b></para>
     /// </summary>
     public sealed class PrometheusHistoricalSource : IDisposable
     {
@@ -81,10 +82,23 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
         // ---------------------------------------------------------------------------
 
         /// <summary>
-        ///     Fetches all 12 metrics for all pods matching PodRegex over the configured
-        ///     time range and assembles them into scrape batches.
-        ///     Issues 12 parallel range queries (one per metric × both DCs).
-        ///     Returns one entry per scrape step covering the full Golden Window.
+        /// Fetches every mapped metric for every pod matching <c>PodRegex</c> over the configured range, as
+        /// one parallel range query per metric per data centre.
+        ///
+        /// <para><b>Every returned entry holds the SAME series list.</b> The result reads as one batch per
+        /// scrape step, and it is not: the timestamps differ, the <c>List&lt;RawMetricSeries&gt;</c> is one
+        /// object handed out N times. The real time series lives inside each
+        /// <see cref="RawMetricSeries.Samples"/>, each sample carrying its own millisecond timestamp.</para>
+        ///
+        /// <para><b>So do not read one value per entry.</b> Looping the entries and taking
+        /// <c>Samples[^1]</c> — the obvious reading, and the one two separate callers in this repository
+        /// wrote — yields the final value of each series repeated once per step. That is a constant, and a
+        /// constant is a well-formed series that every detector will happily accept: a trend over it is
+        /// exactly zero by construction, and a peer comparison between constants reports significance derived
+        /// from a sample count that does not exist. Nothing downstream can detect the mistake.</para>
+        ///
+        /// <para>Take <c>result[0].Series</c> once and align each series' own samples onto the timestamp
+        /// grid, leaving <c>NaN</c> where a series has no sample for a step.</para>
         /// </summary>
         public async Task<IReadOnlyList<(long ScrapeTimestampMs, List<RawMetricSeries> Series)>> FetchAsync(
             CancellationToken ct = default)
@@ -271,8 +285,10 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
                 timestamps.Add(t * 1000L);
             }
 
-            // Each scrape batch contains ALL series — TimeSeriesAligner will
-            // extract the relevant window around each scrapeTimestamp
+            // Every batch gets THE SAME list instance. The comment that used to sit here said an aligner
+            // would window it per timestamp; no such type exists in this codebase, and the two callers that
+            // trusted the shape both read one value per batch and got constants. FetchAsync's remarks now
+            // state the contract this actually implements.
             var batches = new List<(long, List<RawMetricSeries>)>(timestamps.Count);
 
             foreach (var tsMs in timestamps)

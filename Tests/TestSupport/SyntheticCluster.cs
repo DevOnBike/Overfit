@@ -48,6 +48,16 @@ namespace DevOnBike.Overfit.Tests.TestSupport
     /// throughout, exactly as it was for three of the lab's four pods.</item>
     /// </list>
     ///
+    /// <para><b>Validated against the lab, and corrected twice by it</b>
+    /// (<see cref="Anomalies.Diagnostics.SyntheticClusterRealismDiagnostics"/>). The first version had each pod drawing
+    /// its own diurnal phase — replicas of one Deployment serve the same traffic at the same instant, so that
+    /// alone pushed between-pod spread to 8.4% against a measured 4.7%. It also gave pods +-4% of internal
+    /// scatter where the lab showed 52%, which is the more damaging error: Cliff's delta measures overlap, so
+    /// unrealistically quiet pods separate cleanly and produce findings no real replica would.</para>
+    ///
+    /// <para>Both errors inflated the false-positive rate, so any figure measured before this correction is an
+    /// upper bound rather than an estimate.</para>
+    ///
     /// <para>Deterministic for a given seed, so a false-positive count is reproducible and a regression in it
     /// is attributable.</para>
     /// </summary>
@@ -56,25 +66,64 @@ namespace DevOnBike.Overfit.Tests.TestSupport
         /// <summary>Features per pod — the <see cref="MetricSnapshot"/> contract.</summary>
         public const int MetricCount = (int)MetricIndex.Count;
 
+        /// <summary>
+        /// What a freshly started process holds before its caches fill, as a fraction of its settled working
+        /// set. Not near-zero: the runtime, the loaded assemblies and the JIT-compiled code are there the
+        /// moment the process serves its first request.
+        /// </summary>
+        private const double ColdStartFraction = 0.35;
+
+        /// <summary>
+        /// How much of the remaining gap to the settled working set a warm-up closes per sample. 0.154 at a
+        /// 15 s scrape is a ~90 s time constant, so a restarted pod is within 5% of its siblings after about
+        /// four and a half minutes.
+        ///
+        /// <para><b>This is a different rate from the allocation rate, and that distinction is the whole
+        /// point.</b> Filling a working set is assemblies, JIT and caches populating as traffic arrives;
+        /// filling a sawtooth is the process allocating garbage. The first version used the second rate for
+        /// both and produced a 3.9-hour ramp — see the restart handling in <c>Generate</c>.</para>
+        /// </summary>
+        private const double WarmupRatePerSample = 0.154;
+
         private readonly double[][] _series;
+        private readonly double _diurnalPhase;
 
         /// <param name="pods">Replicas in the deployment.</param>
         /// <param name="hours">Wall-clock hours to generate.</param>
         /// <param name="scrapeSeconds">Scrape interval; 15 s matches the lab's Prometheus.</param>
         /// <param name="seed">Any value; the same seed reproduces the same cluster exactly.</param>
-        public SyntheticCluster(int pods, double hours, double scrapeSeconds = 15.0, int seed = 20260729)
+        /// <param name="restartsPerPodPerDay">
+        /// Restarts to inject, as a rate. Exists so restarts can be <b>ablated</b> rather than argued about:
+        /// a restarted pod's memory ramp is a different mechanism from the GC sawtooth, and the only way to
+        /// tell which one a false-positive count comes from is to turn one of them off and measure again.
+        /// Zero disables them; the default is a quiet-cluster rate, not a broken-cluster one.
+        /// </param>
+        public SyntheticCluster(
+            int pods,
+            double hours,
+            double scrapeSeconds = 15.0,
+            int seed = 20260729,
+            double restartsPerPodPerDay = 1.0)
         {
             ArgumentOutOfRangeException.ThrowIfLessThan(pods, 3);
             ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(hours, 0.0);
             ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(scrapeSeconds, 0.0);
+            ArgumentOutOfRangeException.ThrowIfNegative(restartsPerPodPerDay);
 
             Pods = pods;
             ScrapeSeconds = scrapeSeconds;
+            RestartsPerPodPerDay = restartsPerPodPerDay;
             Samples = (int)(hours * 3600.0 / scrapeSeconds);
 
             _series = new double[pods * MetricCount][];
 
             var rng = new Random(seed);
+
+            // ONE phase for the whole deployment. Drawing it per pod was a modelling error: replicas of one
+            // Deployment serve the same traffic at the same instant, so they do not have independent daily
+            // curves. Measured consequence — it was the dominant source of between-pod spread, pushing the
+            // generator to 8.4% against the lab's 4.7% across three replicas.
+            _diurnalPhase = rng.NextDouble();
 
             for (var pod = 0; pod < pods; pod++)
             {
@@ -96,6 +145,12 @@ namespace DevOnBike.Overfit.Tests.TestSupport
 
         /// <summary>Seconds between samples.</summary>
         public double ScrapeSeconds
+        {
+            get;
+        }
+
+        /// <summary>Restart rate this cluster was generated with; zero means none were injected.</summary>
+        public double RestartsPerPodPerDay
         {
             get;
         }
@@ -123,14 +178,26 @@ namespace DevOnBike.Overfit.Tests.TestSupport
             var cpuOffset = 1.0 + ((rng.NextDouble() - 0.5) * 0.33);       // +-16.5% -> ~33% spread across a group
             var memoryBaseline = 1.15e9 * (1.0 + ((rng.NextDouble() - 0.5) * 0.05));
             var trafficShare = (1.0 / Pods) * (1.0 + ((rng.NextDouble() - 0.5) * 0.18));
-            var diurnalPhase = rng.NextDouble() * 0.2;                     // scrapers are not synchronised
+
+            // Scrapes are not synchronised, but the difference is seconds, not hours — a fraction of a percent
+            // of a daily period, not a fifth of one.
+            var diurnalPhase = _diurnalPhase + ((rng.NextDouble() - 0.5) * 0.002);
+
+            var samplesPerDay = 86400.0 / ScrapeSeconds;
 
             // One restart per pod per day is a quiet cluster, not a broken one: image updates, node drains,
             // evictions. Placed away from the very start so a window can contain the ramp.
-            var restartAt = Samples > 200 ? rng.Next(Samples / 5, Samples) : int.MaxValue;
-
-            var samplesPerDay = 86400.0 / ScrapeSeconds;
+            // Drawn UNCONDITIONALLY, then discarded if restarts are ablated. Skipping the draw would shift
+            // every subsequent random value for this pod and all later ones, so the "without restarts" arm
+            // would be a different cluster rather than the same cluster minus restarts — which is not an
+            // ablation, it is two unrelated populations. This cost one wrong reading already: an ablated arm
+            // came out *worse* than the arm it was supposed to be a subset of.
+            var restartDraw = Samples > 200 ? rng.Next(Samples / 5, Samples) : int.MaxValue;
+            var restartAt = RestartsPerPodPerDay > 0.0 ? restartDraw : int.MaxValue;
             var memory = memoryBaseline;
+
+            // The level the sawtooth rides on. Equal to the baseline except while a restarted pod warms up.
+            var floor = memoryBaseline;
 
             for (var t = 0; t < Samples; t++)
             {
@@ -142,7 +209,15 @@ namespace DevOnBike.Overfit.Tests.TestSupport
                 var traffic = 40.0 * trafficShare * diurnal * (1.0 + ((rng.NextDouble() - 0.5) * 0.10));
 
                 // Queueing: latency rises with load, sub-linearly.
-                var latency = 700.0 * latencyOffset * (1.0 + (0.35 * diurnal)) * (1.0 + ((rng.NextDouble() - 0.5) * 0.08));
+                //
+                // The scatter is +-26%, giving a (max-min)/median spread near 52% — which is what the lab
+                // measured on its healthy replicas (52% / 55% / 22%), not a number chosen for convenience.
+                // The previous +-4% was 6.5x too tight, and that direction matters more than it looks: Cliff's
+                // delta measures OVERLAP, so unrealistically quiet pods separate cleanly and manufacture peer
+                // findings that real replicas would never produce. A p95 is a coarse quantile over a few dozen
+                // requests, and it jumps accordingly.
+                var latency = 700.0 * latencyOffset * (1.0 + (0.35 * diurnal))
+                              * (1.0 + ((rng.NextDouble() - 0.5) * 0.52));
 
                 // Rare scrape artefact. The reason every estimator here is rank-based rather than least-squares.
                 if (rng.NextDouble() < 0.003)
@@ -150,11 +225,34 @@ namespace DevOnBike.Overfit.Tests.TestSupport
                     latency *= 5.0;
                 }
 
-                // Working set sawtooths between collections and steps back to near nothing on a restart.
-                memory += 1.2e6 * (1.0 + ((rng.NextDouble() - 0.5) * 0.4));
-                if (memory > memoryBaseline * 1.06 || t == restartAt)
+                // A restart drops the working set to a cold process and the warm-up brings it back. The two
+                // rates below are DIFFERENT rates, and conflating them was a measured bug: the first version
+                // refilled a restarted pod at the allocation rate, so recovery from 30 MB took 933 samples —
+                // 3.9 hours — leaving 3.2 of 20 pods permanently mid-ramp, each hundreds of megabytes below
+                // its siblings and climbing monotonically. That is a perfect trend signal and a perfect peer
+                // outlier, both entirely manufactured: ablating restarts removed 60% of all incidents and
+                // 93% of every trend finding.
+                if (t == restartAt)
                 {
-                    memory = t == restartAt ? 3.0e7 : memoryBaseline;
+                    floor = memoryBaseline * ColdStartFraction;
+                    memory = floor;
+                }
+
+                // Warm-up: the working set is dominated by assemblies, JIT-compiled code and caches, and those
+                // populate in minutes as traffic arrives — not at the rate the process allocates garbage.
+                floor += (memoryBaseline - floor) * WarmupRatePerSample;
+
+                // Allocation between collections, riding on top of whatever the floor currently is.
+                memory += 1.2e6 * (1.0 + ((rng.NextDouble() - 0.5) * 0.4));
+
+                if (memory > floor * 1.06)
+                {
+                    memory = floor;
+                }
+
+                if (memory < floor)
+                {
+                    memory = floor;
                 }
 
                 Set(pod, MetricIndex.RequestsPerSecond, t, traffic);

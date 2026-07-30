@@ -21,11 +21,32 @@ namespace DevOnBike.Overfit.Statistics
     /// request counts alike. 0.10 means "the fit must move at least 10% of typical across the window".
     /// </param>
     /// <param name="MinimumSamples">Observations required before any verdict is given.</param>
+    /// <param name="MinAbsoluteChangeOverWindow">
+    /// Smallest fitted change across the window <b>in the signal's own units</b>, worth reporting. Zero
+    /// disables the gate.
+    ///
+    /// <para><b>This exists because a relative gate has nothing to be relative to when a series sits at
+    /// zero.</b> On the cluster lab, <c>GcPauseRatio</c> is identically zero on healthy replicas apart from
+    /// occasional readings around 10⁻⁵. The relative gate could not be evaluated, the code treated "cannot
+    /// judge the size" as "the size is large", and a severity-0.59 incident was raised over a few
+    /// microseconds of garbage collection. The reason string even said so out loud — <i>"a measurable amount
+    /// (no usable scale: the series sits at zero)"</i> — and still counted as material.</para>
+    ///
+    /// <para><b>The value has to come from the caller, per metric</b>, for the same reason as
+    /// <see cref="PeerOutlierOptions.MinAbsoluteGap"/>: one number cannot serve bytes, seconds, ratios and
+    /// counts, and only whoever chose the signal knows what movement in it would make somebody act.</para>
+    ///
+    /// <para>Left at zero, the relative gate falls back to the largest magnitude the window actually reached
+    /// rather than being skipped — so a signal climbing away from zero is still caught, while one wobbling
+    /// inside the noise floor is not. A window that never leaves zero has no scale under either rule and can
+    /// no longer be material, which is the whole point.</para>
+    /// </param>
     public readonly record struct TrendOptions(
         double MaxPValue,
         double MinTau,
         double MinRelativeChangeOverWindow,
-        int MinimumSamples)
+        int MinimumSamples,
+        double MinAbsoluteChangeOverWindow = 0.0)
     {
         /// <summary>
         /// Balanced defaults: 5% significance, tau 0.30, a 10% move across the window, 30 samples.
@@ -48,6 +69,7 @@ namespace DevOnBike.Overfit.Statistics
                && MinTau > 0.0
                && MinTau <= 1.0
                && MinRelativeChangeOverWindow > 0.0
-               && MinimumSamples >= 3;
+               && MinimumSamples >= 3
+               && MinAbsoluteChangeOverWindow >= 0.0;
     }
 }

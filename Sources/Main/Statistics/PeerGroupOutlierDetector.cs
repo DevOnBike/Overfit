@@ -157,11 +157,12 @@ namespace DevOnBike.Overfit.Statistics
 
             // The size gate, measured before any test runs — see PeerOutlierOptions.MinRelativeGap for why a
             // rank effect size cannot stand in for it.
-            using var summaryBuffer = new PooledBuffer<double>(2 * peers.Count, clearMemory: false);
+            using var summaryBuffer = new PooledBuffer<double>(3 * peers.Count, clearMemory: false);
             using var rawBuffer = new PooledBuffer<PeerDeviation>(peers.Count, clearMemory: true);
 
             var medians = summaryBuffer.Span[..peers.Count];
             var gaps = summaryBuffer.Span.Slice(peers.Count, peers.Count);
+            var absolute = summaryBuffer.Span.Slice(2 * peers.Count, peers.Count);
             var rawDeviations = rawBuffer.Span[..peers.Count];
 
             for (var i = 0; i < peers.Count; i++)
@@ -171,7 +172,7 @@ namespace DevOnBike.Overfit.Statistics
                 medians[i] = MedianSelector.MedianInPlace(workspace[..span.Length]);
             }
 
-            var departures = MeasureGaps(medians, gaps, workspace, options.MinRelativeGap);
+            var departures = MeasureGaps(medians, gaps, absolute, workspace, options.MinRelativeGap);
 
             // Two one-sided tests per member, so the family is twice the group size.
             var correctedAlpha = options.MaxPValue / (2.0 * peers.Count);
@@ -195,7 +196,11 @@ namespace DevOnBike.Overfit.Statistics
                 // The size gate never changes which direction the rank test found, only whether that direction
                 // is worth reporting — so the raw verdict is kept alongside as the evidence for "this group has
                 // no norm".
-                var material = options.MinRelativeGap <= 0.0 || gaps[i] >= options.MinRelativeGap;
+                // Three gates, and a deviation must clear all of them: consistent (the rank test), large in
+                // proportion (the relative gap), and large in the signal's own units (the absolute floor).
+                // The third exists because the first two are dimensionless — see MinAbsoluteGap.
+                var material = (options.MinRelativeGap <= 0.0 || gaps[i] >= options.MinRelativeGap)
+                               && (options.MinAbsoluteGap <= 0.0 || absolute[i] >= options.MinAbsoluteGap);
 
                 // Above its peers: peer as the candidate. Below: swap the arms, so the same one-sided test
                 // answers the opposite question and the effect size stays a positive magnitude.
@@ -208,7 +213,8 @@ namespace DevOnBike.Overfit.Statistics
                     rawHigh++;
 
                     findings[i] = new PeerOutlierFinding(
-                        peers[i].Name, above, material ? PeerDeviation.High : PeerDeviation.None, end - start);
+                        peers[i].Name, above, material ? PeerDeviation.High : PeerDeviation.None,
+                        end - start, gaps[i], absolute[i]);
 
                     if (material)
                     {
@@ -227,7 +233,8 @@ namespace DevOnBike.Overfit.Statistics
                     rawLow++;
 
                     findings[i] = new PeerOutlierFinding(
-                        peers[i].Name, below, material ? PeerDeviation.Low : PeerDeviation.None, end - start);
+                        peers[i].Name, below, material ? PeerDeviation.Low : PeerDeviation.None,
+                        end - start, gaps[i], absolute[i]);
 
                     if (material)
                     {
@@ -237,7 +244,8 @@ namespace DevOnBike.Overfit.Statistics
                     continue;
                 }
 
-                findings[i] = new PeerOutlierFinding(peers[i].Name, above, PeerDeviation.None, end - start);
+                findings[i] = new PeerOutlierFinding(
+                    peers[i].Name, above, PeerDeviation.None, end - start, gaps[i], absolute[i]);
             }
 
             // A third or more of the group standing away from the group's own centre is not one departure from
@@ -308,15 +316,36 @@ namespace DevOnBike.Overfit.Statistics
         /// </summary>
         /// <param name="medians">One median per peer, index-aligned with the group.</param>
         /// <param name="gaps">Receives each peer's relative distance from its peers' centre.</param>
+        /// <param name="absolute">Receives the same distance in the signal's own units.</param>
         /// <param name="scratch">At least <c>medians.Length</c> doubles; permuted.</param>
         /// <param name="minimumGap">The gate; zero disables it, and every gap is then reported as passing.</param>
         private static int MeasureGaps(
             ReadOnlySpan<double> medians,
             Span<double> gaps,
+            Span<double> absolute,
             Span<double> scratch,
             double minimumGap)
         {
             var n = medians.Length;
+
+            // The absolute distance is always measured, even when the relative gate is off: it is reported on
+            // every finding, and the absolute gate may be in use on its own.
+            for (var i = 0; i < n; i++)
+            {
+                var written = 0;
+                for (var j = 0; j < n; j++)
+                {
+                    if (j == i)
+                    {
+                        continue;
+                    }
+
+                    scratch[written] = medians[j];
+                    written++;
+                }
+
+                absolute[i] = Math.Abs(medians[i] - MedianSelector.MedianInPlace(scratch[..written]));
+            }
 
             if (minimumGap <= 0.0)
             {

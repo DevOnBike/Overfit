@@ -261,7 +261,15 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
             // a CPU-throttled replica showed the *lowest* cost per request of the four, because it served
             // fewer requests while its fixed overhead stayed put. A detector that only looked upward would
             // have called the broken pod the cheapest one.
-            return $"'{finding.Name}' sits {direction} the other {peers} peers: "
+            // The relative gap leads, because it is the only one of the three numbers that answers "by how
+            // much". Cliff's delta saturates on any well-separated pair and says nothing about size.
+            // Both, because a percentage alone hides "14% of a 0.004 ratio" and an absolute figure alone
+            // hides how unusual it is for this group.
+            var size = double.IsFinite(finding.RelativeGap)
+                ? $"by {finding.RelativeGap:P0} ({finding.AbsoluteGap:G3})"
+                : $"by {finding.AbsoluteGap:G3} (the peers' median is zero, so there is no proportion to take)";
+
+            return $"'{finding.Name}' sits {direction} the other {peers} peers {size}: "
                    + $"Cliff's delta {Math.Abs(comparison.EffectSize):F2}, p {comparison.PValueCandidateWorse:G3} "
                    + $"against a Bonferroni-corrected alpha of {result.CorrectedAlpha:G3} "
                    + $"({finding.UsableSamples} usable samples).";

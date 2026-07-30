@@ -69,11 +69,18 @@ namespace DevOnBike.Overfit.Statistics
         /// <param name="options">Thresholds; use <see cref="TrendOptions.Balanced"/> rather than <c>default</c>.</param>
         /// <param name="limit">Optional ceiling (a memory limit, an SLO) for the time-to-limit projection. Pass
         /// <see cref="double.NaN"/> — the default — to skip it.</param>
-        /// <param name="seasonalExpectation">
-        /// Optional per-sample expectation, index-aligned with <paramref name="values"/> and normally built by
-        /// <see cref="SeasonalBaseline.TryBuild"/>. When supplied, the test runs on the <b>residual</b>
-        /// (observed minus expected) instead of the raw series, which is what turns "is this rising?" into "is
-        /// this rising more than it does every day at this hour?".
+        /// <param name="expectation">
+        /// Optional per-sample expectation, index-aligned with <paramref name="values"/>. When supplied, the
+        /// test runs on the <b>residual</b> (observed minus expected) instead of the raw series.
+        ///
+        /// <para>Two sources build one, and they answer different questions:</para>
+        /// <list type="bullet">
+        /// <item><see cref="SeasonalBaseline.TryBuild"/> — the same phase of previous periods. Turns "is this
+        /// rising?" into "is this rising <i>more than it does every day at this hour</i>?".</item>
+        /// <item><see cref="CrossPeerBaseline.TryBuild"/> — the same instant across sibling replicas. Turns it
+        /// into "is this rising <i>more than its siblings are</i>?", which is what separates one sick pod from
+        /// a deployment that is warming up, being rolled, or simply serving a rising load.</item>
+        /// </list>
         ///
         /// <para><b>This is not a refinement, it is the difference between usable and not.</b> Measured on a
         /// healthy synthetic population with a four-hour window, the raw test produced <b>2583 false incidents
@@ -89,18 +96,18 @@ namespace DevOnBike.Overfit.Statistics
             ReadOnlySpan<double> timestampsSeconds,
             TrendOptions options,
             double limit = double.NaN,
-            ReadOnlySpan<double> seasonalExpectation = default)
+            ReadOnlySpan<double> expectation = default)
         {
             if (values.Length != timestampsSeconds.Length)
             {
                 throw new ArgumentException("Values and timestamps must be index-aligned.", nameof(timestampsSeconds));
             }
 
-            if (!seasonalExpectation.IsEmpty && seasonalExpectation.Length != values.Length)
+            if (!expectation.IsEmpty && expectation.Length != values.Length)
             {
                 throw new ArgumentException(
-                    "The seasonal expectation must be index-aligned with the observations.",
-                    nameof(seasonalExpectation));
+                    "The expectation must be index-aligned with the observations.",
+                    nameof(expectation));
             }
 
             if (!options.IsValid)
@@ -116,9 +123,9 @@ namespace DevOnBike.Overfit.Statistics
             }
 
             var raw = values.Length;
-            var seasonal = !seasonalExpectation.IsEmpty;
+            var hasExpectation = !expectation.IsEmpty;
 
-            using var series = new PooledBuffer<double>((seasonal ? 3 : 2) * raw, clearMemory: false);
+            using var series = new PooledBuffer<double>((hasExpectation ? 3 : 2) * raw, clearMemory: false);
 
             var times = series.Span[..raw];
             var observations = series.Span.Slice(raw, raw);
@@ -129,11 +136,11 @@ namespace DevOnBike.Overfit.Statistics
             var expectedAtEnd = 0.0;
             var tested = values;
 
-            if (seasonal)
+            if (hasExpectation)
             {
-                var deseasonalised = series.Span.Slice(2 * raw, raw);
-                scale = Subtract(values, seasonalExpectation, deseasonalised, out expectedAtEnd);
-                tested = deseasonalised;
+                var residual = series.Span.Slice(2 * raw, raw);
+                scale = Subtract(values, expectation, residual, out expectedAtEnd);
+                tested = residual;
             }
 
             var count = Compact(tested, timestampsSeconds, times, observations);
@@ -228,11 +235,29 @@ namespace DevOnBike.Overfit.Statistics
             var significant = pValue <= options.MaxPValue;
             var monotone = Math.Abs(tau) >= options.MinTau;
 
-            // A series sitting at zero has no meaningful "relative" scale, so the size gate is skipped rather
-            // than divided by something arbitrarily small — and the reason says so.
+            // The size gate, and the case it used to get exactly backwards.
+            //
+            // A series sitting at zero has no meaningful median to be relative to. The previous rule skipped
+            // the gate entirely when that happened — treating "the size cannot be judged" as "the size is
+            // large" — and on the cluster lab that raised a severity-0.59 incident over GcPauseRatio, a
+            // channel that is identically zero on healthy replicas apart from readings around 10^-5.
+            //
+            // Falling back to silence would be just as wrong in the other direction: a signal climbing away
+            // from zero (an error rate leaving zero, a queue starting to build) is precisely what should be
+            // caught, and its median is zero for most of the window that matters.
+            //
+            // So the scale falls back to the largest magnitude the window actually reached. That keeps
+            // "climbs away from zero" material and makes "wobbles inside the noise floor" not, because a
+            // wobble's fitted change is small against its own peak too. Only a window that never leaves zero
+            // has no scale under either rule, and a change within such a window is numerically nothing.
+            // The absolute gate is checked independently, in the signal's own units — see TrendOptions.
             var scaleIsUsable = Math.Abs(median) > 1e-12;
-            var material = !scaleIsUsable
-                           || fittedChange >= options.MinRelativeChangeOverWindow * Math.Abs(median);
+            var scaleForSize = scaleIsUsable ? Math.Abs(median) : PeakMagnitude(observations);
+            var hasScale = scaleForSize > 1e-12;
+
+            var material = hasScale
+                           && fittedChange >= options.MinRelativeChangeOverWindow * scaleForSize
+                           && fittedChange >= options.MinAbsoluteChangeOverWindow;
 
             if (!significant || !monotone || !material || direction == TrendDirection.None)
             {
@@ -249,7 +274,10 @@ namespace DevOnBike.Overfit.Statistics
                     null);
             }
 
-            var relative = scaleIsUsable ? fittedChange / Math.Abs(median) : double.NaN;
+            // Reported against whichever scale the gate actually used, so the number in the message is the
+            // number that decided the verdict. When the median was zero that is the window's peak, and the
+            // wording says which — "180% of typical" and "180% of the window's peak" are different claims.
+            var relative = fittedChange / scaleForSize;
             var timeToLimit = ProjectTimeToLimit(slope, fittedAtEnd, limit);
 
             return new TrendResult(
@@ -410,6 +438,22 @@ namespace DevOnBike.Overfit.Statistics
             return s;
         }
 
+        /// <summary>
+        /// Largest absolute value in an already-sorted span — the fallback scale when the median is zero.
+        ///
+        /// <para>Only the two ends can hold it, since the span is ordered, so this is a comparison rather
+        /// than a sweep.</para>
+        /// </summary>
+        private static double PeakMagnitude(ReadOnlySpan<double> sorted)
+        {
+            if (sorted.Length == 0)
+            {
+                return 0.0;
+            }
+
+            return Math.Max(Math.Abs(sorted[0]), Math.Abs(sorted[^1]));
+        }
+
         /// <summary>Median of an already-sorted span.</summary>
         private static double Median(Span<double> sorted)
         {
@@ -561,9 +605,13 @@ namespace DevOnBike.Overfit.Statistics
             TimeSpan? timeToLimit)
         {
             var moving = direction == TrendDirection.Rising ? "rose" : "fell";
+
+            // Two different claims, so two different words. Against the median it is "of typical"; when the
+            // median was zero the gate used the window's peak instead, and saying "of typical" there would
+            // describe a proportion of a number the series never held.
             var size = scaleIsUsable
                 ? $"{relative * 100.0:F1}% of typical"
-                : "a measurable amount (no usable scale: the series sits at zero)";
+                : $"{relative * 100.0:F1}% of the window's peak (the median is zero, so there is no typical)";
 
             var window = TimeSpan.FromSeconds(windowSeconds);
             var message =

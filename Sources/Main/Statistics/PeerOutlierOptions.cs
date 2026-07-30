@@ -37,12 +37,31 @@ namespace DevOnBike.Overfit.Statistics
     /// be rejected and a real 13.3% regression must be caught, so 8% sits between them with roughly equal
     /// margin on each side. It scales with the profile for the same reason the effect size does.</para>
     /// </param>
+    /// <param name="MinAbsoluteGap">
+    /// Smallest difference from the peers' median, <b>in the signal's own units</b>, worth reporting. Zero
+    /// disables the gate.
+    ///
+    /// <para><b>Both other gates are dimensionless, and that is why this one is needed.</b> Cliff's delta
+    /// measures overlap; the relative gap measures proportion. Neither can say "fourteen percent of nothing is
+    /// nothing". Measured on a healthy synthetic population, the single largest source of false peer findings
+    /// was <c>GcPauseRatio</c> — 218 of 804 — with a median real difference of <b>0.0003</b>, or three tenths
+    /// of a millisecond of GC pause per second. It cleared a 14% relative gate because the metric's magnitude
+    /// is 0.004. Request rate was the same story at 0.21 requests per second, which is load-balancer jitter.</para>
+    ///
+    /// <para><b>The value has to come from the caller, per metric.</b> One number cannot serve bytes, seconds,
+    /// ratios and counts, and only whoever chose the signal knows what difference in it would make somebody
+    /// act. Leaving it at zero keeps the previous behaviour.</para>
+    ///
+    /// <para>It also rescues the case the relative gate cannot judge at all: when the peers' median is zero
+    /// there is no proportion to take, and an absolute difference is the only meaningful question left.</para>
+    /// </param>
     public readonly record struct PeerOutlierOptions(
         double MaxPValue,
         double MinEffectSize,
         int MinimumSamplesPerPeer,
         int MinimumPeers,
-        double MinRelativeGap = 0.08)
+        double MinRelativeGap = 0.08,
+        double MinAbsoluteGap = 0.0)
     {
         /// <summary>
         /// Balanced defaults: 5% family-wise, at least a medium effect, 30 samples per peer (15 minutes at a
@@ -68,6 +87,7 @@ namespace DevOnBike.Overfit.Statistics
                && MinEffectSize <= 1.0
                && MinimumSamplesPerPeer > 0
                && MinimumPeers >= 3
-               && MinRelativeGap >= 0.0;
+               && MinRelativeGap >= 0.0
+               && MinAbsoluteGap >= 0.0;
     }
 }

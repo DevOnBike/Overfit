@@ -48,15 +48,25 @@ namespace DevOnBike.Overfit.Statistics
     {
         /// <summary>
         /// Uneven load cannot explain a deviation: restart count, OOMKilled, readiness, container terminations,
-        /// node conditions. Comparable across peers as-is, and — usefully — detectable with no application
+        /// node conditions — and any quantity dominated by a fixed cost, memory working set and gen-2 heap
+        /// included. Comparable across peers as-is, and — usefully — detectable with no application
         /// instrumentation at all, straight from cAdvisor and kube-state-metrics.
         /// </summary>
         LoadIndependent = 0,
 
         /// <summary>
-        /// Magnitude tracks throughput: memory, CPU, network bytes, connection counts. Requires
+        /// Magnitude tracks throughput: CPU, network bytes, connection counts, queue depths. Requires
         /// <see cref="PeerSeries.Work"/> so the comparison runs on cost <i>per unit of work</i>; without it the
         /// detector reports <see cref="DetectionStatus.InsufficientData"/> rather than guessing.
+        ///
+        /// <para><b>Memory used to be on that list and it was wrong — measured, not reconsidered.</b> A
+        /// working set is assemblies, JIT-compiled code, caches and the live set: a fixed cost with almost no
+        /// per-request component. Dividing a fixed quantity by a varying one manufactures a difference the
+        /// size of the traffic imbalance, forever, on a healthy cluster — on a synthetic population it made
+        /// working set the single largest source of false peer findings, at a median gap that was exactly the
+        /// traffic spread the generator draws by construction. Memory belongs in
+        /// <see cref="LoadIndependent"/>; see <c>PeerSignalCatalog</c> for the per-signal classification and
+        /// the reasoning behind each line.</para>
         ///
         /// <para>Supplying the work metric is the entry requirement, not a guarantee of comparability — see
         /// the measured residue on the enum above. Under materially uneven traffic, prefer a

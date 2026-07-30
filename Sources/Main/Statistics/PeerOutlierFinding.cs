@@ -19,11 +19,31 @@ namespace DevOnBike.Overfit.Statistics
     /// <param name="Deviation">Which way it departs, if at all.</param>
     /// <param name="UsableSamples">Observations that survived filtering — non-finite values, and samples with
     /// non-positive work on a load-sensitive signal, are dropped.</param>
+    /// <param name="RelativeGap">
+    /// How far this member's median sits from its peers', as a fraction of theirs — the magnitude the rank
+    /// statistics cannot express.
+    ///
+    /// <para><b>Reported because neither of the other numbers answers "by how much".</b> Cliff's delta counts
+    /// overlap and saturates: two tight distributions three percent apart score the same as two three hundred
+    /// percent apart. A p-value is a statement about evidence, not size. An operator handed only those two has
+    /// no way to tell a replica worth paging for from one that is a rounding error, and neither does a
+    /// downstream gate.</para>
+    ///
+    /// <para><see cref="double.PositiveInfinity"/> when the peers' median carries no usable scale — a group
+    /// centred on zero has no relative distance to report.</para>
+    /// </param>
+    /// <param name="AbsoluteGap">
+    /// The same distance in the signal's own units. Reported alongside the relative one because a percentage
+    /// alone hides the case that matters: 14% of a GC-pause ratio of 0.004 is three tenths of a millisecond,
+    /// and no percentage makes that worth waking anyone.
+    /// </param>
     public readonly record struct PeerOutlierFinding(
         string Name,
         TwoSampleComparison Comparison,
         PeerDeviation Deviation,
-        int UsableSamples)
+        int UsableSamples,
+        double RelativeGap,
+        double AbsoluteGap)
     {
         /// <summary>Whether this member departs from the group in either direction.</summary>
         public bool IsOutlier => Deviation != PeerDeviation.None;

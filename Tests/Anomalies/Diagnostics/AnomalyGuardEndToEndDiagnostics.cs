@@ -54,7 +54,16 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
                 ? parsed
                 : 20;
 
-            var end = DateTime.UtcNow;
+            // OVERFIT_LAB_END_OFFSET_MINUTES pushes the window back from now. Running this straight after a
+            // load run otherwise ends the window inside the decay: the rate() range is two minutes wide, so
+            // the last samples of every RED signal are still falling as traffic stops, and the trend family
+            // would report a cluster-wide downward drift that is an artefact of when the measurement stopped.
+            var offset = int.TryParse(
+                Environment.GetEnvironmentVariable("OVERFIT_LAB_END_OFFSET_MINUTES"), out var parsedOffset)
+                ? parsedOffset
+                : 0;
+
+            var end = DateTime.UtcNow.AddMinutes(-offset);
             var start = end.AddMinutes(-windowMinutes);
 
             var config = PrometheusHistoricalSourceConfig.ForOverfitServer(
@@ -101,19 +110,34 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
 
                 foreach (var finding in incident.Findings)
                 {
-                    _output.WriteLine($"      - [{finding.Class}] {finding.Signal} @ {finding.Subject.Pod}");
+                    var where = finding.Subject.Pod.Length > 0
+                        ? finding.Subject.Pod
+                        : $"{finding.Subject.Workload} (whole deployment)";
+
+                    _output.WriteLine($"      - [{finding.Class}] {finding.Signal} @ {where}");
                 }
             }
 
             // Scored, not asserted: the honest question is how much of the noise is on the healthy replicas,
             // and a pass/fail on the first live run would hide that behind a green tick.
+            //
+            // Three buckets, not two. A common-mode finding carries no pod by design — it is a statement
+            // about the deployment — so counting it as "on a healthy replica" would charge the
+            // false-positive budget for the very finding that stopped N per-pod ones from being raised.
             var onDegraded = 0;
             var onHealthy = 0;
+            var onDeployment = 0;
 
             for (var i = 0; i < incidents.Count; i++)
             {
                 foreach (var finding in incidents[i].Findings)
                 {
+                    if (finding.Subject.Pod.Length == 0)
+                    {
+                        onDeployment++;
+                        continue;
+                    }
+
                     if (finding.Subject.Pod.Contains(DegradedMarker, StringComparison.Ordinal))
                     {
                         onDegraded++;
@@ -126,6 +150,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
 
             _output.WriteLine($"\nfindings on the degraded replica: {onDegraded}");
             _output.WriteLine($"findings on healthy replicas:      {onHealthy}   <-- the false-positive budget");
+            _output.WriteLine($"findings about the deployment:     {onDeployment}   <-- common mode, no pod blamed");
         }
 
         /// <summary>
@@ -258,31 +283,66 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
             report.Append("\n=== trends (anomalous only) ===\n");
 
             var anomalous = 0;
+            var from = new DateTimeOffset(start, TimeSpan.Zero);
+            var to = new DateTimeOffset(end, TimeSpan.Zero);
 
-            foreach (var (pod, byMetric) in history)
+            // The group is decomposed per metric rather than each pod being tested in isolation. Tested
+            // alone, a deployment warming up produced the same falling latency trend on all three healthy
+            // pods — ten of eleven findings, each naming a pod and none of them about that pod.
+            //
+            // The common component answers "is the deployment drifting?" once, as a workload-level finding
+            // with no pod attached. Each pod's residual answers "is this pod drifting differently?". Both
+            // questions keep their answer; only the reporting changes.
+            foreach (var metric in AllMetrics(history))
             {
-                foreach (var (metric, values) in byMetric)
+                var peers = PeersFor(history, metric, TrendOptions.Balanced.MinimumSamples);
+
+                if (peers.Count == 0)
                 {
-                    if (values.Count < TrendOptions.Balanced.MinimumSamples)
-                    {
-                        continue;
-                    }
+                    continue;
+                }
 
-                    var times = new double[values.Count];
-                    for (var i = 0; i < times.Length; i++)
-                    {
-                        times[i] = i * 15.0;
-                    }
+                var length = 0;
+                for (var p = 0; p < peers.Count; p++)
+                {
+                    length = Math.Max(length, peers[p].Values.Length);
+                }
 
-                    var result = detector.Detect(values.ToArray(), times, TrendOptions.Balanced);
+                var times = new double[length];
+                for (var i = 0; i < length; i++)
+                {
+                    times[i] = i * 15.0;
+                }
 
-                    if (pipeline.Observe(
-                            SubjectFor(pod), NameOf(metric), result,
-                            new DateTimeOffset(start, TimeSpan.Zero), new DateTimeOffset(end, TimeSpan.Zero),
-                            values.ToArray()))
+                var expectation = new double[length];
+                var hasCommon = CrossPeerBaseline.TryBuild(peers, expectation, new double[peers.Count]);
+
+                if (hasCommon)
+                {
+                    var common = detector.Detect(expectation, times, TrendOptions.Balanced);
+
+                    if (pipeline.Observe(WorkloadSubject(), NameOf(metric), common, from, to, expectation))
                     {
                         anomalous++;
-                        report.Append($"  {pod,-42} {metric,-24} {result.Direction} tau={result.KendallTau:F2}\n");
+                        report.Append($"  {"(whole deployment)",-42} {metric,-24} "
+                                      + $"{common.Direction} tau={common.KendallTau:F2}   <-- common mode\n");
+                    }
+                }
+
+                for (var p = 0; p < peers.Count; p++)
+                {
+                    var values = peers[p].Values.Span;
+                    var result = detector.Detect(
+                        values, times.AsSpan(0, values.Length), TrendOptions.Balanced, double.NaN,
+                        hasCommon ? expectation.AsSpan(0, values.Length) : default);
+
+                    if (pipeline.Observe(
+                            SubjectFor(peers[p].Name), NameOf(metric), result, from, to,
+                            peers[p].Values))
+                    {
+                        anomalous++;
+                        report.Append($"  {peers[p].Name,-42} {metric,-24} "
+                                      + $"{result.Direction} tau={result.KendallTau:F2}\n");
                     }
                 }
             }
@@ -302,36 +362,65 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
         {
             var history = new SortedDictionary<string, Dictionary<MetricIndex, List<double>>>(StringComparer.Ordinal);
 
+            if (frames.Count == 0)
+            {
+                return history;
+            }
+
+            // ONE frame, not all of them. FetchAsync returns an entry per scrape step, but every entry holds
+            // THE SAME series list — the batching exists for an aligner that windows the shared list, and
+            // that aligner does not exist in this codebase.
+            //
+            // The previous version looped over frames and took Samples[^1] from each, which produced the last
+            // value of every series repeated once per step: constants. Every detector then ran on them. A
+            // trend over a constant is exactly zero by construction, and a peer comparison between four
+            // constants reports p-values computed from a sample count that is not real — 61 replicas of one
+            // number is one observation, not sixty-one. The verdicts this diagnostic produced before this fix
+            // are not evidence.
+            var grid = new Dictionary<long, int>(frames.Count);
             for (var f = 0; f < frames.Count; f++)
             {
-                foreach (var series in frames[f].Series)
+                grid[frames[f].ScrapeTimestampMs] = f;
+            }
+
+            foreach (var series in frames[0].Series)
+            {
+                var pod = series.Pod.PodName;
+
+                if (pod.Length == 0 || series.Samples.Count == 0)
                 {
-                    var pod = series.Pod.PodName;
+                    continue;
+                }
 
-                    if (pod.Length == 0 || series.Samples.Count == 0)
+                if (!history.TryGetValue(pod, out var byMetric))
+                {
+                    byMetric = [];
+                    history[pod] = byMetric;
+                }
+
+                var metric = (MetricIndex)series.MetricTypeId;
+
+                if (!byMetric.TryGetValue(metric, out var values))
+                {
+                    // Pre-filled with NaN so a scrape this series has no sample for stays a gap rather than
+                    // shifting every later sample one step earlier. Non-finite means the query produced
+                    // nothing at that instant; the detectors filter those themselves, and carrying them keeps
+                    // the series index-aligned with time.
+                    values = new List<double>(frames.Count);
+                    for (var i = 0; i < frames.Count; i++)
                     {
-                        continue;
+                        values.Add(double.NaN);
                     }
 
-                    if (!history.TryGetValue(pod, out var byMetric))
+                    byMetric[metric] = values;
+                }
+
+                foreach (var sample in series.Samples)
+                {
+                    if (grid.TryGetValue(sample.Timestamp, out var slot))
                     {
-                        byMetric = [];
-                        history[pod] = byMetric;
+                        values[slot] = sample.Value;
                     }
-
-                    var metric = (MetricIndex)series.MetricTypeId;
-
-                    if (!byMetric.TryGetValue(metric, out var values))
-                    {
-                        values = [];
-                        byMetric[metric] = values;
-                    }
-
-                    var value = series.Samples[^1].Value;
-
-                    // Non-finite means the query produced nothing for this pod at this instant. The detectors
-                    // filter those themselves, but carrying them keeps the series index-aligned with time.
-                    values.Add(value);
                 }
             }
 
@@ -356,6 +445,52 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
         /// with those two segments removed. That distinction is what puts the degraded replica in its own
         /// workload while leaving it in the same namespace as its siblings.
         /// </summary>
+        /// <summary>
+        /// The subject a common-mode finding belongs to: the deployment, with <b>no pod</b>. Attaching one
+        /// would be a false statement — the whole point of the decomposition is that this movement is not
+        /// about any individual replica.
+        /// </summary>
+        private static IncidentSubject WorkloadSubject()
+        {
+            return new IncidentSubject("overfit", "overfit-server", string.Empty, string.Empty, string.Empty);
+        }
+
+        /// <summary>Every metric any pod reported, so the group is assembled per metric rather than per pod.</summary>
+        private static List<MetricIndex> AllMetrics(
+            SortedDictionary<string, Dictionary<MetricIndex, List<double>>> history)
+        {
+            var metrics = new SortedSet<MetricIndex>();
+
+            foreach (var (_, byMetric) in history)
+            {
+                foreach (var (metric, _) in byMetric)
+                {
+                    metrics.Add(metric);
+                }
+            }
+
+            return [.. metrics];
+        }
+
+        /// <summary>Members of the peer group for one metric, skipping pods with too little data to test.</summary>
+        private static List<PeerSeries> PeersFor(
+            SortedDictionary<string, Dictionary<MetricIndex, List<double>>> history,
+            MetricIndex metric,
+            int minimumSamples)
+        {
+            var peers = new List<PeerSeries>();
+
+            foreach (var (pod, byMetric) in history)
+            {
+                if (byMetric.TryGetValue(metric, out var values) && values.Count >= minimumSamples)
+                {
+                    peers.Add(new PeerSeries(pod, values.ToArray()));
+                }
+            }
+
+            return peers;
+        }
+
         private static IncidentSubject SubjectFor(string pod)
         {
             var workload = pod;

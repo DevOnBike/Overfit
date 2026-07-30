@@ -201,10 +201,16 @@ namespace DevOnBike.Overfit.Tests.Statistics
         }
 
         [Fact]
-        public void AZeroSeriesWithARealClimb_SkipsTheRelativeGateInsteadOfDividingByNothing()
+        public void AZeroSeriesWithARealClimb_IsScaledAgainstItsPeakInsteadOfDividingByNothing()
         {
             // Error counts sitting at zero and then walking upward: the median is 0, so "10% of typical" is
-            // meaningless. The detector must still report the climb, and say why the size gate was skipped.
+            // meaningless. The detector must still report the climb, and name the scale it used instead.
+            //
+            // This test previously asserted that the size gate was SKIPPED when the median was zero. That was
+            // the behaviour, and it was wrong in the other direction: skipping the gate meant "the size
+            // cannot be judged" counted as "the size is large", which on the cluster lab raised an incident
+            // over GcPauseRatio noise of about 10^-5. The gate now falls back to the largest magnitude the
+            // window reached, which keeps this case — a real climb away from zero — and drops that one.
             var values = new double[120];
             var times = new double[120];
             for (var i = 0; i < values.Length; i++)
@@ -217,7 +223,8 @@ namespace DevOnBike.Overfit.Tests.Statistics
 
             Assert.Equal(DetectionStatus.Anomalous, result.Status);
             Assert.Equal(TrendDirection.Rising, result.Direction);
-            Assert.Contains("no usable scale", result.Reason);
+            Assert.Contains("the window's peak", result.Reason, StringComparison.Ordinal);
+            Assert.Contains("no typical", result.Reason, StringComparison.Ordinal);
         }
 
         [Fact]
