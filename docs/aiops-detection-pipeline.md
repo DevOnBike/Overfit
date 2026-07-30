@@ -514,6 +514,101 @@ cannot.
 
 ---
 
+## Layer 0 — the runner, which was missing
+
+`AnomalyGuard.RunCycle(window, at)` is one evaluation, end to end: rules, peer comparison and the
+common-mode-decomposed trend over a `MetricWindow`, grouped, tracked, reported.
+
+**Its absence was not obvious and mattered more than anything below it.** Every part existed and was tested
+— three detector families, a grouper, a tracker, a reporter — and *nothing in `Sources/` composed them*. The
+only code that ran the whole path was a diagnostic in the test project. There was no artefact to deploy,
+however finished the parts looked.
+
+**No I/O, no timer, no logging.** A cycle is a function of a window and its options, so it can be run in an
+ordinary unit test against `Tests/test_fixtures/lab/lab-window.csv` — a recorded window of the real cluster
+— rather than only against a simulator that has already been wrong three times. Two of the guard's tests do
+exactly that, and one of them asserts that the replica the lab deliberately throttled is among the pods the
+guard names.
+
+`MetricWindow` is the input contract: pods × metrics × a shared timestamp grid, `NaN` where a scrape returned
+nothing, flat storage because jagged `double[][]` is a build error here. Prometheus, the fixture and the
+synthetic population all produce that one shape, so there is no second code path between test and production.
+
+### Coverage is counted, so silence stops meaning two things
+
+`GuardCycleResult` carries `BlindMetrics` — channels this deployment has a query for that **no pod** reported
+— and `PartialMetrics`, where some did. A blind metric produces no findings, which is indistinguishable from
+health at every layer below, and an operator who is not told will read "no incidents" as "nothing is wrong".
+Partial coverage is usually legitimate (CFS throttling counters exist only on containers with a CPU limit)
+but has the same shape as a rollout that changed what half the fleet exports, so it is counted rather than
+assumed.
+
+### The loop, and where it lives
+
+`AnomalyGuardService` (a `BackgroundService` in `Sources/Server.AspNet`) is the scheduling: read a window,
+evaluate it, report, wait, repeat. Registered with `services.AddOverfitAnomalyGuard(prometheusConfig)`.
+
+**Off unless asked for.** The guard is not a property of running the server — it watches a cluster, needs a
+reachable Prometheus and a pod regex that matches something, and on a host with neither it would log a failed
+cycle every five minutes forever.
+
+**A failed cycle is logged and skipped, never fatal.** A monitoring guard that dies because Prometheus was
+briefly unreachable has replaced the problem it was bought to detect with one of its own, and taken the host
+with it.
+
+**`PrometheusMetricWindowSource`** turns a rolling range into a `MetricWindow`, and carries the alignment that
+`FetchAsync` invites you to get wrong. A sample with no matching grid slot is dropped rather than snapped to a
+neighbour: a value nudged onto an adjacent step is a fabricated observation, while the gap it would have left
+is something every detector already handles. It returns `null` when no pod answered at all — a cluster the
+source cannot see is not an empty cluster, and a window of `NaN` would read as one.
+
+Fixing that path first required a real bug in `PrometheusHistoricalSource`: **it disposed an `HttpClient` it
+did not own.** A loop sharing one client across cycles would have got `ObjectDisposedException` on the second.
+
+### Shadow run on the lab — the tracker on real multi-cycle data
+
+Eight cycles, 60 s apart, 12-minute window, against the live cluster under even load with one deliberately
+throttled replica:
+
+```
+cycle  pods  blind  partial  findings  incidents  opened  ongoing  resolved
+    1     4      0        1        10          1       1        0         0
+    2     4      0        1        11          1       0        1         0
+  ...
+    8     4      0        1        11          1       0        1         0
+
+evaluated 8 of 8 cycles, 1 incident opened, 1 still open
+```
+
+**One notification across eight cycles**, on the pod the lab deliberately degraded, at severity 1.00. That is
+the property that made the guard undeployable when it was missing: without the tracker this run would have
+produced eight incidents that each looked new.
+
+`blind = 0` — every mapped metric reported for at least one pod. `partial = 1` throughout, which is
+`CpuThrottleRatio` and correct: the CFS counters exist only on containers carrying a CPU limit.
+
+**What the run does not show, and should not be read as showing:**
+
+- **`Resolved` was never exercised.** The fault ran for the whole run, so the close path — and the two-cycle
+  grace period that stops a flicker from producing resolve/open/resolve — has still only been tested against
+  fixtures.
+- **Findings fluctuated 9–14 per cycle while incidents stayed at 1.** The grouper is absorbing healthy-replica
+  noise into the real incident rather than filtering it. An operator sees one thing, which is the goal, but
+  the thing they see is a mix of the fault and the noise — and the finding count is still the honest measure
+  of how much noise there is.
+- **Eight cycles is eight minutes.** Nothing here says what happens over a day, across a rollout, or when the
+  problem ends.
+
+### Defaults, each with the measurement behind it
+
+| Setting | Default | Why |
+|---|--:|---|
+| `Cadence` | 5 min | the cadence every measurement in this project used |
+| `Window` | 20 min | **longer is not safer** — 20 min gave 234 false incidents/day, 60 min gave 93, and 240 min gave **2583**, because a four-hour window sits on the slope of the daily traffic curve |
+| `EndOffset` | 2 min | rate expressions look backwards, so the newest samples are still filling in; a window ending as a load run stopped put a cluster-wide decline in every RED signal |
+
+---
+
 ## Layer 5 — reporting
 
 The tree becomes **rows**. `IncidentReporter.Report(incidents, sink)` flattens each group into one incident
@@ -578,6 +673,39 @@ half continues it and the other opens as new. That is defensible rather than rig
 for a situation nobody has watched on real data would be guessing — `CyclesSeen` and `CyclesMissing` make the
 choice visible when it happens. **Nothing persists**, either: a restart reopens every incident under a new
 id, and fixing that is a decision about the deployment rather than about detection.
+
+#### Two refutations of the matching key, both on real data
+
+**Pairs flap.** Keyed on (subject, signal) pairs, a 22-cycle shadow run of one fault introduced and removed
+opened **eight** incidents instead of two, alternating opened/ongoing every other cycle. Once a large
+incident clears, one to three findings remain, and at that size a single rotating signal drops the overlap
+below any threshold. All eight were the same pod.
+
+**Subjects alone produce an immortal incident.** The grouper merges every pod's findings into one group, so
+the incident about the degraded replica covered all four pods. With that replica gone it still shared three
+of four subjects — 0.75 overlap — and matched. It never resolved; it silently changed what it was about
+while keeping its identity, which is worse than opening a new one.
+
+**What works: the same primary subject, plus subject overlap.** The primary is "where to look first"; if that
+changed, an operator is looking at a different incident. Measured on the recorded window: one open while the
+fault is present, one resolve after it goes, no cycle both opening and closing.
+
+**The deeper finding, and it was not what it looked like.** The four-pod mega-incident was blamed on the
+grouper merging too much. Measured, that is wrong: `SameNamespace` is 0.25 against a `MinRelatedness` of
+0.35, so the grouper deliberately does *not* link across workloads, and given honest topology the same
+findings split into two incidents — the healthy three, and the degraded replica alone.
+
+The defect was in `AnomalyGuard.Subject()`, which stamped every pod with one configured workload.
+`SameWorkload` scores 0.7, so declaring four pods to be one workload merges everything on all of them. The
+lab's degraded replica is its own Deployment. **The grouper was right; the guard was lying to it.** Workload
+is now derived from the pod name — a heuristic that gets StatefulSets and bare pods wrong, and which should
+give way to `PromqlCatalog.PodOwnershipQuery` once something executes it.
+
+`IncidentLifecycleAcceptanceTests` pins all of it deterministically against the recorded lab window: fault
+present, then the same window with that replica removed. Its criterion is about **the fault** — a second
+incident does open on healthy-replica memory noise once the fault clears, and that is the known
+false-positive budget rather than a lifecycle defect. Folding the two together makes a lifecycle test fail
+for a detection reason.
 
 ### What reporting does not yet solve
 

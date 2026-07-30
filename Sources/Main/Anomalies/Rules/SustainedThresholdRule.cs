@@ -119,8 +119,8 @@ namespace DevOnBike.Overfit.Anomalies.Rules
                 return new SustainedThresholdResult(
                     DetectionStatus.Healthy,
                     breached == 0
-                        ? $"No sample reached {options.Threshold:G3} across {kept} observations."
-                        : $"{fraction:P0} of the window reached {options.Threshold:G3}, under the {options.MinBreachFraction:P0} required to call it sustained (peak {peak:G3}).",
+                        ? $"No sample reached {Describe(options.Threshold)} across {kept} observations."
+                        : $"{fraction:P0} of the window reached {Describe(options.Threshold)}, under the {options.MinBreachFraction:P0} required to call it sustained (peak {peak:G3}).",
                     fraction,
                     breached,
                     kept,
@@ -130,7 +130,8 @@ namespace DevOnBike.Overfit.Anomalies.Rules
 
             return new SustainedThresholdResult(
                 DetectionStatus.Anomalous,
-                $"Held at or above {options.Threshold:G3} for {fraction:P0} of the window ({breached} of {kept} observations, median {median:G3}, peak {peak:G3}).",
+                $"Held {Describe(options.Threshold)} for {fraction:P0} of the window ({breached} of {kept} "
+                + $"observations, median {median:G3}, peak {peak:G3}).",
                 fraction,
                 breached,
                 kept,
@@ -140,5 +141,22 @@ namespace DevOnBike.Overfit.Anomalies.Rules
 
         private static SustainedThresholdResult Undecidable(DetectionStatus status, string reason, int usable)
             => new(status, reason, 0.0, 0, usable, double.NaN, double.NaN);
+        /// <summary>
+        /// The threshold as a human would say it.
+        ///
+        /// <para><b>An operator was being shown "4,94E-324".</b> That is
+        /// <see cref="double.Epsilon"/>, which <see cref="SustainedThresholdOptions.ForRareEvent"/> uses to
+        /// mean "any non-zero reading at all" — a perfectly good way to express the rule in code and a
+        /// terrible one to put in front of somebody at three in the morning. A threshold that small is not a
+        /// number anybody compares against; it is a statement that the event happened.</para>
+        /// </summary>
+        private static string Describe(double threshold)
+        {
+            // Anything under a millionth of a percent is a stand-in for "greater than zero", not a level.
+            return threshold <= 1e-9
+                ? "above zero"
+                : $"at or above {threshold:G3}";
+        }
+
     }
 }

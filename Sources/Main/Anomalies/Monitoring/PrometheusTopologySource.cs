@@ -1,0 +1,237 @@
+// Copyright (c) 2026 DevOnBike.
+// This file is part of DevonBike Overfit.
+// DevonBike Overfit is licensed under the GNU AGPLv3.
+// For commercial licensing options, contact: devonbike@gmail.com
+
+using System.Text.Json;
+using DevOnBike.Overfit.Anomalies.Monitoring.Abstractions;
+using DevOnBike.Overfit.Anomalies.Monitoring.Contracts;
+
+namespace DevOnBike.Overfit.Anomalies.Monitoring
+{
+    /// <summary>
+    /// Reads pod ownership and placement from kube-state-metrics, through Prometheus.
+    ///
+    /// <para><b>The relationships are in the LABELS, not the values.</b> kube-state-metrics emits a constant
+    /// <c>1</c> and carries the fact in <c>owner_kind</c>, <c>owner_name</c>, <c>node</c>. Every other reader
+    /// in this project parses for a value and would come back with a column of ones, which is why none of
+    /// them could be reused and why this class exists at all.</para>
+    ///
+    /// <para><b>Two hops, because Kubernetes has two.</b> A Deployment's pod is owned by a ReplicaSet, and the
+    /// ReplicaSet by the Deployment. Resolving only the first hop names the <i>version</i> — which is useful,
+    /// and is not what a human calls the workload. Both are kept: during a rollout two ReplicaSets serve at
+    /// once, and comparing across them compares two different builds, which is why the grouper scores
+    /// <c>SameReplicaSet</c> above <c>SameWorkload</c>.</para>
+    ///
+    /// <para><b>A pod owned directly by something else keeps that owner as its workload.</b> A StatefulSet
+    /// pod, a Job pod or a bare pod has no ReplicaSet, and inventing one would be worse than reporting what
+    /// is actually there.</para>
+    ///
+    /// <para><b>A failed refresh leaves the previous snapshot in place</b> rather than emptying it. An empty
+    /// topology is not neutral — it makes every pod share an empty workload and therefore merge with every
+    /// other, which is the failure this class was built to prevent. Stale coordinates are wrong slowly;
+    /// blank ones are wrong instantly and in the worst direction.</para>
+    /// </summary>
+    public sealed class PrometheusTopologySource : IRefreshablePodTopology, IDisposable
+    {
+        private static readonly JsonSerializerOptions _jsonOptions = new()
+        {
+            PropertyNameCaseInsensitive = true,
+        };
+
+        private readonly IPrometheusQuerySelector _selector;
+        private readonly string _baseUrl;
+        private readonly HttpClient _http;
+        private readonly bool _ownsHttpClient;
+
+        private Dictionary<string, PodPlacement> _snapshot = new(StringComparer.Ordinal);
+        private bool _disposed;
+
+        public PrometheusTopologySource(
+            string prometheusBaseUrl,
+            IPrometheusQuerySelector selector,
+            HttpClient? httpClient = null)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(prometheusBaseUrl);
+            ArgumentNullException.ThrowIfNull(selector);
+
+            _baseUrl = prometheusBaseUrl.TrimEnd('/');
+            _selector = selector;
+            _ownsHttpClient = httpClient is null;
+            _http = httpClient ?? new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+        }
+
+        /// <summary>Pods in the current snapshot. Zero means nothing has been resolved yet.</summary>
+        public int Count => _snapshot.Count;
+
+        /// <inheritdoc/>
+        public bool TryResolve(string pod, out PodPlacement placement)
+        {
+            ArgumentNullException.ThrowIfNull(pod);
+
+            return _snapshot.TryGetValue(pod, out placement);
+        }
+
+        /// <summary>
+        /// Re-reads ownership and placement. Returns how many pods were resolved; on any failure the previous
+        /// snapshot is kept and <c>-1</c> is returned, so a caller can report degraded topology without
+        /// having its grouping silently collapse.
+        /// </summary>
+        public async Task<int> RefreshAsync(CancellationToken ct = default)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+
+            try
+            {
+                var podOwners = await QueryAsync(PromqlCatalog.PodOwnershipQuery(_selector), ct)
+                    .ConfigureAwait(false);
+                var replicaSetOwners = await QueryAsync(PromqlCatalog.ReplicaSetOwnershipQuery(_selector), ct)
+                    .ConfigureAwait(false);
+                var podNodes = await QueryAsync(PromqlCatalog.PodNodeQuery(_selector), ct)
+                    .ConfigureAwait(false);
+
+                // ReplicaSet -> Deployment, the second hop.
+                var deploymentOf = new Dictionary<string, string>(StringComparer.Ordinal);
+
+                for (var i = 0; i < replicaSetOwners.Count; i++)
+                {
+                    var labels = replicaSetOwners[i];
+
+                    if (Label(labels, "replicaset") is { Length: > 0 } replicaSet
+                        && Label(labels, "owner_name") is { Length: > 0 } owner)
+                    {
+                        deploymentOf[replicaSet] = owner;
+                    }
+                }
+
+                var nodeOf = new Dictionary<string, string>(StringComparer.Ordinal);
+
+                for (var i = 0; i < podNodes.Count; i++)
+                {
+                    var labels = podNodes[i];
+
+                    if (Label(labels, "pod") is { Length: > 0 } pod
+                        && Label(labels, "node") is { Length: > 0 } node)
+                    {
+                        nodeOf[pod] = node;
+                    }
+                }
+
+                var resolved = new Dictionary<string, PodPlacement>(
+                    podOwners.Count, StringComparer.Ordinal);
+
+                for (var i = 0; i < podOwners.Count; i++)
+                {
+                    var labels = podOwners[i];
+                    var pod = Label(labels, "pod");
+
+                    if (pod.Length == 0)
+                    {
+                        continue;
+                    }
+
+                    var owner = Label(labels, "owner_name");
+                    var kind = Label(labels, "owner_kind");
+
+                    // A ReplicaSet owner resolves one more hop to the Deployment; anything else — StatefulSet,
+                    // Job, DaemonSet — already names the workload, so it is kept as it stands.
+                    var workload = string.Equals(kind, "ReplicaSet", StringComparison.Ordinal)
+                                   && deploymentOf.TryGetValue(owner, out var deployment)
+                        ? deployment
+                        : owner;
+
+                    var replicaSet = string.Equals(kind, "ReplicaSet", StringComparison.Ordinal)
+                        ? owner
+                        : string.Empty;
+
+                    resolved[pod] = new PodPlacement(
+                        workload,
+                        replicaSet,
+                        nodeOf.TryGetValue(pod, out var node) ? node : string.Empty);
+                }
+
+                if (resolved.Count == 0)
+                {
+                    // Prometheus answered and matched nothing. Almost always kube-state-metrics is absent or
+                    // the namespace matcher is wrong — and adopting an empty topology would merge the whole
+                    // namespace into one incident, so the previous snapshot stands.
+                    return -1;
+                }
+
+                _snapshot = resolved;
+
+                return resolved.Count;
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception)
+            {
+                return -1;
+            }
+        }
+
+        /// <summary>
+        /// Runs an instant query and returns each series' <b>label set</b>. The value is deliberately
+        /// discarded — for these metrics it is always 1 and carries nothing.
+        /// </summary>
+        private async Task<List<Dictionary<string, string>>> QueryAsync(string promql, CancellationToken ct)
+        {
+            var url = $"{_baseUrl}/api/v1/query?query={Uri.EscapeDataString(promql)}";
+
+            using var response = await _http.GetAsync(url, ct).ConfigureAwait(false);
+            response.EnsureSuccessStatusCode();
+
+            var body = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            var result = new List<Dictionary<string, string>>();
+
+            using var document = JsonDocument.Parse(body);
+
+            if (!document.RootElement.TryGetProperty("data", out var data)
+                || !data.TryGetProperty("result", out var series))
+            {
+                return result;
+            }
+
+            foreach (var entry in series.EnumerateArray())
+            {
+                if (!entry.TryGetProperty("metric", out var metric))
+                {
+                    continue;
+                }
+
+                var labels = new Dictionary<string, string>(StringComparer.Ordinal);
+
+                foreach (var label in metric.EnumerateObject())
+                {
+                    labels[label.Name] = label.Value.GetString() ?? string.Empty;
+                }
+
+                result.Add(labels);
+            }
+
+            return result;
+        }
+
+        private static string Label(Dictionary<string, string> labels, string name)
+        {
+            return labels.TryGetValue(name, out var value) ? value : string.Empty;
+        }
+
+        public void Dispose()
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            _disposed = true;
+
+            if (_ownsHttpClient)
+            {
+                _http.Dispose();
+            }
+        }
+    }
+}

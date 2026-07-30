@@ -198,7 +198,6 @@ namespace DevOnBike.Overfit.Statistics
             // correction needs is only visible in a full ordering, so there is nothing to save here.
             observations.Sort();
             var tiedPairs = CountTiedPairs(observations, out var varianceTieTerm);
-            var median = Median(observations);
 
             var totalPairs = (double)count * (count - 1) / 2.0;
             var variance = (((double)count * (count - 1) * ((2.0 * count) + 5.0)) - varianceTieTerm) / 18.0;
@@ -251,8 +250,18 @@ namespace DevOnBike.Overfit.Statistics
             // wobble's fitted change is small against its own peak too. Only a window that never leaves zero
             // has no scale under either rule, and a change within such a window is numerically nothing.
             // The absolute gate is checked independently, in the signal's own units — see TrendOptions.
-            var scaleIsUsable = Math.Abs(median) > 1e-12;
-            var scaleForSize = scaleIsUsable ? Math.Abs(median) : PeakMagnitude(observations);
+            // THE SCALE COMES FROM THE ORIGINAL SERIES, NEVER FROM THE RESIDUAL. When an expectation was
+            // supplied, `observations` holds observed-minus-expected, whose median sits near zero by
+            // construction — dividing by it turns any change into a huge percentage and leaves the gate
+            // passing everything. That regression shipped for part of a day and showed up on the lab as
+            // "rose by 2429% of typical"; `Subtract` returns the observed median precisely so it cannot
+            // happen, and the value was being computed and then ignored.
+            var sizeAgainst = hasExpectation ? scale : Median(observations);
+
+            var scaleIsUsable = double.IsFinite(sizeAgainst) && Math.Abs(sizeAgainst) > 1e-12;
+            var scaleForSize = scaleIsUsable
+                ? Math.Abs(sizeAgainst)
+                : (hasExpectation ? PeakMagnitudeOf(values) : PeakMagnitude(observations));
             var hasScale = scaleForSize > 1e-12;
 
             var material = hasScale
@@ -436,6 +445,27 @@ namespace DevOnBike.Overfit.Statistics
             }
 
             return s;
+        }
+
+        /// <summary>
+        /// Largest finite absolute value in an <b>unsorted</b> span — the fallback scale for the original
+        /// series when an expectation was supplied, since the sorted buffer then holds residuals.
+        /// </summary>
+        private static double PeakMagnitudeOf(ReadOnlySpan<double> values)
+        {
+            var peak = 0.0;
+
+            for (var i = 0; i < values.Length; i++)
+            {
+                var magnitude = Math.Abs(values[i]);
+
+                if (double.IsFinite(magnitude) && magnitude > peak)
+                {
+                    peak = magnitude;
+                }
+            }
+
+            return peak;
         }
 
         /// <summary>

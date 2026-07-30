@@ -3,8 +3,6 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using System;
-using System.Collections.Generic;
 using DevOnBike.Overfit.Anomalies.Incidents;
 using DevOnBike.Overfit.Anomalies.Incidents.Abstractions;
 using DevOnBike.Overfit.Anomalies.Incidents.Contracts;
@@ -128,7 +126,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
                 signal, cls, Start, Start.AddMinutes(12), severity, $"{signal} on {pod}");
         }
 
-        private static IReadOnlyList<Incident> Group(params SignalFinding[] findings)
+        private static IReadOnlyList<TrackedIncident> Group(params SignalFinding[] findings)
         {
             var pipeline = new IncidentPipeline();
 
@@ -148,10 +146,12 @@ namespace DevOnBike.Overfit.Tests.Anomalies
                     finding.Start, finding.End, default, finding.Class);
             }
 
-            return pipeline.Group(IncidentGroupingOptions.Balanced with
+            var grouped = pipeline.Group(IncidentGroupingOptions.Balanced with
             {
                 Topology = TopologyWeights.SingleNode
             });
+
+            return new IncidentTracker(IncidentTrackingOptions.Balanced).Observe(grouped, Start);
         }
 
         private sealed class CapturingSink : IIncidentSink

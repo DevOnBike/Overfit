@@ -25,8 +25,19 @@ namespace DevOnBike.Overfit.Anomalies.Incidents.Contracts
     /// "unknown pod"; the distinction is the difference between one honest row and N wrong ones.</para>
     /// </summary>
     /// <param name="IncidentKey">Joins a finding row to its incident row within one reporting cycle.
-    /// <b>Not stable across cycles</b> — the pipeline is stateless, so this is a correlation key, not an
-    /// incident identity. Anything building a lifecycle on it will double-count.</param>
+    /// <b>Not stable across cycles</b> — use <paramref name="IncidentId"/> for that.</param>
+    /// <param name="IncidentId">
+    /// Stable identity for as long as the incident is open, from <c>IncidentTracker</c>. Zero when the rows
+    /// were produced without tracking.
+    /// </param>
+    /// <param name="State">
+    /// Opened this cycle, still running, or just closed.
+    ///
+    /// <para><b>Without this the tracker's work does not reach the consumer.</b> A sink that receives the
+    /// same incident every cycle with no way to tell a new one from a continuing one logs twelve identical
+    /// lines for a one-hour problem — which is precisely the behaviour the tracker exists to remove, arriving
+    /// at the last possible boundary. Notify on <see cref="IncidentState.Opened"/>; update on the rest.</para>
+    /// </param>
     /// <param name="Kind">Whether this row describes the group or one finding inside it.</param>
     /// <param name="Namespace">Kubernetes namespace.</param>
     /// <param name="Workload">Deployment or StatefulSet the subject belongs to.</param>
@@ -42,6 +53,8 @@ namespace DevOnBike.Overfit.Anomalies.Incidents.Contracts
     /// <param name="Message">The incident summary, or the detector's reason for a finding row.</param>
     public readonly record struct IncidentLogRecord(
         int IncidentKey,
+        long IncidentId,
+        IncidentState State,
         IncidentLogRecordKind Kind,
         string Namespace,
         string Workload,
@@ -58,6 +71,12 @@ namespace DevOnBike.Overfit.Anomalies.Incidents.Contracts
     {
         /// <summary>How long the behaviour has been running.</summary>
         public TimeSpan Duration => End - Start;
+
+        /// <summary>
+        /// Whether this row is the one moment a consumer should notify a human. Every other state is an
+        /// update to something already reported.
+        /// </summary>
+        public bool IsNews => State is IncidentState.Opened or IncidentState.Resolved;
 
         /// <summary>
         /// Whether this row blames a specific pod. False for common-mode rows, which are about the

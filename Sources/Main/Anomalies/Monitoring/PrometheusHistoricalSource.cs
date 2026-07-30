@@ -32,6 +32,13 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
 
         private readonly PrometheusHistoricalSourceConfig _config;
         private readonly HttpClient _http;
+
+        /// <summary>
+        /// Whether this instance created <see cref="_http"/>, and may therefore dispose it. A caller-supplied
+        /// client is borrowed: disposing it would break the next user of a client that is normally shared for
+        /// the lifetime of the process, which is exactly how one is meant to be used.
+        /// </summary>
+        private readonly bool _ownsHttpClient;
         private readonly int[] _seriesFromLastFetch = new int[(int)MetricIndex.Count];
         private bool _disposed;
 
@@ -41,6 +48,7 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
         {
             ArgumentNullException.ThrowIfNull(config);
             _config = config;
+            _ownsHttpClient = httpClient is null;
             _http = httpClient ?? BuildHttpClient(config);
         }
 
@@ -74,7 +82,11 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
                 return;
             }
             _disposed = true;
-            _http.Dispose();
+
+            if (_ownsHttpClient)
+            {
+                _http.Dispose();
+            }
         }
 
         // ---------------------------------------------------------------------------

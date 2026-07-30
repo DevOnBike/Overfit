@@ -32,10 +32,12 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
         /// Reports every incident in <paramref name="incidents"/> as one incident row plus one row per
         /// finding, joined by <see cref="IncidentLogRecord.IncidentKey"/>.
         /// </summary>
-        /// <param name="incidents">A cycle's output, as returned by <see cref="IncidentPipeline.Group"/>.</param>
+        /// <param name="incidents">A cycle's output, as returned by <see cref="IncidentTracker.Observe"/> —
+        /// tracked rather than raw, so the lifecycle state reaches the sink. Reporting raw groups instead
+        /// loses the tracker entirely at the last boundary: every cycle looks like a fresh incident.</param>
         /// <param name="sink">Destination.</param>
         /// <returns>How many rows were reported.</returns>
-        public static int Report(IReadOnlyList<Incident> incidents, IIncidentSink sink)
+        public static int Report(IReadOnlyList<TrackedIncident> incidents, IIncidentSink sink)
         {
             ArgumentNullException.ThrowIfNull(incidents);
             ArgumentNullException.ThrowIfNull(sink);
@@ -49,7 +51,7 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
 
             for (var i = 0; i < incidents.Count; i++)
             {
-                needed += 1 + incidents[i].Findings.Count;
+                needed += 1 + incidents[i].Incident.Findings.Count;
             }
 
             if (needed > MaxRowsPerCall)
@@ -65,11 +67,14 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
 
             for (var i = 0; i < incidents.Count; i++)
             {
-                var incident = incidents[i];
+                var tracked = incidents[i];
+                var incident = tracked.Incident;
                 var subject = incident.Primary.Subject;
 
                 rows[written] = new IncidentLogRecord(
                     IncidentKey: i,
+                    IncidentId: tracked.Id,
+                    State: tracked.State,
                     Kind: IncidentLogRecordKind.Incident,
                     Namespace: subject.Namespace,
                     Workload: subject.Workload,
@@ -92,6 +97,8 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
 
                     rows[written] = new IncidentLogRecord(
                         IncidentKey: i,
+                        IncidentId: tracked.Id,
+                        State: tracked.State,
                         Kind: IncidentLogRecordKind.Finding,
                         Namespace: finding.Subject.Namespace,
                         Workload: finding.Subject.Workload,

@@ -46,6 +46,7 @@ namespace DevOnBike.Overfit.Server.AspNet.Services
         private const int IncidentEventId = 5001;
         private const int FindingEventId = 5002;
         private const int CommonModeEventId = 5003;
+        private const int ResolvedEventId = 5007;
 
         // Built per instance rather than statically, because LoggerMessage.Define bakes the level into the
         // delegate and the level is the one thing a deployment genuinely needs to change. The templates are
@@ -53,6 +54,7 @@ namespace DevOnBike.Overfit.Server.AspNet.Services
         private readonly Action<ILogger, string, string, string, double, int, Exception?> _incident;
         private readonly Action<ILogger, string, string, string, double, Exception?> _commonMode;
         private readonly Action<ILogger, string, string, SignalClass, double, string, Exception?> _finding;
+        private readonly Action<ILogger, long, string, string, Exception?> _resolved;
 
         private readonly ILogger _logger;
         private readonly IncidentLogOptions _options;
@@ -80,6 +82,11 @@ namespace DevOnBike.Overfit.Server.AspNet.Services
                 new EventId(CommonModeEventId, "AnomalyCommonMode"),
                 "Deployment-wide movement in {Namespace}/{Workload} on {Signal} "
                 + "(severity {Severity}) — no individual replica is implicated");
+
+            _resolved = LoggerMessage.Define<long, string, string>(
+                level,
+                new EventId(ResolvedEventId, "AnomalyIncidentResolved"),
+                "Anomaly incident {IncidentId} in {Namespace}/{Workload} has closed");
 
             _finding = LoggerMessage.Define<string, string, SignalClass, double, string>(
                 _options.FindingLevel,
@@ -111,9 +118,31 @@ namespace DevOnBike.Overfit.Server.AspNet.Services
 
                 if (row.Kind == IncidentLogRecordKind.Incident)
                 {
+                    // Only state changes reach the log. An Ongoing row is the same problem the operator was
+                    // already told about, and emitting one every cycle is the twelve-notifications-per-hour
+                    // behaviour the tracker exists to remove — arriving at the last boundary instead of the
+                    // first.
+                    if (row.State == IncidentState.Ongoing)
+                    {
+                        continue;
+                    }
+
+                    if (row.State == IncidentState.Resolved)
+                    {
+                        _resolved(_logger, row.IncidentId, row.Namespace, row.Workload, null);
+
+                        continue;
+                    }
+
                     _incident(_logger, row.Namespace, row.Workload, row.Message, row.Severity,
                         row.Subjects, null);
 
+                    continue;
+                }
+
+                // Evidence follows its incident: repeating it for an unchanged one is noise.
+                if (row.State == IncidentState.Ongoing)
+                {
                     continue;
                 }
 
