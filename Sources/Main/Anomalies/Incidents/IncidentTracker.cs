@@ -241,9 +241,16 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
         /// </summary>
         /// <param name="incidents">This cycle's output from <see cref="IncidentPipeline.Group"/>.</param>
         /// <param name="observedAt">Cycle timestamp; ages and durations are measured against it.</param>
+        /// <param name="trace">
+        /// Optional per-group explanation of the matching decision. Supplied only by a diagnostic: the
+        /// ordinary path never computes the overlap of a candidate whose primary differs, and this makes it
+        /// do so, which is the number that separates "the incident's centre moved" from "this is a different
+        /// group". Null costs nothing.
+        /// </param>
         public IReadOnlyList<TrackedIncident> Observe(
             IReadOnlyList<Incident> incidents,
-            DateTimeOffset observedAt)
+            DateTimeOffset observedAt,
+            Action<IncidentMatchTrace>? trace = null)
         {
             ArgumentNullException.ThrowIfNull(incidents);
 
@@ -268,8 +275,24 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
                 var best = -1;
                 var bestOverlap = 0.0;
 
+                // Trace-only: the best overlap ignoring the primary requirement. The ordinary loop skips
+                // those candidates entirely, so this is the one thing an outside observer cannot reconstruct.
+                var anyBest = -1;
+                var anyOverlap = 0.0;
+
                 for (var o = 0; o < _open.Count; o++)
                 {
+                    if (trace is not null && !_open[o].MatchedThisCycle)
+                    {
+                        var unconstrained = Overlap(_left, _open[o].Keys);
+
+                        if (unconstrained > anyOverlap)
+                        {
+                            anyOverlap = unconstrained;
+                            anyBest = o;
+                        }
+                    }
+
                     if (_open[o].MatchedThisCycle)
                     {
                         continue;
@@ -299,6 +322,11 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
                 {
                     var tracked = _open[best];
 
+                    trace?.Invoke(new IncidentMatchTrace(
+                        _leftPrimary, _left.Count, IncidentMatchOutcome.Continued, tracked.Id,
+                        anyOverlap, anyBest >= 0 ? _open[anyBest].Id : 0,
+                        anyBest >= 0 ? _open[anyBest].PrimaryKey : string.Empty));
+
                     tracked.MatchedThisCycle = true;
                     tracked.Incident = incident;
                     tracked.LastSeen = observedAt;
@@ -312,6 +340,18 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
                     continue;
                 }
 
+                if (trace is not null)
+                {
+                    trace(new IncidentMatchTrace(
+                        _leftPrimary,
+                        _left.Count,
+                        Explain(best, bestOverlap, anyOverlap),
+                        0,
+                        anyOverlap,
+                        anyBest >= 0 ? _open[anyBest].Id : 0,
+                        anyBest >= 0 ? _open[anyBest].PrimaryKey : string.Empty));
+                }
+
                 results.Add(Open(incident, observedAt));
             }
 
@@ -319,6 +359,32 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
             Evict();
 
             return results;
+        }
+
+        /// <summary>
+        /// Which of the two very different reasons a group opened instead of continuing.
+        ///
+        /// <para>A substantial overlap with a different primary says the incident is the same and its centre
+        /// moved — a matching problem. A low overlap everywhere says the group genuinely changed.</para>
+        /// </summary>
+        private IncidentMatchOutcome Explain(int best, double bestOverlap, double anyOverlap)
+        {
+            if (_open.Count == 0)
+            {
+                return IncidentMatchOutcome.NoOpenIncidents;
+            }
+
+            if (best >= 0 && bestOverlap > 0.0)
+            {
+                return IncidentMatchOutcome.OverlapTooLow;
+            }
+
+            if (anyOverlap >= _options.MinSubjectOverlap)
+            {
+                return IncidentMatchOutcome.PrimaryChanged;
+            }
+
+            return IncidentMatchOutcome.NoResemblance;
         }
 
         private TrackedIncident Open(Incident incident, DateTimeOffset observedAt)

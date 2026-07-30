@@ -70,7 +70,7 @@ namespace DevOnBike.Overfit.Tests.Diagnostics
                 : 1.0;
         }
 
-        [LongFact]
+        [Fact]
         public async Task DriveTrafficAtTheLabReplicas()
         {
             var endpoints = Endpoints();

@@ -9,7 +9,9 @@ using DevOnBike.Overfit.Anomalies.Incidents;
 using DevOnBike.Overfit.Anomalies.Incidents.Abstractions;
 using DevOnBike.Overfit.Anomalies.Incidents.Contracts;
 using DevOnBike.Overfit.Anomalies.Monitoring;
+using DevOnBike.Overfit.Anomalies.Monitoring.Abstractions;
 using DevOnBike.Overfit.Anomalies.Monitoring.Contracts;
+using DevOnBike.Overfit.Statistics;
 using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
@@ -62,6 +64,11 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
                 step: TimeSpan.FromSeconds(15));
 
             using var source = new PrometheusMetricWindowSource(config);
+
+            // The path production takes: real ownership from kube-state-metrics rather than the pod-name
+            // heuristic. It matters here — the lab's degraded replica is its own Deployment, and telling the
+            // grouper otherwise merges it with the healthy three.
+            using var topology = new PrometheusTopologySource(prometheus, config);
             var sink = new RecordingSink();
 
             var guard = new AnomalyGuard(
@@ -69,6 +76,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
                 {
                     Namespace = "overfit",
                     Workload = "overfit-server",
+                    PodTopology = topology,
                     Grouping = IncidentGroupingOptions.Balanced with
                     {
                         // One node means SameNode is a constant, which would relate everything to everything.
@@ -82,7 +90,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
             report.Append($"shadow run: {cycles} cycles, {cadence.TotalSeconds:F0}s cadence, "
                           + $"{window.TotalMinutes:F0} min window, {endOffset.TotalMinutes:F0} min end offset\n\n");
             report.Append($"{"cycle",6}{"pods",6}{"blind",7}{"partial",9}{"findings",10}"
-                          + $"{"incidents",11}{"opened",8}{"ongoing",9}{"resolved",10}\n");
+                          + $"{"incidents",11}{"opened",8}{"ongoing",9}{"resolved",10}{"topo",7}\n");
 
             var totalOpened = 0;
             var evaluated = 0;
@@ -90,6 +98,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
             for (var cycle = 1; cycle <= cycles; cycle++)
             {
                 var now = DateTimeOffset.UtcNow;
+                var resolvedPods = await topology.RefreshAsync();
                 var read = await source.ReadAsync(now - endOffset, window);
 
                 if (read is null)
@@ -98,14 +107,57 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
                 }
                 else
                 {
-                    var result = guard.RunCycle(read, now);
+                    var traces = new List<IncidentMatchTrace>();
+                    var peer = new List<PeerDecisionTrace>();
+                    var result = guard.RunCycle(read, now, traces.Add, peer.Add);
 
                     evaluated++;
                     totalOpened += result.Opened;
 
                     report.Append($"{cycle,6}{read.Pods.Count,6}{result.BlindMetrics,7}{result.PartialMetrics,9}"
                                   + $"{result.Findings,10}{result.Incidents,11}{result.Opened,8}"
-                                  + $"{result.Ongoing,9}{result.Resolved,10}\n");
+                                  + $"{result.Ongoing,9}{result.Resolved,10}{resolvedPods,7}\n");
+
+                    // Every gate on the pod the lab deliberately degraded. "No finding" has five causes and
+                    // they call for opposite fixes, so the numbers that decided are printed rather than the
+                    // verdict.
+                    for (var i = 0; i < peer.Count; i++)
+                    {
+                        if (!peer[i].Pod.Contains("degraded", StringComparison.Ordinal))
+                        {
+                            continue;
+                        }
+
+                        if (peer[i].Status == DetectionStatus.Healthy && !peer[i].IsOutlier)
+                        {
+                            continue;
+                        }
+
+                        report.Append($"      PEER {peer[i].Signal,-22} {peer[i].Status,-16} "
+                                      + $"high={peer[i].High} low={peer[i].Low} "
+                                      + $"outlier={(peer[i].IsOutlier ? "Y" : "n")} "
+                                      + $"gap={peer[i].RelativeGap,7:P0} "
+                                      + $"delta={peer[i].EffectSize,6:F2} "
+                                      + $"p={peer[i].PValue:G3} "
+                                      + $"n={peer[i].UsableSamples}")
+                            .Append('\n');
+                    }
+
+                    // Only the decisions that were not "it continued" — a run where everything continues has
+                    // nothing to explain, and printing it would bury the cycles that do.
+                    for (var i = 0; i < traces.Count; i++)
+                    {
+                        if (traces[i].Outcome == IncidentMatchOutcome.Continued)
+                        {
+                            continue;
+                        }
+
+                        report.Append($"          {traces[i].Outcome,-16} {Short(traces[i].PrimaryKey),-8} "
+                                      + $"subjects={traces[i].SubjectCount,-3} "
+                                      + $"bestOverlap={traces[i].BestOverlap:F2} "
+                                      + $"vs #{traces[i].BestOverlapId} "
+                                      + $"({Short(traces[i].BestOverlapPrimaryKey)})\n");
+                    }
                 }
 
                 if (cycle < cycles)
@@ -129,6 +181,20 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
             Assert.True(evaluated > 0,
                 $"no cycle produced a window from {prometheus} — is the port-forward up and does "
                 + "'overfit-server-.*' match anything in namespace 'overfit'?");
+        }
+
+        /// <summary>Last segment of a subject key, so a table stays readable.</summary>
+        private static string Short(string key)
+        {
+            if (key.Length == 0)
+            {
+                return "(none)";
+            }
+
+            var slash = key.LastIndexOf('/');
+            var tail = slash >= 0 ? key[(slash + 1)..] : key;
+
+            return tail.Length <= 8 ? tail : tail[^8..];
         }
 
         private static int Setting(string name, int fallback)

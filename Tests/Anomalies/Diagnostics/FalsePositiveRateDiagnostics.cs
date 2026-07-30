@@ -127,26 +127,6 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
             var trendSkip = TrendSkip();
             var absoluteGate = Env("OVERFIT_FP_ABSOLUTE", 1) != 0;
 
-            // Both floor levers default OFF, and both defaults are measured rather than cautious.
-            //
-            // PEER (OVERFIT_FP_FLOOR=1): a tie — 206/211, 181/172, 157/156. It could not have been anything
-            // else here: the sawtooth amplitude is 6% of a 1.15 GB baseline, 69 MB, and MinAbsoluteGap for
-            // memory is 100 MB, so the third gate already filtered everything the floor removes.
-            //
-            // TREND (OVERFIT_FP_TREND_FLOOR=1): actively WORSE — trend findings 25→45, 27→53, 22→46, and
-            // memory trend findings 0→10 where there had been none at all. The reasoning behind the
-            // hypothesis was backwards: the sawtooth was not fooling the trend detector, it was protecting
-            // it. An oscillating series has rises and falls that cancel, so Theil-Sen's median slope is ~0
-            // and tau stays low. The floor removes the oscillation and leaves long flat runs with a few
-            // steps in one direction — a highly monotone series, which is precisely what tau rewards.
-            //
-            // Left as knobs rather than deleted so the measurement stays reproducible.
-            var floorGate = Env("OVERFIT_FP_FLOOR", 0) != 0;
-            var trendFloorGate = Env("OVERFIT_FP_TREND_FLOOR", 0) != 0;
-            var floorLookback = windowSamples;
-            var floored = new double[windowSamples];
-            var floorScratch = new int[windowSamples + floorLookback];
-            var floorsRefused = 0;
 
             var expectation = new double[windowSamples];
             var baselinesBuilt = 0;
@@ -197,25 +177,9 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
                     var metric = (MetricIndex)m;
                     var peers = new List<PeerSeries>(pods);
 
-                    var useFloor = floorGate && IsSawtooth(metric);
-
                     for (var p = 0; p < pods; p++)
                     {
-                        var series = cluster.Series(p, metric);
-                        double[] values;
-
-                        // The floor needs history BEFORE the window — that is what makes it phase-invariant —
-                        // so it reads from the full series rather than from the window slice.
-                        if (useFloor && RunningMinimum.TryFloorWindow(
-                                series, start, windowSamples, floorLookback, floored, floorScratch))
-                        {
-                            values = floored.AsSpan().ToArray();
-                        }
-                        else
-                        {
-                            floorsRefused += useFloor ? 1 : 0;
-                            values = series.AsSpan(start, windowSamples).ToArray();
-                        }
+                        var values = cluster.Series(p, metric).AsSpan(start, windowSamples).ToArray();
 
                         var work = IsLoadSensitive(metric)
                             ? cluster.Series(p, MetricIndex.RequestsPerSecond).AsSpan(start, windowSamples).ToArray()
@@ -287,23 +251,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
                     for (var p = 0; p < pods && !trendSkip.Contains(metric); p++)
                     {
                         var history = cluster.Series(p, metric);
-
-                        // The hypothesis under test: on a sawtooth signal, a trend over the raw series is
-                        // dominated by where in the tooth the window happens to start and end, not by any
-                        // drift. The floor is phase-invariant, so a trend over it should be the leak and
-                        // nothing else. OVERFIT_FP_TREND_FLOOR=0 turns it off, which is the other arm.
-                        double[] values;
-
-                        if (trendFloorGate && IsSawtooth(metric)
-                            && RunningMinimum.TryFloorWindow(
-                                history, start, windowSamples, floorLookback, floored, floorScratch))
-                        {
-                            values = floored.AsSpan().ToArray();
-                        }
-                        else
-                        {
-                            values = history.AsSpan(start, windowSamples).ToArray();
-                        }
+                        var values = history.AsSpan(start, windowSamples).ToArray();
 
                         var reference = ReadOnlySpan<double>.Empty;
 
@@ -357,9 +305,6 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
             report.Append($"trend skip   {(trendSkip.Count == 0 ? "(none)" : string.Join(", ", trendSkip))}\n");
             report.Append($"absolute gate {(absoluteGate ? "ON (per-metric floors)" : "off")}\n");
             report.Append($"restarts     {(restarts > 0.0 ? "ON (1/pod/day)" : "ABLATED")}\n");
-            report.Append($"sawtooth floor {(floorGate ? $"ON (lookback {floorLookback} samples)" : "off")}"
-                          + $"{(floorsRefused > 0 ? $" — {floorsRefused} windows lacked history and fell back" : string.Empty)}\n");
-            report.Append($"trend floor  {(trendFloorGate ? $"ON (lookback {floorLookback} samples)" : "off")}\n");
             report.Append($"\nincidents    {incidents}\n");
             report.Append($"findings     {findings}\n");
             report.Append($"pods accused {accused.Count} of {pods}\n");
@@ -435,21 +380,6 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
         private static bool IsLoadSensitive(MetricIndex metric)
         {
             return PeerSignalCatalog.RequiresWork(metric);
-        }
-
-        /// <summary>
-        /// Signals that climb between garbage collections and drop back at each one, so that an instantaneous
-        /// cross-replica comparison compares GC phase rather than health.
-        ///
-        /// <para>Nothing synchronises collections across replicas, so the phases drift apart and stay apart.
-        /// Measured on this very population, the two signals below produced <b>95% of all peer findings</b> on
-        /// pods where nothing was wrong, with real median differences of 130 to 480 MB — differences no
-        /// threshold can filter, because they are genuine and meaningless at the same time. See
-        /// <see cref="RunningMinimum"/>.</para>
-        /// </summary>
-        private static bool IsSawtooth(MetricIndex metric)
-        {
-            return metric is MetricIndex.MemoryWorkingSetBytes or MetricIndex.GcGen2HeapBytes;
         }
 
         /// <summary>

@@ -105,9 +105,7 @@ separate size gate was added, so the trade-off cuts both ways.
 | Learned | **GPT over tokenised snapshots** | mean negative log-probability of the next snapshot | see [Training](#training--the-fourth-family) |
 | Learned, baseline | **EWMA** mean/variance per feature | robust z per feature, averaged | the classical comparison the learned path has to beat to justify itself |
 | Learned, search | **evolutionary MLP** (`AnomalyMlp`) | a scoring function fitted by population search | no gradient needed, so it can optimise a non-differentiable fitness |
-| Peer, sawtooth signals | **sliding minimum over a collection cycle** (`RunningMinimum`) | the floor of the sawtooth, before comparing | replicas do not collect in step, so an instantaneous comparison compares GC phase; a leak moves the floor and the phase does not |
 | Internals | **introselect** (`MedianSelector`) | medians without ordering | `slopes.Sort()` was 99% of the trend detector's runtime |
-| Internals | **monotonic deque** (`RunningMinimum`) | the sliding minimum in one pass | the obvious nested loop is O(n·k) and the lookback is a whole GC cycle |
 
 Two things deliberately **not** used, recorded because both were considered:
 
@@ -917,7 +915,7 @@ across replicas, so their phases drift apart and one pod sits near the top of it
 near the bottom. **No threshold can filter that, because there is nothing there to filter** — the differences
 are real and meaningless at once. This is a structurally invalid comparison, not a mis-set gate.
 
-**A leak moves the floor of the sawtooth; the phase does not.** `RunningMinimum` takes the minimum over at
+**A leak moves the floor of the sawtooth; the phase does not.** The idea was a sliding minimum over at
 least one full collection cycle, which is phase-invariant by construction and is also the quantity the
 operator actually cares about — memory a collection could not reclaim. The lookback must cover a whole cycle
 or the floor lands inside a single tooth and carries the phase straight through, so `TryFloorWindow` refuses a
@@ -940,8 +938,10 @@ remove. Not a refutation of the mechanism: a real service with a 2 GB heap and 3
 pure phase above any sane floor. It is a statement that **this population cannot decide the question**, which
 is a different and more useful thing to know than "it did not help".
 
-The primitive is kept on its own merits — it is the correct statistic for a leak, it is tested against the
-naive definition, and it costs 115 ns per pod per signal. **No claim is attached to it about false positives.**
+**The code has since been deleted.** It was correct, pinned against the naive definition and 0.03x the cost
+of it — and it had no caller, which is what a primitive kept "on its own merits" actually means. Two
+measurements said it did not help and neither said it did; keeping it would have left a reader assuming it
+was in use. The measurements are recorded here because a negative result is the part worth keeping.
 
 #### And on the trend path it is worse, for a reason worth keeping
 
@@ -960,11 +960,9 @@ cancel, so Theil-Sen's median slope sits near zero and tau never clears its gate
 produced no trend findings at all. Taking the floor removes the oscillation and leaves long flat runs broken
 by a few steps in one direction: a highly monotone series, which is exactly what tau rewards.
 
-Both knobs (`OVERFIT_FP_FLOOR`, `OVERFIT_FP_TREND_FLOOR`) now default **off**, because defaulting them on
-would write a belief into the code that the measurement refuted. `RunningMinimum` has **no caller**; it is
-kept because the quantity it computes is right for a leak test over a window long enough to hold several
-collections, which this pipeline does not run. If that never arrives, it should be deleted rather than left
-looking like something in use.
+Both knobs were removed with the code. The quantity is still the right one for a leak test over a window
+long enough to hold several collections — but this pipeline does not run one, and carrying an
+implementation against a configuration nobody has asked for is how a codebase accretes.
 
 ### Third generator bug: the post-restart ramp, and a confounded ablation that nearly hid it
 
@@ -1061,7 +1059,6 @@ The remainder decomposes into two classes, neither mysterious:
 | `PeerOutlierOptions.MinRelativeGap` (Balanced) | 8% | reject 4.7%, catch 13.3% |
 | `SustainedThresholdOptions.ForCpuThrottling` | 5% over 25% of window | loaded 33%, idle 13% |
 | split discriminator | > ⅓ of the group | separates all five pinned cases |
-| `RunningMinimum` lookback (memory, heap) | ≥ one collection cycle | phase-invariance is exact at a full cycle, absent below it — **but its effect on the rate measured as a tie, see above** |
 
 **All of it on one fault, on one single-node lab.** Directions and shapes are solid. Exact numbers are not: a
 multi-node cluster, a different limit ratio or a CPU-bound workload should be expected to move them, and none

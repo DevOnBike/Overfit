@@ -95,7 +95,20 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
         /// </summary>
         /// <param name="window">The evaluated window; <c>NaN</c> where a scrape returned nothing.</param>
         /// <param name="observedAt">Cycle timestamp, used for incident ages.</param>
-        public GuardCycleResult RunCycle(MetricWindow window, DateTimeOffset observedAt)
+        /// <param name="trace">
+        /// Optional per-group explanation of why each incident continued or opened. For diagnostics only —
+        /// it makes the matcher compute an overlap the ordinary path skips, which is the number that
+        /// separates a moved incident centre from a genuinely different group.
+        /// </param>
+        /// <param name="peerTrace">
+        /// Optional per-member explanation of every peer comparison. For diagnostics: "no finding" has five
+        /// different causes that call for opposite fixes, and only the individual gates tell them apart.
+        /// </param>
+        public GuardCycleResult RunCycle(
+            MetricWindow window,
+            DateTimeOffset observedAt,
+            Action<IncidentMatchTrace>? trace = null,
+            Action<PeerDecisionTrace>? peerTrace = null)
         {
             ArgumentNullException.ThrowIfNull(window);
 
@@ -108,6 +121,7 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
 
             var blind = 0;
             var partial = 0;
+            var unevaluable = 0;
 
             RunRules(window, pipeline, from, to);
 
@@ -128,14 +142,14 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
                     partial++;
                 }
 
-                RunPeer(window, metric, pipeline, from, to);
+                unevaluable += RunPeer(window, metric, pipeline, from, to, peerTrace) ? 0 : 1;
                 RunTrend(window, metric, times, pipeline, from, to);
             }
 
-            blind += RunCustom(window, times, pipeline, from, to, ref partial);
+            blind += RunCustom(window, times, pipeline, from, to, ref partial, ref unevaluable);
 
             var incidents = pipeline.Group(_options.Grouping);
-            var tracked = _tracker.Observe(incidents, observedAt);
+            var tracked = _tracker.Observe(incidents, observedAt, trace);
 
             var opened = 0;
             var ongoing = 0;
@@ -155,7 +169,7 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
             _store?.Save(IncidentStateFormat.Write(_tracker.Snapshot(), _tracker.NextId));
 
             return new GuardCycleResult(
-                pipeline.Count, incidents.Count, opened, ongoing, resolved, blind, partial);
+                pipeline.Count, incidents.Count, opened, ongoing, resolved, blind, partial, unevaluable);
         }
 
         /// <summary>
@@ -172,7 +186,8 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
             IncidentPipeline pipeline,
             DateTimeOffset from,
             DateTimeOffset to,
-            ref int partial)
+            ref int partial,
+            ref int unevaluable)
         {
             var blind = 0;
 
@@ -204,14 +219,15 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
                     }
                 }
 
-                RunCustomPeer(window, binding, pipeline, from, to);
+                unevaluable += RunCustomPeer(window, binding, pipeline, from, to) ? 0 : 1;
                 RunCustomTrend(window, binding, times, pipeline, from, to);
             }
 
             return blind;
         }
 
-        private void RunCustomPeer(
+        /// <returns>Whether the group reached a verdict; false means nobody was compared at all.</returns>
+        private bool RunCustomPeer(
             MetricWindow window,
             CustomMetricBinding binding,
             IncidentPipeline pipeline,
@@ -238,6 +254,8 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
             var result = _peer.Detect(peers, binding.SignalKind, options, findings);
 
             pipeline.ObservePeerGroup(binding.Name, result, findings, subjects, from, to, binding.Class);
+
+            return result.Status != DetectionStatus.InsufficientData;
         }
 
         private void RunCustomTrend(
@@ -309,12 +327,18 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
             }
         }
 
-        private void RunPeer(
+        /// <returns>
+        /// Whether the group reached a verdict. False means the metric was reported and still produced no
+        /// comparison — the silence that reads as health and is not, counted in
+        /// <see cref="GuardCycleResult.UnevaluableMetrics"/>.
+        /// </returns>
+        private bool RunPeer(
             MetricWindow window,
             MetricIndex metric,
             IncidentPipeline pipeline,
             DateTimeOffset from,
-            DateTimeOffset to)
+            DateTimeOffset to,
+            Action<PeerDecisionTrace>? peerTrace = null)
         {
             var kind = PeerSignalCatalog.Classify(metric);
             var podCount = window.Pods.Count;
@@ -339,7 +363,29 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
             var findings = new PeerOutlierFinding[podCount];
             var result = _peer.Detect(peers, kind, options, findings);
 
+            if (peerTrace is not null)
+            {
+                for (var pod = 0; pod < podCount; pod++)
+                {
+                    peerTrace(new PeerDecisionTrace(
+                        metric.ToString(),
+                        result.Status,
+                        result.HighCount,
+                        result.LowCount,
+                        window.Pods[pod],
+                        findings[pod].IsOutlier,
+                        findings[pod].RelativeGap,
+                        findings[pod].AbsoluteGap,
+                        findings[pod].Comparison.EffectSize,
+                        findings[pod].Comparison.PValueCandidateWorse,
+                        findings[pod].UsableSamples,
+                        result.ExcludedCount));
+                }
+            }
+
             pipeline.ObservePeerGroup(metric.ToString(), result, findings, subjects, from, to);
+
+            return result.Status != DetectionStatus.InsufficientData;
         }
 
         /// <summary>

@@ -24,6 +24,17 @@ namespace DevOnBike.Overfit.Anomalies.Incidents.Contracts
     /// containers carrying a CPU limit — but the same shape appears when a rollout has changed what half the
     /// fleet exports, so it is counted rather than assumed.
     /// </param>
+    /// <param name="UnevaluableMetrics">
+    /// Metrics that pods <b>did</b> report and which still produced no peer verdict — too few members cleared
+    /// the sample floor for a comparison to mean anything.
+    ///
+    /// <para><b>The third way silence happens, and the one that was invisible.</b>
+    /// <paramref name="BlindMetrics"/> answers "did anybody report this" and
+    /// <paramref name="PartialMetrics"/> answers "did everybody". Neither answers "could it be evaluated", and
+    /// on the cluster lab that gap swallowed nine of eleven metrics at once: every one of them was reported by
+    /// every pod, every one returned <c>InsufficientData</c>, the degraded replica went undetected, and the
+    /// cycle reported <c>blind = 0</c> — indistinguishable from a healthy cluster at every layer above.</para>
+    /// </param>
     public readonly record struct GuardCycleResult(
         int Findings,
         int Incidents,
@@ -31,12 +42,16 @@ namespace DevOnBike.Overfit.Anomalies.Incidents.Contracts
         int Ongoing,
         int Resolved,
         int BlindMetrics,
-        int PartialMetrics)
+        int PartialMetrics,
+        int UnevaluableMetrics = 0)
     {
         /// <summary>Whether anything happened that a human has not already been told about.</summary>
         public bool HasNews => Opened > 0 || Resolved > 0;
 
-        /// <summary>Whether the guard's own coverage is degraded, regardless of what it detected.</summary>
-        public bool IsPartiallyBlind => BlindMetrics > 0;
+        /// <summary>
+        /// Whether the guard's own coverage is degraded, regardless of what it detected — either nobody
+        /// reported a metric, or too few pods reported enough of it to compare.
+        /// </summary>
+        public bool IsPartiallyBlind => BlindMetrics > 0 || UnevaluableMetrics > 0;
     }
 }

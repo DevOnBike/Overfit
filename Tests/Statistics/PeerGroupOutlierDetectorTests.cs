@@ -207,10 +207,125 @@ namespace DevOnBike.Overfit.Tests.Statistics
             var findings = new PeerOutlierFinding[peers.Count];
             var result = Detector.Detect(peers, PeerSignalKind.LoadSensitive, PeerOutlierOptions.Balanced, findings);
 
+            // pod-2 carries no work series, so none of its samples can be normalised and it is dropped. Two
+            // comparable members are below the minimum, so the group still refuses — but for the honest
+            // reason, and the verdict says which member went missing rather than pretending nothing did.
             Assert.Equal(DetectionStatus.InsufficientData, result.Status);
             Assert.False(result.IsHealthy);
-            Assert.Contains("pod-2", result.Reason);
+            Assert.Equal(1, result.ExcludedCount);
+            Assert.Equal(2, result.PeerCount);
             Assert.Contains("load-sensitive", result.Reason);
+        }
+
+        /// <summary>
+        /// <b>The lab regression.</b> Scaling one deployment from four replicas to eight made nine of eleven
+        /// metrics return <c>InsufficientData</c> and the degraded replica vanish — the same traffic over
+        /// twice as many pods left some of them with sparse quantiles, and the first member under the sample
+        /// floor ended the evaluation for everyone. One starving pod must cost its own coverage and nothing
+        /// else.
+        /// </summary>
+        [Fact]
+        public void AStarvedPeer_IsDropped_NotAllowedToBlindTheGroup()
+        {
+            var peers = new List<PeerSeries>();
+            for (var p = 0; p < 6; p++)
+            {
+                peers.Add(new PeerSeries($"pod-{p}", Working(seed: p, megabytes: 400)));
+            }
+
+            peers.Add(new PeerSeries("pod-leaky", Working(seed: 99, megabytes: 1700)));
+
+            // Freshly created: it is in the group, it reports, and it has almost no history in the window.
+            peers.Add(new PeerSeries("pod-new", Working(seed: 7, megabytes: 400, samples: 4)));
+
+            var findings = new PeerOutlierFinding[peers.Count];
+            var result = Detector.Detect(peers, PeerSignalKind.LoadIndependent, PeerOutlierOptions.Balanced, findings);
+
+            Assert.Equal(DetectionStatus.Anomalous, result.Status);
+            Assert.Equal("pod-leaky", findings.Single(f => f.IsOutlier).Name);
+
+            // The correction is over the members that were actually tested: counting the dropped one would
+            // quietly raise the bar for everybody else.
+            Assert.Equal(7, result.PeerCount);
+            Assert.Equal(0.05 / 14.0, result.CorrectedAlpha, 12);
+        }
+
+        [Fact]
+        public void ADroppedPeer_IsCounted_AndGetsAFindingThatExplainsIt()
+        {
+            var peers = new List<PeerSeries>();
+            for (var p = 0; p < 5; p++)
+            {
+                peers.Add(new PeerSeries($"pod-{p}", Working(seed: p, megabytes: 400)));
+            }
+
+            peers.Add(new PeerSeries("pod-new", Working(seed: 7, megabytes: 400, samples: 4)));
+
+            var findings = new PeerOutlierFinding[peers.Count];
+            var result = Detector.Detect(peers, PeerSignalKind.LoadIndependent, PeerOutlierOptions.Balanced, findings);
+
+            Assert.Equal(DetectionStatus.Healthy, result.Status);
+
+            // Healthy over five of six is a weaker statement than healthy over six, and both the count and the
+            // wording have to carry that — this is the shape that reads as health and is not.
+            Assert.False(result.HasFullCoverage);
+            Assert.Equal(1, result.ExcludedCount);
+            Assert.Equal(5, result.PeerCount);
+            Assert.Contains("dropped", result.Reason);
+
+            var dropped = findings.Single(f => f.Name == "pod-new");
+            Assert.Equal(4, dropped.UsableSamples);
+            Assert.Equal(PeerDeviation.None, dropped.Deviation);
+
+            // NaN, not zero: it was never measured against anything, and zero would read as "sits exactly on
+            // its peers' median".
+            Assert.True(double.IsNaN(dropped.RelativeGap));
+            Assert.True(double.IsNaN(dropped.AbsoluteGap));
+        }
+
+        /// <summary>
+        /// The dropped member must leave no trace in the pooled baseline either. If compaction were wrong the
+        /// group would still be evaluated, quietly, against a baseline containing the excluded observations —
+        /// a silent wrong answer, which is worse than the abort it replaced.
+        /// </summary>
+        [Fact]
+        public void DroppingAPeer_LeavesTheSurvivorsComparedOnlyAgainstEachOther()
+        {
+            var peers = new List<PeerSeries>();
+            for (var p = 0; p < 5; p++)
+            {
+                peers.Add(new PeerSeries($"pod-{p}", Working(seed: p, megabytes: 400)));
+            }
+
+            peers.Add(new PeerSeries("pod-leaky", Working(seed: 99, megabytes: 1700)));
+
+            var findings = new PeerOutlierFinding[peers.Count];
+            var reference = Detector.Detect(
+                peers, PeerSignalKind.LoadIndependent, PeerOutlierOptions.Balanced, findings);
+
+            // The same six, plus a starved member sitting at a wildly different level in the middle of the
+            // list — so a compaction bug would both shift indices and poison the baseline.
+            var withStarved = new List<PeerSeries>(peers);
+            withStarved.Insert(3, new PeerSeries("pod-new", Constant(50_000.0, 4)));
+
+            var afterFindings = new PeerOutlierFinding[withStarved.Count];
+            var after = Detector.Detect(
+                withStarved, PeerSignalKind.LoadIndependent, PeerOutlierOptions.Balanced, afterFindings);
+
+            Assert.Equal(reference.Status, after.Status);
+            Assert.Equal(reference.PeerCount, after.PeerCount);
+            Assert.Equal("pod-leaky", afterFindings.Single(f => f.IsOutlier).Name);
+
+            // Findings stay aligned with the caller's list, not with the compacted one.
+            for (var i = 0; i < withStarved.Count; i++)
+            {
+                Assert.Equal(withStarved[i].Name, afterFindings[i].Name);
+            }
+
+            var flagged = findings.Single(f => f.IsOutlier);
+            var flaggedAfter = afterFindings.Single(f => f.IsOutlier);
+            Assert.Equal(flagged.RelativeGap, flaggedAfter.RelativeGap, 9);
+            Assert.Equal(flagged.Comparison.EffectSize, flaggedAfter.Comparison.EffectSize, 9);
         }
 
         [Fact]
@@ -229,8 +344,13 @@ namespace DevOnBike.Overfit.Tests.Statistics
             Assert.Contains("at least 3", result.Reason);
         }
 
+        /// <summary>
+        /// Dropping starved members must not become a way of comparing two pods. Once the survivors fall
+        /// under <see cref="PeerOutlierOptions.MinimumPeers"/> there is no "rest of the group" left and the
+        /// answer is a refusal — the same refusal as before, reached for a reason that is now stated.
+        /// </summary>
         [Fact]
-        public void TooFewSamplesOnOnePeer_BlocksTheWholeGroup()
+        public void DroppingStarvedPeersBelowTheMinimum_StillRefuses()
         {
             var peers = new List<PeerSeries>
             {
@@ -243,7 +363,9 @@ namespace DevOnBike.Overfit.Tests.Statistics
             var result = Detector.Detect(peers, PeerSignalKind.LoadIndependent, PeerOutlierOptions.Balanced, findings);
 
             Assert.Equal(DetectionStatus.InsufficientData, result.Status);
-            Assert.Contains("pod-short", result.Reason);
+            Assert.Equal(1, result.ExcludedCount);
+            Assert.Equal(2, result.PeerCount);
+            Assert.Contains("30", result.Reason);
         }
 
         [Fact]

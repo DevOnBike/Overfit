@@ -52,6 +52,57 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             Assert.Equal(0, result.PartialMetrics);
         }
 
+        /// <summary>
+        /// <b>The defect the cluster lab exposed, at the level an operator would meet it.</b> Scaling the lab
+        /// from four replicas to eight made nine of eleven metrics stop being evaluated and the deliberately
+        /// degraded replica disappear — because the sample floor was an all-or-nothing gate over the group,
+        /// and a pod that had just been created could not clear it.
+        ///
+        /// <para>A pod that started a minute ago, is restarting, or carries too little traffic for its
+        /// quantiles to be defined at every scrape is <b>the ordinary case</b> in any deployment that scales.
+        /// It must cost its own coverage and nothing else.</para>
+        /// </summary>
+        [Fact]
+        public void AFreshlyStartedPodDoesNotBlindTheRestOfTheDeployment()
+        {
+            var window = Synthetic(pods: 6, length: 60, degraded: 3);
+
+            // pod-5 exists and reports — it simply has almost no history inside the window.
+            Starve(window, pod: 5, MetricIndex.LatencyP95Ms, keep: 4);
+
+            var result = Guard(new CapturingSink()).RunCycle(window, T0);
+
+            Assert.Equal(1, result.Opened);
+
+            // And the metric still counts as evaluated: five members were compared, which is a verdict.
+            Assert.Equal(0, result.UnevaluableMetrics);
+        }
+
+        /// <summary>
+        /// The third way silence happens. Every pod reports the metric — so <c>BlindMetrics</c> is zero and
+        /// <c>PartialMetrics</c> is zero — and none of them reported enough of it to be compared. Before this
+        /// was counted, the cycle was indistinguishable from a healthy one at every layer above.
+        /// </summary>
+        [Fact]
+        public void AMetricReportedByEveryoneButNotComparable_IsCountedRatherThanReadAsHealth()
+        {
+            var window = Synthetic(pods: 4, length: 60, degraded: 3);
+
+            for (var pod = 0; pod < 4; pod++)
+            {
+                Starve(window, pod, MetricIndex.LatencyP95Ms, keep: 4);
+            }
+
+            var result = Guard(new CapturingSink()).RunCycle(window, T0);
+
+            Assert.Equal(1, result.UnevaluableMetrics);
+            Assert.True(result.IsPartiallyBlind);
+
+            // The metric is reported by all four, so neither of the older coverage counters notices anything.
+            Assert.Equal(0, result.PartialMetrics);
+            Assert.Equal((int)MetricIndex.Count - 2, result.BlindMetrics);
+        }
+
         /// <summary>A problem that persists is opened once and then updated — the deployability property.</summary>
         [Fact]
         public void APersistingProblemOpensOnceAcrossCycles()
@@ -189,6 +240,22 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             }
 
             return window;
+        }
+
+        /// <summary>
+        /// Leaves one pod with only <paramref name="keep"/> finite samples of a metric and NaN for the rest —
+        /// what a pod created part-way through the window actually looks like, and what a pod whose request
+        /// rate is too low for <c>histogram_quantile</c> to be defined at every scrape looks like too. The
+        /// pod still counts as reporting the metric, which is the whole difficulty.
+        /// </summary>
+        private static void Starve(MetricWindow window, int pod, MetricIndex metric, int keep)
+        {
+            var series = window.Series(pod, metric);
+
+            for (var i = keep; i < series.Length; i++)
+            {
+                series[i] = double.NaN;
+            }
         }
 
         private sealed class CapturingSink : IIncidentSink
