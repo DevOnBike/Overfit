@@ -514,6 +514,86 @@ cannot.
 
 ---
 
+## Layer 5 — reporting
+
+The tree becomes **rows**. `IncidentReporter.Report(incidents, sink)` flattens each group into one incident
+row plus one row per finding, joined by `IncidentKey`, and hands the span to an `IIncidentSink`.
+
+**`IncidentLogRecord` is a schema, and that is why it is separate from `Incident`.** A dashboard query, a log
+filter and an alert rule are all written against field *names*; once somebody has saved a search on
+`Workload` and `Severity`, those names are an interface. Interning them in one place lets the internal
+contracts keep changing without silently breaking it. Flat, because an incident is a tree and a log line is
+not — nesting it produces either an unqueryable blob or a JSON string the reader has to parse back out.
+
+**An empty `Pod` is not a missing field.** Common-mode rows are about the deployment by design, and
+`NamesAPod` exists so a consumer cannot mistake "about the workload" for "unknown pod" — the distinction is
+the difference between one honest row and N wrong ones.
+
+### Where the ILogger adapter lives, and why not in the library
+
+`LoggerIncidentSink` sits in `Sources/Server.AspNet`, not in `Sources/Main`. The library ships with one
+runtime dependency; adding `Microsoft.Extensions.Logging.Abstractions` would put it — and
+`DependencyInjection.Abstractions` behind it — into the public NuGet graph of every consumer, including those
+embedding the engine with no logging at all. The library owns the schema and the contract; the twenty lines
+that bind them to one backend live where that backend already is.
+
+It uses `LoggerMessage.Define`, so templates are parsed once rather than per call, value-typed arguments are
+not boxed, and a disabled level costs a branch instead of an allocation. Three event IDs — 5001 incident,
+5002 finding, 5003 common mode — so they filter apart. Common mode is a **separate event** rather than a
+finding with an empty pod, for the reason above.
+
+**The default is `IncidentLogOptions.Shadow`: everything at `Information`.** A log level is a routing
+decision in most deployments, and Warning or above reaches somebody. This guard still produces tens of
+incidents a day on a healthy synthetic population and false findings on healthy replicas in a twelve-minute
+lab window. Emitting those at Warning would teach the first operator who sees them to filter the channel out,
+and that is not recoverable. `Routed` and `Quiet` are there for after the rate has been measured on the
+cluster it will actually run against.
+
+### Identity across cycles — `IncidentTracker`
+
+`IncidentPipeline` groups one window and forgets. Evaluated every five minutes, a problem lasting an hour
+produces twelve incidents that each look new, and **no threshold fixes that, because every one of the twelve
+is correct.** That alone disqualified the guard from alerting, whatever its false-positive rate.
+
+`IncidentTracker.Observe(incidents, at)` folds a cycle into running state and returns what *changed*:
+`Opened` in the cycle a problem first appears, `Ongoing` while it persists, `Resolved` once, when it closes.
+A consumer notifies on `Opened` and updates on the rest.
+
+**Matching is overlap of (subject, signal) pairs, not equality.** A real incident gains and loses findings
+constantly — a symptom crosses its threshold, a second pod joins, a marginal signal drops out. Requiring an
+identical group would open a fresh incident on each of those, which is the behaviour being removed. Jaccard
+against `MinOverlap`, default a third: the same bound that appears everywhere else here, because below it a
+group has more in common with something else than with itself.
+
+**Closing waits two cycles by default.** A finding sitting on its threshold flickers, and resolving on the
+first miss converts that flicker into resolve/open/resolve/open — the same storm in a different costume. The
+grace period costs only a late close, and an incident inside it is deliberately *not* reported: it has not
+changed state, and emitting it would put an incident in the output of a cycle that did not observe it.
+
+Bounded on purpose: `MaxKeysPerIncident` caps the quadratic comparison, `MaxOpenIncidents` caps the state,
+and reaching either means a detector upstream has stopped filtering.
+
+**What it does not model, and says so:** splits and merges. If one incident becomes two, the better-matching
+half continues it and the other opens as new. That is defensible rather than right, and designing a lattice
+for a situation nobody has watched on real data would be guessing — `CyclesSeen` and `CyclesMissing` make the
+choice visible when it happens. **Nothing persists**, either: a restart reopens every incident under a new
+id, and fixing that is a decision about the deployment rather than about detection.
+
+### What reporting does not yet solve
+
+- **`IncidentKey` is not an incident identity** — it correlates rows *within* one cycle. Identity across
+  cycles is `IncidentTracker`'s job; see below. Do not build a lifecycle on the key.
+- **Silence still has two meanings.** A metric the application does not export produces no incident, which
+  looks exactly like health. `IRawMetricSource` exposes only `ReadAsync`, so coverage is structurally
+  invisible to the production loop; whatever the output channel, it needs a separate "I am blind" signal
+  beside the "I see an anomaly" one.
+- **Prometheus is deliberately not a push target.** Exposing counters for the client's own Alertmanager keeps
+  silences, routing and on-call where they belong, and avoids the state — dedup, resolve, flapping — that a
+  push would force us to hold. It also needs care: Prometheus is both the input and the output, so the
+  guard's own metrics must not fall inside its `PodRegex` and become its own input.
+
+---
+
 ## Where we stand
 
 ### Working end to end, measured on the lab — repeated on real series
@@ -734,6 +814,29 @@ is a different and more useful thing to know than "it did not help".
 
 The primitive is kept on its own merits — it is the correct statistic for a leak, it is tested against the
 naive definition, and it costs 115 ns per pod per signal. **No claim is attached to it about false positives.**
+
+#### And on the trend path it is worse, for a reason worth keeping
+
+The obvious follow-up was that the floor belongs on the *trend* path instead: a trend over a sawtooth ought
+to be dominated by where in the tooth the window happens to cut. Measured, same seeds, one lever:
+
+| seed | trend findings, floor off | floor on | incidents |
+|---|--:|--:|--:|
+| 20260729 | 25 | **45** | 40 → 48 |
+| 424242 | 27 | **53** | 46 → 57 |
+| 77777 | 22 | **46** | 49 → 59 |
+
+Memory trend findings went from **zero to ten**, and gen-2 heap likewise. **The reasoning was backwards: the
+sawtooth was protecting the trend detector, not fooling it.** An oscillating series has rises and falls that
+cancel, so Theil-Sen's median slope sits near zero and tau never clears its gate — which is why memory
+produced no trend findings at all. Taking the floor removes the oscillation and leaves long flat runs broken
+by a few steps in one direction: a highly monotone series, which is exactly what tau rewards.
+
+Both knobs (`OVERFIT_FP_FLOOR`, `OVERFIT_FP_TREND_FLOOR`) now default **off**, because defaulting them on
+would write a belief into the code that the measurement refuted. `RunningMinimum` has **no caller**; it is
+kept because the quantity it computes is right for a leak test over a window long enough to hold several
+collections, which this pipeline does not run. If that never arrives, it should be deleted rather than left
+looking like something in use.
 
 ### Third generator bug: the post-restart ramp, and a confounded ablation that nearly hid it
 

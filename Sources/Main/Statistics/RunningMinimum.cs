@@ -32,7 +32,26 @@ namespace DevOnBike.Overfit.Statistics
     ///
     /// <para>One pass, one caller-owned scratch buffer, no allocation. Every index enters and leaves the
     /// candidate deque exactly once, so the work is linear however long the lookback is — the obvious
-    /// "minimum over the last k" written as a nested loop would be O(n·k).</para>
+    /// "minimum over the last k" written as a nested loop would be O(n·k). Measured against that loop:
+    /// 0.32x at a lookback of 8, 0.03x at 240, flat in the lookback and zero-allocation on both sides.</para>
+    ///
+    /// <para><b>Measured twice against this pipeline, and it did not help either time. Nothing calls it.</b></para>
+    /// <list type="bullet">
+    /// <item><b>Peer comparison: a tie</b> (206/211, 181/172, 157/156 incidents a day). It could not have
+    /// been anything else — the population's sawtooth amplitude is 69 MB and the absolute gate for memory is
+    /// 100 MB, so the largest possible phase difference was already below the threshold.</item>
+    /// <item><b>Trend detection: worse.</b> Trend findings 25→45, 27→53, 22→46, with memory going from
+    /// <i>zero</i> trend findings to ten. The hypothesis had it backwards: <b>the sawtooth was protecting the
+    /// trend detector, not fooling it.</b> An oscillating series has rises and falls that cancel, so
+    /// Theil-Sen's median slope sits near zero and tau stays low. Taking the floor removes the oscillation
+    /// and leaves long flat runs broken by a few steps in one direction — a highly monotone series, which is
+    /// exactly what tau rewards.</item>
+    /// </list>
+    ///
+    /// <para>Kept because it is correct, pinned against the naive definition, and the quantity it computes —
+    /// memory a collection could not reclaim — is the right one for a leak test over a window long enough to
+    /// contain several collections, which this pipeline does not currently run. <b>If that configuration
+    /// never arrives, this should be deleted rather than left as something a reader assumes is in use.</b></para>
     /// </summary>
     public static class RunningMinimum
     {

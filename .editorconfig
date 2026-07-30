@@ -183,6 +183,12 @@ dotnet_diagnostic.OVERFIT030.severity = suggestion
 # a caller that awaits immediately and visible to one that stores the task. Outside Sources/Main that call
 # shape is not ours to police.
 dotnet_diagnostic.OVERFIT031.severity = suggestion
+
+# OVERFIT032 (await without ConfigureAwait(false)) — suggestion outside the library. Applications and the
+# analyzer project pick their own host and have no synchronization context to capture, so the rule buys them
+# nothing; Cli has 22 sites and Server.AspNet 4, none of which can deadlock.
+dotnet_diagnostic.OVERFIT032.severity = suggestion
+
 dotnet_diagnostic.OVERFIT026.severity = suggestion
 # OVERFIT900 — the [OverfitHotPath] escalation. Any per-call rule (001-007, 009-011, 013-014) that
 # fires inside a member or type marked [DevOnBike.Overfit.Diagnostics.OverfitHotPath] is reported as
@@ -374,6 +380,19 @@ dotnet_diagnostic.OVERFIT030.severity = error
 # must catch and 8 it must not — because a rule that fires once across a solution looks the same whether the
 # codebase is clean or the rule is broken.
 dotnet_diagnostic.OVERFIT031.severity = error
+
+# OVERFIT032 (await without ConfigureAwait(false)) — ERROR in the library. Coverage was already 17 of 19
+# await sites, kept by hand; the two gaps were found by grepping rather than by anyone noticing, and one of
+# them was real (OfflineTrainingJob's `await using` over the checkpoint stream). A convention that holds 89%
+# of the time is a habit, and this is what a build error is for.
+#
+# A library does not choose its host: the same code awaited from the WPF demo or the Android app marshals
+# every continuation through one dispatcher, and a caller that blocks deadlocks outright. Exempt by design:
+# `await Task.Yield()` (YieldAwaitable has no such overload and always resumes on the captured context),
+# anything already configured, and any awaitable with no ConfigureAwait member — reporting there would
+# demand a fix that does not compile.
+dotnet_diagnostic.OVERFIT032.severity = error
+
 # OVERFIT027 — ERROR on the same criteria as OVERFIT008/015/025: ZERO existing sites in the whole
 # solution at introduction (2026-07-24), unconditional rule, trivial fix (return Task), and the
 # miss-cost is an uncatchable kill of the hosting process. A tripwire, not a sweep.

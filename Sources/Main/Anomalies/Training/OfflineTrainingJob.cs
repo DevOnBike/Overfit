@@ -236,9 +236,15 @@ namespace DevOnBike.Overfit.Anomalies.Training
             {
                 Directory.CreateDirectory(checkpointDir);
             }
-            await using var fs = File.Create(checkpointPath);
-            using var bw = new BinaryWriter(fs);
-            model.Save(bw);
+            // The stream and its scope are separate names because ConfigureAwait on an `await using`
+            // declaration would make the variable a ConfiguredAsyncDisposable, which BinaryWriter cannot take.
+            var fs = File.Create(checkpointPath);
+
+            await using (fs.ConfigureAwait(false))
+            {
+                using var bw = new BinaryWriter(fs);
+                model.Save(bw);
+            }
 
             return new OfflineTrainingResult
             {

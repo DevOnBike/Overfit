@@ -1,0 +1,118 @@
+// Copyright (c) 2026 DevOnBike.
+// This file is part of DevonBike Overfit.
+// DevonBike Overfit is licensed under the GNU AGPLv3.
+// For commercial licensing options, contact: devonbike@gmail.com
+
+using DevOnBike.Overfit.Anomalies.Incidents.Abstractions;
+using DevOnBike.Overfit.Anomalies.Incidents.Contracts;
+using DevOnBike.Overfit.Tensors;
+
+namespace DevOnBike.Overfit.Anomalies.Incidents
+{
+    /// <summary>
+    /// Flattens grouped incidents into <see cref="IncidentLogRecord"/> rows and hands them to a sink.
+    ///
+    /// <para>The one place the tree becomes rows, so a log, a metrics exporter and a table cannot disagree
+    /// about what a row is. Every backend then maps the same field names, and a saved query keeps working
+    /// when a new one is added.</para>
+    ///
+    /// <para>Rows are built into pooled scratch and passed as a span; nothing is retained. A sink that keeps
+    /// them copies them, which is stated on <see cref="IIncidentSink.Report"/>.</para>
+    /// </summary>
+    public static class IncidentReporter
+    {
+        /// <summary>
+        /// Upper bound on rows per call: one per incident plus one per finding. Guards the pooled buffer
+        /// against a cycle that has stopped filtering, which is the condition
+        /// <see cref="IncidentGrouper.MaxFindingsPerCall"/> already names.
+        /// </summary>
+        public const int MaxRowsPerCall = 2 * IncidentGrouper.MaxFindingsPerCall;
+
+        /// <summary>
+        /// Reports every incident in <paramref name="incidents"/> as one incident row plus one row per
+        /// finding, joined by <see cref="IncidentLogRecord.IncidentKey"/>.
+        /// </summary>
+        /// <param name="incidents">A cycle's output, as returned by <see cref="IncidentPipeline.Group"/>.</param>
+        /// <param name="sink">Destination.</param>
+        /// <returns>How many rows were reported.</returns>
+        public static int Report(IReadOnlyList<Incident> incidents, IIncidentSink sink)
+        {
+            ArgumentNullException.ThrowIfNull(incidents);
+            ArgumentNullException.ThrowIfNull(sink);
+
+            if (incidents.Count == 0)
+            {
+                return 0;
+            }
+
+            var needed = 0;
+
+            for (var i = 0; i < incidents.Count; i++)
+            {
+                needed += 1 + incidents[i].Findings.Count;
+            }
+
+            if (needed > MaxRowsPerCall)
+            {
+                throw new InvalidOperationException(
+                    $"{needed} rows exceeds the per-call bound of {MaxRowsPerCall}. A cycle this large means a "
+                    + "detector has stopped filtering; raise its thresholds or report in batches.");
+            }
+
+            using var scratch = new PooledBuffer<IncidentLogRecord>(needed, clearMemory: false);
+            var rows = scratch.Span[..needed];
+            var written = 0;
+
+            for (var i = 0; i < incidents.Count; i++)
+            {
+                var incident = incidents[i];
+                var subject = incident.Primary.Subject;
+
+                rows[written] = new IncidentLogRecord(
+                    IncidentKey: i,
+                    Kind: IncidentLogRecordKind.Incident,
+                    Namespace: subject.Namespace,
+                    Workload: subject.Workload,
+                    Pod: subject.Pod,
+                    Node: subject.Node,
+                    Signal: incident.Primary.Signal,
+                    Class: incident.Primary.Class,
+                    Severity: incident.PeakSeverity,
+                    Start: incident.Start,
+                    End: incident.End,
+                    Subjects: incident.AffectedSubjects,
+                    Signals: incident.DistinctSignals,
+                    Message: incident.Summary);
+
+                written++;
+
+                for (var f = 0; f < incident.Findings.Count; f++)
+                {
+                    var finding = incident.Findings[f];
+
+                    rows[written] = new IncidentLogRecord(
+                        IncidentKey: i,
+                        Kind: IncidentLogRecordKind.Finding,
+                        Namespace: finding.Subject.Namespace,
+                        Workload: finding.Subject.Workload,
+                        Pod: finding.Subject.Pod,
+                        Node: finding.Subject.Node,
+                        Signal: finding.Signal,
+                        Class: finding.Class,
+                        Severity: finding.Severity,
+                        Start: finding.Start,
+                        End: finding.End,
+                        Subjects: 1,
+                        Signals: 1,
+                        Message: finding.Reason);
+
+                    written++;
+                }
+            }
+
+            sink.Report(rows);
+
+            return written;
+        }
+    }
+}

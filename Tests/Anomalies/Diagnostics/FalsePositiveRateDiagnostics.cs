@@ -129,10 +129,22 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
             var trendSkip = TrendSkip();
             var absoluteGate = Env("OVERFIT_FP_ABSOLUTE", 1) != 0;
 
-            // Sawtooth-shaped signals are peer-compared on their floor rather than their instantaneous value.
-            // Set OVERFIT_FP_FLOOR=0 to measure without it — the whole point of the knob is that the claim
-            // "this removes the memory findings" is an A/B, not an assertion.
-            var floorGate = Env("OVERFIT_FP_FLOOR", 1) != 0;
+            // Both floor levers default OFF, and both defaults are measured rather than cautious.
+            //
+            // PEER (OVERFIT_FP_FLOOR=1): a tie — 206/211, 181/172, 157/156. It could not have been anything
+            // else here: the sawtooth amplitude is 6% of a 1.15 GB baseline, 69 MB, and MinAbsoluteGap for
+            // memory is 100 MB, so the third gate already filtered everything the floor removes.
+            //
+            // TREND (OVERFIT_FP_TREND_FLOOR=1): actively WORSE — trend findings 25→45, 27→53, 22→46, and
+            // memory trend findings 0→10 where there had been none at all. The reasoning behind the
+            // hypothesis was backwards: the sawtooth was not fooling the trend detector, it was protecting
+            // it. An oscillating series has rises and falls that cancel, so Theil-Sen's median slope is ~0
+            // and tau stays low. The floor removes the oscillation and leaves long flat runs with a few
+            // steps in one direction — a highly monotone series, which is precisely what tau rewards.
+            //
+            // Left as knobs rather than deleted so the measurement stays reproducible.
+            var floorGate = Env("OVERFIT_FP_FLOOR", 0) != 0;
+            var trendFloorGate = Env("OVERFIT_FP_TREND_FLOOR", 0) != 0;
             var floorLookback = windowSamples;
             var floored = new double[windowSamples];
             var floorScratch = new int[windowSamples + floorLookback];
@@ -158,6 +170,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
             var evaluations = 0;
             var bySignal = new SortedDictionary<string, int>(StringComparer.Ordinal);
             var byFamily = new SortedDictionary<string, int>(StringComparer.Ordinal);
+            var byTrendSignal = new SortedDictionary<string, int>(StringComparer.Ordinal);
             var accused = new HashSet<string>(StringComparer.Ordinal);
 
             // Per-metric peer detail. A count alone cannot say whether a finding was worth making; the gap and
@@ -276,7 +289,23 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
                     for (var p = 0; p < pods && !trendSkip.Contains(metric); p++)
                     {
                         var history = cluster.Series(p, metric);
-                        var values = history.AsSpan(start, windowSamples).ToArray();
+
+                        // The hypothesis under test: on a sawtooth signal, a trend over the raw series is
+                        // dominated by where in the tooth the window happens to start and end, not by any
+                        // drift. The floor is phase-invariant, so a trend over it should be the leak and
+                        // nothing else. OVERFIT_FP_TREND_FLOOR=0 turns it off, which is the other arm.
+                        double[] values;
+
+                        if (trendFloorGate && IsSawtooth(metric)
+                            && RunningMinimum.TryFloorWindow(
+                                history, start, windowSamples, floorLookback, floored, floorScratch))
+                        {
+                            values = floored.AsSpan().ToArray();
+                        }
+                        else
+                        {
+                            values = history.AsSpan(start, windowSamples).ToArray();
+                        }
 
                         var reference = ReadOnlySpan<double>.Empty;
 
@@ -299,6 +328,11 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
                         if (pipeline.Observe(subjects[p], metric.ToString(), verdict, from, to))
                         {
                             byFamily["trend"] = byFamily.GetValueOrDefault("trend") + 1;
+
+                            // Per signal, and only for this family — the whole point of the measurement is
+                            // which metric the trend noise sits on, and a total across families hides it.
+                            var name = metric.ToString();
+                            byTrendSignal[name] = byTrendSignal.GetValueOrDefault(name) + 1;
                         }
                     }
                 }
@@ -327,6 +361,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
             report.Append($"restarts     {(restarts > 0.0 ? "ON (1/pod/day)" : "ABLATED")}\n");
             report.Append($"sawtooth floor {(floorGate ? $"ON (lookback {floorLookback} samples)" : "off")}"
                           + $"{(floorsRefused > 0 ? $" — {floorsRefused} windows lacked history and fell back" : string.Empty)}\n");
+            report.Append($"trend floor  {(trendFloorGate ? $"ON (lookback {floorLookback} samples)" : "off")}\n");
             report.Append($"\nincidents    {incidents}\n");
             report.Append($"findings     {findings}\n");
             report.Append($"pods accused {accused.Count} of {pods}\n");
@@ -348,6 +383,15 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
                 foreach (var (family, count) in byFamily)
                 {
                     report.Append($"   {family,-8} {count}\n");
+                }
+            }
+
+            if (byTrendSignal.Count > 0)
+            {
+                report.Append("\ntrend findings by signal\n");
+                foreach (var (signal, count) in byTrendSignal)
+                {
+                    report.Append($"   {signal,-24} {count}\n");
                 }
             }
 

@@ -36,4 +36,5 @@ OVERFIT028 | Reliability | Warning | Array length computed by 32-bit multiplicat
 OVERFIT029 | Naming | Warning | Awaitable method not named Async — at the call site it reads like completed work
 OVERFIT030 | Reliability | Warning | Awaitable public API with no CancellationToken — callers cannot abandon it
 OVERFIT031 | Performance | Warning | async method whose only await is its last statement — return the task and drop the state machine (not reported when a using/try would be torn down early)
+OVERFIT032 | Reliability | Warning | await without ConfigureAwait(false) — a library does not choose its host; a captured context deadlocks a blocking caller under WPF/WinForms/MAUI (Task.Yield exempt)
 OVERFIT900 | Performance | Error | A per-call OVERFIT rule fired inside an [OverfitHotPath] member/type — escalated to a build error
