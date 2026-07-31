@@ -82,6 +82,92 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             Assert.All(new[] { second[0], third[0] }, r => Assert.Equal(IncidentState.Ongoing, r.State));
         }
 
+        /// <summary>
+        /// <b>The shadow run this was written for.</b> A fault on one pod produced a group of three subjects
+        /// in one cycle and one subject in the next, as the collateral findings cleared. Jaccard is then
+        /// exactly 1/3 — and the matcher required 0.34, so the same fault on the same pod opened a second
+        /// incident, one hundredth short.
+        ///
+        /// <para>The bar was measuring the wrong thing rather than being set too high, which is why this test
+        /// pins the overlap at 0.33 instead of asserting some new number: a group shrinking as it recovers is
+        /// one incident getting better, and no threshold on periphery can express that.</para>
+        /// </summary>
+        [Fact]
+        public void AShrinkingGroup_WithTheSameCentre_IsStillTheSameIncident()
+        {
+            var tracker = new IncidentTracker(IncidentTrackingOptions.Balanced);
+
+            var first = tracker.Observe(
+                [Severity(("pod-a", "cpu", 0.95), ("pod-b", "cpu", 0.40), ("pod-c", "cpu", 0.40))], T0);
+
+            var traces = new List<IncidentMatchTrace>();
+            var second = tracker.Observe(
+                [Severity(("pod-a", "cpu", 0.95))], T0.AddMinutes(5), traces.Add);
+
+            // The scenario really is the borderline one, not merely a case that happens to pass.
+            Assert.Equal(1.0 / 3.0, traces.Single().BestOverlap, 6);
+            Assert.Contains("pod-a", traces.Single().PrimaryKey, StringComparison.Ordinal);
+
+            Assert.Equal(first[0].Id, second[0].Id);
+            Assert.Equal(IncidentState.Ongoing, second[0].State);
+            Assert.Equal(IncidentMatchOutcome.Continued, traces.Single().Outcome);
+        }
+
+        /// <summary>
+        /// The churn the veto caused, at the scale an operator would feel it. The periphery alternates every
+        /// cycle — which is what a fault near a threshold actually does — and that used to cross the bar in
+        /// both directions, opening an incident every other cycle for one unchanging problem.
+        /// </summary>
+        [Fact]
+        public void AGroupWhosePeripheryAlternates_OpensOnce_NotEveryOtherCycle()
+        {
+            var tracker = new IncidentTracker(IncidentTrackingOptions.Balanced);
+            var opened = 0;
+
+            for (var cycle = 0; cycle < 8; cycle++)
+            {
+                var group = cycle % 2 == 0
+                    ? Severity(("pod-a", "cpu", 0.95), ("pod-b", "cpu", 0.40), ("pod-c", "cpu", 0.40))
+                    : Severity(("pod-a", "cpu", 0.95));
+
+                var rows = tracker.Observe([group], T0.AddMinutes(5 * cycle));
+                opened += rows.Count(r => r.State == IncidentState.Opened);
+            }
+
+            Assert.Equal(1, opened);
+            Assert.Equal(1, tracker.OpenCount);
+        }
+
+        /// <summary>
+        /// <b>The bug the removed veto was introduced alongside, which must stay fixed.</b> When the grouper
+        /// merges a whole deployment, the group about the surviving healthy pods shares three subjects out of
+        /// four with the group about the degraded one — 0.75, comfortably over any overlap bar. Identity has
+        /// to be refused on the centre, not on the periphery, or an incident silently changes what it is
+        /// about while keeping its number.
+        /// </summary>
+        [Fact]
+        public void AGroupWithADifferentCentre_DoesNotInheritTheIdentity_EvenAtHighOverlap()
+        {
+            var tracker = new IncidentTracker(IncidentTrackingOptions.Balanced);
+
+            var first = tracker.Observe(
+                [Severity(
+                    ("pod-a", "cpu", 0.95), ("pod-b", "cpu", 0.40),
+                    ("pod-c", "cpu", 0.40), ("pod-d", "cpu", 0.40))],
+                T0);
+
+            var traces = new List<IncidentMatchTrace>();
+            var second = tracker.Observe(
+                [Severity(("pod-b", "cpu", 0.95), ("pod-c", "cpu", 0.40), ("pod-d", "cpu", 0.40))],
+                T0.AddMinutes(5),
+                traces.Add);
+
+            Assert.Equal(0.75, traces.Single().BestOverlap, 6);
+            Assert.NotEqual(first[0].Id, second[0].Id);
+            Assert.Equal(IncidentState.Opened, second[0].State);
+            Assert.Equal(IncidentMatchOutcome.PrimaryChanged, traces.Single().Outcome);
+        }
+
         /// <summary>Sharing nothing is a different problem, however similar it looks.</summary>
         [Fact]
         public void AnUnrelatedGroup_OpensItsOwnIncident()
@@ -195,6 +281,41 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             Assert.Throws<ArgumentException>(() => new IncidentTracker(default));
             Assert.Throws<ArgumentNullException>(
                 () => new IncidentTracker(IncidentTrackingOptions.Balanced).Observe(null!, T0));
+        }
+
+        /// <summary>
+        /// One group whose members carry <b>different</b> severities, so which pod is the incident's centre is
+        /// decided rather than incidental. Findings otherwise share a class and a start time, which is what
+        /// leaves severity as the tie-break — see <c>Incident.Findings</c> for the ordering.
+        /// </summary>
+        private static Incident Severity(params (string Pod, string Signal, double Breach)[] findings)
+        {
+            var pipeline = new IncidentPipeline();
+
+            foreach (var (pod, signal, breach) in findings)
+            {
+                pipeline.ObserveRule(
+                    new IncidentSubject("overfit", "overfit-server", string.Empty, pod, string.Empty),
+                    signal,
+                    new SustainedThresholdResult(
+                        Status: DetectionStatus.Anomalous,
+                        Reason: $"{signal} on {pod}",
+                        BreachFraction: breach,
+                        BreachedSamples: (int)(breach * 40),
+                        UsableSamples: 40,
+                        PeakValue: breach * 10.0,
+                        MedianValue: breach * 5.0),
+                    T0, T0.AddMinutes(12), default, SignalClass.Resource);
+            }
+
+            var grouped = pipeline.Group(IncidentGroupingOptions.Balanced with
+            {
+                Topology = TopologyWeights.SingleNode
+            });
+
+            Assert.Single(grouped);
+
+            return grouped[0];
         }
 
         private static IReadOnlyList<Incident> Cycle(params (string Pod, string Signal)[] findings)

@@ -25,7 +25,12 @@ namespace DevOnBike.Overfit.Anomalies.Incidents.Contracts
         PrimaryChanged = 2,
 
         /// <summary>
-        /// The best candidate with a matching primary shares too few subjects. The group genuinely moved.
+        /// <b>No longer produced.</b> The matcher used to require a minimum subject overlap on top of a
+        /// matching primary, and this said that second gate had failed. It cost a shadow run an incident at
+        /// 0.33 against a bar of 0.34 — same pod, same fault — and was removed; see <c>IncidentTracker</c>.
+        ///
+        /// <para>Kept so a stored or logged trace from before the change still reads back as what it meant.
+        /// A matcher that emits this again has grown a second gate, which is the regression.</para>
         /// </summary>
         OverlapTooLow = 3,
 

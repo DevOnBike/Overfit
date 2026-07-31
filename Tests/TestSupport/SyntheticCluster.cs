@@ -84,6 +84,94 @@ namespace DevOnBike.Overfit.Tests.TestSupport
         /// </summary>
         private const double WarmupRatePerSample = 0.154;
 
+        // ---------------------------------------------------------------------------------------------
+        // Scatter, calibrated against the recorded lab window rather than chosen
+        // (SyntheticClusterRealismDiagnostics compares the two, healthy replicas only, matched window
+        // length). Each figure is the full width of a uniform draw, so the interquartile spread it produces
+        // is roughly half of it — and the interquartile spread is the one that was compared, because
+        // (max - min) over a window is decided by its two most extreme scrapes.
+        // ---------------------------------------------------------------------------------------------
+
+        /// <summary>
+        /// Per-scrape scatter of each latency quantile, as the full width of a multiplicative draw.
+        ///
+        /// <para><b>Three separate draws, and that is the correction.</b> The quantiles used to be one series
+        /// scaled by a constant — p50 = 0.35x, p99 = 2.4x — which forces all three to have identical relative
+        /// scatter. The lab does not: interquartile spreads of <b>14% at p50, 58% at p95, 35% at p99</b>. No
+        /// multiplier can produce that shape, so the previous generator was wrong in kind rather than in
+        /// degree, and a peer or trend detector reading p50 and p95 saw two copies of one signal where the
+        /// real thing gives two.</para>
+        ///
+        /// <para>A high quantile is a coarse order statistic over a few dozen requests per scrape and jumps
+        /// accordingly; the median of the same requests barely moves. That p99 scatters <i>less</i> than p95
+        /// is not a typo — <c>histogram_quantile</c> interpolates inside a bucket, and the top buckets are
+        /// wide, so the tail is quantised.</para>
+        /// </summary>
+        private const double LatencyScatterP50 = 0.30;
+
+        /// <inheritdoc cref="LatencyScatterP50"/>
+        private const double LatencyScatterP95 = 1.15;
+
+        /// <inheritdoc cref="LatencyScatterP50"/>
+        /// <remarks>
+        /// Wider than the spread it is meant to produce, because the monotonicity clamp against p95 truncates
+        /// its lower tail — p95 scatters harder, so <c>max(p99, p95)</c> bites often enough to compress p99's
+        /// interquartile spread well below the width of its own draw.
+        /// </remarks>
+        private const double LatencyScatterP99 = 0.78;
+
+        /// <summary>
+        /// Scatter of the per-pod request rate. Measured interquartile spread on the lab is 13.6% — a
+        /// <c>rate()</c> over a two-minute window, on one replica behind a load balancer that redistributes
+        /// continuously, is not a smooth number.
+        /// </summary>
+        private const double TrafficScatter = 0.30;
+
+        /// <summary>
+        /// Scatter of CPU beyond what traffic already explains. The affine cost model carries the load-driven
+        /// part; this is everything else the process does — background work, timers, collections.
+        /// </summary>
+        private const double CpuScatter = 0.34;
+
+        /// <summary>
+        /// How often a scrape lands on a burst, and by how much it lifts the value.
+        ///
+        /// <para><b>Uniform scatter alone cannot reproduce the lab, and the ratio is how it shows.</b> A
+        /// uniform draw has a range of almost exactly twice its interquartile spread. The lab's CPU has a
+        /// range <b>3.3x</b> its interquartile spread and its request rate <b>3.9x</b> — fat tails, meaning a
+        /// few scrapes far outside a body that is otherwise tight. Widening the uniform draw until the range
+        /// matched would have inflated the body along with it, and the body is what Cliff's delta reads.</para>
+        ///
+        /// <para>Rare enough to sit outside the middle half of a window — so it stretches the range and leaves
+        /// the interquartile spread alone, which is the shape being reproduced.</para>
+        /// </summary>
+        private const double BurstProbability = 0.05;
+
+        /// <inheritdoc cref="BurstProbability"/>
+        private const double TrafficBurstFactor = 1.30;
+
+        /// <inheritdoc cref="BurstProbability"/>
+        private const double CpuBurstFactor = 1.22;
+
+        /// <summary>
+        /// Per-pod latency personality, as the full width of a uniform draw.
+        ///
+        /// <para><b>Deliberately below the 17% between-pod spread the lab shows on p95</b>, because that
+        /// figure is not all personality. A pod's median over a 49-sample window is itself an estimate, and
+        /// with p95 scattering as hard as it does the standard error of that estimate is several percent —
+        /// so part of the measured between-pod spread is the noise of measuring it. Setting the offset to the
+        /// observed spread would count that noise twice and hand the peer detector a group that genuinely is
+        /// more separated than any real deployment.</para>
+        /// </summary>
+        private const double LatencyOffsetWidth = 0.14;
+
+        /// <summary>
+        /// How far gen2 rises above its settled level once a promotion has happened, before the next
+        /// collection takes it back. Sized against the lab's 11.6% within-pod range on a heap whose
+        /// interquartile spread is exactly zero — a step, held.
+        /// </summary>
+        private const double HeapPromotionStep = 0.12;
+
         private readonly double[][] _series;
         private readonly double _diurnalPhase;
 
@@ -173,7 +261,7 @@ namespace DevOnBike.Overfit.Tests.TestSupport
 
             // Per-pod personality, drawn once. These offsets are what make a peer group non-identical, which is
             // the difference between measuring a false-positive rate and measuring nothing.
-            var latencyOffset = 1.0 + ((rng.NextDouble() - 0.5) * 0.06);   // +-3%, as measured
+            var latencyOffset = 1.0 + ((rng.NextDouble() - 0.5) * LatencyOffsetWidth);
             var cpuOffset = 1.0 + ((rng.NextDouble() - 0.5) * 0.33);       // +-16.5% -> ~33% spread across a group
             var memoryBaseline = 1.15e9 * (1.0 + ((rng.NextDouble() - 0.5) * 0.05));
             var trafficShare = (1.0 / Pods) * (1.0 + ((rng.NextDouble() - 0.5) * 0.18));
@@ -198,6 +286,17 @@ namespace DevOnBike.Overfit.Tests.TestSupport
             // The level the sawtooth rides on. Equal to the baseline except while a restarted pod warms up.
             var floor = memoryBaseline;
 
+            // Gen2 is a staircase, not a curve: it moves when gen2 is collected and holds flat in between.
+            // The lab makes this unmistakable — the interquartile spread of the heap over a twelve-minute
+            // window is exactly 0.0%, because the middle half of those scrapes are the same number. Deriving
+            // it from the working set, as this did, gave it the working set's continuous jitter and turned a
+            // step into noise the trend detector then had to reject.
+            // The fraction of the working set that is gen2 is a property of the application, so it is drawn
+            // once per pod rather than per step. Drawing it per step instead put every replica on its own
+            // level and pushed between-pod spread to 12% at three pods and 69% at twenty, against 2.8%
+            // measured — a staircase with the right step shape and a fabricated peer group.
+            var heapShare = 0.42 * Scatter(rng, 0.06);
+
             for (var t = 0; t < Samples; t++)
             {
                 var timeOfDay = ((t / samplesPerDay) + diurnalPhase) % 1.0;
@@ -205,24 +304,36 @@ namespace DevOnBike.Overfit.Tests.TestSupport
                 // Traffic: a daily curve between roughly a fifth and full load, never zero — a cluster with no
                 // traffic exercises none of the load-sensitive paths.
                 var diurnal = 0.6 + (0.4 * Math.Sin(2.0 * Math.PI * timeOfDay));
-                var traffic = 40.0 * trafficShare * diurnal * (1.0 + ((rng.NextDouble() - 0.5) * 0.10));
 
-                // Queueing: latency rises with load, sub-linearly.
-                //
-                // The scatter is +-26%, giving a (max-min)/median spread near 52% — which is what the lab
-                // measured on its healthy replicas (52% / 55% / 22%), not a number chosen for convenience.
-                // The previous +-4% was 6.5x too tight, and that direction matters more than it looks: Cliff's
-                // delta measures OVERLAP, so unrealistically quiet pods separate cleanly and manufacture peer
-                // findings that real replicas would never produce. A p95 is a coarse quantile over a few dozen
-                // requests, and it jumps accordingly.
-                var latency = 700.0 * latencyOffset * (1.0 + (0.35 * diurnal))
-                              * (1.0 + ((rng.NextDouble() - 0.5) * 0.52));
+                // Every draw below is unconditional, for the reason spelled out at restartDraw: a draw made
+                // inside an `if` shifts the stream for everything after it, so an ablated arm stops being the
+                // same cluster minus one feature.
+                var trafficJitter = Scatter(rng, TrafficScatter);
+                var trafficBurst = rng.NextDouble() < BurstProbability ? TrafficBurstFactor : 1.0;
+                var traffic = 40.0 * trafficShare * diurnal * trafficJitter * trafficBurst;
 
-                // Rare scrape artefact. The reason every estimator here is rank-based rather than least-squares.
-                if (rng.NextDouble() < 0.003)
-                {
-                    latency *= 5.0;
-                }
+                // Queueing: latency rises with load, sub-linearly. Each quantile then scatters on its own —
+                // see LatencyScatterP50 for why one shared series was wrong in kind, not in degree.
+                var latencyLevel = 700.0 * latencyOffset * (1.0 + (0.35 * diurnal));
+
+                var p50 = latencyLevel * 0.35 * Scatter(rng, LatencyScatterP50);
+                var p95 = latencyLevel * Scatter(rng, LatencyScatterP95);
+                var p99 = latencyLevel * 2.4 * Scatter(rng, LatencyScatterP99);
+
+                // Rare scrape artefact. The reason every estimator here is rank-based rather than
+                // least-squares. It hits the whole histogram at once, because the slow requests behind it are
+                // in every quantile's population.
+                var artefact = rng.NextDouble() < 0.003 ? 5.0 : 1.0;
+
+                p50 *= artefact;
+                p95 *= artefact;
+                p99 *= artefact;
+
+                // A histogram cannot report a smaller value at a higher quantile. With independent draws the
+                // bands can cross, and a crossed sample is not a rare event worth modelling — it is impossible
+                // output that would teach every detector downstream something false.
+                p95 = Math.Max(p95, p50);
+                p99 = Math.Max(p99, p95);
 
                 // A restart drops the working set to a cold process and the warm-up brings it back. The two
                 // rates below are DIFFERENT rates, and conflating them was a measured bug: the first version
@@ -244,6 +355,7 @@ namespace DevOnBike.Overfit.Tests.TestSupport
                 // Allocation between collections, riding on top of whatever the floor currently is.
                 memory += 1.2e6 * (1.0 + ((rng.NextDouble() - 0.5) * 0.4));
 
+                // Drawn before the branch that uses it, so the stream does not depend on whether gen2 ran.
                 if (memory > floor * 1.06)
                 {
                     memory = floor;
@@ -254,18 +366,33 @@ namespace DevOnBike.Overfit.Tests.TestSupport
                     memory = floor;
                 }
 
+                // Gen2 in two discrete levels: a promotion lifts it, a collection drops it back, and it holds
+                // flat in between. Both halves of the lab's measurement have to come out of this — a within-pod
+                // range near 12% AND replicas sitting 2.8% apart. An earlier version drew a fresh level at each
+                // collection, which reproduced the flatness and nothing else: with barely one collection inside
+                // a twelve-minute window, each replica simply held whatever it drew, so the step size became
+                // the between-pod spread (12% at three pods, 67% at twenty).
+                // Only the top of the sawtooth, so the settled level is where most scrapes land: the lab's
+                // interquartile spread is zero, meaning the middle half of the window is one number. A
+                // threshold at the midpoint splits the window evenly instead and turns the step into the
+                // interquartile spread — the flatness is the measurement, not the step.
+                var promoted = (memory - floor) > (floor * 0.05) ? HeapPromotionStep : 0.0;
+
+                Set(pod, MetricIndex.GcGen2HeapBytes, t, floor * heapShare * (1.0 + promoted));
+
                 Set(pod, MetricIndex.RequestsPerSecond, t, traffic);
-                Set(pod, MetricIndex.LatencyP50Ms, t, latency * 0.35);
-                Set(pod, MetricIndex.LatencyP95Ms, t, latency);
-                Set(pod, MetricIndex.LatencyP99Ms, t, latency * 2.4);
+                Set(pod, MetricIndex.LatencyP50Ms, t, p50);
+                Set(pod, MetricIndex.LatencyP95Ms, t, p95);
+                Set(pod, MetricIndex.LatencyP99Ms, t, p99);
 
                 // Affine, not proportional: a fixed floor plus a marginal cost per request. This is the
                 // measured model, and it is why unit cost carries a residue that grows with imbalance.
+                var cpuBurst = rng.NextDouble() < BurstProbability ? CpuBurstFactor : 1.0;
+
                 Set(pod, MetricIndex.CpuUsageRatio, t,
-                    cpuOffset * (0.45 + (0.040 * traffic)) * (1.0 + ((rng.NextDouble() - 0.5) * 0.15)));
+                    cpuOffset * (0.45 + (0.040 * traffic)) * Scatter(rng, CpuScatter) * cpuBurst);
 
                 Set(pod, MetricIndex.MemoryWorkingSetBytes, t, memory);
-                Set(pod, MetricIndex.GcGen2HeapBytes, t, memory * 0.42);
                 Set(pod, MetricIndex.GcPauseRatio, t, 0.004 * diurnal * (1.0 + ((rng.NextDouble() - 0.5) * 0.6)));
 
                 // Mostly empty, occasionally a couple of items — never a starvation signal.
@@ -294,6 +421,13 @@ namespace DevOnBike.Overfit.Tests.TestSupport
         /// restarting exporter, a network hiccup — and "missing is not zero" is a decision the whole pipeline
         /// rests on, so the holes have to be here for the measurement to mean anything.
         /// </summary>
+        /// <summary>
+        /// A multiplicative draw of the given full width, centred on 1. Uniform rather than Gaussian: the body
+        /// of these signals is bounded, and the tail is modelled explicitly as a burst instead of being left
+        /// to a distribution's shape — see <see cref="BurstProbability"/>.
+        /// </summary>
+        private static double Scatter(Random rng, double width) => 1.0 + ((rng.NextDouble() - 0.5) * width);
+
         private void PunchScrapeGaps(int pod, Random rng)
         {
             for (var m = 0; m < MetricCount; m++)

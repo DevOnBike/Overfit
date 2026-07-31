@@ -16,9 +16,26 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
     /// every five minutes, a problem lasting an hour produces twelve unrelated incidents that each look new.
     /// No threshold fixes that, because every one of the twelve is correct.</para>
     ///
-    /// <para><b>Matching is by overlap of subjects.</b> A group continues a previous one when it shares
-    /// enough of the pods it is about — intersection over union, against
-    /// <see cref="IncidentTrackingOptions.MinSubjectOverlap"/>.</para>
+    /// <para><b>Matching is by primary subject.</b> A group continues an open incident when it is centred on
+    /// the same pod. Subject overlap still ranks the candidates when more than one qualifies, but it does not
+    /// veto: a group that shares a centre with an open incident continues it however much of the periphery
+    /// came and went.</para>
+    ///
+    /// <para><b>The veto was there and it was wrong, and the difference matters more than the threshold.</b>
+    /// The rule used to be "same primary <i>and</i> at least a third of the subjects shared", which cost a
+    /// shadow run an incident at an overlap of <b>0.33 against a bar of 0.34</b> — the same pod, the same
+    /// fault, one hundredth short. The fix is not a lower bar. The bar was measuring the wrong thing: an
+    /// incident's periphery is the findings the grouper attached to it this cycle, and those rotate by
+    /// design — that is the very property that killed the (subject, signal) key below. Once the centre is
+    /// required to be the same pod, a shrinking group is one incident getting better, not a different
+    /// incident.</para>
+    ///
+    /// <para>Removing it costs nothing the primary requirement was not already paying for. The immortality
+    /// bug it was introduced alongside — a group about the healthy replicas inheriting the identity of one
+    /// about the degraded replica at 0.75 overlap — is blocked by the primary key, which those two groups do
+    /// not share. What remains is the cost already stated on <see cref="IncidentTrackingOptions"/>: two
+    /// unrelated problems on one pod are one incident, which is the same policy the grouper applies inside a
+    /// single cycle.</para>
     ///
     /// <para><b>Subjects rather than (subject, signal) pairs, because the pair version was measured and it
     /// failed.</b> A real incident gains and loses findings constantly, and once a large one clears what
@@ -53,6 +70,18 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
         /// already beyond what a human can act on, and the comparison is quadratic in keys.
         /// </summary>
         public const int MaxKeysPerIncident = 256;
+
+        /// <summary>
+        /// Overlap above which a trace calls a non-match <see cref="IncidentMatchOutcome.PrimaryChanged"/>
+        /// rather than <see cref="IncidentMatchOutcome.NoResemblance"/>.
+        ///
+        /// <para><b>A label on a diagnostic, not a threshold in the matcher.</b> Nothing behaves differently
+        /// on either side of it; it exists so a reader of a shadow run can tell "the incident's centre moved"
+        /// from "this is a different problem". It is deliberately a constant rather than an option — a knob
+        /// that changes only how a trace is worded would invite someone to tune it and expect a behaviour
+        /// change.</para>
+        /// </summary>
+        private const double SubstantialOverlap = 0.34;
 
         private readonly IncidentTrackingOptions _options;
         private readonly List<Tracked> _open = [];
@@ -318,7 +347,9 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
                     }
                 }
 
-                if (best >= 0 && bestOverlap >= _options.MinSubjectOverlap)
+                // A matching primary subject is enough. There is deliberately no second gate on how much of
+                // the periphery survived — see the type doc for the run that settled it.
+                if (best >= 0)
                 {
                     var tracked = _open[best];
 
@@ -345,7 +376,7 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
                     trace(new IncidentMatchTrace(
                         _leftPrimary,
                         _left.Count,
-                        Explain(best, bestOverlap, anyOverlap),
+                        Explain(anyOverlap),
                         0,
                         anyOverlap,
                         anyBest >= 0 ? _open[anyBest].Id : 0,
@@ -366,20 +397,18 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
         ///
         /// <para>A substantial overlap with a different primary says the incident is the same and its centre
         /// moved — a matching problem. A low overlap everywhere says the group genuinely changed.</para>
+        ///
+        /// <para>Reached only when nothing with a matching primary was open, since that is now the whole test.
+        /// <see cref="SubstantialOverlap"/> labels a trace and decides nothing.</para>
         /// </summary>
-        private IncidentMatchOutcome Explain(int best, double bestOverlap, double anyOverlap)
+        private IncidentMatchOutcome Explain(double anyOverlap)
         {
             if (_open.Count == 0)
             {
                 return IncidentMatchOutcome.NoOpenIncidents;
             }
 
-            if (best >= 0 && bestOverlap > 0.0)
-            {
-                return IncidentMatchOutcome.OverlapTooLow;
-            }
-
-            if (anyOverlap >= _options.MinSubjectOverlap)
+            if (anyOverlap >= SubstantialOverlap)
             {
                 return IncidentMatchOutcome.PrimaryChanged;
             }
