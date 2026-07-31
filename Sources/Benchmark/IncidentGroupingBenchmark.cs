@@ -4,8 +4,8 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using BenchmarkDotNet.Attributes;
-using DevOnBike.Overfit.Anomalies.Incidents;
 using DevOnBike.Overfit.Anomalies.Contracts;
+using DevOnBike.Overfit.Anomalies.Incidents;
 
 namespace Benchmarks
 {

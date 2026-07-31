@@ -27,7 +27,10 @@ namespace DevOnBike.Overfit.Tests.TestSupport
         /// <summary>Label the recorder writes for the replica carrying the injected fault.</summary>
         public const string FaultLabel = "FAULT:cpu-throttle";
 
-        public static string Path { get; } =
+        public static string Path
+        {
+            get;
+        } =
             System.IO.Path.Combine(AppContext.BaseDirectory, "test_fixtures", "lab", "lab-window.csv");
 
         /// <summary>Whether the fixture is present — it is copied to output, so normally yes.</summary>

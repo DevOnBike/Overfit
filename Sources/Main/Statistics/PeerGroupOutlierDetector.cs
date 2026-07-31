@@ -260,7 +260,10 @@ namespace DevOnBike.Overfit.Statistics
             {
                 for (var i = 0; i < comparable; i++)
                 {
-                    findings[map[i]] = findings[map[i]] with { Deviation = rawDeviations[i] };
+                    findings[map[i]] = findings[map[i]] with
+                    {
+                        Deviation = rawDeviations[i]
+                    };
                 }
 
                 return new PeerOutlierResult(

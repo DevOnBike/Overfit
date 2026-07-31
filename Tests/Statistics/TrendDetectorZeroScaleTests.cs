@@ -116,7 +116,10 @@ namespace DevOnBike.Overfit.Tests.Statistics
 
             Assert.Equal(DetectionStatus.Anomalous, Detect(values, TrendOptions.Balanced).Status);
 
-            var demanding = TrendOptions.Balanced with { MinAbsoluteChangeOverWindow = 5000.0 };
+            var demanding = TrendOptions.Balanced with
+            {
+                MinAbsoluteChangeOverWindow = 5000.0
+            };
 
             Assert.Equal(DetectionStatus.Healthy, Detect(values, demanding).Status);
         }
@@ -127,7 +130,10 @@ namespace DevOnBike.Overfit.Tests.Statistics
         {
             Assert.Equal(0.0, TrendOptions.Balanced.MinAbsoluteChangeOverWindow);
             Assert.True(TrendOptions.Balanced.IsValid);
-            Assert.True((TrendOptions.Balanced with { MinAbsoluteChangeOverWindow = 0.25 }).IsValid);
+            Assert.True((TrendOptions.Balanced with
+            {
+                MinAbsoluteChangeOverWindow = 0.25
+            }).IsValid);
         }
 
         private static TrendResult Detect(double[] values, TrendOptions options)

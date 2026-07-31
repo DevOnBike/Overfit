@@ -3,8 +3,8 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using DevOnBike.Overfit.Anomalies.Monitoring;
 using DevOnBike.Overfit.Anomalies.Contracts;
+using DevOnBike.Overfit.Anomalies.Monitoring;
 
 namespace DevOnBike.Overfit.Tests.Anomalies.Monitoring
 {
@@ -80,7 +80,10 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Monitoring
         {
             // `kube_replicaset_owner{}` is valid PromQL but an empty matcher set reads like a mistake, and a
             // stray comma would be one.
-            var unscoped = Lab with { Namespace = string.Empty };
+            var unscoped = Lab with
+            {
+                Namespace = string.Empty
+            };
 
             Assert.Equal("kube_replicaset_owner", PromqlCatalog.ReplicaSetOwnershipQuery(unscoped));
             Assert.Equal("kube_deployment_created", PromqlCatalog.DeploymentCreatedQuery(unscoped));
@@ -89,7 +92,11 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Monitoring
         [Fact]
         public void WithADataCentreLabel_ItIsAppliedToTheNamespaceScopedQueriesToo()
         {
-            var multiDc = Lab with { DataCenterLabel = "dc", DcWestLabel = "west" };
+            var multiDc = Lab with
+            {
+                DataCenterLabel = "dc",
+                DcWestLabel = "west"
+            };
 
             Assert.Equal(
                 "kube_replicaset_owner{namespace=\"overfit\",dc=\"west\"}",
@@ -99,7 +106,12 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Monitoring
         [Fact]
         public void WithADataCentreLabelAndNoNamespace_ThereIsNoLeadingComma()
         {
-            var odd = Lab with { Namespace = string.Empty, DataCenterLabel = "dc", DcWestLabel = "west" };
+            var odd = Lab with
+            {
+                Namespace = string.Empty,
+                DataCenterLabel = "dc",
+                DcWestLabel = "west"
+            };
 
             Assert.Equal("kube_deployment_created{dc=\"west\"}", PromqlCatalog.DeploymentCreatedQuery(odd));
         }

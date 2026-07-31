@@ -3,8 +3,8 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using DevOnBike.Overfit.Anomalies.Incidents;
 using DevOnBike.Overfit.Anomalies.Contracts;
+using DevOnBike.Overfit.Anomalies.Incidents;
 
 namespace DevOnBike.Overfit.Tests.Anomalies.Incidents
 {
@@ -143,7 +143,10 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Incidents
 
             var singleTenant = IncidentGroupingOptions.Balanced with
             {
-                Topology = TopologyWeights.Default with { SameNamespace = 0.65 }
+                Topology = TopologyWeights.Default with
+                {
+                    SameNamespace = 0.65
+                }
             };
 
             Assert.Single(Grouper.Group(findings, singleTenant));
@@ -169,7 +172,10 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Incidents
             // pods merged, which is the distinction the ReplicaSet coordinate exists to make.
             var versionAware = IncidentGroupingOptions.Balanced with
             {
-                Topology = TopologyWeights.Default with { SameWorkload = 0.2 }
+                Topology = TopologyWeights.Default with
+                {
+                    SameWorkload = 0.2
+                }
             };
 
             Assert.Equal(2, Grouper.Group(findings, versionAware).Count);
@@ -197,7 +203,10 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Incidents
             };
 
             // A threshold between the two weights: same-ReplicaSet clears it, cross-ReplicaSet does not.
-            var between = IncidentGroupingOptions.Balanced with { MinRelatedness = 0.75 };
+            var between = IncidentGroupingOptions.Balanced with
+            {
+                MinRelatedness = 0.75
+            };
 
             Assert.Single(Grouper.Group(sameRs, between));
             Assert.Equal(2, Grouper.Group(crossRs, between).Count);
@@ -212,19 +221,28 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Incidents
 
             var negative = IncidentGroupingOptions.Balanced with
             {
-                Topology = TopologyWeights.Default with { SameNode = -0.1 }
+                Topology = TopologyWeights.Default with
+                {
+                    SameNode = -0.1
+                }
             };
 
             var aboveOne = IncidentGroupingOptions.Balanced with
             {
-                Topology = TopologyWeights.Default with { SameWorkload = 1.5 }
+                Topology = TopologyWeights.Default with
+                {
+                    SameWorkload = 1.5
+                }
             };
 
             // Zeroing the strongest link would mean "two findings about the same process are unrelated", which
             // is not a weakening of the evidence but a mistake.
             var podless = IncidentGroupingOptions.Balanced with
             {
-                Topology = TopologyWeights.Default with { SamePod = 0.0 }
+                Topology = TopologyWeights.Default with
+                {
+                    SamePod = 0.0
+                }
             };
 
             Assert.Throws<ArgumentException>(() => Grouper.Group(findings, negative));

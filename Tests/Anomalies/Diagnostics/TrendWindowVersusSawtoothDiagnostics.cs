@@ -149,7 +149,10 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
                 times[i] = i * 15.0;
             }
 
-            var options = TrendOptions.Balanced with { MinAbsoluteChangeOverWindow = floor };
+            var options = TrendOptions.Balanced with
+            {
+                MinAbsoluteChangeOverWindow = floor
+            };
 
             return new TrendDetector().Detect(series, times, options);
         }

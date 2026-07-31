@@ -3,9 +3,9 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using DevOnBike.Overfit.Anomalies.Contracts;
 using DevOnBike.Overfit.Anomalies.Incidents;
 using DevOnBike.Overfit.Anomalies.Incidents.Abstractions;
-using DevOnBike.Overfit.Anomalies.Contracts;
 using DevOnBike.Overfit.Anomalies.Monitoring;
 using DevOnBike.Overfit.Anomalies.Monitoring.Abstractions;
 using Microsoft.Extensions.Hosting;
@@ -90,7 +90,10 @@ namespace DevOnBike.Overfit.Server.AspNet.Services
             // The guard reads topology through the interface, so handing it the same instance the loop
             // refreshes is what keeps the two in step — no snapshot is copied anywhere.
             _guard = new AnomalyGuard(
-                options.Guard with { PodTopology = topology },
+                options.Guard with
+                {
+                    PodTopology = topology
+                },
                 sink,
                 options.Tracking);
         }

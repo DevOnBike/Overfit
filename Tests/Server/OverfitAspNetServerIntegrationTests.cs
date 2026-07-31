@@ -48,14 +48,14 @@ namespace DevOnBike.Overfit.Tests.Server
         private async Task DoCoreDefaultAsync()
         {
             var a = "a";
-            
+
             await Task.CompletedTask;
         }
-        
+
         private Task DoCoreCorrectAsync()
         {
             var a = "a";
-            
+
             return Task.CompletedTask;
         }
 

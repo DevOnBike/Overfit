@@ -3,8 +3,8 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using DevOnBike.Overfit.Anomalies.Incidents.Abstractions;
 using DevOnBike.Overfit.Anomalies.Contracts;
+using DevOnBike.Overfit.Anomalies.Incidents.Abstractions;
 using DevOnBike.Overfit.Anomalies.Monitoring;
 using DevOnBike.Overfit.Anomalies.Rules;
 using DevOnBike.Overfit.Statistics;
@@ -261,7 +261,10 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
                 subjects[pod] = Subject(window.Pods[pod]);
             }
 
-            var options = _options.Peer with { MinAbsoluteGap = binding.MinAbsoluteGap };
+            var options = _options.Peer with
+            {
+                MinAbsoluteGap = binding.MinAbsoluteGap
+            };
             var findings = new PeerOutlierFinding[podCount];
             var result = _peer.Detect(peers, binding.SignalKind, options, findings);
 

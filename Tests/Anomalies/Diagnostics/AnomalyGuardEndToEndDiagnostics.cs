@@ -4,8 +4,8 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using System.Text;
-using DevOnBike.Overfit.Anomalies.Incidents;
 using DevOnBike.Overfit.Anomalies.Contracts;
+using DevOnBike.Overfit.Anomalies.Incidents;
 using DevOnBike.Overfit.Anomalies.Monitoring;
 using DevOnBike.Overfit.Anomalies.Rules;
 using DevOnBike.Overfit.Statistics;

@@ -4,9 +4,9 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using DevOnBike.Overfit.Anomalies.Baseline;
+using DevOnBike.Overfit.Anomalies.Contracts;
 using DevOnBike.Overfit.Anomalies.Gpt;
 using DevOnBike.Overfit.Anomalies.Monitoring;
-using DevOnBike.Overfit.Anomalies.Contracts;
 
 namespace DevOnBike.Overfit.Tests.Anomalies
 {

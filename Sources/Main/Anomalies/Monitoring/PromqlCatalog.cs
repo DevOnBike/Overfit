@@ -58,98 +58,98 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
         }
 
         /// <summary>
-    /// Label matchers for series that carry no <c>pod</c> label — ReplicaSet and Deployment metadata. Namespace
-    /// and data centre still apply; the pod regex cannot.
-    /// </summary>
-    public static string BuildNamespaceSelector(IPrometheusQuerySelector selector)
-    {
-        ArgumentNullException.ThrowIfNull(selector);
-
-        var sb = new StringBuilder(64);
-
-        if (selector.Namespace.Length > 0)
+        /// Label matchers for series that carry no <c>pod</c> label — ReplicaSet and Deployment metadata. Namespace
+        /// and data centre still apply; the pod regex cannot.
+        /// </summary>
+        public static string BuildNamespaceSelector(IPrometheusQuerySelector selector)
         {
-            sb.Append("namespace=\"").Append(selector.Namespace).Append('"');
-        }
+            ArgumentNullException.ThrowIfNull(selector);
 
-        if (IsSingleDataCenter(selector))
-        {
+            var sb = new StringBuilder(64);
+
+            if (selector.Namespace.Length > 0)
+            {
+                sb.Append("namespace=\"").Append(selector.Namespace).Append('"');
+            }
+
+            if (IsSingleDataCenter(selector))
+            {
+                return sb.ToString();
+            }
+
+            if (sb.Length > 0)
+            {
+                sb.Append(',');
+            }
+
+            sb.Append(selector.DataCenterLabel).Append("=\"").Append(selector.DcWestLabel).Append('"');
+
             return sb.ToString();
         }
 
-        if (sb.Length > 0)
+        /// <summary>
+        /// <b>Pod to ReplicaSet.</b> On a Deployment the ReplicaSet is the version, so this is the query that makes
+        /// a rollout visible — and it is the only thing standing between the guard and going blind through one.
+        ///
+        /// <para>The answer is in the series' <c>owner_name</c> <b>label</b>, not its value: kube-state-metrics
+        /// emits a constant 1 and carries the relationship in labels. A reader for these has to keep the labels,
+        /// which is why the metric sources cannot be reused as-is — they parse for a value.</para>
+        /// </summary>
+        public static string PodOwnershipQuery(IPrometheusQuerySelector selector)
         {
-            sb.Append(',');
+            var matchers = BuildSelector(selector, DataCenter.West);
+
+            return $"kube_pod_owner{{{matchers},owner_kind=\"ReplicaSet\"}}";
         }
 
-        sb.Append(selector.DataCenterLabel).Append("=\"").Append(selector.DcWestLabel).Append('"');
+        /// <summary><b>ReplicaSet to Deployment</b>, closing the chain from a pod up to the workload a human names.</summary>
+        public static string ReplicaSetOwnershipQuery(IPrometheusQuerySelector selector)
+        {
+            var matchers = BuildNamespaceSelector(selector);
 
-        return sb.ToString();
-    }
+            return matchers.Length > 0
+                ? $"kube_replicaset_owner{{{matchers}}}"
+                : "kube_replicaset_owner";
+        }
 
-    /// <summary>
-    /// <b>Pod to ReplicaSet.</b> On a Deployment the ReplicaSet is the version, so this is the query that makes
-    /// a rollout visible — and it is the only thing standing between the guard and going blind through one.
-    ///
-    /// <para>The answer is in the series' <c>owner_name</c> <b>label</b>, not its value: kube-state-metrics
-    /// emits a constant 1 and carries the relationship in labels. A reader for these has to keep the labels,
-    /// which is why the metric sources cannot be reused as-is — they parse for a value.</para>
-    /// </summary>
-    public static string PodOwnershipQuery(IPrometheusQuerySelector selector)
-    {
-        var matchers = BuildSelector(selector, DataCenter.West);
+        /// <summary>
+        /// <b>Pod to node.</b> Fills the coordinate that catches the fault nobody looks for — a failing node
+        /// degrading workloads with nothing else in common. Currently nothing populates it.
+        /// </summary>
+        public static string PodNodeQuery(IPrometheusQuerySelector selector)
+        {
+            var matchers = BuildSelector(selector, DataCenter.West);
 
-        return $"kube_pod_owner{{{matchers},owner_kind=\"ReplicaSet\"}}";
-    }
+            return $"kube_pod_info{{{matchers}}}";
+        }
 
-    /// <summary><b>ReplicaSet to Deployment</b>, closing the chain from a pod up to the workload a human names.</summary>
-    public static string ReplicaSetOwnershipQuery(IPrometheusQuerySelector selector)
-    {
-        var matchers = BuildNamespaceSelector(selector);
+        /// <summary>
+        /// <b>The rollout timestamp</b>, as a unix time in the sample's value rather than in a label.
+        ///
+        /// <para>An incident whose start coincides with this moving is <i>more</i> informative, not less: "this
+        /// began when version N went out" is the attribution a bare recording rule cannot produce. Suppressing
+        /// alerts during a rollout — the common workaround — hides exactly the faults a rollout causes.</para>
+        /// </summary>
+        public static string DeploymentCreatedQuery(IPrometheusQuerySelector selector)
+        {
+            var matchers = BuildNamespaceSelector(selector);
 
-        return matchers.Length > 0
-            ? $"kube_replicaset_owner{{{matchers}}}"
-            : "kube_replicaset_owner";
-    }
+            return matchers.Length > 0
+                ? $"kube_deployment_created{{{matchers}}}"
+                : "kube_deployment_created";
+        }
 
-    /// <summary>
-    /// <b>Pod to node.</b> Fills the coordinate that catches the fault nobody looks for — a failing node
-    /// degrading workloads with nothing else in common. Currently nothing populates it.
-    /// </summary>
-    public static string PodNodeQuery(IPrometheusQuerySelector selector)
-    {
-        var matchers = BuildSelector(selector, DataCenter.West);
+        /// <summary>
+        /// <b>How many pods each ReplicaSet holds</b> — the old-versus-new split during a rollout, in one query.
+        /// A workload with two non-zero entries is mid-rollout, which is the condition under which the peer family
+        /// should be partitioned rather than trusted.
+        /// </summary>
+        public static string ReplicaSetPopulationQuery(IPrometheusQuerySelector selector)
+        {
+            return $"sum by (owner_name) ({PodOwnershipQuery(selector)})";
+        }
 
-        return $"kube_pod_info{{{matchers}}}";
-    }
-
-    /// <summary>
-    /// <b>The rollout timestamp</b>, as a unix time in the sample's value rather than in a label.
-    ///
-    /// <para>An incident whose start coincides with this moving is <i>more</i> informative, not less: "this
-    /// began when version N went out" is the attribution a bare recording rule cannot produce. Suppressing
-    /// alerts during a rollout — the common workaround — hides exactly the faults a rollout causes.</para>
-    /// </summary>
-    public static string DeploymentCreatedQuery(IPrometheusQuerySelector selector)
-    {
-        var matchers = BuildNamespaceSelector(selector);
-
-        return matchers.Length > 0
-            ? $"kube_deployment_created{{{matchers}}}"
-            : "kube_deployment_created";
-    }
-
-    /// <summary>
-    /// <b>How many pods each ReplicaSet holds</b> — the old-versus-new split during a rollout, in one query.
-    /// A workload with two non-zero entries is mid-rollout, which is the condition under which the peer family
-    /// should be partitioned rather than trusted.
-    /// </summary>
-    public static string ReplicaSetPopulationQuery(IPrometheusQuerySelector selector)
-    {
-        return $"sum by (owner_name) ({PodOwnershipQuery(selector)})";
-    }
-
-    /// <summary>Whether queries should omit the data-centre matcher and run once rather than per centre.</summary>
+        /// <summary>Whether queries should omit the data-centre matcher and run once rather than per centre.</summary>
         public static bool IsSingleDataCenter(IPrometheusQuerySelector selector)
         {
             ArgumentNullException.ThrowIfNull(selector);

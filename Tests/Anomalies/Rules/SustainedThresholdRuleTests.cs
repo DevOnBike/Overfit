@@ -3,8 +3,8 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using DevOnBike.Overfit.Anomalies.Incidents;
 using DevOnBike.Overfit.Anomalies.Contracts;
+using DevOnBike.Overfit.Anomalies.Incidents;
 using DevOnBike.Overfit.Anomalies.Rules;
 using DevOnBike.Overfit.Statistics;
 
@@ -53,7 +53,10 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Rules
 
             var measured = Rule.Evaluate(window, SustainedThresholdOptions.ForCpuThrottling);
             var literature = Rule.Evaluate(
-                window, SustainedThresholdOptions.ForCpuThrottling with { Threshold = 0.25 });
+                window, SustainedThresholdOptions.ForCpuThrottling with
+                {
+                    Threshold = 0.25
+                });
 
             Assert.Equal(DetectionStatus.Anomalous, measured.Status);
             Assert.Equal(DetectionStatus.Healthy, literature.Status);
@@ -99,7 +102,10 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Rules
             }
 
             var result = Rule.Evaluate(
-                window, SustainedThresholdOptions.ForCpuThrottling with { MinimumSamples = 10 });
+                window, SustainedThresholdOptions.ForCpuThrottling with
+                {
+                    MinimumSamples = 10
+                });
 
             Assert.Equal(DetectionStatus.Anomalous, result.Status);
             Assert.Equal(10, result.UsableSamples);

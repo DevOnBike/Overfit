@@ -49,7 +49,10 @@ namespace DevOnBike.Overfit.Anomalies.Contracts
         /// namespace, with namespace low enough that it cannot merge anything by itself under
         /// <see cref="IncidentGroupingOptions.Balanced"/>.
         /// </summary>
-        public static TopologyWeights Default { get; } = new(
+        public static TopologyWeights Default
+        {
+            get;
+        } = new(
             SamePod: 1.0,
             SameReplicaSet: 0.8,
             SameWorkload: 0.7,

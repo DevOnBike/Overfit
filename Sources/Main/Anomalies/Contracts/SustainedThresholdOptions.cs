@@ -42,7 +42,10 @@ namespace DevOnBike.Overfit.Anomalies.Contracts
         /// are not: a multi-node cluster, a different limit ratio or a CPU-bound workload should be expected to
         /// move them, and no threshold should be promoted to a product default without that repeat.</para>
         /// </summary>
-        public static SustainedThresholdOptions ForCpuThrottling { get; } = new(
+        public static SustainedThresholdOptions ForCpuThrottling
+        {
+            get;
+        } = new(
             Threshold: 0.05,
             MinBreachFraction: 0.25,
             MinimumSamples: 20);
@@ -52,7 +55,10 @@ namespace DevOnBike.Overfit.Anomalies.Contracts
         /// finding — OOM kills, container restarts, pool rejections. One breach in twenty samples is enough,
         /// because these do not happen by accident.
         /// </summary>
-        public static SustainedThresholdOptions ForRareEvent { get; } = new(
+        public static SustainedThresholdOptions ForRareEvent
+        {
+            get;
+        } = new(
             Threshold: double.Epsilon,
             MinBreachFraction: 0.05,
             MinimumSamples: 20);

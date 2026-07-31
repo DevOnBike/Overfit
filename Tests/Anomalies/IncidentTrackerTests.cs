@@ -3,8 +3,8 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using DevOnBike.Overfit.Anomalies.Incidents;
 using DevOnBike.Overfit.Anomalies.Contracts;
+using DevOnBike.Overfit.Anomalies.Incidents;
 using DevOnBike.Overfit.Statistics;
 
 namespace DevOnBike.Overfit.Tests.Anomalies
@@ -264,7 +264,11 @@ namespace DevOnBike.Overfit.Tests.Anomalies
         public void TrackedStateIsBounded()
         {
             var tracker = new IncidentTracker(
-                IncidentTrackingOptions.Balanced with { MaxOpenIncidents = 4, ResolveAfterMissingCycles = 99 });
+                IncidentTrackingOptions.Balanced with
+                {
+                    MaxOpenIncidents = 4,
+                    ResolveAfterMissingCycles = 99
+                });
 
             for (var i = 0; i < 40; i++)
             {

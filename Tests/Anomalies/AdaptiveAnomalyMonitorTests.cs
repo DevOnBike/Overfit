@@ -4,8 +4,8 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using DevOnBike.Overfit.Anomalies.Adaptive;
-using DevOnBike.Overfit.Anomalies.Gpt;
 using DevOnBike.Overfit.Anomalies.Contracts;
+using DevOnBike.Overfit.Anomalies.Gpt;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Maths;
 using Xunit.Abstractions;

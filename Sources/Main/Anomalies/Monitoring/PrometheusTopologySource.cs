@@ -4,8 +4,8 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using System.Text.Json;
-using DevOnBike.Overfit.Anomalies.Monitoring.Abstractions;
 using DevOnBike.Overfit.Anomalies.Contracts;
+using DevOnBike.Overfit.Anomalies.Monitoring.Abstractions;
 
 namespace DevOnBike.Overfit.Anomalies.Monitoring
 {

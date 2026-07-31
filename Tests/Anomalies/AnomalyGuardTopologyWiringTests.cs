@@ -3,9 +3,9 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using DevOnBike.Overfit.Anomalies.Contracts;
 using DevOnBike.Overfit.Anomalies.Incidents;
 using DevOnBike.Overfit.Anomalies.Incidents.Abstractions;
-using DevOnBike.Overfit.Anomalies.Contracts;
 using DevOnBike.Overfit.Anomalies.Monitoring.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.Anomalies
@@ -48,7 +48,10 @@ namespace DevOnBike.Overfit.Tests.Anomalies
 
             var sink = new CapturingSink();
             var guard = new AnomalyGuard(
-                Options() with { PodTopology = topology }, sink, IncidentTrackingOptions.Balanced);
+                Options() with
+                {
+                    PodTopology = topology
+                }, sink, IncidentTrackingOptions.Balanced);
 
             guard.RunCycle(Window(pods), T0);
 
@@ -75,7 +78,10 @@ namespace DevOnBike.Overfit.Tests.Anomalies
         {
             var sink = new CapturingSink();
             var guard = new AnomalyGuard(
-                Options() with { PodTopology = new StubTopology() }, sink, IncidentTrackingOptions.Balanced);
+                Options() with
+                {
+                    PodTopology = new StubTopology()
+                }, sink, IncidentTrackingOptions.Balanced);
 
             guard.RunCycle(Window(Pods(8)), T0);
 

@@ -81,7 +81,10 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
         /// Ordered longest-first so a longer unit is matched before a shorter one that is its prefix or
         /// suffix — <c>ms</c> before <c>s</c>, <c>GB</c> before <c>B</c>.
         /// </summary>
-        private static (string Unit, double Scale)[] Units { get; } =
+        private static (string Unit, double Scale)[] Units
+        {
+            get;
+        } =
         [
             ("us", 0.000_001),
             ("ms", 0.001),

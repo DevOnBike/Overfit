@@ -6,8 +6,8 @@
 using System.Globalization;
 using System.Net.Http.Headers;
 using System.Text.Json;
-using DevOnBike.Overfit.Anomalies.Monitoring.Abstractions;
 using DevOnBike.Overfit.Anomalies.Contracts;
+using DevOnBike.Overfit.Anomalies.Monitoring.Abstractions;
 
 namespace DevOnBike.Overfit.Anomalies.Monitoring
 {

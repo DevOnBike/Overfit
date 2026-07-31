@@ -5,9 +5,9 @@
 
 using System.Globalization;
 using System.Text;
+using DevOnBike.Overfit.Anomalies.Contracts;
 using DevOnBike.Overfit.Anomalies.Incidents;
 using DevOnBike.Overfit.Anomalies.Incidents.Abstractions;
-using DevOnBike.Overfit.Anomalies.Contracts;
 using DevOnBike.Overfit.Anomalies.Monitoring;
 using DevOnBike.Overfit.Anomalies.Monitoring.Abstractions;
 using DevOnBike.Overfit.Statistics;

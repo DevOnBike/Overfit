@@ -127,9 +127,15 @@ namespace DevOnBike.Overfit.Tests.Statistics
             var expectation = new double[window];
             Assert.True(SeasonalBaseline.TryBuild(history, offset, window, PerPeriod, expectation, minimumPeriods: 3));
 
-            var raw = Detector.Detect(values, times, TrendOptions.Balanced with { MinimumSamples = 12 });
+            var raw = Detector.Detect(values, times, TrendOptions.Balanced with
+            {
+                MinimumSamples = 12
+            });
             var seasonal = Detector.Detect(
-                values, times, TrendOptions.Balanced with { MinimumSamples = 12 }, double.NaN, expectation);
+                values, times, TrendOptions.Balanced with
+                {
+                    MinimumSamples = 12
+                }, double.NaN, expectation);
 
             Assert.Equal(DetectionStatus.Anomalous, raw.Status);
             Assert.Equal(TrendDirection.Rising, raw.Direction);
@@ -165,7 +171,10 @@ namespace DevOnBike.Overfit.Tests.Statistics
             Assert.True(SeasonalBaseline.TryBuild(history, start, window, PerPeriod, expectation, minimumPeriods: 3));
 
             var seasonal = Detector.Detect(
-                values, times, TrendOptions.Balanced with { MinimumSamples = 12 }, double.NaN, expectation);
+                values, times, TrendOptions.Balanced with
+                {
+                    MinimumSamples = 12
+                }, double.NaN, expectation);
 
             Assert.Equal(DetectionStatus.Anomalous, seasonal.Status);
             Assert.Equal(TrendDirection.Rising, seasonal.Direction);

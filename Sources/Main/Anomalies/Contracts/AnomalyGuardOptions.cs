@@ -3,8 +3,8 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using DevOnBike.Overfit.Anomalies.Monitoring.Abstractions;
 using DevOnBike.Overfit.Anomalies.Contracts;
+using DevOnBike.Overfit.Anomalies.Monitoring.Abstractions;
 using DevOnBike.Overfit.Statistics;
 
 namespace DevOnBike.Overfit.Anomalies.Contracts
@@ -167,7 +167,10 @@ namespace DevOnBike.Overfit.Anomalies.Contracts
         /// Cliff's delta scores below any usable effect size: <b>the peer detector is structurally blind to
         /// one OOMKill</b>, measured, and only a rule catches it.</para>
         /// </summary>
-        public static IReadOnlyList<RuleProfile> DefaultRules { get; } =
+        public static IReadOnlyList<RuleProfile> DefaultRules
+        {
+            get;
+        } =
         [
             new(MetricIndex.CpuThrottleRatio, SustainedThresholdOptions.ForCpuThrottling),
             new(MetricIndex.OomEventsRate, SustainedThresholdOptions.ForRareEvent),

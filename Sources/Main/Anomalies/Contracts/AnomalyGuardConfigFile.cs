@@ -38,14 +38,20 @@ namespace DevOnBike.Overfit.Anomalies.Contracts
         /// Metrics this project does not model, keyed by the name findings will carry. Evaluated by the
         /// rules, peer and trend families and not by the learned one.
         /// </summary>
-        public Dictionary<string, CustomEntry> CustomMetrics { get; set; } =
+        public Dictionary<string, CustomEntry> CustomMetrics
+        {
+            get; set;
+        } =
             new(StringComparer.OrdinalIgnoreCase);
 
         /// <summary>
         /// Per-feature absolute floors, keyed by <see cref="MetricIndex"/> name. Values accept a unit —
         /// <c>100MB</c>, <c>50ms</c> — because a bare number is where an order-of-magnitude slip hides.
         /// </summary>
-        public Dictionary<string, ThresholdEntry> Thresholds { get; set; } =
+        public Dictionary<string, ThresholdEntry> Thresholds
+        {
+            get; set;
+        } =
             new(StringComparer.OrdinalIgnoreCase);
 
         /// <summary>One known feature's source.</summary>

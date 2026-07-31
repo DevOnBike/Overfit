@@ -3,9 +3,9 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using DevOnBike.Overfit.Anomalies.Contracts;
 using DevOnBike.Overfit.Anomalies.Incidents;
 using DevOnBike.Overfit.Anomalies.Incidents.Abstractions;
-using DevOnBike.Overfit.Anomalies.Contracts;
 
 namespace DevOnBike.Overfit.Tests.Anomalies
 {

@@ -3,9 +3,9 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using DevOnBike.Overfit.Anomalies.Contracts;
 using DevOnBike.Overfit.Anomalies.Incidents;
 using DevOnBike.Overfit.Anomalies.Incidents.Abstractions;
-using DevOnBike.Overfit.Anomalies.Contracts;
 using DevOnBike.Overfit.Statistics;
 
 namespace DevOnBike.Overfit.Tests.Anomalies
@@ -76,7 +76,10 @@ namespace DevOnBike.Overfit.Tests.Anomalies
         public void TheConfiguredSignalClassIsCarried()
         {
             var sink = new CapturingSink();
-            var guard = Guard(sink, Binding() with { Class = SignalClass.Symptom });
+            var guard = Guard(sink, Binding() with
+            {
+                Class = SignalClass.Symptom
+            });
 
             guard.RunCycle(Window(pods: 8, outlierLag: 90_000.0), T0);
 
