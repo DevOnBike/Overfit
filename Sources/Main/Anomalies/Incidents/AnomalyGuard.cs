@@ -122,7 +122,14 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
             var partial = 0;
             var unevaluable = 0;
 
-            RunRules(window, pipeline, from, to);
+            // The peer and rule families answer "what is happening"; the trend family answers "where is this
+            // going". They need different amounts of time — see AnomalyGuardOptions.RecentWindow — so the
+            // caller supplies the long window and the two present-tense families take its tail. The interval
+            // travels with them, or a peer finding would report an observation window it never looked at.
+            var recent = RecentSamples(window);
+            var recentFrom = window.End - (window.Step * (recent - 1));
+
+            RunRules(window, pipeline, recentFrom, to, recent);
 
             for (var m = 0; m < (int)MetricIndex.Count; m++)
             {
@@ -141,11 +148,12 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
                     partial++;
                 }
 
-                unevaluable += RunPeer(window, metric, pipeline, from, to, peerTrace) ? 0 : 1;
+                unevaluable += RunPeer(window, metric, pipeline, recentFrom, to, recent, peerTrace) ? 0 : 1;
                 RunTrend(window, metric, times, pipeline, from, to);
             }
 
-            blind += RunCustom(window, times, pipeline, from, to, ref partial, ref unevaluable);
+            blind += RunCustom(
+                window, times, pipeline, from, to, recentFrom, recent, ref partial, ref unevaluable);
 
             var incidents = pipeline.Group(_options.Grouping);
             var tracked = _tracker.Observe(incidents, observedAt, trace);
@@ -185,6 +193,8 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
             IncidentPipeline pipeline,
             DateTimeOffset from,
             DateTimeOffset to,
+            DateTimeOffset recentFrom,
+            int recent,
             ref int partial,
             ref int unevaluable)
         {
@@ -211,14 +221,16 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
                 {
                     for (var pod = 0; pod < window.Pods.Count; pod++)
                     {
-                        var verdict = _rule.Evaluate(window.Series(pod, binding.Name), rule);
+                        var verdict = _rule.Evaluate(
+                            Tail(window.Series(pod, binding.Name), recent), rule);
 
                         pipeline.ObserveRule(
-                            Subject(window.Pods[pod]), binding.Name, verdict, from, to, default, binding.Class);
+                            Subject(window.Pods[pod]), binding.Name, verdict, recentFrom, to, default,
+                            binding.Class);
                     }
                 }
 
-                unevaluable += RunCustomPeer(window, binding, pipeline, from, to) ? 0 : 1;
+                unevaluable += RunCustomPeer(window, binding, pipeline, recentFrom, to, recent) ? 0 : 1;
                 RunCustomTrend(window, binding, times, pipeline, from, to);
             }
 
@@ -231,7 +243,8 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
             CustomMetricBinding binding,
             IncidentPipeline pipeline,
             DateTimeOffset from,
-            DateTimeOffset to)
+            DateTimeOffset to,
+            int recent)
         {
             var podCount = window.Pods.Count;
             var peers = new List<PeerSeries>(podCount);
@@ -240,11 +253,11 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
             for (var pod = 0; pod < podCount; pod++)
             {
                 var work = binding.SignalKind == PeerSignalKind.LoadSensitive
-                    ? window.Series(pod, MetricIndex.RequestsPerSecond).ToArray()
+                    ? Tail(window.Series(pod, MetricIndex.RequestsPerSecond), recent).ToArray()
                     : [];
 
                 peers.Add(new PeerSeries(
-                    window.Pods[pod], window.Series(pod, binding.Name).ToArray(), work));
+                    window.Pods[pod], Tail(window.Series(pod, binding.Name), recent).ToArray(), work));
                 subjects[pod] = Subject(window.Pods[pod]);
             }
 
@@ -310,7 +323,8 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
             MetricWindow window,
             IncidentPipeline pipeline,
             DateTimeOffset from,
-            DateTimeOffset to)
+            DateTimeOffset to,
+            int recent)
         {
             for (var r = 0; r < _options.Rules.Count; r++)
             {
@@ -318,7 +332,8 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
 
                 for (var pod = 0; pod < window.Pods.Count; pod++)
                 {
-                    var verdict = _rule.Evaluate(window.Series(pod, profile.Metric), profile.Options);
+                    var verdict = _rule.Evaluate(
+                        Tail(window.Series(pod, profile.Metric), recent), profile.Options);
 
                     pipeline.ObserveRule(
                         Subject(window.Pods[pod]), profile.Metric.ToString(), verdict, from, to);
@@ -337,6 +352,7 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
             IncidentPipeline pipeline,
             DateTimeOffset from,
             DateTimeOffset to,
+            int recent,
             Action<PeerDecisionTrace>? peerTrace = null)
         {
             var kind = PeerSignalCatalog.Classify(metric);
@@ -347,10 +363,11 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
             for (var pod = 0; pod < podCount; pod++)
             {
                 var work = kind == PeerSignalKind.LoadSensitive
-                    ? window.Series(pod, MetricIndex.RequestsPerSecond).ToArray()
+                    ? Tail(window.Series(pod, MetricIndex.RequestsPerSecond), recent).ToArray()
                     : [];
 
-                peers.Add(new PeerSeries(window.Pods[pod], window.Series(pod, metric).ToArray(), work));
+                peers.Add(new PeerSeries(
+                    window.Pods[pod], Tail(window.Series(pod, metric), recent).ToArray(), work));
                 subjects[pod] = Subject(window.Pods[pod]);
             }
 
@@ -458,6 +475,28 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
         /// segments of <c>&lt;deployment&gt;-&lt;replicaset-hash&gt;-&lt;suffix&gt;</c> — right for a
         /// Deployment, wrong for a StatefulSet, a Job or a bare pod.</para>
         /// </summary>
+        /// <summary>
+        /// Trailing samples covering <see cref="AnomalyGuardOptions.RecentWindow"/>, never more than the
+        /// window holds and never fewer than one. A caller who supplies a window shorter than the recent
+        /// window gets the whole of it, which is the pre-existing behaviour.
+        /// </summary>
+        private int RecentSamples(MetricWindow window)
+        {
+            if (window.Step <= TimeSpan.Zero || _options.RecentWindow <= TimeSpan.Zero)
+            {
+                return window.Length;
+            }
+
+            var samples = (int)Math.Ceiling(
+                _options.RecentWindow.TotalSeconds / window.Step.TotalSeconds);
+
+            return Math.Clamp(samples, 1, window.Length);
+        }
+
+        /// <summary>The last <paramref name="samples"/> observations, or all of them if there are fewer.</summary>
+        private static ReadOnlySpan<double> Tail(ReadOnlySpan<double> series, int samples)
+            => samples >= series.Length ? series : series[^samples..];
+
         private IncidentSubject Subject(string pod)
         {
             if (_options.PodTopology is { } topology

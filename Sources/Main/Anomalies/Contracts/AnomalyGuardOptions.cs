@@ -133,6 +133,28 @@ namespace DevOnBike.Overfit.Anomalies.Contracts
         /// </summary>
         public TimeSpan MaxRestoredIncidentAge { get; init; } = TimeSpan.FromHours(2);
 
+        /// <summary>
+        /// How far back "now" reaches for the families that answer <i>what is happening</i> — the peer
+        /// comparison and the absolute rules. The trend family always uses the whole window it is given.
+        ///
+        /// <para><b>The two questions need different amounts of time, and using one window for both was a
+        /// design error rather than a threshold to tune.</b> A peer comparison asks whether replicas differ
+        /// <i>at the same instant</i>: fifteen minutes is plenty, and a longer window only smears a fault
+        /// that started recently into the calm before it. A trend asks where a signal is going, and a leak,
+        /// a drift or a slow saturation take hours — over fifteen minutes what a trend test actually measures
+        /// is fluctuation.</para>
+        ///
+        /// <para>Measured on the cluster lab, on replicas with nothing wrong with them: latency trends of
+        /// <b>−40%</b> and <b>−75% over fifteen minutes</b>, which is not degradation but a pod recovering
+        /// from a momentary load spike. No floor removes those, because the movement is real and large; only
+        /// a window long enough for it to be the noise it is.</para>
+        ///
+        /// <para>So the caller supplies the <b>long</b> window — hours — and this trims the tail of it for the
+        /// two families that want the present. Left at the default with a fifteen-minute window supplied,
+        /// nothing changes for anyone.</para>
+        /// </summary>
+        public TimeSpan RecentWindow { get; init; } = TimeSpan.FromMinutes(15);
+
         /// <summary>Thresholds the absolute rules run with; empty disables that family.</summary>
         public IReadOnlyList<RuleProfile> Rules { get; init; } = DefaultRules;
 

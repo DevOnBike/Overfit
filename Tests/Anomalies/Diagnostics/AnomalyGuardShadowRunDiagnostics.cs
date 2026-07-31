@@ -44,7 +44,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
             _output = output;
         }
 
-        [Fact]
+        [LongFact]
         public async Task RunsInShadowAgainstTheLab()
         {
             var prometheus = Environment.GetEnvironmentVariable("OVERFIT_LAB_PROMETHEUS")

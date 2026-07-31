@@ -15,7 +15,7 @@ namespace DevOnBike.Overfit.Tests.Diagnostics
     ///
     /// <para><b>Why a test and not a console app.</b> It needs the solution's HTTP shapes, it belongs next to
     /// the code it exercises, and xUnit already provides the runner, the output plumbing and the skip
-    /// mechanism. It is <c>[Fact]</c>, so <c>dotnet test</c> never runs it by accident — flip it to
+    /// mechanism. It is <c>[LongFact]</c>, so <c>dotnet test</c> never runs it by accident — flip it to
     /// <c>[Fact]</c> temporarily, exactly as with the other diagnostics here.</para>
     ///
     /// <para><b>Why the skew knob is the point.</b> Even load across identical replicas produces a peer group

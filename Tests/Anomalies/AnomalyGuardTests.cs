@@ -102,6 +102,55 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             Assert.Equal((int)MetricIndex.Count - 2, result.BlindMetrics);
         }
 
+        /// <summary>
+        /// <b>The peer family must not see past its own window.</b> A fault that ended before the recent
+        /// window began is history, and reporting it as current is worse than missing it: an operator sent to
+        /// look finds a healthy pod, and the next finding gets less attention than it deserves.
+        ///
+        /// <para>Before the split this could not even be expressed — one window served both families, so
+        /// lengthening it for the trend detector would have dragged hours of stale evidence into every peer
+        /// comparison.</para>
+        /// </summary>
+        [Fact]
+        public void AFaultThatEndedBeforeTheRecentWindow_IsNotAPeerFinding()
+        {
+            // An hour of history at a 15-second scrape; the guard's recent window is the last 15 minutes.
+            var window = LongWindow(pods: 4, length: 240, degraded: 3, from: 0, until: 170);
+
+            var result = Guard(new CapturingSink()).RunCycle(window, T0);
+
+            Assert.Equal(0, result.Opened);
+        }
+
+        /// <summary>The other half: the same fault inside the recent window must still be found.</summary>
+        [Fact]
+        public void AFaultInsideTheRecentWindow_IsStillAPeerFinding()
+        {
+            var window = LongWindow(pods: 4, length: 240, degraded: 3, from: 170, until: 240);
+
+            var result = Guard(new CapturingSink()).RunCycle(window, T0);
+
+            Assert.Equal(1, result.Opened);
+        }
+
+        /// <summary>
+        /// And the recent window is measured in time, not in samples: the same fifteen minutes must be the
+        /// same fifteen minutes at any scrape interval, or the split silently means something different on
+        /// every cluster.
+        /// </summary>
+        [Fact]
+        public void TheRecentWindowIsMeasuredInTime_NotInSamples()
+        {
+            // 30-second scrapes, so 15 minutes is 30 samples rather than 60. A fault confined to the last
+            // 20 samples — 10 minutes — is inside the recent window either way.
+            var window = LongWindow(
+                pods: 4, length: 120, degraded: 3, from: 100, until: 120, stepSeconds: 30);
+
+            var result = Guard(new CapturingSink()).RunCycle(window, T0);
+
+            Assert.Equal(1, result.Opened);
+        }
+
         /// <summary>A problem that persists is opened once and then updated — the deployability property.</summary>
         [Fact]
         public void APersistingProblemOpensOnceAcrossCycles()
@@ -233,6 +282,41 @@ namespace DevOnBike.Overfit.Tests.Anomalies
 
                 for (var i = 0; i < length; i++)
                 {
+                    latency[i] = (slow ? 3000.0 : 950.0) * (1.0 + ((rng.NextDouble() - 0.5) * 0.2));
+                    rps[i] = 5.0 * (1.0 + ((rng.NextDouble() - 0.5) * 0.1));
+                }
+            }
+
+            return window;
+        }
+
+        /// <summary>
+        /// A window longer than the guard's recent window, with one pod degraded over a chosen stretch of it.
+        /// The point is to place a fault inside or outside the last fifteen minutes and see which family
+        /// notices.
+        /// </summary>
+        private static MetricWindow LongWindow(
+            int pods, int length, int degraded, int from, int until, int stepSeconds = 15)
+        {
+            var names = new List<string>(pods);
+
+            for (var p = 0; p < pods; p++)
+            {
+                names.Add($"pod-{p}");
+            }
+
+            var window = new MetricWindow(names, length, T0, TimeSpan.FromSeconds(stepSeconds));
+            var rng = new Random(20260731);
+
+            for (var p = 0; p < pods; p++)
+            {
+                var latency = window.Series(p, MetricIndex.LatencyP95Ms);
+                var rps = window.Series(p, MetricIndex.RequestsPerSecond);
+
+                for (var i = 0; i < length; i++)
+                {
+                    var slow = p == degraded && i >= from && i < until;
+
                     latency[i] = (slow ? 3000.0 : 950.0) * (1.0 + ((rng.NextDouble() - 0.5) * 0.2));
                     rps[i] = 5.0 * (1.0 + ((rng.NextDouble() - 0.5) * 0.1));
                 }
