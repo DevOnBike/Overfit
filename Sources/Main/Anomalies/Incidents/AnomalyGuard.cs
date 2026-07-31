@@ -357,8 +357,19 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
         {
             var kind = PeerSignalCatalog.Classify(metric);
             var podCount = window.Pods.Count;
-            var peers = new List<PeerSeries>(podCount);
             var subjects = new IncidentSubject[podCount];
+
+            for (var pod = 0; pod < podCount; pod++)
+            {
+                subjects[pod] = Subject(window.Pods[pod]);
+            }
+
+            var options = _options.Peer with
+            {
+                MinAbsoluteGap = AnomalyGuardOptions.FloorFor(_options.MinAbsoluteGap, metric)
+            };
+
+            var peers = new List<PeerSeries>(podCount);
 
             for (var pod = 0; pod < podCount; pod++)
             {
@@ -368,13 +379,7 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
 
                 peers.Add(new PeerSeries(
                     window.Pods[pod], Tail(window.Series(pod, metric), recent).ToArray(), work));
-                subjects[pod] = Subject(window.Pods[pod]);
             }
-
-            var options = _options.Peer with
-            {
-                MinAbsoluteGap = AnomalyGuardOptions.FloorFor(_options.MinAbsoluteGap, metric)
-            };
 
             var findings = new PeerOutlierFinding[podCount];
             var result = _peer.Detect(peers, kind, options, findings);
