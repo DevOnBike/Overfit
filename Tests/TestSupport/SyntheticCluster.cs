@@ -3,7 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using DevOnBike.Overfit.Anomalies.Monitoring.Contracts;
+using DevOnBike.Overfit.Anomalies.Contracts;
 
 namespace DevOnBike.Overfit.Tests.TestSupport
 {
@@ -84,12 +84,33 @@ namespace DevOnBike.Overfit.Tests.TestSupport
         /// </summary>
         private const double WarmupRatePerSample = 0.154;
 
+        /// <summary>
+        /// Scrapes between one working-set reclaim and the next.
+        ///
+        /// <para><b>Searchable, and the reason is the retracement column.</b> This was pinned at 57 — one
+        /// cycle per detector window — which made every generated window a complete sawtooth that gave back
+        /// everything it gained. The lab does the opposite: three of its four replicas retraced <b>0.0%</b>
+        /// over a twelve-minute window and the fourth 17.5%, so roughly one window in four contains a reclaim
+        /// and the rest see nothing but climb.</para>
+        ///
+        /// <para>Range and interquartile spread could not see that difference — both are computed on sorted
+        /// values, so a monotone climb and a sawtooth of equal amplitude score identically, and the generator
+        /// sat within a tenth of a percent of the lab on both while producing the opposite signal in time.
+        /// The consequence was not cosmetic: Mann-Kendall keys on monotonicity, so a generator that resets
+        /// every window cannot be used to measure trend false positives at all.</para>
+        /// </summary>
+        internal const double MemoryCycleSamples = 92.0;
+
         // ---------------------------------------------------------------------------------------------
-        // Scatter, calibrated against the recorded lab window rather than chosen
-        // (SyntheticClusterRealismDiagnostics compares the two, healthy replicas only, matched window
-        // length). Each figure is the full width of a uniform draw, so the interquartile spread it produces
-        // is roughly half of it — and the interquartile spread is the one that was compared, because
-        // (max - min) over a window is decided by its two most extreme scrapes.
+        // Scatter, FITTED to the recorded lab window by SyntheticClusterCalibrationSearch rather than chosen
+        // or hand-tuned. The values below are that search's output: re-run it after any change to the fixture
+        // or to the structure around them, because editing one by hand silently un-fits the rest.
+        //
+        // Comparison is against healthy replicas only, over a matched window length
+        // (SyntheticClusterRealismDiagnostics prints the table). Each figure is the full width of a uniform
+        // draw, so the interquartile spread it produces is roughly half of it — and the interquartile spread
+        // is what the objective weighs, because (max - min) over a window is decided by its two most extreme
+        // scrapes.
         // ---------------------------------------------------------------------------------------------
 
         /// <summary>
@@ -107,10 +128,10 @@ namespace DevOnBike.Overfit.Tests.TestSupport
         /// is not a typo — <c>histogram_quantile</c> interpolates inside a bucket, and the top buckets are
         /// wide, so the tail is quantised.</para>
         /// </summary>
-        private const double LatencyScatterP50 = 0.30;
+        internal const double LatencyScatterP50 = 0.2804;
 
         /// <inheritdoc cref="LatencyScatterP50"/>
-        private const double LatencyScatterP95 = 1.15;
+        internal const double LatencyScatterP95 = 1.15;
 
         /// <inheritdoc cref="LatencyScatterP50"/>
         /// <remarks>
@@ -118,20 +139,20 @@ namespace DevOnBike.Overfit.Tests.TestSupport
         /// its lower tail — p95 scatters harder, so <c>max(p99, p95)</c> bites often enough to compress p99's
         /// interquartile spread well below the width of its own draw.
         /// </remarks>
-        private const double LatencyScatterP99 = 0.78;
+        internal const double LatencyScatterP99 = 0.6783;
 
         /// <summary>
         /// Scatter of the per-pod request rate. Measured interquartile spread on the lab is 13.6% — a
         /// <c>rate()</c> over a two-minute window, on one replica behind a load balancer that redistributes
         /// continuously, is not a smooth number.
         /// </summary>
-        private const double TrafficScatter = 0.30;
+        internal const double TrafficScatter = 0.2643;
 
         /// <summary>
         /// Scatter of CPU beyond what traffic already explains. The affine cost model carries the load-driven
         /// part; this is everything else the process does — background work, timers, collections.
         /// </summary>
-        private const double CpuScatter = 0.34;
+        internal const double CpuScatter = 0.34;
 
         /// <summary>
         /// How often a scrape lands on a burst, and by how much it lifts the value.
@@ -144,14 +165,28 @@ namespace DevOnBike.Overfit.Tests.TestSupport
         ///
         /// <para>Rare enough to sit outside the middle half of a window — so it stretches the range and leaves
         /// the interquartile spread alone, which is the shape being reproduced.</para>
+        ///
+        /// <para><b>Fixed, not searched, because it was measured to be unidentifiable.</b> Ten restarts of the
+        /// calibration search landed on values spanning <b>70% of its allowed range</b> — 0.082 to 0.291 —
+        /// with the near-optimal ones alone still spread fourfold. The reason is structural rather than a
+        /// shortcoming of the search: over a window of a few dozen scrapes, once a burst is near-certain to
+        /// occur at all, the range is set by how far it lifts the value and not by how often it happens; and
+        /// below a quarter of the samples it never reaches the interquartile spread. Everything between those
+        /// two points is a plateau, so probability and magnitude are only identifiable as a product.</para>
+        ///
+        /// <para>Leaving both free let the fitter hand back a precise-looking number carrying no information.
+        /// The magnitude is what the data can pin, so the burst factors stay searchable and this stays put —
+        /// one scrape in sixteen, about one every four minutes at a 15 s scrape, which is what a stall from a
+        /// collection or a scheduling hiccup plausibly looks like. Collapsing it cost <b>nothing</b>: the
+        /// search reaches the same score without it.</para>
         /// </summary>
-        private const double BurstProbability = 0.05;
+        private const double BurstProbability = 0.0631;
 
         /// <inheritdoc cref="BurstProbability"/>
-        private const double TrafficBurstFactor = 1.30;
+        internal const double TrafficBurstFactor = 1.339;
 
         /// <inheritdoc cref="BurstProbability"/>
-        private const double CpuBurstFactor = 1.22;
+        internal const double CpuBurstFactor = 1.305;
 
         /// <summary>
         /// Per-pod latency personality, as the full width of a uniform draw.
@@ -166,14 +201,55 @@ namespace DevOnBike.Overfit.Tests.TestSupport
         private const double LatencyOffsetWidth = 0.14;
 
         /// <summary>
+        /// How long a queueing episode adds to every request in that scrape, as a fraction of the latency
+        /// level. Shares <see cref="BurstProbability"/> with the other bursts.
+        ///
+        /// <para><b>Additive, not multiplicative, and the search is what proved this had to exist.</b> The
+        /// lab's p50 has a range 3.1x its interquartile spread — a fat tail — and a uniform draw gives
+        /// exactly 2.0. With only its own width to move, the fitter could buy p50's range only by inflating
+        /// its interquartile spread from 14% to 20%, wrecking the statistic the peer detector actually reads.
+        /// A missing degree of freedom shows up as a bad trade, not as a bad number.</para>
+        ///
+        /// <para>The reason it must be additive is arithmetic, not taste. A stall adds the same wait to every
+        /// request, so it moves each quantile by the same absolute amount — which is a large <i>relative</i>
+        /// move for the median and a small one for the tail, because they sit at 0.35x and 2.4x of the same
+        /// level. One term therefore fattens p50 by roughly seven times as much as p99, which is the shape
+        /// the lab shows. A multiplicative burst would lift all three equally and overshoot p95 and p99,
+        /// which already match.</para>
+        /// </summary>
+        internal const double LatencyBurstDelay = 0.0777;
+
+        /// <summary>
+        /// Height of the working-set sawtooth: how far allocation carries it above the settled floor before
+        /// gen2 takes it back.
+        ///
+        /// <para><b>A parameter, and it is worth recording that it was first mistaken for a missing
+        /// mechanism.</b> Memory was the one channel the fitter could not reach — 2.5% interquartile spread
+        /// against the lab's 3.7%, 5.7% range against 7.8% — and the conclusion drawn was that some mechanism
+        /// was absent, as had genuinely been the case for p50 and for the heap staircase.</para>
+        ///
+        /// <para>The ratio said otherwise. A uniform sawtooth has a range of exactly twice its interquartile
+        /// spread; the generator sat at 2.28 and the lab at 2.11. <b>Both are uniform sawtooths and only the
+        /// amplitude differed</b> — the shape was already right. That is the diagnostic worth keeping: the
+        /// range-to-interquartile ratio tells you whether the mechanism is right, and the level tells you
+        /// whether the number is. A missing mechanism shows up as a wrong ratio, which is what p50's 3.1
+        /// against a uniform 2.0 was, and what CPU's 3.3 was.</para>
+        ///
+        /// <para>The value here was hardcoded at 0.06 with no source; it is now fitted like everything else
+        /// around it.</para>
+        /// </summary>
+        internal const double MemorySawtoothAmplitude = 0.1491;
+
+        /// <summary>
         /// How far gen2 rises above its settled level once a promotion has happened, before the next
         /// collection takes it back. Sized against the lab's 11.6% within-pod range on a heap whose
         /// interquartile spread is exactly zero — a step, held.
         /// </summary>
-        private const double HeapPromotionStep = 0.12;
+        internal const double HeapPromotionStep = 0.1155;
 
         private readonly double[][] _series;
         private readonly double _diurnalPhase;
+        private readonly SyntheticClusterShape _shape;
 
         /// <param name="pods">Replicas in the deployment.</param>
         /// <param name="hours">Wall-clock hours to generate.</param>
@@ -185,13 +261,20 @@ namespace DevOnBike.Overfit.Tests.TestSupport
         /// tell which one a false-positive count comes from is to turn one of them off and measure again.
         /// Zero disables them; the default is a quiet-cluster rate, not a broken-cluster one.
         /// </param>
+        /// <param name="shape">
+        /// Scatter parameters. Omit for <see cref="SyntheticClusterShape.Measured"/>, the values calibrated
+        /// against the recorded lab window; supply one only to search them (docs/autoresearch-program.md).
+        /// </param>
         public SyntheticCluster(
             int pods,
             double hours,
             double scrapeSeconds = 15.0,
             int seed = 20260729,
-            double restartsPerPodPerDay = 1.0)
+            double restartsPerPodPerDay = 1.0,
+            SyntheticClusterShape? shape = null)
         {
+            _shape = shape ?? SyntheticClusterShape.Measured;
+
             ArgumentOutOfRangeException.ThrowIfLessThan(pods, 3);
             ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(hours, 0.0);
             ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(scrapeSeconds, 0.0);
@@ -308,17 +391,23 @@ namespace DevOnBike.Overfit.Tests.TestSupport
                 // Every draw below is unconditional, for the reason spelled out at restartDraw: a draw made
                 // inside an `if` shifts the stream for everything after it, so an ablated arm stops being the
                 // same cluster minus one feature.
-                var trafficJitter = Scatter(rng, TrafficScatter);
-                var trafficBurst = rng.NextDouble() < BurstProbability ? TrafficBurstFactor : 1.0;
+                var trafficJitter = Scatter(rng, _shape.TrafficScatter);
+                var trafficBurst = rng.NextDouble() < BurstProbability ? _shape.TrafficBurstFactor : 1.0;
                 var traffic = 40.0 * trafficShare * diurnal * trafficJitter * trafficBurst;
 
                 // Queueing: latency rises with load, sub-linearly. Each quantile then scatters on its own —
                 // see LatencyScatterP50 for why one shared series was wrong in kind, not in degree.
                 var latencyLevel = 700.0 * latencyOffset * (1.0 + (0.35 * diurnal));
 
-                var p50 = latencyLevel * 0.35 * Scatter(rng, LatencyScatterP50);
-                var p95 = latencyLevel * Scatter(rng, LatencyScatterP95);
-                var p99 = latencyLevel * 2.4 * Scatter(rng, LatencyScatterP99);
+                // A queueing episode: something stalls for a moment and every request in that scrape waits
+                // behind it. ADDITIVE, and that is the whole point — see LatencyBurstDelay.
+                var queueing = rng.NextDouble() < BurstProbability
+                    ? latencyLevel * _shape.LatencyBurstDelay
+                    : 0.0;
+
+                var p50 = (latencyLevel * 0.35 * Scatter(rng, _shape.LatencyScatterP50)) + queueing;
+                var p95 = (latencyLevel * Scatter(rng, _shape.LatencyScatterP95)) + queueing;
+                var p99 = (latencyLevel * 2.4 * Scatter(rng, _shape.LatencyScatterP99)) + queueing;
 
                 // Rare scrape artefact. The reason every estimator here is rank-based rather than
                 // least-squares. It hits the whole histogram at once, because the slow requests behind it are
@@ -353,10 +442,11 @@ namespace DevOnBike.Overfit.Tests.TestSupport
                 floor += (memoryBaseline - floor) * WarmupRatePerSample;
 
                 // Allocation between collections, riding on top of whatever the floor currently is.
-                memory += 1.2e6 * (1.0 + ((rng.NextDouble() - 0.5) * 0.4));
+                memory += floor * _shape.MemorySawtoothAmplitude / _shape.MemoryCycleSamples
+                          * (1.0 + ((rng.NextDouble() - 0.5) * 0.4));
 
                 // Drawn before the branch that uses it, so the stream does not depend on whether gen2 ran.
-                if (memory > floor * 1.06)
+                if (memory > floor * (1.0 + _shape.MemorySawtoothAmplitude))
                 {
                     memory = floor;
                 }
@@ -376,7 +466,9 @@ namespace DevOnBike.Overfit.Tests.TestSupport
                 // interquartile spread is zero, meaning the middle half of the window is one number. A
                 // threshold at the midpoint splits the window evenly instead and turns the step into the
                 // interquartile spread — the flatness is the measurement, not the step.
-                var promoted = (memory - floor) > (floor * 0.05) ? HeapPromotionStep : 0.0;
+                var promoted = (memory - floor) > (floor * _shape.MemorySawtoothAmplitude * (5.0 / 6.0))
+                    ? _shape.HeapPromotionStep
+                    : 0.0;
 
                 Set(pod, MetricIndex.GcGen2HeapBytes, t, floor * heapShare * (1.0 + promoted));
 
@@ -387,10 +479,10 @@ namespace DevOnBike.Overfit.Tests.TestSupport
 
                 // Affine, not proportional: a fixed floor plus a marginal cost per request. This is the
                 // measured model, and it is why unit cost carries a residue that grows with imbalance.
-                var cpuBurst = rng.NextDouble() < BurstProbability ? CpuBurstFactor : 1.0;
+                var cpuBurst = rng.NextDouble() < BurstProbability ? _shape.CpuBurstFactor : 1.0;
 
                 Set(pod, MetricIndex.CpuUsageRatio, t,
-                    cpuOffset * (0.45 + (0.040 * traffic)) * Scatter(rng, CpuScatter) * cpuBurst);
+                    cpuOffset * (0.45 + (0.040 * traffic)) * Scatter(rng, _shape.CpuScatter) * cpuBurst);
 
                 Set(pod, MetricIndex.MemoryWorkingSetBytes, t, memory);
                 Set(pod, MetricIndex.GcPauseRatio, t, 0.004 * diurnal * (1.0 + ((rng.NextDouble() - 0.5) * 0.6)));

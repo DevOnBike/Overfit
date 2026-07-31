@@ -15,7 +15,7 @@ namespace DevOnBike.Overfit.Tests.Diagnostics
     ///
     /// <para><b>Why a test and not a console app.</b> It needs the solution's HTTP shapes, it belongs next to
     /// the code it exercises, and xUnit already provides the runner, the output plumbing and the skip
-    /// mechanism. It is <c>[LongFact]</c>, so <c>dotnet test</c> never runs it by accident — flip it to
+    /// mechanism. It is <c>[Fact]</c>, so <c>dotnet test</c> never runs it by accident — flip it to
     /// <c>[Fact]</c> temporarily, exactly as with the other diagnostics here.</para>
     ///
     /// <para><b>Why the skew knob is the point.</b> Even load across identical replicas produces a peer group
@@ -85,26 +85,67 @@ namespace DevOnBike.Overfit.Tests.Diagnostics
                 + (Math.Abs(skew - 1.0) < 0.01 ? "  (even — nothing for a peer detector to find)" : ""));
             _out.WriteLine("");
 
+            const int ProbeAttempts = 5;
+            var probeRetryDelay = TimeSpan.FromSeconds(3);
+
             using var client = new HttpClient { Timeout = TimeSpan.FromMinutes(2) };
 
-            var reachable = new List<string>();
+            // The probe reports; it does NOT decide. Every endpoint given is driven.
+            //
+            // <b>Excluding an endpoint on a failed probe cost four lab runs and this is the fix.</b> The probe
+            // was a one-shot /health at start-up, and a kubectl port-forward establishes its tunnel lazily and
+            // refuses connections often enough that a healthy pod fails it by chance. Retrying five times did
+            // not stop it either — the last run dropped the degraded replica again, minutes before that same
+            // pod answered /health in 6 ms and a chat request in 562 ms.
+            //
+            // The damage is out of all proportion to the cause. A dropped endpoint is not a smaller load: it
+            // is an IDLE REPLICA INSIDE A PEER GROUP for the whole run, which every detector downstream reads
+            // as a fabricated outlier and a starved peer. When the one dropped is the deliberately degraded
+            // replica, the experiment is asking whether the guard can find a fault on a pod that received no
+            // traffic at all — and "it found nothing" then means nothing.
+            //
+            // A transient failure must therefore cost a few failed requests, not a peer. Genuinely dead
+            // endpoints are caught where they should be: by per-pod request rates read from Prometheus before
+            // anything is measured.
+            var reachable = new List<string>(endpoints);
+            var unproven = new List<string>();
+
             foreach (var endpoint in endpoints)
             {
-                try
+                var answered = false;
+
+                for (var attempt = 1; attempt <= ProbeAttempts && !answered; attempt++)
                 {
-                    using var probe = await client.GetAsync($"{endpoint}/health");
-                    if (probe.IsSuccessStatusCode)
+                    try
                     {
-                        reachable.Add(endpoint);
-                        continue;
+                        using var probe = await client.GetAsync($"{endpoint}/health");
+                        answered = probe.IsSuccessStatusCode;
+                    }
+                    catch (Exception ex)
+                    {
+                        _out.WriteLine($"  {endpoint}: {ex.GetType().Name} (attempt {attempt})");
                     }
 
-                    _out.WriteLine($"  {endpoint}: /health returned {(int)probe.StatusCode}");
+                    if (!answered && attempt < ProbeAttempts)
+                    {
+                        await Task.Delay(probeRetryDelay);
+                    }
                 }
-                catch (Exception ex)
+
+                if (!answered)
                 {
-                    _out.WriteLine($"  {endpoint}: unreachable ({ex.GetType().Name})");
+                    unproven.Add(endpoint);
                 }
+            }
+
+            if (unproven.Count > 0)
+            {
+                _out.WriteLine("");
+                _out.WriteLine($"  {unproven.Count} endpoint(s) never answered /health and are being driven "
+                               + "anyway: " + string.Join(", ", unproven));
+                _out.WriteLine("  If they are genuinely down their requests will fail and show in the table "
+                               + "below, which is recoverable. Dropping them would not have been.");
+                _out.WriteLine("");
             }
 
             if (reachable.Count == 0)

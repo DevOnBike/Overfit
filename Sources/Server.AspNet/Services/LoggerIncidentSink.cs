@@ -4,7 +4,7 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using DevOnBike.Overfit.Anomalies.Incidents.Abstractions;
-using DevOnBike.Overfit.Anomalies.Incidents.Contracts;
+using DevOnBike.Overfit.Anomalies.Contracts;
 using Microsoft.Extensions.Logging;
 
 namespace DevOnBike.Overfit.Server.AspNet.Services

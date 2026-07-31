@@ -5,7 +5,7 @@
 
 using BenchmarkDotNet.Attributes;
 using DevOnBike.Overfit.Anomalies.Incidents;
-using DevOnBike.Overfit.Anomalies.Incidents.Contracts;
+using DevOnBike.Overfit.Anomalies.Contracts;
 
 namespace Benchmarks
 {

@@ -4,7 +4,7 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using System.Globalization;
-using DevOnBike.Overfit.Anomalies.Monitoring.Contracts;
+using DevOnBike.Overfit.Anomalies.Contracts;
 
 namespace DevOnBike.Overfit.Tests.TestSupport
 {

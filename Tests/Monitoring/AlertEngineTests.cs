@@ -5,7 +5,7 @@
 
 using DevOnBike.Overfit.Anomalies.Alerting;
 using DevOnBike.Overfit.Anomalies.Alerting.Abstractions;
-using DevOnBike.Overfit.Anomalies.Alerting.Contracts;
+using DevOnBike.Overfit.Anomalies.Contracts;
 
 namespace DevOnBike.Overfit.Tests.Monitoring
 {

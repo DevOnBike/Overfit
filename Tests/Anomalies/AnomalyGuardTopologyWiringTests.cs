@@ -5,9 +5,8 @@
 
 using DevOnBike.Overfit.Anomalies.Incidents;
 using DevOnBike.Overfit.Anomalies.Incidents.Abstractions;
-using DevOnBike.Overfit.Anomalies.Incidents.Contracts;
+using DevOnBike.Overfit.Anomalies.Contracts;
 using DevOnBike.Overfit.Anomalies.Monitoring.Abstractions;
-using DevOnBike.Overfit.Anomalies.Monitoring.Contracts;
 
 namespace DevOnBike.Overfit.Tests.Anomalies
 {

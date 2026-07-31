@@ -5,7 +5,7 @@
 
 using System.Net;
 using DevOnBike.Overfit.Anomalies.Monitoring;
-using DevOnBike.Overfit.Anomalies.Monitoring.Contracts;
+using DevOnBike.Overfit.Anomalies.Contracts;
 
 namespace DevOnBike.Overfit.Tests.Anomalies
 {

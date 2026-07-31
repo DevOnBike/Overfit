@@ -5,11 +5,10 @@
 
 using DevOnBike.Overfit.Anomalies.Adaptive;
 using DevOnBike.Overfit.Anomalies.Alerting.Abstractions;
-using DevOnBike.Overfit.Anomalies.Alerting.Contracts;
+using DevOnBike.Overfit.Anomalies.Contracts;
 using DevOnBike.Overfit.Anomalies.Gpt;
 using DevOnBike.Overfit.Anomalies.Monitoring;
 using DevOnBike.Overfit.Anomalies.Monitoring.Abstractions;
-using DevOnBike.Overfit.Anomalies.Monitoring.Contracts;
 using DevOnBike.Overfit.DeepLearning;
 using GptTrainingConfig = DevOnBike.Overfit.Anomalies.Training.GptTrainingConfig;
 

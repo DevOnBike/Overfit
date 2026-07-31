@@ -4,7 +4,7 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using DevOnBike.Overfit.Anomalies.Incidents.Abstractions;
-using DevOnBike.Overfit.Anomalies.Incidents.Contracts;
+using DevOnBike.Overfit.Anomalies.Contracts;
 using DevOnBike.Overfit.Tensors;
 
 namespace DevOnBike.Overfit.Anomalies.Incidents
@@ -87,7 +87,11 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
                     End: incident.End,
                     Subjects: incident.AffectedSubjects,
                     Signals: incident.DistinctSignals,
-                    Message: incident.Summary);
+                    Message: incident.Summary,
+
+                    // Only on the incident row. A finding row is one line of evidence and repeating the whole
+                    // explanation on each would bloat every log by the square of the group size.
+                    Narrative: IncidentNarrative.Describe(incident));
 
                 written++;
 

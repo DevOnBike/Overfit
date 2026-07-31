@@ -5,7 +5,7 @@
 
 using System.Globalization;
 using System.Text;
-using DevOnBike.Overfit.Anomalies.Incidents.Contracts;
+using DevOnBike.Overfit.Anomalies.Contracts;
 
 namespace DevOnBike.Overfit.Anomalies.Incidents
 {
