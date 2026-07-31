@@ -289,6 +289,47 @@ temporary counter in the dispatcher) before believing any kernel A/B.
 Never ship, claim, or commit a perf "win" you have not measured on a stable box — and prefer
 measuring over reasoning even when the reasoning feels airtight.
 
+## Automated search instead of hand-tuning (`docs/autoresearch-program.md`)
+
+When a question is **"what value"** rather than **"what mechanism"**, do not hand-tune it. Write the objective
+and let a search run it. The worked example is `SyntheticClusterCalibrationSearch`, which fits the synthetic
+generator to the recorded lab window: six hand iterations over an afternoon were replaced by 281 evaluations
+in 17 seconds, and the fitted shape scored **0.064 against 0.130 for the hand-tuned one**.
+
+**Use it when all three hold**, and it is worth stating the hypothesis out loud first — the search settles it,
+it does not invent it:
+
+1. The objective is **cheap and deterministic** (sub-second, in-process, seed-averaged).
+2. The objective is **fair**: it cannot be satisfied by a change that improves nothing real. This is the hard
+   part and it is what `val_bpb` is for in the original. Between-pod spread was deliberately excluded from
+   the calibration objective because on the lab side it is a range over three draws — the same unchanged
+   generator moved it from 12% to 28% when an unrelated edit shifted the random stream, so a search scored on
+   it would chase a coin flip and report convergence.
+3. The **reference is gated first**. `LabWindowValidator` rejects a contaminated recording, and
+   `LabWindowFixtureTests` runs it on every `dotnet test` with one reproduction of each real failure so the
+   validator cannot be vacuous. Fitting to a broken reference is worse than not running: fast, repeatable,
+   and wrong.
+
+**Do not use it for benchmark-driven questions.** Everything in the section above about thermal drift, wrong
+job types, canaries and ABAB interleaving applies with more force to an automated loop, because it will
+happily run a hundred iterations against a drifting box and hand back a confident wrong answer. A search over
+kernels needs the canary *inside* the harness — rejecting any sample where an untouched path moved — before
+it is worth starting.
+
+**A search cannot invent a mechanism, only fit one.** The generator's three biggest corrections came from
+reading a table and asking why a column was arithmetically impossible: latency quantiles were one series
+scaled by a constant, so they could not have different relative scatter; a uniform draw has a range of
+exactly twice its interquartile spread while the lab's CPU sits at 3.3x; gen2 heap is a staircase with an
+interquartile spread of exactly zero. None is reachable by moving a number. **A missing degree of freedom
+shows up as a bad trade, not as a bad number** — the fitter bought p50's range by wrecking its interquartile
+spread, which is what revealed that an additive queueing term had to exist.
+
+**Measured, so do not re-litigate it:** the objective's landscape is rugged (10 random restarts spread 0.064
+to 0.115) but a good starting point beat all of them — no restart improved on the shape reached by descending
+from structurally-reasoned values. A population-based search is therefore not indicated here; initialisation
+dominates. `BurstProbability` came out **unidentifiable** (70% of its allowed range across the optima),
+because only its product with the burst factors affects the data.
+
 ## Test discipline
 
 Read `Tests/README.md` and `Tests/LanguageModels/README.md` before adding
