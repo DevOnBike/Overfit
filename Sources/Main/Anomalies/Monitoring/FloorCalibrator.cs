@@ -3,6 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Text;
 using DevOnBike.Overfit.Anomalies.Contracts;
 using DevOnBike.Overfit.Statistics;
 
@@ -36,9 +37,15 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
         /// <summary>Headroom over the largest healthy observation, for what a week did not happen to show.</summary>
         private const double Margin = 1.25;
 
-        private readonly BoundedSamples[] _peerGaps;
-        private readonly BoundedSamples[] _trendChanges;
-        private readonly BoundedSamples[] _magnitudes;
+        private BoundedSamples[] _peerGaps;
+        private BoundedSamples[] _trendChanges;
+        private BoundedSamples[] _magnitudes;
+        /// <summary>
+        /// The last computed proposal, or null when an observation has invalidated it. Not thread-safe, like
+        /// the rest of this type: one guard, one cycle at a time.
+        /// </summary>
+        private FloorProposal[]? _cached;
+
         private readonly TrendDetector _trend = new();
         private readonly TrendOptions _trendOptions;
 
@@ -70,6 +77,10 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
         public void Observe(MetricWindow window)
         {
             ArgumentNullException.ThrowIfNull(window);
+
+            // Invalidated before the early returns as well: a window that contributes nothing still leaves
+            // the cache correct, and reasoning about which returns are "safe" is how a stale cache is born.
+            _cached = null;
 
             var pods = window.Pods.Count;
 
@@ -138,8 +149,96 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
             }
         }
 
-        /// <summary>The proposal so far, one entry per metric, indexed by <see cref="MetricIndex"/>.</summary>
+        /// <summary>
+        /// Serialises everything learned so far, so a restart does not start from nothing.
+        ///
+        /// <para><b>This matters more than it looks.</b> Without it, every restart of the guard leaves it with
+        /// no floors for as long as it takes to relearn them — and the state it is in during that hour is
+        /// exactly the one measured at 209 false incidents a day. A rollout of the monitoring tool would
+        /// reliably produce a burst of noise from the monitoring tool.</para>
+        /// </summary>
+        public string Write()
+        {
+            var text = new StringBuilder();
+
+            for (var m = 0; m < (int)MetricIndex.Count; m++)
+            {
+                text.Append((MetricIndex)m).Append('\t')
+                    .Append(_peerGaps[m].Write()).Append('\t')
+                    .Append(_trendChanges[m].Write()).Append('\t')
+                    .Append(_magnitudes[m].Write()).Append('\n');
+            }
+
+            return text.ToString();
+        }
+
+        /// <summary>
+        /// Restores a calibrator. Anything unreadable yields an empty one: a guard that refuses to start
+        /// because its own scratch file is malformed has turned a soft degradation into an outage.
+        /// </summary>
+        public static FloorCalibrator Read(string? state, TrendOptions? trendOptions = null)
+        {
+            var calibrator = new FloorCalibrator(trendOptions);
+
+            if (string.IsNullOrWhiteSpace(state))
+            {
+                return calibrator;
+            }
+
+            var lines = state.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+
+            for (var i = 0; i < lines.Length; i++)
+            {
+                var parts = lines[i].Split('\t');
+
+                if (parts.Length != 4 || !Enum.TryParse<MetricIndex>(parts[0], out var metric)
+                    || metric == MetricIndex.Count)
+                {
+                    continue;
+                }
+
+                var m = (int)metric;
+
+                calibrator._cached = null;
+                calibrator._peerGaps[m] = BoundedSamples.Read(parts[1]);
+                calibrator._trendChanges[m] = BoundedSamples.Read(parts[2]);
+                calibrator._magnitudes[m] = BoundedSamples.Read(parts[3]);
+            }
+
+            return calibrator;
+        }
+
+        /// <summary>
+        /// The proposal so far, one entry per metric, indexed by <see cref="MetricIndex"/>.
+        ///
+        /// <para><b>Cached between observations, and that is a fix rather than an optimisation.</b> Computing
+        /// it sorts a copy of every retained sample — thirteen signals times three statistics, each up to a
+        /// thousand values — and <c>ConfiguredFloorSource</c> asks for it once per signal per gate, which is
+        /// thirty-nine times a cycle for an answer that cannot change within one. Measured with
+        /// <c>MemoryDiagnoser</c> on <c>AnomalyGuardScaleBenchmark</c>: <b>7.41 MB allocated per cycle at four
+        /// replicas</b>, almost all of it this, and almost none of it varying with pod count — which is what
+        /// gave it away, since a cost that ignores the size of the cluster is not doing work about the
+        /// cluster.</para>
+        ///
+        /// <para>A copy is returned rather than the cached array itself. Handing out the internal instance
+        /// would make a caller's stray write silently rewrite the guard's floors, and the copy costs a
+        /// thirteen-element array against the sort it replaces.</para>
+        /// </summary>
         public FloorProposal[] Propose()
+        {
+            if (_cached is null)
+            {
+                _cached = Compute();
+            }
+
+            var copy = new FloorProposal[_cached.Length];
+
+            Array.Copy(_cached, copy, _cached.Length);
+
+            return copy;
+        }
+
+        private FloorProposal[] Compute()
         {
             var proposals = new FloorProposal[(int)MetricIndex.Count];
 

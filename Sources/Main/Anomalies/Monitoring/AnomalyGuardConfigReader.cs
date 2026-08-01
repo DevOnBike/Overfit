@@ -3,6 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Globalization;
 using System.Text;
 using DevOnBike.Overfit.Anomalies.Contracts;
 using DevOnBike.Overfit.Statistics;
@@ -145,6 +146,60 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
             problems = found;
 
             return (gap, trend);
+        }
+
+        /// <summary>
+        /// The declared maintenance windows, with anything unparseable reported and dropped.
+        ///
+        /// <para><b>Dropped, never widened.</b> A window whose timestamps cannot be read must not become one
+        /// that covers everything: a suppression that quietly applies for ever is total, invisible deafness,
+        /// and it would arrive through a typo. The operator is told and the guard keeps watching.</para>
+        /// </summary>
+        public static IReadOnlyList<MaintenanceWindow> ReadMaintenance(
+            AnomalyGuardConfigFile file, out IReadOnlyList<string> problems)
+        {
+            ArgumentNullException.ThrowIfNull(file);
+
+            var found = new List<string>();
+            var windows = new List<MaintenanceWindow>(file.Maintenance.Count);
+
+            for (var i = 0; i < file.Maintenance.Count; i++)
+            {
+                var entry = file.Maintenance[i];
+
+                if (!DateTimeOffset.TryParse(
+                        entry.From, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var from))
+                {
+                    found.Add($"Maintenance[{i}].from = '{entry.From}' — not an ISO-8601 timestamp. "
+                              + "The window is IGNORED.");
+
+                    continue;
+                }
+
+                if (!DateTimeOffset.TryParse(
+                        entry.To, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var to))
+                {
+                    found.Add($"Maintenance[{i}].to = '{entry.To}' — not an ISO-8601 timestamp. "
+                              + "The window is IGNORED.");
+
+                    continue;
+                }
+
+                if (to <= from)
+                {
+                    found.Add($"Maintenance[{i}] ends at or before it starts ({entry.From} .. {entry.To}). "
+                              + "The window is IGNORED.");
+
+                    continue;
+                }
+
+                windows.Add(new MaintenanceWindow(from, to, entry.Workload ?? string.Empty,
+                    entry.Reason ?? string.Empty));
+            }
+
+            problems = found;
+
+            return windows;
         }
 
         /// <summary>
