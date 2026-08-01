@@ -125,6 +125,73 @@ flagged for a decision, 1 declared blind.
 
 ---
 
+## 🐞 OPEN DEFECTS — decode runtime (found 2026-08-01 by `overfit-find-bugs-game`)
+
+Two bug hunts over `Sources/Main/LanguageModels/Runtime`. The first read a third of the directory in five
+minutes and returned **nothing**; its value was the list of files it had *not* opened, which pointed the
+second hunt straight at the dense kernels instead of spending its budget on reconnaissance. Reports in
+`docs/bug-hunts/`.
+
+Two of the three are confirmed by reading; the third is reported unconfirmed on purpose, because settling it
+needs a concurrency stress test and a measurement was running on the box.
+
+| # | Defect | Why it matters |
+|---|---|---|
+| **1** | **`EmbeddingPooling.Cls` silently returns the wrong vector.** `CachedLlamaSession.Embed` branches only on `Mean` versus everything-else, so `Cls` takes the last-token path instead of the first. `BertEncoder` implements the same contract correctly, so this is one path breaking a live contract rather than an unimplemented option. No test covers `Cls` in either direction. | **Cheapest to fix, ugliest symptom.** The result has the right dimension and is correctly normalised; nothing throws. Similarities are simply worse and nobody can say why. It is in the public API. |
+| **2** | **AVX-512 is silently inert in the banded Q4_K prefill.** `BatchedQuantProjection.TiledBandChunk` has no `if (c.Avx512)` branch and always calls the 256-bit `GemmTiled`. Its three siblings — `TiledChunk`, `TiledQ6KChunk`, `TiledQ6KBandChunk` — all have it, so the omission is asymmetric rather than a design choice. | A feature that is configured, parity-tested (`Avx512PrefillParityTests`) and documented as active does not run on one path — precisely the short-prompt case banding exists for. The test gap is the lesson: the two kernels are pinned against each other, and **nothing checks that the dispatcher selects the 512-bit one**. |
+| **3** | **`Q4KWeight.EnsureRepacked()` builds its lazy cache without synchronisation** while the architecture deliberately shares one weight set across concurrently created sessions — cheap session creation is the whole point of the design. Concurrent first decode is therefore a reachable race on a `ReadOnlyMemory<byte>?`. | **Unconfirmed by design.** Reading establishes the missing lock and the reachability; observing a torn read needs a stress test. Reported anyway, because an unverified finding costs a follow-up and a verified one would have cost a day of measurement. |
+
+Fix order: 1, then 2, then 3 — cheapest and worst-symptom first, then the silent flag, then the race that
+needs a test harness before it can be confirmed or dismissed.
+
+**Not reached by either hunt**, so no claim is made about them: `BatchedProjectionKernel.cs`,
+`Q8DotKernel.cs`, `Q6KRepack.cs`, `Gpt1SlmModelAdapter.cs`, `CachedGpt1ModelAdapter.cs`,
+`SingleTokenLayerNormKernel.cs`, `SingleTokenProjectionKernel.cs`.
+
+## 🐞 OPEN DEFECTS — evolutionary (found 2026-08-01 by `overfit-find-bugs-game`)
+
+All 29 files read, and the hunt **ended by scope rather than by the clock** — which is what makes the score
+meaningful. Four defects against a target of eleven says the module is in better shape than the game
+assumed; the same number on the decode runtime would have said only that two thirds of it went unopened.
+Report in `docs/bug-hunts/evolutionary-2026-08-01-2226-bugs-game-findings.md`.
+
+| # | Defect | Why it matters |
+|---|---|---|
+| **1** | **`GenerationalGeneticAlgorithm.Tell()` has no Ask/Tell guard.** Its two siblings, `OpenAiEsStrategy` and `SeparableCmaEsStrategy`, carry an identical `if (!_hasPendingPopulation) throw` — this one goes straight to `fitness.CopyTo`. Verified by reading all three side by side. | Calling `Tell()` cold reads `_workspace.Population`, a `PooledBuffer<float>` taken with `clearMemory: false` — **leftover pool contents, not zeros** — and stores them as `_bestParameters`. Nothing throws, the result has the right shape, and the search starts from somebody else's freed buffer. The asymmetry rules out a deliberate choice: it is one of three parallel implementations missing a check the other two have. |
+| **2** | **`GridEliteArchive` silently files a NaN descriptor into cell 0.** The bounds test `value < min \|\| value > max` is **false for NaN in both directions**, so a NaN falls through and the conversion lands it in the first cell. | The contrast is the tell: the *fitness* argument has an explicit `EliteInsertStatus.InvalidFitness` path for exactly this case, and the descriptor has none. A MAP-Elites grid whose first cell quietly collects every degenerate candidate is not a map of the behaviour space any more. |
+| **3** | **`CenteredRankFitnessShaper.Shape()` throws when the population shrinks.** Its own documentation promises a ranking buffer that "grows monotonically… for zero-alloc reuse", and then passes the full, larger array unsliced to `PartialSort.SortIndices`, which requires equal lengths. | A false claim and a crash from one cause. The doc is what a caller reads before deciding a shrinking population is safe. |
+| **4** | **`IEvolutionCheckpoint`'s documentation contradicts every implementation.** It states that checkpoints do **not** capture RNG state and that resumes are not bit-identical; all three strategies persist RNG state, and one carries an inline comment saying a resumed run *is* bit-identical rather than merely statistically equivalent. | A one-line fix, and the one most likely to cost somebody real time: reproducibility of a resumed search is exactly the property a person checks the interface documentation for, and here it tells them the opposite of the truth. |
+
+Fix order: 1, 2, 3, 4 — the silent-garbage path first, then the silent-NaN path, then the crash-plus-false-claim,
+then the doc. Nothing here is large; 4 is a single paragraph.
+
+**Checked and clean**, so nobody repeats the work: the `PrecomputedNoiseTable` index round-trip between
+`Ask` and `Tell` — the trick the whole OpenAI-ES memory profile rests on — and the parallel population
+evaluator's order-independence, which is what a reproducible-from-seed claim needs in order to hold.
+
+## 🐞 OPEN DEFECTS — deep learning layers (found 2026-08-01 by `overfit-find-bugs-game`)
+
+Breadth-first over the high-yield areas; the hunt **stopped voluntarily with time left but without full
+coverage**, so the score says nothing about the parts it did not open. Report in
+`docs/bug-hunts/deeplearning-2026-08-02-2237-bugs-game-findings.md`.
+
+| # | Defect | Why it matters |
+|---|---|---|
+| **1** | **LSTM weights never persist.** `LSTMCell.Save` and `LSTMCell.Load` are literally empty method bodies — not incomplete, `{ }`. `LSTMLayer` delegates through unchanged, and `LSTMAutoencoder` and `Crnn` inherit it. Verified by reading. | **This breaks a shipped capability in the way that is hardest to notice.** Save a trained CRNN, load it, and its convolutions, norms and classifier all come back correctly while the recurrent core sits at random initialisation. Nothing throws, the model looks loaded, and it produces nonsense. The OCR demo that reads digits at loss 0.006 cannot survive a round-trip through disk. |
+| **2** | **`DepthwiseConv2DLayer.Load` desynchronises the stream.** `if (br.ReadInt32() == 1 && Bias is not null)` consumes the flag but skips the trailing floats when the file has a bias section and the layer was built with `useBias: false`, misaligning every subsequent read in a composite `Load`. `ConvLayer.Load` handles the same case correctly by constructing `Bias` lazily — so, as in the evolutionary strategies, the asymmetry between two implementations of one pattern is the evidence. | A misaligned stream does not fail where it went wrong. It fails later, in a different layer, as dimensions that do not match — or worse, does not fail at all and loads plausible garbage. |
+| **3** | **`CheckpointedModule` does not enforce the determinism it requires.** `ComputationGraph.Checkpoint` documents that the segment must be deterministic and nothing checks it; `CheckpointedModule` accepts any `IModule`, and `TensorMath.Dropout` draws from an unseeded `Random.Shared`. Recomputation during backward then uses a different mask than the forward pass did. | **Reported unconfirmed in the strict sense**: `GPT1Model`'s own use is safe because its transformer block has no dropout, so no shipped path is currently wrong. The composition is unguarded, and the failure mode is wrong gradients with no error — a model that trains, converges to something, and is quietly optimising a different objective. |
+
+Fix order: 1, 2, 3. The first is a shipped model that cannot be reloaded; the second corrupts loading
+silently; the third is a trap that nothing currently steps in.
+
+**Note for the next hunt here:** this run predated the agent's README-first step, and
+`Sources/Main/DeepLearning/README.md` states the contract *"layers own their parameters;
+`TrainableParameters()` is the canonical way to enumerate them"* — a testable assertion that was supplied to
+the agent by hand rather than found. A re-run should check every layer's allocations against what it
+enumerates and what it disposes, which this one did not systematically do.
+
+---
+
 ## Status snapshot
 
 | Area | Status |
