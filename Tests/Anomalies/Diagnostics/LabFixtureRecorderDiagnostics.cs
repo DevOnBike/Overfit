@@ -40,8 +40,19 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
     public sealed class LabFixtureRecorderDiagnostics
     {
         private const string DefaultPrometheus = "http://127.0.0.1:9090";
-        private const string PodRegex = "overfit-server-.*";
-        private const string Namespace = "overfit";
+
+        /// <summary>
+        /// Which pods to record, and under what metric names.
+        ///
+        /// <para><b>Read from the guard's own configuration rather than hardcoded, and that was a
+        /// correction.</b> The first version pinned <c>overfit-server-.*</c> in namespace <c>overfit</c> with
+        /// the built-in query templates — which stopped matching the moment the lab was rebuilt around an
+        /// application that names its metrics <c>labapp_*</c>. A recorder that silently records nothing
+        /// produces an empty fixture, and an empty fixture is worse than none because it looks like data.</para>
+        /// </summary>
+        private static string ConfigPath =>
+            Environment.GetEnvironmentVariable("OVERFIT_LAB_CONFIG")
+            ?? "D:/Overfit/Tests/bin/lab-guard.json";
 
         private readonly ITestOutputHelper _output;
 
@@ -69,10 +80,27 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
             var end = DateTime.UtcNow.AddSeconds(-stepSeconds).AddMinutes(-offset);
             var start = end.AddMinutes(-minutes);
 
+            // The same mapping the deployed guard runs, so the fixture holds the series the guard actually
+            // judges rather than a parallel set that happens to share names.
+            Assert.True(File.Exists(ConfigPath),
+                $"no guard configuration at {ConfigPath} — pull it from the running ConfigMap first, or the "
+                + "recorder will use built-in templates that no longer match this lab.");
+
+            var file = System.Text.Json.JsonSerializer.Deserialize<AnomalyGuardConfigFile>(
+                await File.ReadAllTextAsync(ConfigPath),
+                new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+            Assert.NotNull(file);
+
+            var map = AnomalyGuardConfigReader.ReadMap(file, out _);
+
             var config = PrometheusHistoricalSourceConfig.ForOverfitServer(
-                baseUrl, PodRegex, Namespace, start, end,
+                baseUrl, file.PodRegex, file.Namespace, start, end,
                 step: TimeSpan.FromSeconds(stepSeconds),
-                window: TimeSpan.FromMinutes(2));
+                window: TimeSpan.FromMinutes(2)) with
+            {
+                QueryOverrides = map.ToQueryOverrides(),
+            };
 
             using var source = new PrometheusHistoricalSource(config);
             var batches = await source.FetchAsync();
@@ -141,7 +169,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
 
             Assert.True(pods.Count >= 3,
                 $"{pods.Count} pods returned series; a peer group needs at least three. Check the port-forward "
-                + $"to Prometheus at {baseUrl}, the namespace '{Namespace}' and the regex '{PodRegex}'.");
+                + $"to Prometheus at {baseUrl}, the namespace '{file.Namespace}' and the regex '{file.PodRegex}'.");
 
             AssertTrafficWasFlowing(series);
 

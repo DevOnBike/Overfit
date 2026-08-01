@@ -56,6 +56,42 @@ The dashed box is built but **never validated against real data** — see [Where
 
 ---
 
+## What changed after this document was first written
+
+This file described a pipeline with three detector families and no memory. It now has **five families and a
+week of memory**, and the additions were each forced by a measurement rather than designed in advance. The
+older sections below remain accurate about the parts they describe; read this one first so the picture is not
+three families short.
+
+| Added | Because |
+|---|---|
+| `LevelShiftDetector` | A **step is not a trend**, and no threshold fixes that. Mann-Kendall's tau counts rank order, so a step scores ≈ 0.51 whatever its height: measured on one window shape, a 2.5× step gave p = 0.0695 and a **10× step scored worse**, p = 0.0794. Splitting the window and rank-testing the halves separated every step at p ≤ 1.1e-3 and left a flat control alone. |
+| Silent-pod check | Every other family judges a time *series*, and a pod that never started has none. A replica stuck in `Pending` or `ImagePullBackOff` was invisible to the whole guard — and eleven healthy pods look identical to twelve where one never came up. It compares the cluster's own roster against who reported. |
+| `MetricHistory` | Every cycle judged one twenty-minute window in isolation, which made a seasonal expectation impossible, a **slow leak invisible** (2 MB/h never moves far enough inside twenty minutes and still kills a pod in a week), and "wrong for three days" indistinguishable from "wrong for ten minutes". Keyed by **workload, not pod** — pod names do not survive a deployment. |
+| `FloorCalibrator` | The absolute gates had nobody to set them, and the honest answer was "only you can know" — true and useless. It watches a period believed healthy and proposes the floors that follow. Fitted on one population and scored on a **held-out** one: 124 → 44 hand-reasoned → **29** calibrated false incidents a day, at identical detection. |
+| `MaintenanceWindow` / `IMaintenanceCalendar` | A deployment **is** a level shift and the step detector says so — about something the operator did five minutes ago. It suppresses reporting **and learning**: folding a declared-abnormal period into "what this cluster does when it is well" takes the one input known to be wrong and treats it as truth. |
+| `GuardTelemetry` | The guard had the exact pathology it exists to eliminate. It only logged, so a stopped loop or failing queries produced no incidents — **indistinguishable from a healthy cluster**. `overfit_guard_last_cycle_timestamp_seconds` is what makes "this has stopped" alertable. |
+| `MetricDiscovery` / `overfit anomaly-discover` | Hand-authoring the metric map does not work: the map for this project's own lab was written by the author of the system and left **two channels of thirteen unbound**, reporting blind for hours. Discovery proposes a mapping from what a cluster actually exports and names what will be blind. |
+
+### Known gaps in these additions, found by reading rather than by running
+
+Recorded here because the lab does not exercise these paths, so no measurement will surface them:
+
+1. **The calibrator never observes custom channels.** It iterates `MetricIndex` only, and the custom peer and
+   trend paths read their floors straight off the binding. A customer-mapped signal with no configured floor
+   therefore stays in the "gate off" state that measured at 209 false incidents a day — silently, and on the
+   channels a customer with a bespoke application relies on most.
+2. **`AnomalyGuardOptions.Workload` is empty in the deployed path.** The configuration file has no such field
+   and the registration never sets one. The visible symptom is in the lab's own logs — `Anomaly incident in
+   lab/:` with nothing after the slash — and the invisible one is that **a maintenance window scoped to a
+   named workload can never match**, so the feature is half-dead exactly where it matters.
+3. **The silent-pod check trusts a stale roster.** When a topology refresh fails the previous snapshot stands,
+   which is right for grouping and wrong here: a pod deleted since would stop reporting and be called silent.
+   The check should stand down when the topology is known to be stale.
+4. **The seasonal baseline only learns while `DecomposeCommonMode` is on.** The observation sits inside that
+   branch, so turning the decomposition off silently disables a week of learning as a side effect nobody
+   would predict from the option's name.
+
 ## Why there are three detector families
 
 They are not redundant. Each answers a question the others cannot, and each one is the *only* one that works

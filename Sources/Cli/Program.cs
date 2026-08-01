@@ -485,6 +485,14 @@ var guardWindow = new Option<int>("--window-minutes")
                 + "healthy population, 20 min gave 234 false incidents a day, 60 gave 93 and 240 gave 2583.",
 };
 
+var guardMetricsPort = new Option<int>("--metrics-port")
+{
+    Description = "Serve the guard's OWN metrics on this port at /metrics. Default 9469; 0 disables. "
+                + "Alert on overfit_guard_last_cycle_timestamp_seconds going stale — a guard that has "
+                + "stopped reports no incidents, which is indistinguishable from a healthy cluster.",
+    DefaultValueFactory = _ => 9469,
+};
+
 var anomalyGuardCommand = new Command(
     "anomaly-guard",
     "Watch a deployment's Prometheus metrics and report incidents. Shadow by default: it counts, explains "
@@ -494,6 +502,7 @@ var anomalyGuardCommand = new Command(
     guardState,
     guardCadence,
     guardWindow,
+    guardMetricsPort,
 };
 
 anomalyGuardCommand.SetAction((parseResult, ct) => AnomalyGuardCommand.RunAsync(
@@ -501,6 +510,7 @@ anomalyGuardCommand.SetAction((parseResult, ct) => AnomalyGuardCommand.RunAsync(
     parseResult.GetValue(guardState),
     parseResult.GetValue(guardCadence),
     parseResult.GetValue(guardWindow),
+    parseResult.GetValue(guardMetricsPort),
     ct));
 
 // ---- anomaly-discover: what a cluster exports, and what the guard would be blind to ----

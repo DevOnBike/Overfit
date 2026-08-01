@@ -53,8 +53,51 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
         /// <summary>What this workload normally does, per signal, per hour. Null when history is off.</summary>
         private readonly MetricHistory? _history;
 
+        /// <summary>
+        /// What a healthy period looks like in each signal's own units.
+        ///
+        /// <para><b>It lives here rather than in the host, and that move is the point of this.</b> It used to
+        /// sit in the ASP.NET service, which meant the CLI path — the one the lab actually runs — had no
+        /// calibration at all, and that the numbers it produced could only ever be copied into a
+        /// configuration by hand. A floor that has to be transcribed is a floor that is absent on day one, and
+        /// day one with no floors is the configuration measured at 209 false incidents a day.</para>
+        /// </summary>
+        private readonly FloorCalibrator _calibrator;
+
+        /// <summary>Where the absolute floors come from. Configured first, learned as a fallback.</summary>
+        private readonly IAbsoluteFloorSource _floors;
+
+        /// <summary>Which moments were declared abnormal on purpose.</summary>
+        private readonly IMaintenanceCalendar _calendar;
+
+        /// <summary>What a healthy period has looked like so far, per signal. Empty until enough is seen.</summary>
+        public FloorProposal[] FloorProposals => _calibrator.Propose();
+
+        /// <summary>
+        /// The guard's own counters, for a host to expose. <b>Alert on
+        /// <c>overfit_guard_last_cycle_timestamp_seconds</c> going stale</b> — it is the one series that makes
+        /// "this thing has stopped" visible, and a guard that has stopped is worse than one that never
+        /// started, because somebody is relying on it.
+        /// </summary>
+        public GuardTelemetry Telemetry { get; } = new();
+
         /// <summary>How many consecutive cycles each known pod has reported nothing.</summary>
         private readonly Dictionary<string, int> _silent = new(StringComparer.Ordinal);
+
+        /// <summary>
+        /// Whether the current cycle falls inside a declared maintenance window. Held as a field rather than
+        /// threaded through every detector: the answer is a property of the cycle, and passing it down five
+        /// call layers to be read in one place would be worse than a field with a short life.
+        /// </summary>
+        private bool _declaredAbnormal;
+
+        /// <summary>Names the window covering <paramref name="at"/>, or empty when none does.</summary>
+        private string SuppressionReason(DateTimeOffset at)
+        {
+            return _calendar.IsDeclaredAbnormal(at, _options.Workload, out var reason)
+                ? reason
+                : string.Empty;
+        }
 
         /// <param name="options">Thresholds, topology and the per-metric floors.</param>
         /// <param name="sink">Where rows go.</param>
@@ -91,9 +134,19 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
             _historyStore = historyStore;
             _tracker = new IncidentTracker(tracking);
 
-            _history = options.MinimumHistoryDays > 0
-                ? MetricHistory.Read(historyStore?.Load())
-                : null;
+            var (history, calibrator) = LearnedState.Read(historyStore?.Load(), options.Trend);
+
+            _history = options.MinimumHistoryDays > 0 ? history : null;
+            _calibrator = calibrator;
+
+            // Built here rather than injected, so the default deployment needs nothing but options — and
+            // replaceable, because the two things a customer is most likely to own are their own threshold
+            // policy and their own deployment calendar.
+            _floors = options.Floors ?? new ConfiguredFloorSource(
+                options.MinAbsoluteGap, options.MinAbsoluteTrendChange, calibrator,
+                options.ApplyCalibratedFloors);
+
+            _calendar = options.Calendar ?? new StaticMaintenanceCalendar(options.MaintenanceWindows);
 
             if (store is null)
             {
@@ -158,6 +211,17 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
             RunRules(window, pipeline, recentFrom, to, recent);
             RunSilentPods(window, pipeline, from, to);
 
+            // Learned from the same window it is about to judge. That is not circular: the floor derived from
+            // it applies to LATER cycles, and one window cannot lift a bar that is set from the maximum of
+            // hundreds. What it does mean is stated plainly in FloorProposal — a fault inside the observed
+            // period raises the bar above itself, so the observed period has to have been healthy.
+            _declaredAbnormal = SuppressionReason(observedAt).Length > 0;
+
+            if (!_declaredAbnormal)
+            {
+                _calibrator.Observe(window);
+            }
+
             for (var m = 0; m < (int)MetricIndex.Count; m++)
             {
                 var metric = (MetricIndex)m;
@@ -196,22 +260,34 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
                 resolved += tracked[i].State == IncidentState.Resolved ? 1 : 0;
             }
 
-            IncidentReporter.Report(tracked, _sink);
+            // Declared abnormal on purpose: reported, flagged, and NOT learned from. See MaintenanceWindow
+            // for why the second half matters as much as the first — folding a deployment into "what this
+            // cluster does when it is well" takes the one input known to be wrong and treats it as truth.
+            var suppressedBy = SuppressionReason(observedAt);
+
+            IncidentReporter.Report(tracked, _sink, suppressedBy);
 
             // After reporting, so a crash between the two costs a repeated notification rather than a lost
             // one: an operator told twice is annoyed, an operator never told is unprotected.
             _store?.Save(IncidentStateFormat.Write(_tracker.Snapshot(), _tracker.NextId));
 
-            if (_history is not null)
+            if (_historyStore is not null)
             {
                 // Forgotten before saving, so a workload that was deleted stops costing storage on the next
                 // restart rather than being carried for ever by a store that only ever grows.
-                _history.Forget(observedAt, TimeSpan.FromDays(MetricHistory.MaxDays * 2));
-                _historyStore?.Save(_history.Write());
+                _history?.Forget(observedAt, TimeSpan.FromDays(MetricHistory.MaxDays * 2));
+                _historyStore.Save(LearnedState.Write(_history ?? new MetricHistory(), _calibrator));
             }
 
-            return new GuardCycleResult(
+            var result = new GuardCycleResult(
                 pipeline.Count, incidents.Count, opened, ongoing, resolved, blind, partial, unevaluable);
+
+            // The guard measuring itself, in the same shape it demands of everything else. Without it, a loop
+            // that has stopped or whose queries have started failing produces no incidents — indistinguishable
+            // from a healthy cluster, which is the one failure mode this whole subsystem exists to make loud.
+            Telemetry.Cycle(result, window.Pods.Count, observedAt, _declaredAbnormal);
+
+            return result;
         }
 
         /// <summary>
@@ -288,11 +364,11 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
             for (var pod = 0; pod < podCount; pod++)
             {
                 var work = binding.SignalKind == PeerSignalKind.LoadSensitive
-                    ? Tail(window.Series(pod, MetricIndex.RequestsPerSecond), recent).ToArray()
-                    : [];
+                    ? TailMemory(window.SeriesMemory(pod, MetricIndex.RequestsPerSecond), recent)
+                    : ReadOnlyMemory<double>.Empty;
 
                 peers.Add(new PeerSeries(
-                    window.Pods[pod], Tail(window.Series(pod, binding.Name), recent).ToArray(), work));
+                    window.Pods[pod], TailMemory(window.SeriesMemory(pod, binding.Name), recent), work));
                 subjects[pod] = Subject(window.Pods[pod]);
             }
 
@@ -331,7 +407,7 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
 
                 for (var pod = 0; pod < podCount; pod++)
                 {
-                    peers.Add(new PeerSeries(window.Pods[pod], window.Series(pod, binding.Name).ToArray()));
+                    peers.Add(new PeerSeries(window.Pods[pod], window.SeriesMemory(pod, binding.Name)));
                 }
 
                 common = new double[window.Length];
@@ -346,24 +422,28 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
                         WorkloadSubject(), binding.Name, verdict, from, to, common, binding.Class);
 
                     ObserveLevelShift(
-                        pipeline, binding.Name, common, from, to, binding.MinAbsoluteGap, binding.Class);
+                        pipeline, binding.Name, common, from, to, binding.MinAbsoluteTrendChange,
+                        binding.Class);
                 }
             }
 
             for (var pod = 0; pod < podCount; pod++)
             {
-                var series = window.Series(pod, binding.Name).ToArray();
                 // Custom channels carry their own ceiling on the binding, since the per-metric table is
                 // indexed by MetricIndex and cannot hold a name the enum does not have.
                 var verdict = _trend.Detect(
-                    series,
+                    window.Series(pod, binding.Name),
                     times,
                     options,
                     binding.SaturationLimit,
                     expectation);
 
                 pipeline.Observe(
-                    Subject(window.Pods[pod]), binding.Name, verdict, from, to, series, binding.Class);
+                    Subject(window.Pods[pod]), binding.Name, verdict, from, to,
+                    verdict.Status == DetectionStatus.Anomalous
+                        ? window.Series(pod, binding.Name).ToArray()
+                        : default,
+                    binding.Class);
             }
         }
 
@@ -416,7 +496,7 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
 
             var options = _options.Peer with
             {
-                MinAbsoluteGap = AnomalyGuardOptions.FloorFor(_options.MinAbsoluteGap, metric)
+                MinAbsoluteGap = _floors.MinAbsoluteGap(metric)
             };
 
             // One comparison per declared cohort — see PeerCohorts for why this cannot be inferred and why
@@ -436,11 +516,11 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
                     var pod = cohort[i];
 
                     var work = kind == PeerSignalKind.LoadSensitive
-                        ? Tail(window.Series(pod, MetricIndex.RequestsPerSecond), recent).ToArray()
-                        : [];
+                        ? TailMemory(window.SeriesMemory(pod, MetricIndex.RequestsPerSecond), recent)
+                        : ReadOnlyMemory<double>.Empty;
 
                     peers.Add(new PeerSeries(
-                        window.Pods[pod], Tail(window.Series(pod, metric), recent).ToArray(), work));
+                        window.Pods[pod], TailMemory(window.SeriesMemory(pod, metric), recent), work));
                     cohortSubjects[i] = subjects[pod];
                 }
 
@@ -494,7 +574,7 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
             var options = _options.Trend with
             {
                 MinAbsoluteChangeOverWindow =
-                    AnomalyGuardOptions.FloorFor(_options.MinAbsoluteTrendChange, metric)
+                    _floors.MinAbsoluteTrendChange(metric)
             };
 
             // Worked out first, because it depends only on the clock and on history — and because it has to
@@ -511,7 +591,7 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
 
                 for (var pod = 0; pod < podCount; pod++)
                 {
-                    peers.Add(new PeerSeries(window.Pods[pod], window.Series(pod, metric).ToArray()));
+                    peers.Add(new PeerSeries(window.Pods[pod], window.SeriesMemory(pod, metric)));
                 }
 
                 common = new double[window.Length];
@@ -532,30 +612,42 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
 
                     ObserveLevelShift(
                         pipeline, metric.ToString(), Adjust(common, seasonal), from, to,
-                        AnomalyGuardOptions.FloorFor(_options.MinAbsoluteGap, metric), null);
+                        _floors.MinAbsoluteTrendChange(metric), null);
 
                     // The workload's own level this hour, learned from its own aggregate rather than from any
                     // one replica — so a single odd pod cannot move the baseline the whole deployment is
                     // later judged against.
-                    _history?.Observe(_options.Workload, metric, from, Median(common));
+                    if (!_declaredAbnormal)
+                    {
+                        _history?.Observe(_options.Workload, metric, from, Median(common));
+                    }
                 }
             }
 
             for (var pod = 0; pod < podCount; pod++)
             {
-                var series = window.Series(pod, metric).ToArray();
+                // Judged from the window's own storage. The copy that used to happen here was made for every
+                // pod and every signal whether or not anything came of it — two hundred replicas times
+                // thirteen channels of eighty samples, several megabytes a cycle, for series that are read
+                // once and dropped. The finding is what needs to outlive the window, and on a healthy cluster
+                // there are almost none.
+                //
                 // The ceiling this signal is heading towards, when the operator supplied one. Without it the
                 // projection is skipped and the finding reads as it always did; with it, "rose by 11% of
                 // typical" becomes "reaches its limit in 40 minutes", which is the difference between an
                 // observation and something worth getting up for.
                 var verdict = _trend.Detect(
-                    series,
+                    window.Series(pod, metric),
                     times,
                     options,
                     AnomalyGuardOptions.LimitFor(_options.SaturationLimit, metric),
                     expectation);
 
-                pipeline.Observe(Subject(window.Pods[pod]), metric.ToString(), verdict, from, to, series);
+                pipeline.Observe(
+                    Subject(window.Pods[pod]), metric.ToString(), verdict, from, to,
+                    verdict.Status == DetectionStatus.Anomalous
+                        ? window.Series(pod, metric).ToArray()
+                        : default);
             }
         }
 
@@ -767,11 +859,15 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
         /// step came back at a <i>worse</i> p-value than a 2.5× one. Running this per pod as well would
         /// duplicate the peer comparison and add its false positives for nothing.</para>
         ///
-        /// <para>The absolute floor is <see cref="AnomalyGuardOptions.MinAbsoluteGap"/> rather than a table of
-        /// its own: both gates ask "how large a difference in this signal's units is worth reporting", one
-        /// across replicas and one across time, and the answer does not depend on which axis the difference
-        /// lies along. It also means <c>FloorCalibrator</c>'s proposal covers this detector without knowing
-        /// it exists.</para>
+        /// <para><b>The absolute floor is the TREND gate's, and that was a correction.</b> It originally
+        /// borrowed <see cref="AnomalyGuardOptions.MinAbsoluteGap"/> on the argument that both gates ask "how
+        /// large a difference in this signal's units matters", one across replicas and one across time, so the
+        /// axis should not matter. Four hours on the lab said otherwise: the peer floor for the gen-2 heap
+        /// calibrated to <b>0.64 MB</b> and the trend floor to <b>4.23 MB</b> — six times apart, because a GC
+        /// sawtooth moves a heap far more over a window than two replicas differ at any instant. At the peer
+        /// floor this detector fired about <b>twice an hour on a healthy cluster</b> and became the single
+        /// largest remaining source of false positives. Movement over time is the question it asks, so the
+        /// gate measured over time is the one it gets.</para>
         /// </summary>
         private void ObserveLevelShift(
             IncidentPipeline pipeline,
@@ -828,6 +924,17 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
 
         /// <summary>The last <paramref name="samples"/> observations, or all of them if there are fewer.</summary>
         private static ReadOnlySpan<double> Tail(ReadOnlySpan<double> series, int samples)
+            => samples >= series.Length ? series : series[^samples..];
+
+        /// <summary>
+        /// The last <paramref name="samples"/> of a signal, as memory over the window's own storage.
+        ///
+        /// <para>The peer detector reads its input inside the call and its findings carry numbers rather than
+        /// series, so nothing here outlives the window — which is what makes a slice safe where the trend
+        /// path still has to copy. It was the last per-pod allocation in a cycle: two copies of the tail per
+        /// replica per signal, made whether or not anything came of them.</para>
+        /// </summary>
+        private static ReadOnlyMemory<double> TailMemory(ReadOnlyMemory<double> series, int samples)
             => samples >= series.Length ? series : series[^samples..];
 
         /// <summary>

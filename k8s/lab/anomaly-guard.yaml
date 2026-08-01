@@ -98,6 +98,11 @@ spec:
             - "300"
             - --window-minutes
             - "20"
+            - --metrics-port
+            - "9469"
+          ports:
+            - name: metrics
+              containerPort: 9469
           volumeMounts:
             - name: config
               mountPath: /config
@@ -115,8 +120,61 @@ spec:
           configMap:
             name: anomaly-guard-config
         - name: state
-          # emptyDir, deliberately, and the cost is known: a restart loses the open incidents and the next
-          # cycle reports them as new, which is one duplicate notification per open incident. A few megabytes
-          # of PVC removes that. At one replica and rare restarts, accepting it is a defensible choice — and
-          # stating the cost is the point, since the alternative is discovering it during an incident.
-          emptyDir: {}
+          # A volume that outlives the pod, and the reason changed. It used to be an emptyDir with a known,
+          # bounded cost: one duplicate notification per open incident per restart. This directory now also
+          # holds the LEARNED state — the per-hour seasonal baseline and the floor calibration, which take
+          # days to rebuild. Losing those does not produce a burst of duplicates; it produces a guard that is
+          # quieter than it should be for a week, which is the failure mode that looks like success.
+          persistentVolumeClaim:
+            claimName: anomaly-guard-state
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: anomaly-guard-state
+  namespace: lab
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      # Incidents are kilobytes. The learned state is bounded by construction — seven days per bucket, a
+      # capped reservoir per signal — so this is not a number that has to grow with the cluster.
+      storage: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: anomaly-guard
+  namespace: lab
+  labels:
+    app.kubernetes.io/name: anomaly-guard
+spec:
+  selector:
+    app.kubernetes.io/name: anomaly-guard
+  ports:
+    - name: metrics
+      port: 9469
+      targetPort: metrics
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: anomaly-guard
+  namespace: lab
+  labels:
+    release: overfit-lab
+spec:
+  # The guard watching the guard. Until this existed, a loop that had stopped or whose queries had begun
+  # failing produced no incidents — indistinguishable from a healthy cluster, which is the one failure mode
+  # this whole subsystem exists to make loud. The alert to write against it:
+  #
+  #   time() - overfit_guard_last_cycle_timestamp_seconds > 900
+  #
+  # A guard that has stopped is worse than one that never started, because somebody is relying on it.
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: anomaly-guard
+  endpoints:
+    - port: metrics
+      interval: 30s

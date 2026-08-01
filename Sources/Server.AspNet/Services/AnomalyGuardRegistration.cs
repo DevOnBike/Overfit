@@ -131,11 +131,13 @@ namespace DevOnBike.Overfit.Server.AspNet.Services
 
             var map = AnomalyGuardConfigReader.ReadMap(file, out var mapProblems);
             var (gap, trendChange) = AnomalyGuardConfigReader.ReadThresholds(file, out var floorProblems);
+            var maintenance = AnomalyGuardConfigReader.ReadMaintenance(file, out var windowProblems);
 
             if (onProblem is not null)
             {
                 Report(mapProblems, onProblem);
                 Report(floorProblems, onProblem);
+                Report(windowProblems, onProblem);
             }
 
             var prometheus = PrometheusHistoricalSourceConfig.ForOverfitServer(
@@ -165,6 +167,7 @@ namespace DevOnBike.Overfit.Server.AspNet.Services
                     MinAbsoluteGap = gap,
                     MinAbsoluteTrendChange = trendChange,
                     CustomMetrics = map.Custom,
+                    MaintenanceWindows = maintenance,
                 },
             };
 
@@ -202,7 +205,13 @@ namespace DevOnBike.Overfit.Server.AspNet.Services
                 new PrometheusTopologySource(prometheus.PrometheusBaseUrl, prometheus));
 
             services.TryAddSingletonSink();
-            services.AddHostedService<AnomalyGuardService>();
+
+            // Registered as a singleton AND as the hosted service, resolving to the same object. A host that
+            // wants to expose the guard's own metrics has to be able to reach it, and
+            // AddHostedService<T> alone builds an instance nobody else can see — which is how the telemetry
+            // came to exist with no way to scrape it.
+            services.AddSingleton<AnomalyGuardService>();
+            services.AddHostedService(provider => provider.GetRequiredService<AnomalyGuardService>());
 
             return services;
         }

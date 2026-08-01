@@ -69,6 +69,57 @@ namespace DevOnBike.Overfit.Anomalies.Contracts
         /// </summary>
         public int MinimumHistoryDays { get; init; } = 2;
 
+        /// <summary>
+        /// Whether a gate with no configured floor falls back to one derived from what a healthy period
+        /// actually did.
+        ///
+        /// <para><b>On by default, because the alternative default is worse.</b> An absent floor means the
+        /// gate is off, and a guard with every absolute gate off is the configuration this project measured
+        /// at <b>209 false incidents a day</b> on a lab where nothing was wrong. A calibrated floor is not a
+        /// guess: it is the largest thing the cluster did while healthy, with a margin.</para>
+        ///
+        /// <para><b>It never overrides an explicit value</b>, even a lower one. A configured floor is a
+        /// decision somebody made and may encode something the data cannot see — "we do not get up for less
+        /// than fifty milliseconds" is not a statement about noise. Where it is too low, the guard says so in
+        /// its proposal and leaves the fix with the operator.</para>
+        ///
+        /// <para><b>And it inherits the calibrator's one real hazard.</b> If the observed period contained a
+        /// fault, the floor is set above that fault and the guard is blind to it at that size — permanently,
+        /// and quietly. Turn this off where the observation period cannot be trusted.</para>
+        /// </summary>
+        public bool ApplyCalibratedFloors { get; init; } = true;
+
+        /// <summary>
+        /// Periods the operator has declared abnormal on purpose — a deployment, a node pool upgrade, a load
+        /// test.
+        ///
+        /// <para>Inside one, findings are still made and reported but carry
+        /// <see cref="IncidentLogRecord.SuppressedBy"/>, and <b>nothing observed is folded into the baseline
+        /// or the floors</b>. See <see cref="MaintenanceWindow"/> for why the second half matters as much as
+        /// the first.</para>
+        /// </summary>
+        public IReadOnlyList<MaintenanceWindow> MaintenanceWindows { get; init; } = [];
+
+        /// <summary>
+        /// Where the absolute floors come from. Null builds the default: configured values first, learned
+        /// ones where those are absent.
+        ///
+        /// <para>Supply one to express a policy no measurement can produce — "a tenth of the container limit",
+        /// or "never less than fifty milliseconds" — which is the half of the threshold question that belongs
+        /// to the customer.</para>
+        /// </summary>
+        public IAbsoluteFloorSource? Floors { get; init; }
+
+        /// <summary>
+        /// Which moments were declared abnormal on purpose. Null builds one from
+        /// <see cref="MaintenanceWindows"/>.
+        ///
+        /// <para>Supply one to read a deployment pipeline or a change-management system instead — those know
+        /// a rollout is happening, and a ConfigMap is a second copy of that truth which somebody has to
+        /// remember to update.</para>
+        /// </summary>
+        public IMaintenanceCalendar? Calendar { get; init; }
+
         /// <summary>How findings become incidents.</summary>
         public IncidentGroupingOptions Grouping { get; init; } = IncidentGroupingOptions.Balanced;
 

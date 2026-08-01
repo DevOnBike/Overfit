@@ -37,10 +37,12 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
         /// loses the tracker entirely at the last boundary: every cycle looks like a fresh incident.</param>
         /// <param name="sink">Destination.</param>
         /// <returns>How many rows were reported.</returns>
-        public static int Report(IReadOnlyList<TrackedIncident> incidents, IIncidentSink sink)
+        public static int Report(
+            IReadOnlyList<TrackedIncident> incidents, IIncidentSink sink, string suppressedBy = "")
         {
             ArgumentNullException.ThrowIfNull(incidents);
             ArgumentNullException.ThrowIfNull(sink);
+            ArgumentNullException.ThrowIfNull(suppressedBy);
 
             if (incidents.Count == 0)
             {
@@ -91,7 +93,8 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
 
                     // Only on the incident row. A finding row is one line of evidence and repeating the whole
                     // explanation on each would bloat every log by the square of the group size.
-                    Narrative: IncidentNarrative.Describe(incident));
+                    Narrative: IncidentNarrative.Describe(incident),
+                    SuppressedBy: suppressedBy);
 
                 written++;
 
@@ -115,7 +118,9 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
                         End: finding.End,
                         Subjects: 1,
                         Signals: 1,
-                        Message: finding.Reason);
+                        Message: finding.Reason,
+                        Narrative: "",
+                        SuppressedBy: suppressedBy);
 
                     written++;
                 }

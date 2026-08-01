@@ -35,13 +35,60 @@ how interesting the work is.
 
 | Item | Note |
 |---|---|
-| **Affine work-adjusted trend** for load-sensitive signals | Peer divides CPU by work; trend does not, and lab CPU drift correlates with traffic at **+1.00**. Plain division is right in one regime and wrong in the other (lab fixed-cost ≈ 0; synthetic fixed cost is 22–58% of value), so the affine fit is the correct form. **Blocked on an instrument** — the generator does not contain the phenomenon (0 false CPU trends over 24 h, against ~10% of windows on the lab), so a recorded lab fixture has to come first. |
+| ~~**Affine work-adjusted trend** for load-sensitive signals~~ | **Measured and not shipped — see below.** |
 | **Causality ordering in narratives** | We group findings into an incident but never say what moved *first*. `SignalClass` already separates cause from consequence; only the time ordering is missing. "Latency rose four minutes after GC pause rose" is the sentence an operator wants. |
 | **Per-workload signal classification** | `PeerSignalCatalog` states load-sensitivity globally. PHP-FPM memory **is** load-sensitive; .NET's is not. A per-stack claim, currently hard-coded for one stack. |
 | **Second stack in the lab** (nginx cheapest, JVM most informative) | De-risks "works with any application", which today rests on one .NET workload. |
 | **More channels** | `kube_pod_status_phase{phase="Pending"}` + `waiting_reason` (why a pod never started, not just that it did not); network bytes (a pod that stopped talking at unchanged CPU); in-flight requests (saturation in the USE sense); volume stats (blocked — Docker Desktop does not export them). |
 | **Learned families** (`Gpt`, `Neuro`) | Lowest ROI now: they need training data a client does not have on day one, and the three statistical families already answer the questions clients ask. |
 | **Service-to-service dependency graph** | The highest diagnostic value on the list and a separate product, not a feature. |
+
+### Measured and NOT shipped — work-adjusted trend
+
+The trend family follows traffic on a load-sensitive signal, because peer comparison divides such a signal
+by a work metric and the trend family does not. On the lab, CPU drift inside a twenty-minute window
+correlates with traffic drift at **+1.00**, and about 10% of windows drift past the trend gate on that alone.
+Two repairs were proposed: divide by work, or fit `value = fixed + marginal × work` and ask what the value
+would have been at constant work.
+
+**The first attempt to measure it was vacuous, and that is worth recording on its own.** Scored against
+`SyntheticCluster`, every arm returned zero false trends — the generator does not contain the phenomenon. Its
+diurnal curve moves traffic about 3% across a twenty-minute window against a gate needing 10%. A comparison
+in which no arm can score is not evidence about any arm, and it took a `+1.00` correlation measured on the
+real cluster to notice. That is what forced `lab-window-healthy-12pod.csv` — sixty minutes, twelve replicas,
+241 scrapes, 12 of 13 channels at 100% coverage — into the repository.
+
+Scored on that recording (`AffineTrendOnLabFixtureDiagnostics`), across 9 windows × 12 replicas:
+
+| Signal | Treatment | False trends | Injected regression seen in |
+|---|---|---|---|
+| CpuUsageRatio | raw (today) | 15 | 3 windows |
+| CpuUsageRatio | divided by work | 11 | 4 windows |
+| CpuUsageRatio | affine-adjusted | 11 | 4 windows |
+| GcPauseRatio | any of the three | 5 / 5 / 6 | **0** |
+
+**Not shipped, for three reasons in descending order of weight.**
+
+1. **The effect does not clear its own noise.** 15 against 11 gives Poisson intervals of [7, 23] and [5, 17],
+   which overlap — and worse than that suggests, because consecutive windows overlap by 75% at a 20-minute
+   window and a 5-minute step, so the nine observations are not independent and the true interval is wider
+   than the arithmetic says.
+2. **The affine fit does not beat plain division on real data** — 11 to 11, 4 to 4. Its whole justification
+   was the regime where the fixed cost is large, which the lab does not exhibit (fixed cost ≈ 0 there, which
+   is what the +1.00 correlation means) and which only the generator does. Shipping the more complex form
+   when the simpler one is indistinguishable on the only real data available is code for nothing.
+3. **It is a second-order lever anyway.** What actually removed CPU as a false-positive source was the
+   absolute floor: 16 of 22 incidents before, 2 of 12 after.
+
+One point in favour, recorded so the next attempt starts from it: both corrections **improved** detection of
+the injected regression, 3 windows to 4. They do not buy quiet with deafness — the effect is simply too small
+to resolve at this sample size. **What would settle it is a longer recording**: an hour yields nine
+overlapping windows, several hours would yield dozens of independent ones.
+
+Separately, and not fixed by any treatment: a 50% rise in per-request GC pause is invisible to the trend
+family in all three arms, because `GcPauseRatio` on this lab sits at 5.3e-6 and a relative gate has nothing
+to divide. That is the same pattern as the heap and CPU, and it has the same remedy — an absolute floor,
+which is already deployed.
 
 ### Shipped in this track
 

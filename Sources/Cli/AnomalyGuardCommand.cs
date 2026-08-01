@@ -37,7 +37,7 @@ namespace DevOnBike.Overfit.Cli
     internal static class AnomalyGuardCommand
     {
         public static async Task<int> RunAsync(
-            string configPath, string? statePath, int cadenceSeconds, int windowMinutes,
+            string configPath, string? statePath, int cadenceSeconds, int windowMinutes, int metricsPort,
             CancellationToken ct)
         {
             if (!File.Exists(configPath))
@@ -94,6 +94,16 @@ namespace DevOnBike.Overfit.Cli
             {
                 // Registered before the guard so TryAddSingletonSink-style "caller wins" resolution applies.
                 builder.Services.AddSingleton<IIncidentStore>(_ => new FileIncidentStore(statePath));
+
+                // The learned state lives beside the incidents, in its own file. Separate payloads: the
+                // incidents are small, change every cycle and matter for hours; the baseline and the floor
+                // calibration are large, change slowly and matter for days. Losing the second costs a week of
+                // learning and leaves the guard quieter than it should be, which looks like success.
+                var learnedPath = Path.Combine(
+                    Path.GetDirectoryName(statePath) is { Length: > 0 } dir ? dir : ".",
+                    "learned-state.txt");
+
+                builder.Services.AddSingleton<ILearnedStateStore>(_ => new FileLearnedStateStore(learnedPath));
             }
 
             var problems = 0;
@@ -153,6 +163,19 @@ namespace DevOnBike.Overfit.Cli
                 logger.LogWarning(
                     "blind: {Metric} has no binding — no query will be issued and every cycle counts it blind",
                     map.Unmapped[i]);
+            }
+
+            // The guard's own metrics, so "this has stopped" is detectable from outside. Without a scrape the
+            // counters are a property nobody reads, and an alert written against a series that never arrives
+            // reads as healthy in most alerting rules.
+            using var metrics = GuardMetricsEndpoint.TryStart(
+                host.Services.GetRequiredService<AnomalyGuardService>().Telemetry, logger, metricsPort);
+
+            if (metrics is not null)
+            {
+                logger.LogInformation(
+                    "serving guard metrics on :{Port}/metrics — alert on "
+                    + "overfit_guard_last_cycle_timestamp_seconds going stale", metricsPort);
             }
 
             await host.RunAsync(ct).ConfigureAwait(false);

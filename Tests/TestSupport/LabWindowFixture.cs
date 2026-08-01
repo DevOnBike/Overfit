@@ -27,11 +27,19 @@ namespace DevOnBike.Overfit.Tests.TestSupport
         /// <summary>Label the recorder writes for the replica carrying the injected fault.</summary>
         public const string FaultLabel = "FAULT:cpu-throttle";
 
-        public static string Path
-        {
-            get;
-        } =
-            System.IO.Path.Combine(AppContext.BaseDirectory, "test_fixtures", "lab", "lab-window.csv");
+        /// <summary>
+        /// Which recording to read. Defaults to the original four-replica window; set
+        /// <c>OVERFIT_LAB_FIXTURE_NAME</c> to read another recording from the same directory.
+        ///
+        /// <para>Made selectable when a second recording arrived — sixty minutes of the rebuilt twelve-replica
+        /// lab. The two are not interchangeable: the first is four replicas of an inference server with an
+        /// injected throttle, the second is twelve replicas of a purpose-built workload with nothing wrong,
+        /// and a measurement calibrated against one says nothing about the other.</para>
+        /// </summary>
+        public static string Path =>
+            System.IO.Path.Combine(
+                AppContext.BaseDirectory, "test_fixtures", "lab",
+                Environment.GetEnvironmentVariable("OVERFIT_LAB_FIXTURE_NAME") ?? "lab-window.csv");
 
         /// <summary>Whether the fixture is present — it is copied to output, so normally yes.</summary>
         public static bool Exists => File.Exists(Path);

@@ -146,15 +146,59 @@ namespace DevOnBike.Overfit.Anomalies.Contracts
             return Channel(pod, (int)MetricIndex.Count + index);
         }
 
+        /// <summary>
+        /// A signal as memory over this window's own storage — no copy.
+        ///
+        /// <para><b>For readers that outlive the call but not the window.</b> A <see cref="Span{T}"/> cannot
+        /// be stored, so every consumer that needed to keep a series was copying it, and the guard was making
+        /// two copies per pod per signal per cycle whether or not anything came of them — measured at
+        /// <b>3 MB a cycle on two hundred replicas</b>, for series almost all of which are read once and
+        /// discarded.</para>
+        ///
+        /// <para><b>The lifetime is the window's, and that is the whole caution.</b> Anything that keeps this
+        /// beyond the cycle keeps the entire window alive with it — 1.7 MB at two hundred replicas — and will
+        /// read whatever the window holds later. Retain it only for as long as the window is retained; copy
+        /// when it has to outlive one, which is what a finding does.</para>
+        /// </summary>
+        public ReadOnlyMemory<double> SeriesMemory(int pod, MetricIndex metric)
+        {
+            var index = (int)metric;
+
+            if ((uint)index >= (uint)MetricIndex.Count)
+            {
+                throw new ArgumentOutOfRangeException(nameof(metric), metric, "Unknown metric.");
+            }
+
+            return new ReadOnlyMemory<double>(_values, Offset(pod, index), Length);
+        }
+
+        /// <summary>A custom channel as memory. Same lifetime caution as the indexed overload.</summary>
+        public ReadOnlyMemory<double> SeriesMemory(int pod, string custom)
+        {
+            ArgumentNullException.ThrowIfNull(custom);
+
+            if (!_customIndex.TryGetValue(custom, out var index))
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(custom), custom, "This window carries no such custom channel.");
+            }
+
+            return new ReadOnlyMemory<double>(
+                _values, Offset(pod, (int)MetricIndex.Count + index), Length);
+        }
+
         private Span<double> Channel(int pod, int channel)
+            => _values.AsSpan(Offset(pod, channel), Length);
+
+        /// <summary>Start of one pod's channel inside the flat store. Shared so span and memory cannot drift.</summary>
+        private int Offset(int pod, int channel)
         {
             ArgumentOutOfRangeException.ThrowIfNegative(pod);
             ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(pod, _pods.Length);
 
             var channels = (int)MetricIndex.Count + _custom.Length;
-            var offset = (((long)pod * channels) + channel) * Length;
 
-            return _values.AsSpan((int)offset, Length);
+            return (int)((((long)pod * channels) + channel) * Length);
         }
 
         /// <summary>

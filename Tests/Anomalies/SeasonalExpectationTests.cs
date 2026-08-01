@@ -87,8 +87,10 @@ namespace DevOnBike.Overfit.Tests.Anomalies
                 first.RunCycle(RisingWindow(at: WindowStart.AddDays(day)), WindowStart.AddDays(day).AddMinutes(20));
             }
 
-            // A fresh guard, as after a restart. Nothing is shared but the store.
-            var restored = MetricHistory.Read(store.State);
+            // A fresh guard, as after a restart. Nothing is shared but the store — which now carries the
+            // baseline and the floor calibration together, since both are "what normal looks like" and
+            // neither is much use without the other after a restart.
+            var (restored, _) = LearnedState.Read(store.State);
 
             Assert.True(restored.TryGet(Workload, MetricIndex.RequestsPerSecond, WindowStart, out var summary));
             Assert.Equal(3, summary.Days);

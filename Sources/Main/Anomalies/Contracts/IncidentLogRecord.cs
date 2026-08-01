@@ -80,8 +80,17 @@ namespace DevOnBike.Overfit.Anomalies.Contracts
         int Subjects,
         int Signals,
         string Message,
-        string Narrative = "")
+        string Narrative = "",
+        string SuppressedBy = "")
     {
+        /// <summary>
+        /// Whether a declared maintenance window covered this. The row is still emitted, because an operator
+        /// looking at a failed deploy wants to know what the guard saw during it — deleting the evidence to
+        /// keep the log tidy removes exactly the record they came for. What the flag changes is routing: a
+        /// host must not page on it.
+        /// </summary>
+        public bool IsSuppressed => SuppressedBy.Length > 0;
+
         /// <summary>How long the behaviour has been running.</summary>
         public TimeSpan Duration => End - Start;
 

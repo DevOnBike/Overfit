@@ -125,7 +125,8 @@ namespace DevOnBike.Overfit.Server.AspNet.Services
             IIncidentSink sink,
             ILogger<AnomalyGuardService> logger,
             IRefreshablePodTopology? topology = null,
-            IIncidentStore? store = null)
+            IIncidentStore? store = null,
+            ILearnedStateStore? learnedState = null)
         {
             ArgumentNullException.ThrowIfNull(options);
             ArgumentNullException.ThrowIfNull(source);
@@ -151,11 +152,26 @@ namespace DevOnBike.Overfit.Server.AspNet.Services
                 },
                 sink,
                 options.Tracking,
-                store);
+                store,
+                restoredAt: null,
+
+                // Passed, and it had better stay passed. The same omission on the incident store meant
+                // durable state existed in the library while nothing deployable reached it — the seasonal
+                // baseline and the floor calibration would have relearned from nothing on every rollout, and
+                // a guard that has forgotten its floors is quietly the noisy one.
+                historyStore: learnedState);
         }
 
         /// <summary>Incidents adopted from durable state when this instance started. Zero without a store.</summary>
         public int RestoredIncidents => _guard.RestoredIncidents;
+
+        /// <summary>
+        /// The guard's own counters, for a host to expose to Prometheus. <b>Alert on
+        /// <c>overfit_guard_last_cycle_timestamp_seconds</c> going stale</b>: it is the only series that makes
+        /// "this has stopped" visible from outside, and a stopped guard is worse than an absent one because
+        /// somebody is relying on it.
+        /// </summary>
+        public GuardTelemetry Telemetry => _guard.Telemetry;
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
@@ -357,6 +373,10 @@ namespace DevOnBike.Overfit.Server.AspNet.Services
             }
             catch (Exception ex)
             {
+                // Counted as well as logged. A loop that fails every cycle updates no incident counter, so
+                // without its own series the only evidence is a log line nobody is watching — and no
+                // incidents is exactly what a healthy cluster looks like.
+                _guard.Telemetry.Failed();
                 _cycleFailed(_logger, ex);
             }
         }

@@ -117,6 +117,41 @@ namespace DevOnBike.Overfit.Anomalies.Contracts
         }
 
         /// <summary>One feature's absolute floors.</summary>
+        /// <summary>
+        /// Periods declared abnormal on purpose — a deployment, a node pool upgrade, a load test.
+        ///
+        /// <para><b>Declarative, in the same file as everything else, and that is the whole point.</b> The
+        /// alternative is an endpoint the operator calls to silence the guard, which means the guard needs a
+        /// write API, authentication for it, and a way to survive its own restart with that state intact. A
+        /// list in a ConfigMap needs none of those, reviews like code, and keeps the promise that the only
+        /// dependency is an HTTP route to Prometheus.</para>
+        ///
+        /// <para>Timestamps are ISO-8601. A window that cannot be parsed is <b>reported and dropped</b>, never
+        /// silently widened to cover everything — a suppression that quietly applies for ever is the one
+        /// mistake here that produces total, invisible deafness.</para>
+        /// </summary>
+        public List<MaintenanceEntry> Maintenance
+        {
+            get;
+            set;
+        } = [];
+
+        /// <summary>One declared window.</summary>
+        public sealed class MaintenanceEntry
+        {
+            /// <summary>Start, ISO-8601, inclusive.</summary>
+            public string From { get; set; } = string.Empty;
+
+            /// <summary>End, ISO-8601, exclusive.</summary>
+            public string To { get; set; } = string.Empty;
+
+            /// <summary>Workload it covers; empty means the whole scope.</summary>
+            public string Workload { get; set; } = string.Empty;
+
+            /// <summary>Why, in the operator's words. Carried into every suppressed report.</summary>
+            public string Reason { get; set; } = string.Empty;
+        }
+
         public sealed class ThresholdEntry
         {
             /// <summary>Smallest peer difference worth reporting, with a unit.</summary>
