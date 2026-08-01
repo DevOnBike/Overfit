@@ -39,6 +39,28 @@ namespace DevOnBike.Overfit.Server.AspNet.Services
         /// </summary>
         public TimeSpan EndOffset { get; init; } = TimeSpan.FromMinutes(2);
 
+        /// <summary>
+        /// Pod label the topology reader uses as the peer-group key. Empty leaves every pod in one group,
+        /// which is the behaviour before cohorts existed.
+        /// </summary>
+        public string PeerGroupLabel { get; init; } = string.Empty;
+
+        /// <summary>
+        /// How often the guard reports what floors its own observations imply. <see cref="TimeSpan.Zero"/>
+        /// turns it off.
+        ///
+        /// <para><b>This is the answer to "what do I put in those absolute floors", and it is on by default
+        /// because the honest alternative was "only you can know".</b> True, and useless — the numbers are not
+        /// knowable in advance, but they are measurable, and a guard that has been running in shadow mode has
+        /// been measuring them all along. It reports only the metrics whose configured floor is <i>below</i>
+        /// what a healthy period produced, so it goes quiet once the configuration catches up rather than
+        /// repeating itself forever.</para>
+        ///
+        /// <para>An hour, because the proposal is only worth reading once enough windows are behind it and a
+        /// shadow deployment runs for days.</para>
+        /// </summary>
+        public TimeSpan FloorProposalInterval { get; init; } = TimeSpan.FromHours(1);
+
         /// <summary>Detector thresholds, topology and the per-metric floors.</summary>
         public AnomalyGuardOptions Guard { get; init; } = new();
 

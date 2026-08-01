@@ -88,6 +88,16 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
         [
             ("us", 0.000_001),
             ("ms", 0.001),
+            // Binary units first: "GiB" must not be read as "B", and Kubernetes resource limits are written
+            // this way ("2Gi", "512Mi"), so an operator configuring a memory floor reaches for them by habit.
+            // Rejecting them is not a harmless refusal — the entry is dropped and the gate quietly stops
+            // gating, which is exactly the failure the reporting exists to prevent.
+            ("GiB", 1_073_741_824.0),
+            ("MiB", 1_048_576.0),
+            ("KiB", 1_024.0),
+            ("Gi", 1_073_741_824.0),
+            ("Mi", 1_048_576.0),
+            ("Ki", 1_024.0),
             ("GB", 1_000_000_000.0),
             ("MB", 1_000_000.0),
             ("KB", 1_000.0),

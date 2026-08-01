@@ -10,12 +10,21 @@ using Xunit.Abstractions;
 namespace DevOnBike.Overfit.Tests.Diagnostics
 {
     /// <summary>
+    /// <b>SUPERSEDED by Demo/LabLoadDriver, which runs inside the cluster.</b> Kept because it is
+    /// still the only way to drive the inference-server lab, but do not reach for it by default: it
+    /// depends on one <c>kubectl port-forward</c> per replica, and that path produced three separate
+    /// classes of silent failure — stale forwards answering for the WRONG pod, forwards dropping
+    /// mid-run and leaving a replica idle inside a peer group, and this being an xUnit test whose
+    /// output is buffered until after the run it would have explained. Four lab runs were lost to
+    /// those before the driver moved into the cluster, where no forward exists to go stale.
+    /// </summary>
+    /// <summary>
     /// Drives traffic at the Overfit replicas running in the local Kubernetes lab (<c>k8s/</c>), so the
     /// anomaly detectors have something other than flat lines to look at.
     ///
     /// <para><b>Why a test and not a console app.</b> It needs the solution's HTTP shapes, it belongs next to
     /// the code it exercises, and xUnit already provides the runner, the output plumbing and the skip
-    /// mechanism. It is <c>[LongFact]</c>, so <c>dotnet test</c> never runs it by accident — flip it to
+    /// mechanism. It is <c>[Fact]</c>, so <c>dotnet test</c> never runs it by accident — flip it to
     /// <c>[Fact]</c> temporarily, exactly as with the other diagnostics here.</para>
     ///
     /// <para><b>Why the skew knob is the point.</b> Even load across identical replicas produces a peer group
@@ -70,7 +79,7 @@ namespace DevOnBike.Overfit.Tests.Diagnostics
                 : 1.0;
         }
 
-        [Fact]
+        [LongFact]
         public async Task DriveTrafficAtTheLabReplicas()
         {
             var endpoints = Endpoints();

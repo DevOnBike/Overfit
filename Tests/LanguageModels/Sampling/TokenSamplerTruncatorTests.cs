@@ -5,6 +5,7 @@
 
 using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Runtime;
+using DevOnBike.Overfit.Tests.TestSupport;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Sampling
 {
@@ -58,14 +59,11 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Sampling
             var random = new Random(2);
             var opts = SamplingOptions.WithTopNSigma(1f, temperature: 0.8f);
 
-            TokenSampler.Sample(logits, in opts, random, idx, score); // warm (JIT)
+            // Minimum across attempts rather than one shot: a pool trim or a late tier-1 promotion can only
+            // ADD to the figure, and both get likelier as the machine gets busier — see AllocationProbe.
+            var allocated = AllocationProbe.MinimumBytes(
+                () => TokenSampler.Sample(logits, in opts, random, idx, score), calls: 200);
 
-            var before = GC.GetAllocatedBytesForCurrentThread();
-            for (var i = 0; i < 200; i++)
-            {
-                TokenSampler.Sample(logits, in opts, random, idx, score);
-            }
-            var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
             Assert.True(allocated < 1024, $"expected ~0 alloc, got {allocated} B over 200 calls");
         }
 

@@ -147,6 +147,54 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
         }
 
         /// <summary>
+        /// Records a step in the workload's own level, if there was one.
+        ///
+        /// <para>The subject here is normally the workload rather than a pod, and that is the point: this is
+        /// the family that speaks about a change everybody made at once, which the peer comparison reports as
+        /// <c>Inconclusive</c> and the trend family does not see at all.</para>
+        /// </summary>
+        /// <param name="subject">Who this is about — usually the workload as a whole.</param>
+        /// <param name="signal">Metric name.</param>
+        /// <param name="result">What <see cref="LevelShiftDetector.Detect"/> returned.</param>
+        /// <param name="windowStart">Start of the evaluated window.</param>
+        /// <param name="windowEnd">End of it.</param>
+        /// <param name="series">The series judged, kept for reporting.</param>
+        /// <param name="signalClass">Overrides <see cref="SignalCatalog"/> classification.</param>
+        /// <returns>Whether a finding was added.</returns>
+        public bool ObserveLevelShift(
+            IncidentSubject subject,
+            string signal,
+            in LevelShiftResult result,
+            DateTimeOffset windowStart,
+            DateTimeOffset windowEnd,
+            ReadOnlyMemory<double> series = default,
+            SignalClass? signalClass = null)
+        {
+            ArgumentNullException.ThrowIfNull(signal);
+
+            if (result.Status != DetectionStatus.Anomalous)
+            {
+                return false;
+            }
+
+            RequireCapacity();
+
+            _findings.Add(new SignalFinding(
+                subject,
+                signal,
+                signalClass ?? SignalCatalog.Classify(signal),
+                windowStart,
+                windowEnd,
+                result.Severity,
+                result.Reason)
+            {
+                Series = series
+            });
+
+            return true;
+        }
+
+        /// <summary>
         /// Records every deviating member of a peer group. Returns how many findings were added.
         /// </summary>
         /// <param name="signal">Metric name the group was compared on.</param>

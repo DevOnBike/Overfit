@@ -55,6 +55,21 @@ namespace DevOnBike.Overfit.Statistics
     /// </summary>
     public sealed class PeerGroupOutlierDetector
     {
+        /// <summary>
+        /// How many times larger one direction's deviation must be before the other is treated as noise rather
+        /// than as evidence that the group has no norm. See <see cref="Dominant"/>.
+        ///
+        /// <para><b>Three, chosen to sit between the cases that have actually been measured</b> rather than
+        /// picked for roundness. The cases that must survive as ambiguous: a group split evenly between 100
+        /// and 900, where both sides have an absolute gap of 800 and the ratio is <b>1</b>; and a healthy
+        /// group spread in both directions at similar size. The cases that must be resolved: a replica at 2.5×
+        /// its peers while others sit ~10% under, ratio near <b>18</b>, and 400 against a group at 100 with
+        /// others at 88, ratio <b>25</b>. Nothing measured falls between 1 and 18, so the exact value inside
+        /// that range is not load-bearing — but it is a threshold, and if a real group ever lands near it,
+        /// this is the number to revisit and the paragraph to extend.</para>
+        /// </summary>
+        private const double Dominance = 3.0;
+
         private readonly ITwoSampleComparer _comparer;
 
         /// <summary>Uses <see cref="MannWhitneyComparer.Instance"/>.</summary>
@@ -252,6 +267,23 @@ namespace DevOnBike.Overfit.Statistics
                     peers[map[i]].Name, above, PeerDeviation.None, end - start, gaps[i], absolute[i]);
             }
 
+            // Before either coherence gate, because both of them read "the group is spread out" as "the group
+            // has no norm", and that is only true when the spread is of comparable size in both directions.
+            // One member three times the group with a few others sitting ten percent under it is an outlier
+            // plus scatter, and the scatter must not veto the outlier — see Dominant for the run that forced
+            // this, where a replica at Cliff's delta 1.00 and a 190% gap was never named in any cycle.
+            if (high > 0 && low > 0 && Dominant(absolute, findings, map, comparable, ref high, ref low))
+            {
+                return new PeerOutlierResult(
+                    DetectionStatus.Anomalous,
+                    $"{high + low} of {comparable} members deviate from their peers beyond noise ({high} above, {low} below); members deviating the other way were an order less pronounced and are reported as noise.{Dropped(starved, peers.Count)}",
+                    correctedAlpha,
+                    comparable,
+                    high,
+                    low,
+                    starved);
+            }
+
             // A third or more of the group standing away from the group's own centre is not one departure from
             // a norm — it is the absence of one, and the size gate must not be allowed to tidy that into a
             // confident list. Reported with the RAW directions, because members pulling both ways is the
@@ -288,8 +320,8 @@ namespace DevOnBike.Overfit.Statistics
                     starved);
             }
 
-            // Members pulling in opposite directions, or a majority departing at once: "the rest" is no longer
-            // a norm. Naming a list here would be a confident answer to a question the data cannot settle.
+            // Pulling both ways at comparable size, or a majority departing at once: "the rest" is no longer a
+            // norm. Naming a list here would be a confident answer to a question the data cannot settle.
             if ((high > 0 && low > 0) || ((high + low) * 2 > comparable))
             {
                 return new PeerOutlierResult(
@@ -310,6 +342,108 @@ namespace DevOnBike.Overfit.Statistics
                 high,
                 low,
                 starved);
+        }
+
+        /// <summary>
+        /// Decides whether one direction dwarfs the other, and if so demotes the lesser side to noise.
+        ///
+        /// <para><b>Why this exists.</b> The bidirectional gate ahead of it reads "somebody above and somebody
+        /// below" as "this group has no norm". That is right when the two sides are comparable and wrong when
+        /// they are not, and the wrong case is not rare. Measured on a twelve-replica population with one
+        /// replica deliberately run at 2.5× the CPU of its peers: the injected replica came back at Cliff's
+        /// delta <b>1.00</b> and a <b>190%</b> gap, two ordinary replicas sat about 10% under the group, the
+        /// verdict was <c>Inconclusive</c>, and <b>the guard never named the hot replica in any cycle</b> — the
+        /// only thing that ever reported it was the trend family catching the step once, after which a level
+        /// that has finished changing has no slope. A 190% deviation was vetoed by two 10% ones.</para>
+        ///
+        /// <para><b>The remedy is the same shape as <see cref="PeerOutlierOptions.MinRelativeGap"/>:</b> a rank
+        /// test cannot express "materially larger", so the comparison is made on the gaps. When the largest
+        /// deviation on one side is at least <see cref="Dominance"/> times the largest on the other, the group
+        /// does have a norm — the majority plus the small side — and the big one is an outlier from it.</para>
+        ///
+        /// <para><b>On the ABSOLUTE gap, not the relative one, and that distinction is the whole correctness of
+        /// this method.</b> A relative gap is asymmetric by construction: 900 against a group at 100 is +800%,
+        /// while 100 against a group at 900 is −89%, so comparing the two sides by proportion declares the
+        /// upper side dominant in <i>any</i> split and would resolve exactly the groups that must stay
+        /// ambiguous. An existing test — a group split evenly between 100 and 900 — caught precisely that.
+        /// <c>|a − b|</c> is symmetric, and both sides are measured in the same signal's units here, so the
+        /// units cancel and the ratio means what it says.</para>
+        ///
+        /// <para>The demoted members keep their finding and their measured numbers; only their
+        /// <see cref="PeerDeviation"/> is cleared, so nothing is hidden from a caller reading the findings, and
+        /// the reason string says out loud that they were treated as noise.</para>
+        /// </summary>
+        /// <returns>Whether one side dominated, in which case <paramref name="high"/> and
+        /// <paramref name="low"/> have been updated to the surviving counts.</returns>
+        private static bool Dominant(
+            ReadOnlySpan<double> absolute,
+            Span<PeerOutlierFinding> findings,
+            ReadOnlySpan<int> map,
+            int comparable,
+            ref int high,
+            ref int low)
+        {
+            var maxHigh = 0.0;
+            var maxLow = 0.0;
+
+            for (var i = 0; i < comparable; i++)
+            {
+                if (findings[map[i]].Deviation == PeerDeviation.None || !double.IsFinite(absolute[i]))
+                {
+                    continue;
+                }
+
+                if (findings[map[i]].Deviation == PeerDeviation.High)
+                {
+                    maxHigh = Math.Max(maxHigh, absolute[i]);
+
+                    continue;
+                }
+
+                maxLow = Math.Max(maxLow, absolute[i]);
+            }
+
+            // Either side measuring zero leaves nothing to compare, and a ratio against zero would make any
+            // deviation infinitely dominant — which is the opposite of what "no measurable difference" means.
+            if (maxHigh <= 0.0 || maxLow <= 0.0)
+            {
+                return false;
+            }
+
+            var keep = maxHigh >= Dominance * maxLow
+                ? PeerDeviation.High
+                : maxLow >= Dominance * maxHigh
+                    ? PeerDeviation.Low
+                    : PeerDeviation.None;
+
+            if (keep == PeerDeviation.None)
+            {
+                return false;
+            }
+
+            for (var i = 0; i < comparable; i++)
+            {
+                if (findings[map[i]].Deviation == PeerDeviation.None || findings[map[i]].Deviation == keep)
+                {
+                    continue;
+                }
+
+                findings[map[i]] = findings[map[i]] with
+                {
+                    Deviation = PeerDeviation.None
+                };
+            }
+
+            if (keep == PeerDeviation.High)
+            {
+                low = 0;
+
+                return true;
+            }
+
+            high = 0;
+
+            return true;
         }
 
         /// <summary>

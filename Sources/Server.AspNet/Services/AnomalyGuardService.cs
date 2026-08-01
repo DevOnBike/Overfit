@@ -37,7 +37,11 @@ namespace DevOnBike.Overfit.Server.AspNet.Services
     public sealed class AnomalyGuardService : BackgroundService
     {
         private const int BlindEventId = 5004;
+        private const int BlindMetricEventId = 5007;
         private const int CycleFailedEventId = 5005;
+        private const int RestoredEventId = 5008;
+        private const int CycleEventId = 5009;
+        private const int FloorProposalEventId = 5010;
         private const int TopologyStaleEventId = 5006;
 
         private static readonly Action<ILogger, int, int, int, int, Exception?> _blind =
@@ -48,6 +52,15 @@ namespace DevOnBike.Overfit.Server.AspNet.Services
                 + "{PartialMetrics} for only some, across {Pods} pods — an absence of incidents this cycle "
                 + "({Incidents}) does not mean the cluster is healthy");
 
+        // One line per blind metric, alongside the count above. The count says the guard is partly blind; the
+        // name says which query to go and fix, and that is the whole actionable part.
+        private static readonly Action<ILogger, string, Exception?> _blindMetric =
+            LoggerMessage.Define<string>(
+                LogLevel.Warning,
+                new EventId(BlindMetricEventId, nameof(BlindMetricEventId)),
+                "Blind on {Metric}: no pod reported it this cycle. Either this cluster does not export it "
+                + "or its binding is wrong — both look like health from here.");
+
         // Its own event, because stale topology degrades grouping quietly rather than loudly: the guard keeps
         // producing incidents, they are just related to each other by out-of-date coordinates.
         private static readonly Action<ILogger, int, Exception?> _topologyStale =
@@ -56,6 +69,32 @@ namespace DevOnBike.Overfit.Server.AspNet.Services
                 new EventId(TopologyStaleEventId, "AnomalyGuardTopologyStale"),
                 "Pod topology could not be refreshed; grouping this cycle used the previous snapshot of "
                 + "{Pods} pod(s). A pod created since then falls back to a name heuristic.");
+
+        // One line per cycle, always, including the quiet ones. Counting incidents over a day is the number
+        // that decides whether anyone can page on this, and it cannot be recovered from incident lines alone:
+        // an absence of them is ambiguous between "nothing happened", "the guard was blind" and "the guard
+        // was not running". A summary emitted every cycle makes the denominator explicit.
+        private static readonly EventId CycleEvent = new(CycleEventId, "AnomalyGuardCycle");
+
+        private static readonly Action<ILogger, int, Exception?> _restored =
+            LoggerMessage.Define<int>(
+                LogLevel.Information,
+                new EventId(RestoredEventId, "AnomalyGuardStateRestored"),
+                "Adopted {Restored} open incident(s) from durable state. Zero after a restart that should "
+                + "have restored something means the state did not survive, and the next cycle will report "
+                + "problems the operator was already told about as new.");
+
+        // Deliberately Warning, not Information. A configured floor sitting below what the cluster does when
+        // nothing is wrong is not a curiosity — it is the guard telling the operator, with evidence, which of
+        // its own settings is generating noise.
+        private static readonly Action<ILogger, string, double, double, double, int, Exception?> _floorProposal =
+            LoggerMessage.Define<string, double, double, double, int>(
+                LogLevel.Warning,
+                new EventId(FloorProposalEventId, "AnomalyGuardFloorProposal"),
+                "Floor proposal for {Metric}: healthy peers differed by up to {ObservedMax} (typical "
+                + "magnitude {Typical}), so a gap below {Proposed} is something this cluster does when it is "
+                + "well. The configured floor is under that, which is why it reports. Based on {Samples} "
+                + "observation(s) — valid only if this period really was healthy.");
 
         private static readonly Action<ILogger, Exception?> _cycleFailed =
             LoggerMessage.Define(
@@ -68,14 +107,25 @@ namespace DevOnBike.Overfit.Server.AspNet.Services
         private readonly IRefreshablePodTopology? _topology;
         private readonly AnomalyGuard _guard;
         private readonly ILogger<AnomalyGuardService> _logger;
+        private readonly FloorCalibrator? _calibrator;
         private int _knownPods;
+        private DateTimeOffset _nextProposal;
 
+        /// <param name="store">
+        /// Optional durable state. <b>Supply one in any deployment that can be restarted</b>, which is all of
+        /// them: without it every incident that was running is reopened after a rollout or a crash, and the
+        /// operator is paged again for problems they were already told about — the tracker's whole
+        /// contribution undone by the guard's own restart. This was missing here while
+        /// <see cref="AnomalyGuard"/> had supported it all along, so the durable path existed and nothing
+        /// deployable reached it.
+        /// </param>
         public AnomalyGuardService(
             AnomalyGuardServiceOptions options,
             PrometheusMetricWindowSource source,
             IIncidentSink sink,
             ILogger<AnomalyGuardService> logger,
-            IRefreshablePodTopology? topology = null)
+            IRefreshablePodTopology? topology = null,
+            IIncidentStore? store = null)
         {
             ArgumentNullException.ThrowIfNull(options);
             ArgumentNullException.ThrowIfNull(source);
@@ -87,6 +137,11 @@ namespace DevOnBike.Overfit.Server.AspNet.Services
             _topology = topology;
             _logger = logger;
 
+            if (options.FloorProposalInterval > TimeSpan.Zero)
+            {
+                _calibrator = new FloorCalibrator(options.Guard.Trend);
+            }
+
             // The guard reads topology through the interface, so handing it the same instance the loop
             // refreshes is what keeps the two in step — no snapshot is copied anywhere.
             _guard = new AnomalyGuard(
@@ -95,11 +150,21 @@ namespace DevOnBike.Overfit.Server.AspNet.Services
                     PodTopology = topology
                 },
                 sink,
-                options.Tracking);
+                options.Tracking,
+                store);
         }
+
+        /// <summary>Incidents adopted from durable state when this instance started. Zero without a store.</summary>
+        public int RestoredIncidents => _guard.RestoredIncidents;
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
+            // Said once, at startup, because it is the only evidence an operator has that durable state is
+            // wired at all. Zero after a restart that should have restored something means either no store
+            // was supplied or the file did not survive — and both present as a burst of duplicate
+            // notifications for problems the operator was already told about.
+            _restored(_logger, _guard.RestoredIncidents, null);
+
             using var timer = new PeriodicTimer(_options.Cadence);
 
             // #pragma BOUND: exits when the host signals cancellation; PeriodicTimer.WaitForNextTickAsync
@@ -138,6 +203,69 @@ namespace DevOnBike.Overfit.Server.AspNet.Services
             _knownPods = resolved;
         }
 
+        /// <summary>
+        /// Folds this window into the running picture of what healthy looks like, and periodically says what
+        /// floors that picture implies.
+        ///
+        /// <para><b>Only the metrics whose configured floor is below the proposal are reported</b>, because
+        /// those are the only ones where the setting is the reason for the noise. A floor already above what
+        /// the cluster does is doing its job and there is nothing to say about it — so the report shrinks as
+        /// the configuration is fixed, instead of restating the same thirteen lines every hour until they are
+        /// filtered out and stop being read.</para>
+        /// </summary>
+        private void ProposeFloors(MetricWindow window, DateTimeOffset now)
+        {
+            if (_calibrator is null)
+            {
+                return;
+            }
+
+            _calibrator.Observe(window);
+
+            if (_nextProposal == default)
+            {
+                _nextProposal = now + _options.FloorProposalInterval;
+
+                return;
+            }
+
+            if (now < _nextProposal)
+            {
+                return;
+            }
+
+            _nextProposal = now + _options.FloorProposalInterval;
+
+            var proposals = _calibrator.Propose();
+
+            for (var m = 0; m < proposals.Length; m++)
+            {
+                var proposal = proposals[m];
+
+                if (!proposal.IsUsable || proposal.ProposedMinAbsoluteGap <= 0.0)
+                {
+                    continue;
+                }
+
+                var metric = (MetricIndex)m;
+                var configured = AnomalyGuardOptions.FloorFor(_options.Guard.MinAbsoluteGap, metric);
+
+                if (configured >= proposal.ProposedMinAbsoluteGap)
+                {
+                    continue;
+                }
+
+                _floorProposal(
+                    _logger,
+                    metric.ToString(),
+                    proposal.PeerGapMax,
+                    proposal.TypicalMagnitude,
+                    proposal.ProposedMinAbsoluteGap,
+                    proposal.Samples,
+                    null);
+            }
+        }
+
         private async Task RunOneCycleAsync(CancellationToken ct)
         {
             try
@@ -158,12 +286,47 @@ namespace DevOnBike.Overfit.Server.AspNet.Services
 
                 var result = _guard.RunCycle(window, now);
 
+            // Eight fields, and LoggerMessage.Define stops at six. Pre-compiling this would mean dropping
+            // two of them or splitting the line, and neither is worth it for a call that happens once per
+            // cadence — the allocation is nothing against a cycle that has just read a window from
+            // Prometheus. The placeholders still name the properties a structured sink records.
+            _logger.LogInformation(
+                CycleEvent,
+                "cycle: pods={Pods} findings={Findings} incidents={Incidents} opened={Opened} "
+                + "ongoing={Ongoing} resolved={Resolved} blind={Blind} unevaluable={Unevaluable}",
+                window.Pods.Count,
+                result.Findings,
+                result.Incidents,
+                result.Opened,
+                result.Ongoing,
+                result.Resolved,
+                result.BlindMetrics,
+                result.UnevaluableMetrics);
+
+            // Named, not counted. "5 metrics returned nothing" tells an operator that the guard is partly
+            // blind and nothing about which query to go and fix; the names are the whole actionable part,
+            // and they are cheap because the window already knows.
+            if (result.BlindMetrics > 0)
+            {
+                for (var m = 0; m < (int)MetricIndex.Count; m++)
+                {
+                    var metric = (MetricIndex)m;
+
+                    if (window.PodsReporting(metric) == 0)
+                    {
+                        _blindMetric(_logger, metric.ToString(), null);
+                    }
+                }
+            }
+
                 if (result.BlindMetrics > 0 || result.PartialMetrics > 0)
                 {
                     _blind(
                         _logger, result.BlindMetrics, result.PartialMetrics,
                         window.Pods.Count, result.Incidents, null);
                 }
+
+                ProposeFloors(window, now);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {

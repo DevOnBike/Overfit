@@ -1,0 +1,93 @@
+# The anomaly guard, deployed the way a client would run it: one replica, configuration from a ConfigMap,
+# Prometheus reached by cluster DNS, shadow mode.
+#
+#   dotnet publish Sources/Cli/Cli.csproj -c Release -o Sources/Cli/publish -p:PublishAot=false
+#   docker build -f k8s/lab/guard.Dockerfile -t overfit-guard:latest Sources/Cli
+#   kubectl apply -f k8s/lab/anomaly-guard.yaml
+#
+# The only dependency is an HTTP route to Prometheus. No API-server access, no RBAC, no CRDs, no operator —
+# which is the claim made to clients, and running it this way is what tests it rather than asserting it.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: anomaly-guard-config
+  namespace: lab
+data:
+  guard.json: |
+    {
+      "prometheus": "http://overfit-lab-prometheus.monitoring.svc.cluster.local:9090",
+      "namespace": "lab",
+      "podRegex": "lab-workload-.*",
+      "metrics": {
+        "RequestsPerSecond":     { "source": "labapp_requests_total", "kind": "Counter" },
+        "LatencyP50Ms":          { "source": "labapp_request_duration_seconds", "kind": "HistogramSeconds", "quantile": 0.50 },
+        "LatencyP95Ms":          { "source": "labapp_request_duration_seconds", "kind": "HistogramSeconds", "quantile": 0.95 },
+        "LatencyP99Ms":          { "source": "labapp_request_duration_seconds", "kind": "HistogramSeconds", "quantile": 0.99 },
+        "CpuUsageRatio":         { "source": "container_cpu_usage_seconds_total", "kind": "Counter" },
+        "MemoryWorkingSetBytes": { "source": "container_memory_working_set_bytes", "kind": "Gauge" },
+        "GcGen2HeapBytes":       { "source": "dotnet_gc_heap_size_bytes", "kind": "Gauge" },
+        "GcPauseRatio":          { "source": "dotnet_gc_pause_seconds_total", "kind": "Counter" },
+        "ThreadPoolQueueLength": { "source": "dotnet_threadpool_queue_length", "kind": "Gauge" },
+        "OomEventsRate":         { "source": "container_oom_events_total", "kind": "EventCount" },
+        "ContainerRestarts":     { "source": "kube_pod_container_status_restarts_total", "kind": "EventCount" }
+      },
+      "thresholds": {
+        "MemoryWorkingSetBytes": { "minTrendChange": "256MiB" }
+      }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: anomaly-guard
+  namespace: lab
+  labels:
+    app.kubernetes.io/name: anomaly-guard
+spec:
+  # One. Two would keep two independent incident trackers and page twice for one problem — naive HA here is
+  # worse than none.
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: anomaly-guard
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: anomaly-guard
+    spec:
+      containers:
+        - name: guard
+          image: overfit-guard:latest
+          imagePullPolicy: Never
+          args:
+            - anomaly-guard
+            - --config
+            - /config/guard.json
+            - --state
+            - /state/incidents.json
+            - --cadence-seconds
+            - "300"
+            - --window-minutes
+            - "20"
+          volumeMounts:
+            - name: config
+              mountPath: /config
+              readOnly: true
+            - name: state
+              mountPath: /state
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+      volumes:
+        - name: config
+          configMap:
+            name: anomaly-guard-config
+        - name: state
+          # emptyDir, deliberately, and the cost is known: a restart loses the open incidents and the next
+          # cycle reports them as new, which is one duplicate notification per open incident. A few megabytes
+          # of PVC removes that. At one replica and rare restarts, accepting it is a defensible choice — and
+          # stating the cost is the point, since the alternative is discovering it during an incident.
+          emptyDir: {}

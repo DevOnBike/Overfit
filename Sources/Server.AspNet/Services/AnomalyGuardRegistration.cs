@@ -95,7 +95,39 @@ namespace DevOnBike.Overfit.Server.AspNet.Services
             ArgumentNullException.ThrowIfNull(section);
 
             var file = new AnomalyGuardConfigFile();
+
+            // The one reflection site in this file, and it is deliberately the only one. Binding walks the
+            // type with reflection, so it is IL2026/IL3050 and cannot go into a Native-AOT image — which the
+            // `overfit` CLI is. Everything after this line works on a plain object, so a host that cannot
+            // afford reflection deserialises the file itself and calls the overload below.
             section.Bind(file);
+
+            return services.AddOverfitAnomalyGuard(file, options, onProblem);
+        }
+
+        /// <summary>
+        /// Registers the guard from an already-materialised configuration object.
+        ///
+        /// <para><b>The AOT-safe entry point.</b> A host that publishes Native-AOT — the <c>overfit</c> CLI
+        /// does — cannot use <see cref="ConfigurationBinder"/>, so it deserialises the file with a
+        /// source-generated <c>JsonSerializerContext</c> and hands the result here. Nothing in this method
+        /// reflects over anything.</para>
+        ///
+        /// <para>Unreadable entries are dropped and reported through <paramref name="onProblem"/>, never
+        /// defaulted — a threshold that quietly became zero is a gate that quietly stopped gating.</para>
+        /// </summary>
+        /// <param name="services">Host container.</param>
+        /// <param name="file">The client's configuration, already read.</param>
+        /// <param name="options">Cadence, window and tracking; the defaults are the measured ones.</param>
+        /// <param name="onProblem">One line per configuration entry that could not be used.</param>
+        public static IServiceCollection AddOverfitAnomalyGuard(
+            this IServiceCollection services,
+            AnomalyGuardConfigFile file,
+            AnomalyGuardServiceOptions? options = null,
+            Action<string>? onProblem = null)
+        {
+            ArgumentNullException.ThrowIfNull(services);
+            ArgumentNullException.ThrowIfNull(file);
 
             var map = AnomalyGuardConfigReader.ReadMap(file, out var mapProblems);
             var (gap, trendChange) = AnomalyGuardConfigReader.ReadThresholds(file, out var floorProblems);
@@ -122,6 +154,7 @@ namespace DevOnBike.Overfit.Server.AspNet.Services
             var given = options ?? new AnomalyGuardServiceOptions();
             var resolved = new AnomalyGuardServiceOptions
             {
+                PeerGroupLabel = file.PeerGroupLabel ?? string.Empty,
                 Cadence = given.Cadence,
                 Window = given.Window,
                 EndOffset = given.EndOffset,

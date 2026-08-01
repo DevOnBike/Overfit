@@ -124,6 +124,47 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
         }
 
         /// <summary>
+        /// <b>Pod labels.</b> Carries the one fact the guard cannot work out for itself: which replicas are
+        /// meant to be compared against each other.
+        ///
+        /// <para>A rollout, a canary and an elected leader all look identical from the metrics — a minority of
+        /// pods behaving unlike the majority — and each calls for a different answer. The cluster already
+        /// knows which is which, because the operator that runs the workload publishes it as a label and
+        /// updates it on failover. Reading that beats both guessing and asking a human to keep a list.</para>
+        ///
+        /// <para>kube-state-metrics exposes every pod label as <c>label_&lt;key&gt;</c> on this series, with
+        /// dots and dashes flattened to underscores.</para>
+        /// </summary>
+        public static string PodLabelsQuery(IPrometheusQuerySelector selector)
+        {
+            var matchers = BuildSelector(selector, DataCenter.West);
+
+            return $"kube_pod_labels{{{matchers}}}";
+        }
+
+        /// <summary>
+        /// The Prometheus label name kube-state-metrics gives a Kubernetes pod label. Anything that is not a
+        /// letter, digit or underscore becomes an underscore, which is what makes <c>app.kubernetes.io/name</c>
+        /// reachable at all.
+        /// </summary>
+        public static string PodLabelSeriesName(string kubernetesLabel)
+        {
+            ArgumentNullException.ThrowIfNull(kubernetesLabel);
+
+            var text = new StringBuilder(kubernetesLabel.Length + 6);
+            text.Append("label_");
+
+            for (var i = 0; i < kubernetesLabel.Length; i++)
+            {
+                var c = kubernetesLabel[i];
+
+                text.Append(char.IsAsciiLetterOrDigit(c) || c == '_' ? c : '_');
+            }
+
+            return text.ToString();
+        }
+
+        /// <summary>
         /// <b>The rollout timestamp</b>, as a unix time in the sample's value rather than in a label.
         ///
         /// <para>An incident whose start coincides with this moving is <i>more</i> informative, not less: "this

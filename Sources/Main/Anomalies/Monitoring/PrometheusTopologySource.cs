@@ -40,6 +40,7 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
         };
 
         private readonly IPrometheusQuerySelector _selector;
+        private readonly string _peerGroupLabel;
         private readonly string _baseUrl;
         private readonly HttpClient _http;
         private readonly bool _ownsHttpClient;
@@ -47,22 +48,63 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
         private Dictionary<string, PodPlacement> _snapshot = new(StringComparer.Ordinal);
         private bool _disposed;
 
+        /// <param name="peerGroupLabel">
+        /// Pod label naming which replicas may be compared against each other — <c>role</c> for most database
+        /// and queue operators. Empty means none is declared and every pod compares against every other,
+        /// which is the behaviour before this existed.
+        ///
+        /// <para>Declared rather than inferred because a rollout, a canary and an elected leader produce the
+        /// same shape and want opposite answers. Read from the cluster rather than from a list because the
+        /// operator already publishes it and updates it on failover; a hand-written list is wrong from the
+        /// first election.</para>
+        /// </param>
         public PrometheusTopologySource(
             string prometheusBaseUrl,
             IPrometheusQuerySelector selector,
-            HttpClient? httpClient = null)
+            HttpClient? httpClient = null,
+            string peerGroupLabel = "")
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(prometheusBaseUrl);
             ArgumentNullException.ThrowIfNull(selector);
 
             _baseUrl = prometheusBaseUrl.TrimEnd('/');
             _selector = selector;
+            _peerGroupLabel = peerGroupLabel ?? string.Empty;
             _ownsHttpClient = httpClient is null;
             _http = httpClient ?? new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
         }
 
         /// <summary>Pods in the current snapshot. Zero means nothing has been resolved yet.</summary>
         public int Count => _snapshot.Count;
+
+        /// <summary>
+        /// Reads the declared peer group for every pod from <c>kube_pod_labels</c>.
+        ///
+        /// <para>A pod that does not carry the label gets no entry, and therefore an empty group. That is
+        /// deliberate rather than a gap: an empty group is shared with every other unlabelled pod, so they
+        /// keep comparing against each other exactly as they did before anyone declared anything. The
+        /// alternative — inventing a group per pod — would leave each one alone and silently switch the peer
+        /// family off for the whole deployment.</para>
+        /// </summary>
+        private async Task<Dictionary<string, string>> ReadPeerGroupsAsync(CancellationToken ct)
+        {
+            var series = PromqlCatalog.PodLabelSeriesName(_peerGroupLabel);
+            var rows = await QueryAsync(PromqlCatalog.PodLabelsQuery(_selector), ct).ConfigureAwait(false);
+            var groups = new Dictionary<string, string>(rows.Count, StringComparer.Ordinal);
+
+            for (var i = 0; i < rows.Count; i++)
+            {
+                var labels = rows[i];
+
+                if (Label(labels, "pod") is { Length: > 0 } pod
+                    && Label(labels, series) is { Length: > 0 } group)
+                {
+                    groups[pod] = group;
+                }
+            }
+
+            return groups;
+        }
 
         /// <inheritdoc/>
         public bool TryResolve(string pod, out PodPlacement placement)
@@ -89,6 +131,13 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
                     .ConfigureAwait(false);
                 var podNodes = await QueryAsync(PromqlCatalog.PodNodeQuery(_selector), ct)
                     .ConfigureAwait(false);
+
+                // Only issued when a label was named. Asking for kube_pod_labels on every refresh would cost
+                // a query per cycle to fill a field nobody configured, and the series is one of the widest
+                // kube-state-metrics produces.
+                var peerGroupOf = _peerGroupLabel.Length > 0
+                    ? await ReadPeerGroupsAsync(ct).ConfigureAwait(false)
+                    : null;
 
                 // ReplicaSet -> Deployment, the second hop.
                 var deploymentOf = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -144,10 +193,16 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
                         ? owner
                         : string.Empty;
 
+                    var peerGroup = peerGroupOf is not null
+                                    && peerGroupOf.TryGetValue(pod, out var declared)
+                        ? declared
+                        : string.Empty;
+
                     resolved[pod] = new PodPlacement(
                         workload,
                         replicaSet,
-                        nodeOf.TryGetValue(pod, out var node) ? node : string.Empty);
+                        nodeOf.TryGetValue(pod, out var node) ? node : string.Empty,
+                        peerGroup);
                 }
 
                 if (resolved.Count == 0)

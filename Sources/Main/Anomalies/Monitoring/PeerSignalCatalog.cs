@@ -72,5 +72,31 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
         {
             return Classify(metric) == PeerSignalKind.LoadSensitive;
         }
+
+        /// <summary>
+        /// Whether a single occurrence of <paramref name="metric"/> is itself the finding, which makes its
+        /// threshold a matter of meaning rather than of measurement.
+        ///
+        /// <para><b>This exists because fitting one of these to observed data sets it above a real event.</b>
+        /// Measured, and it is not hypothetical: <see cref="FloorCalibrator"/> run over a healthy day proposed
+        /// a <see cref="MetricIndex.ContainerRestarts"/> floor of <b>1.25</b>, because pods in that population
+        /// restart about once a day and so a difference of one restart is, statistically, entirely normal. It
+        /// is also exactly what the operator wants to hear about, and a floor of 1.25 makes one restart
+        /// permanently unreportable. The rest of that proposal was good; this part of it was worse than
+        /// nothing.</para>
+        ///
+        /// <para>So these signals opt out of calibration and keep whatever the operator declared. The general
+        /// rule the case teaches: a quantity whose <i>scale</i> is arbitrary can be calibrated from data, and
+        /// a quantity whose <i>unit</i> is already the thing you care about cannot.</para>
+        /// </summary>
+        public static bool IsCountedEvent(MetricIndex metric)
+        {
+            return metric switch
+            {
+                MetricIndex.ContainerRestarts => true,
+                MetricIndex.OomEventsRate => true,
+                _ => false,
+            };
+        }
     }
 }

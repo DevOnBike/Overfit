@@ -30,6 +30,16 @@ namespace DevOnBike.Overfit.Anomalies.Contracts
         /// <summary>Trend thresholds.</summary>
         public TrendOptions Trend { get; init; } = TrendOptions.Balanced;
 
+        /// <summary>
+        /// Thresholds for the step detector, which runs on the workload's own aggregate.
+        ///
+        /// <para>It only runs when <see cref="DecomposeCommonMode"/> is on, because the series it judges is
+        /// the cross-peer common component. Its absolute floor comes from <see cref="MinAbsoluteGap"/> — the
+        /// same "how large a difference in this signal's units matters" question, asked across time rather
+        /// than across replicas.</para>
+        /// </summary>
+        public LevelShiftOptions LevelShift { get; init; } = LevelShiftOptions.Balanced;
+
         /// <summary>How findings become incidents.</summary>
         public IncidentGroupingOptions Grouping { get; init; } = IncidentGroupingOptions.Balanced;
 
@@ -176,6 +186,50 @@ namespace DevOnBike.Overfit.Anomalies.Contracts
             new(MetricIndex.OomEventsRate, SustainedThresholdOptions.ForRareEvent),
             new(MetricIndex.ContainerRestarts, SustainedThresholdOptions.ForRareEvent),
         ];
+
+        /// <summary>
+        /// The ceiling each metric is heading towards, per metric, in that metric's own units — a container
+        /// memory limit, a disk capacity, an SLO. Absent entries mean no projection.
+        ///
+        /// <para><b>This turns a trend from an observation into something someone can act on.</b>
+        /// <see cref="TrendDetector"/> has always computed a time-to-limit and put it in the finding's own
+        /// words; the deployed path passed <c>NaN</c> for the limit, so it never had one to project against
+        /// and the capability was dead. "Working set rose by 11% of typical" and "working set reaches its
+        /// limit in 40 minutes" are the same measurement, and only one of them tells an operator whether to
+        /// get up.</para>
+        ///
+        /// <para><b>Static and per metric, matching the two floor tables above.</b> A container's real limit
+        /// varies per pod and could be read from <c>kube_pod_container_resource_limits</c>, which would be
+        /// better and is not what this is; one number per metric is what an operator can state in a config
+        /// file today, and a wrong-by-a-factor projection is still worth more than none. Reading the true
+        /// per-pod limit is the obvious next step and is deliberately not pretended at here.</para>
+        ///
+        /// <para>Left empty, nothing changes: no projection is attempted and the finding reads exactly as it
+        /// did before.</para>
+        /// </summary>
+        public IReadOnlyList<double>? SaturationLimit
+        {
+            get; init;
+        }
+
+        /// <summary>
+        /// Looks up a per-metric ceiling. <see cref="double.NaN"/> when absent, which is what
+        /// <c>TrendDetector.Detect</c> reads as "do not project" — distinct from the floor lookup below,
+        /// where a missing entry means zero and therefore "gate off".
+        /// </summary>
+        public static double LimitFor(IReadOnlyList<double>? table, MetricIndex metric)
+        {
+            var index = (int)metric;
+
+            if (table is null || index < 0 || index >= table.Count)
+            {
+                return double.NaN;
+            }
+
+            var value = table[index];
+
+            return double.IsFinite(value) && value > 0.0 ? value : double.NaN;
+        }
 
         /// <summary>Looks up a per-metric floor, treating a short or absent table as "gate off".</summary>
         public static double FloorFor(IReadOnlyList<double>? table, MetricIndex metric)

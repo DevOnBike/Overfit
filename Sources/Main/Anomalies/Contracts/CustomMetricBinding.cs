@@ -55,6 +55,14 @@ namespace DevOnBike.Overfit.Anomalies.Contracts
     /// Optional absolute rule — "above this, for this share of the window". The case the relative families
     /// cannot reach: a queue depth or a consumer lag that is simply too high, whatever the siblings are doing.
     /// </param>
+    /// <param name="SaturationLimit">
+    /// The ceiling this signal is heading towards, in its own units — a disk capacity, a queue bound, a
+    /// connection-pool size. <see cref="double.NaN"/> skips the projection.
+    ///
+    /// <para>Its own field rather than an entry in the per-metric table, because that table is indexed by
+    /// <see cref="MetricIndex"/> and cannot hold a name the enum does not have — the same reason custom
+    /// channels carry their own floors.</para>
+    /// </param>
     public readonly record struct CustomMetricBinding(
         string Name,
         string Source,
@@ -64,7 +72,8 @@ namespace DevOnBike.Overfit.Anomalies.Contracts
         double MinAbsoluteGap = 0.0,
         double MinAbsoluteTrendChange = 0.0,
         double Quantile = 0.0,
-        SustainedThresholdOptions? Rule = null)
+        SustainedThresholdOptions? Rule = null,
+        double SaturationLimit = double.NaN)
     {
         /// <summary>Whether this binding can produce a query at all.</summary>
         public bool IsUsable => !string.IsNullOrWhiteSpace(Name) && !string.IsNullOrWhiteSpace(Source);

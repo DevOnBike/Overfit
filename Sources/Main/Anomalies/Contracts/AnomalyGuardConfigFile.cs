@@ -25,6 +25,21 @@ namespace DevOnBike.Overfit.Anomalies.Contracts
         /// <summary>Kubernetes namespace to watch.</summary>
         public string Namespace { get; set; } = string.Empty;
 
+        /// <summary>
+        /// Pod label naming which replicas may be compared against each other — <c>role</c> for most database
+        /// and queue operators. Empty means none is declared and every pod compares against every other.
+        ///
+        /// <para><b>One string, not a list of pods.</b> Nobody maintains it after a scale-up and nobody
+        /// updates it after a failover, because the operator that runs the workload already publishes the
+        /// fact as a label and changes it when leadership moves. This names which label to read.</para>
+        ///
+        /// <para>It has to be declared because it cannot be inferred: a rollout, a canary and an elected
+        /// leader all look like a minority of replicas behaving unlike the majority, and they call for
+        /// opposite answers. An attempt to key this on the ReplicaSet was written and reverted within the
+        /// hour, when a test showed it made canaries invisible.</para>
+        /// </summary>
+        public string PeerGroupLabel { get; set; } = string.Empty;
+
         /// <summary>Pod-name regex selecting the group to watch.</summary>
         public string PodRegex { get; set; } = string.Empty;
 

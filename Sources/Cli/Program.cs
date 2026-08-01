@@ -459,6 +459,50 @@ gatewayCommand.SetAction(parseResult => Commands.Gateway(
     parseResult.GetValue(gwInsecure),
     parseResult.GetValue(gwScanResponses)));
 
+// ---- anomaly-guard: the deployable guard loop, shadow by default ----
+var guardConfig = new Option<string>("--config", "-c")
+{
+    Description = "Path to the JSON configuration: Prometheus URL, namespace, pod regex, metric map, thresholds.",
+    Required = true,
+};
+
+var guardState = new Option<string?>("--state")
+{
+    Description = "File holding open incidents across restarts. Without it a restart reopens every incident "
+                + "that was running, so a rollout of this process pages an operator for problems they were "
+                + "already told about.",
+};
+
+var guardCadence = new Option<int>("--cadence-seconds")
+{
+    Description = "How often to evaluate. Default 300; consecutive windows overlap, so far below the window "
+                + "length just re-decides what it already decided.",
+};
+
+var guardWindow = new Option<int>("--window-minutes")
+{
+    Description = "How much history each cycle evaluates. Default 20. Longer is NOT safer: measured on a "
+                + "healthy population, 20 min gave 234 false incidents a day, 60 gave 93 and 240 gave 2583.",
+};
+
+var anomalyGuardCommand = new Command(
+    "anomaly-guard",
+    "Watch a deployment's Prometheus metrics and report incidents. Shadow by default: it counts, explains "
+    + "and wakes nobody.")
+{
+    guardConfig,
+    guardState,
+    guardCadence,
+    guardWindow,
+};
+
+anomalyGuardCommand.SetAction((parseResult, ct) => AnomalyGuardCommand.RunAsync(
+    parseResult.GetValue(guardConfig)!,
+    parseResult.GetValue(guardState),
+    parseResult.GetValue(guardCadence),
+    parseResult.GetValue(guardWindow),
+    ct));
+
 var rootCommand = new RootCommand("Overfit — run local LLMs, RAG and agents in pure .NET. No Python, no native runtime.")
 {
     pullCommand,
@@ -473,6 +517,7 @@ var rootCommand = new RootCommand("Overfit — run local LLMs, RAG and agents in
     benchCommand,
     scoreCommand,
     gatewayCommand,
+    anomalyGuardCommand,
 };
 
 // Safety net for anything that escapes a command's own handler. Only OverfitException is caught: every one of

@@ -1,0 +1,71 @@
+{
+  "// what this is": [
+    "The guard's configuration for the synthetic lab workload — the stand-in for a client's application.",
+    "Nothing here is recognised by name: the guard knows MetricIndex.LatencyP95Ms, the cluster exports",
+    "labapp_request_duration_seconds, and this file is the only thing that connects them. That is the point.",
+    "",
+    "CpuThrottleRatio and OomEventsRate come from cadvisor rather than the app; ErrorRate is derived from the",
+    "app's own error counter over its request counter, which the map cannot express as a single source, so it",
+    "is left out and reported blind."
+  ],
+
+  "prometheus": "http://127.0.0.1:9090",
+  "namespace": "lab",
+  "podRegex": "lab-workload-.*",
+
+  "metrics": {
+    "RequestsPerSecond": {
+      "source": "labapp_requests_total",
+      "kind": "Counter"
+    },
+    "LatencyP50Ms": {
+      "source": "labapp_request_duration_seconds",
+      "kind": "HistogramSeconds",
+      "quantile": 0.50
+    },
+    "LatencyP95Ms": {
+      "source": "labapp_request_duration_seconds",
+      "kind": "HistogramSeconds",
+      "quantile": 0.95
+    },
+    "LatencyP99Ms": {
+      "source": "labapp_request_duration_seconds",
+      "kind": "HistogramSeconds",
+      "quantile": 0.99
+    },
+    "CpuUsageRatio": {
+      "source": "container_cpu_usage_seconds_total",
+      "kind": "Counter"
+    },
+    "MemoryWorkingSetBytes": {
+      "source": "container_memory_working_set_bytes",
+      "kind": "Gauge"
+    },
+    "GcGen2HeapBytes": {
+      "source": "dotnet_gc_heap_size_bytes",
+      "kind": "Gauge"
+    },
+    "GcPauseRatio": {
+      "source": "dotnet_gc_pause_seconds_total",
+      "kind": "Counter"
+    },
+    "ThreadPoolQueueLength": {
+      "source": "dotnet_threadpool_queue_length",
+      "kind": "Gauge"
+    },
+    "OomEventsRate": {
+      "source": "container_oom_events_total",
+      "kind": "EventCount"
+    },
+    "ContainerRestarts": {
+      "source": "kube_pod_container_status_restarts_total",
+      "kind": "EventCount"
+    }
+  },
+
+  "thresholds": {
+    "MemoryWorkingSetBytes": {
+      "minTrendChange": "256MiB"
+    }
+  }
+}

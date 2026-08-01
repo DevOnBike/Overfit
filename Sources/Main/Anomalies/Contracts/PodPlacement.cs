@@ -13,7 +13,31 @@ namespace DevOnBike.Overfit.Anomalies.Contracts
     /// the grouper scores <c>SameReplicaSet</c> above <c>SameWorkload</c>.
     /// </param>
     /// <param name="Node">Node the pod is scheduled on; empty when unknown.</param>
-    public readonly record struct PodPlacement(string Workload, string ReplicaSet, string Node)
+    /// <param name="PeerGroup">
+    /// Which replicas this one may be compared against, taken from a pod label the operator names.
+    ///
+    /// <para><b>Declared, because it cannot be inferred.</b> Three situations produce the same shape — a
+    /// minority of pods behaving unlike the majority — and call for opposite answers. A <b>rollout</b> should
+    /// not be compared across, because the new cohort is starting cold. A <b>canary</b> should be compared
+    /// across, because that is the entire purpose of running one. A <b>leader</b> should not be, because it
+    /// legitimately does different work. Code cannot tell them apart; an attempt to key this on the
+    /// ReplicaSet was written and reverted the same hour, when a test showed it made canaries invisible by
+    /// leaving them alone in a cohort below the minimum group size.</para>
+    ///
+    /// <para><b>Read from the cluster rather than written by hand, which is the part that makes it work.</b>
+    /// A hand-maintained list is wrong the moment leadership moves — and leadership moving is itself an event
+    /// worth noticing. Operators already publish the fact as a label (Patroni sets <c>role</c>, and most
+    /// database and queue operators do the same), kube-state-metrics exposes it as <c>kube_pod_labels</c>,
+    /// and it changes on failover on its own. The client configures one string: which label to read.</para>
+    ///
+    /// <para>Empty means "no grouping declared", and every pod then compares against every other — the
+    /// behaviour before this existed.</para>
+    /// </param>
+    public readonly record struct PodPlacement(
+        string Workload,
+        string ReplicaSet,
+        string Node,
+        string PeerGroup = "")
     {
         /// <summary>
         /// Whether anything was actually resolved.

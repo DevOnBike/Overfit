@@ -1,0 +1,72 @@
+{
+  "// what this is": [
+    "The anomaly guard's configuration for the local cluster lab, and the worked example a client copies.",
+    "Every metric name below was read out of the lab's own Prometheus rather than guessed — a name that",
+    "does not exist produces an empty result that Prometheus reports as success, which is the one failure",
+    "mode this whole subsystem exists to avoid.",
+    "",
+    "A feature with no entry here is NOT a gap to paper over: its query is never issued and every cycle",
+    "counts it blind, which the guard prints at startup. CpuThrottleRatio and ErrorRate are left out on",
+    "purpose so that list has something in it on the first run."
+  ],
+
+  "prometheus": "http://127.0.0.1:9090",
+  "namespace": "overfit",
+  "podRegex": "overfit-server-.*",
+
+  "metrics": {
+    "RequestsPerSecond": {
+      "source": "overfit_chat_requests_total",
+      "kind": "Counter"
+    },
+    "LatencyP50Ms": {
+      "source": "overfit_chat_response_time_seconds",
+      "kind": "HistogramSeconds",
+      "quantile": 0.50
+    },
+    "LatencyP95Ms": {
+      "source": "overfit_chat_response_time_seconds",
+      "kind": "HistogramSeconds",
+      "quantile": 0.95
+    },
+    "LatencyP99Ms": {
+      "source": "overfit_chat_response_time_seconds",
+      "kind": "HistogramSeconds",
+      "quantile": 0.99
+    },
+    "CpuUsageRatio": {
+      "source": "container_cpu_usage_seconds_total",
+      "kind": "Counter"
+    },
+    "MemoryWorkingSetBytes": {
+      "source": "container_memory_working_set_bytes",
+      "kind": "Gauge"
+    },
+    "GcGen2HeapBytes": {
+      "source": "dotnet_gc_heap_size_bytes",
+      "kind": "Gauge"
+    },
+    "GcPauseRatio": {
+      "source": "dotnet_gc_pause_seconds_total",
+      "kind": "Counter"
+    },
+    "ThreadPoolQueueLength": {
+      "source": "dotnet_threadpool_queue_length",
+      "kind": "Gauge"
+    },
+    "OomEventsRate": {
+      "source": "container_oom_events_total",
+      "kind": "EventCount"
+    },
+    "ContainerRestarts": {
+      "source": "kube_pod_container_status_restarts_total",
+      "kind": "EventCount"
+    }
+  },
+
+  "thresholds": {
+    "MemoryWorkingSetBytes": {
+      "minTrendChange": "256MiB"
+    }
+  }
+}

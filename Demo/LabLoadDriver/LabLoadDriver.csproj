@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>DevOnBike.Overfit.LabLoadDriver</RootNamespace>
+    <AssemblyName>lab-load-driver</AssemblyName>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <IsAotCompatible>true</IsAotCompatible>
+
+    <!-- No project references, for the same reason as LabWorkload: this stands in for whatever generates a
+         client's traffic, and sharing types with the thing under test would let a mistake hide. -->
+
+    <!-- Env-var names are local to this stand-in; OverfitEnvironment lives in Main, which is deliberately
+         not referenced. -->
+    <NoWarn>$(NoWarn);OVERFIT024</NoWarn>
+  </PropertyGroup>
+
+</Project>

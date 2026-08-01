@@ -41,6 +41,7 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
         private readonly IncidentTracker _tracker;
         private readonly PeerGroupOutlierDetector _peer = new();
         private readonly TrendDetector _trend = new();
+        private readonly LevelShiftDetector _levelShift = new();
         private readonly SustainedThresholdRule _rule = new();
 
         /// <param name="options">Thresholds, topology and the per-metric floors.</param>
@@ -309,13 +310,23 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
 
                     pipeline.Observe(
                         WorkloadSubject(), binding.Name, verdict, from, to, common, binding.Class);
+
+                    ObserveLevelShift(
+                        pipeline, binding.Name, common, from, to, binding.MinAbsoluteGap, binding.Class);
                 }
             }
 
             for (var pod = 0; pod < podCount; pod++)
             {
                 var series = window.Series(pod, binding.Name).ToArray();
-                var verdict = _trend.Detect(series, times, options, double.NaN, expectation);
+                // Custom channels carry their own ceiling on the binding, since the per-metric table is
+                // indexed by MetricIndex and cannot hold a name the enum does not have.
+                var verdict = _trend.Detect(
+                    series,
+                    times,
+                    options,
+                    binding.SaturationLimit,
+                    expectation);
 
                 pipeline.Observe(
                     Subject(window.Pods[pod]), binding.Name, verdict, from, to, series, binding.Class);
@@ -361,10 +372,12 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
             var kind = PeerSignalCatalog.Classify(metric);
             var podCount = window.Pods.Count;
             var subjects = new IncidentSubject[podCount];
+            var groups = new string[podCount];
 
             for (var pod = 0; pod < podCount; pod++)
             {
                 subjects[pod] = Subject(window.Pods[pod]);
+                groups[pod] = PeerGroupOf(window.Pods[pod]);
             }
 
             var options = _options.Peer with
@@ -372,44 +385,60 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
                 MinAbsoluteGap = AnomalyGuardOptions.FloorFor(_options.MinAbsoluteGap, metric)
             };
 
-            var peers = new List<PeerSeries>(podCount);
+            // One comparison per declared cohort — see PeerCohorts for why this cannot be inferred and why
+            // it costs nothing when nobody has declared anything: every group is then empty, every pod lands
+            // together, and this is one Detect call exactly as before.
+            var cohorts = PeerCohorts.Partition(groups, podCount);
+            var decided = false;
 
-            for (var pod = 0; pod < podCount; pod++)
+            for (var c = 0; c < cohorts.Count; c++)
             {
-                var work = kind == PeerSignalKind.LoadSensitive
-                    ? Tail(window.Series(pod, MetricIndex.RequestsPerSecond), recent).ToArray()
-                    : [];
+                var cohort = cohorts[c];
+                var peers = new List<PeerSeries>(cohort.Count);
+                var cohortSubjects = new IncidentSubject[cohort.Count];
 
-                peers.Add(new PeerSeries(
-                    window.Pods[pod], Tail(window.Series(pod, metric), recent).ToArray(), work));
-            }
-
-            var findings = new PeerOutlierFinding[podCount];
-            var result = _peer.Detect(peers, kind, options, findings);
-
-            if (peerTrace is not null)
-            {
-                for (var pod = 0; pod < podCount; pod++)
+                for (var i = 0; i < cohort.Count; i++)
                 {
-                    peerTrace(new PeerDecisionTrace(
-                        metric.ToString(),
-                        result.Status,
-                        result.HighCount,
-                        result.LowCount,
-                        window.Pods[pod],
-                        findings[pod].IsOutlier,
-                        findings[pod].RelativeGap,
-                        findings[pod].AbsoluteGap,
-                        findings[pod].Comparison.EffectSize,
-                        findings[pod].Comparison.PValueCandidateWorse,
-                        findings[pod].UsableSamples,
-                        result.ExcludedCount));
+                    var pod = cohort[i];
+
+                    var work = kind == PeerSignalKind.LoadSensitive
+                        ? Tail(window.Series(pod, MetricIndex.RequestsPerSecond), recent).ToArray()
+                        : [];
+
+                    peers.Add(new PeerSeries(
+                        window.Pods[pod], Tail(window.Series(pod, metric), recent).ToArray(), work));
+                    cohortSubjects[i] = subjects[pod];
                 }
+
+                var findings = new PeerOutlierFinding[cohort.Count];
+                var result = _peer.Detect(peers, kind, options, findings);
+
+                decided |= result.Status != DetectionStatus.InsufficientData;
+
+                if (peerTrace is not null)
+                {
+                    for (var i = 0; i < cohort.Count; i++)
+                    {
+                        peerTrace(new PeerDecisionTrace(
+                            metric.ToString(),
+                            result.Status,
+                            result.HighCount,
+                            result.LowCount,
+                            window.Pods[cohort[i]],
+                            findings[i].IsOutlier,
+                            findings[i].RelativeGap,
+                            findings[i].AbsoluteGap,
+                            findings[i].Comparison.EffectSize,
+                            findings[i].Comparison.PValueCandidateWorse,
+                            findings[i].UsableSamples,
+                            result.ExcludedCount));
+                    }
+                }
+
+                pipeline.ObservePeerGroup(metric.ToString(), result, findings, cohortSubjects, from, to);
             }
 
-            pipeline.ObservePeerGroup(metric.ToString(), result, findings, subjects, from, to);
-
-            return result.Status != DetectionStatus.InsufficientData;
+            return decided;
         }
 
         /// <summary>
@@ -455,16 +484,64 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
                     var verdict = _trend.Detect(common, times, options);
 
                     pipeline.Observe(WorkloadSubject(), metric.ToString(), verdict, from, to, common);
+
+                    ObserveLevelShift(
+                        pipeline, metric.ToString(), common, from, to,
+                        AnomalyGuardOptions.FloorFor(_options.MinAbsoluteGap, metric), null);
                 }
             }
 
             for (var pod = 0; pod < podCount; pod++)
             {
                 var series = window.Series(pod, metric).ToArray();
-                var verdict = _trend.Detect(series, times, options, double.NaN, expectation);
+                // The ceiling this signal is heading towards, when the operator supplied one. Without it the
+                // projection is skipped and the finding reads as it always did; with it, "rose by 11% of
+                // typical" becomes "reaches its limit in 40 minutes", which is the difference between an
+                // observation and something worth getting up for.
+                var verdict = _trend.Detect(
+                    series,
+                    times,
+                    options,
+                    AnomalyGuardOptions.LimitFor(_options.SaturationLimit, metric),
+                    expectation);
 
                 pipeline.Observe(Subject(window.Pods[pod]), metric.ToString(), verdict, from, to, series);
             }
+        }
+
+        /// <summary>
+        /// Asks the workload's own aggregate whether it stepped to a new level part-way through the window.
+        ///
+        /// <para><b>Only on the common component, and only against the workload subject.</b> The case this
+        /// covers is every replica moving together, which peer comparison cannot see by construction and the
+        /// trend family cannot see either — measured, and the reason is structural rather than a threshold:
+        /// Mann-Kendall's tau counts rank order, so a step scores about 0.51 whatever its height, and a 10×
+        /// step came back at a <i>worse</i> p-value than a 2.5× one. Running this per pod as well would
+        /// duplicate the peer comparison and add its false positives for nothing.</para>
+        ///
+        /// <para>The absolute floor is <see cref="AnomalyGuardOptions.MinAbsoluteGap"/> rather than a table of
+        /// its own: both gates ask "how large a difference in this signal's units is worth reporting", one
+        /// across replicas and one across time, and the answer does not depend on which axis the difference
+        /// lies along. It also means <c>FloorCalibrator</c>'s proposal covers this detector without knowing
+        /// it exists.</para>
+        /// </summary>
+        private void ObserveLevelShift(
+            IncidentPipeline pipeline,
+            string signal,
+            double[] common,
+            DateTimeOffset from,
+            DateTimeOffset to,
+            double minAbsoluteChange,
+            SignalClass? signalClass)
+        {
+            var options = _options.LevelShift with
+            {
+                MinAbsoluteChange = minAbsoluteChange
+            };
+
+            var verdict = _levelShift.Detect(common, options);
+
+            pipeline.ObserveLevelShift(WorkloadSubject(), signal, verdict, from, to, common, signalClass);
         }
 
         /// <summary>
@@ -504,6 +581,22 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
         /// <summary>The last <paramref name="samples"/> observations, or all of them if there are fewer.</summary>
         private static ReadOnlySpan<double> Tail(ReadOnlySpan<double> series, int samples)
             => samples >= series.Length ? series : series[^samples..];
+
+        /// <summary>
+        /// The cohort this pod may be compared within, from the topology. Empty when nothing was declared,
+        /// which puts every pod in one group — the behaviour before cohorts existed.
+        /// </summary>
+        private string PeerGroupOf(string pod)
+        {
+            if (_options.PodTopology is { } topology
+                && topology.TryResolve(pod, out var placement)
+                && placement.PeerGroup is { Length: > 0 } group)
+            {
+                return group;
+            }
+
+            return string.Empty;
+        }
 
         private IncidentSubject Subject(string pod)
         {

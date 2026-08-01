@@ -4,6 +4,7 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using DevOnBike.Overfit.Statistics;
+using DevOnBike.Overfit.Tests.TestSupport;
 
 namespace DevOnBike.Overfit.Tests.Statistics
 {
@@ -315,13 +316,14 @@ namespace DevOnBike.Overfit.Tests.Statistics
 
             // 40 000 doubles is 320 KB — comfortably past the 85 KB large-object-heap threshold, which is the
             // exact shape the pooled scratch exists to keep off the GC's plate in a long-lived analyser.
-            var before = GC.GetAllocatedBytesForCurrentThread();
-            for (var i = 0; i < 10; i++)
-            {
-                MannWhitneyU.Compare(baseline, candidate);
-            }
+            // Not "exactly zero on one attempt". ArrayPool<T>.Shared is trimmed on gen2 collections, so on a
+            // loaded box a Rent that normally reuses a buffer allocates a fresh 320 KB one instead — a
+            // guaranteed flake, and one that says nothing about this code. The minimum across attempts is the
+            // steady-state figure, and it is still asserted at zero.
+            var allocated = AllocationProbe.MinimumBytes(
+                () => MannWhitneyU.Compare(baseline, candidate), calls: 10);
 
-            Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
+            Assert.Equal(0, allocated);
         }
 
         [Fact]
