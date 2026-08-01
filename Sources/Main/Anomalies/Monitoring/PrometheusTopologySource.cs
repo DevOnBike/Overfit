@@ -32,7 +32,7 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
     /// other, which is the failure this class was built to prevent. Stale coordinates are wrong slowly;
     /// blank ones are wrong instantly and in the worst direction.</para>
     /// </summary>
-    public sealed class PrometheusTopologySource : IRefreshablePodTopology, IDisposable
+    public sealed class PrometheusTopologySource : IRefreshablePodTopology, IPodRoster, IDisposable
     {
         private static readonly JsonSerializerOptions _jsonOptions = new()
         {
@@ -112,6 +112,29 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
             ArgumentNullException.ThrowIfNull(pod);
 
             return _snapshot.TryGetValue(pod, out placement);
+        }
+
+        /// <inheritdoc/>
+        /// <remarks>
+        /// Straight off the last snapshot, which comes from <c>kube_pod_owner</c> and friends — the cluster's
+        /// own list, not a list of whoever happened to export a metric. That distinction is the entire value
+        /// of this member: the two lists differing is the only evidence a pod exists and is saying nothing.
+        /// </remarks>
+        public IReadOnlyList<string> KnownPods
+        {
+            get
+            {
+                var snapshot = _snapshot;
+                var pods = new string[snapshot.Count];
+                var i = 0;
+
+                foreach (var pod in snapshot.Keys)
+                {
+                    pods[i++] = pod;
+                }
+
+                return pods;
+            }
         }
 
         /// <summary>

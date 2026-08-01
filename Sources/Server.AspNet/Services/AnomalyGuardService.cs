@@ -248,22 +248,44 @@ namespace DevOnBike.Overfit.Server.AspNet.Services
                 }
 
                 var metric = (MetricIndex)m;
-                var configured = AnomalyGuardOptions.FloorFor(_options.Guard.MinAbsoluteGap, metric);
 
-                if (configured >= proposal.ProposedMinAbsoluteGap)
-                {
-                    continue;
-                }
+                // Both gates, because they are read by different families and only one of them was being
+                // reported. The peer gate governs how far apart two replicas may sit; the trend gate governs
+                // how far one may move across a window. On the lab the dominant false-positive source is the
+                // TREND family, so proposing only the peer floor addressed the smaller half of the problem —
+                // and did it silently, which is worse than not addressing it.
+                Propose(
+                    metric, "peer gap",
+                    AnomalyGuardOptions.FloorFor(_options.Guard.MinAbsoluteGap, metric),
+                    proposal.PeerGapMax, proposal.ProposedMinAbsoluteGap, proposal);
 
-                _floorProposal(
-                    _logger,
-                    metric.ToString(),
-                    proposal.PeerGapMax,
-                    proposal.TypicalMagnitude,
-                    proposal.ProposedMinAbsoluteGap,
-                    proposal.Samples,
-                    null);
+                Propose(
+                    metric, "trend change across a window",
+                    AnomalyGuardOptions.FloorFor(_options.Guard.MinAbsoluteTrendChange, metric),
+                    proposal.TrendChangeMax, proposal.ProposedMinAbsoluteTrendChange, proposal);
             }
+        }
+
+        /// <summary>
+        /// Reports one gate's proposal, or says nothing when the configured floor already covers it.
+        /// </summary>
+        private void Propose(
+            MetricIndex metric, string gate, double configured, double observed, double proposed,
+            in FloorProposal proposal)
+        {
+            if (proposed <= 0.0 || configured >= proposed)
+            {
+                return;
+            }
+
+            _floorProposal(
+                _logger,
+                $"{metric} ({gate})",
+                observed,
+                proposal.TypicalMagnitude,
+                proposed,
+                proposal.Samples,
+                null);
         }
 
         private async Task RunOneCycleAsync(CancellationToken ct)

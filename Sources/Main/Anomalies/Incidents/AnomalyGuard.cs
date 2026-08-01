@@ -6,6 +6,7 @@
 using DevOnBike.Overfit.Anomalies.Contracts;
 using DevOnBike.Overfit.Anomalies.Incidents.Abstractions;
 using DevOnBike.Overfit.Anomalies.Monitoring;
+using DevOnBike.Overfit.Anomalies.Monitoring.Abstractions;
 using DevOnBike.Overfit.Anomalies.Rules;
 using DevOnBike.Overfit.Statistics;
 
@@ -44,6 +45,17 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
         private readonly LevelShiftDetector _levelShift = new();
         private readonly SustainedThresholdRule _rule = new();
 
+        /// <summary>Signal name silent pods are filed under, stable so a query can group them.</summary>
+        private const string SilentPodSignal = "PodReportingNothing";
+
+        private readonly IIncidentStore? _historyStore;
+
+        /// <summary>What this workload normally does, per signal, per hour. Null when history is off.</summary>
+        private readonly MetricHistory? _history;
+
+        /// <summary>How many consecutive cycles each known pod has reported nothing.</summary>
+        private readonly Dictionary<string, int> _silent = new(StringComparer.Ordinal);
+
         /// <param name="options">Thresholds, topology and the per-metric floors.</param>
         /// <param name="sink">Where rows go.</param>
         /// <param name="tracking">How incidents are matched across cycles and when they close.</param>
@@ -55,12 +67,20 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
         /// Clock used for the staleness bound when restoring. Defaults to now; supplied explicitly by tests,
         /// which must not depend on the wall clock.
         /// </param>
+        /// <param name="historyStore">
+        /// Where the per-workload, per-hour baseline survives a restart. <b>Deliberately separate from
+        /// <paramref name="store"/></b>: the two payloads have different sizes, different lifetimes and
+        /// different formats, and coupling them would mean a version bump in one silently invalidating the
+        /// other. Without it the guard still learns within a run and forgets on restart — correct, just
+        /// slower to become useful.
+        /// </param>
         public AnomalyGuard(
             AnomalyGuardOptions options,
             IIncidentSink sink,
             IncidentTrackingOptions tracking,
             IIncidentStore? store = null,
-            DateTimeOffset? restoredAt = null)
+            DateTimeOffset? restoredAt = null,
+            IIncidentStore? historyStore = null)
         {
             ArgumentNullException.ThrowIfNull(options);
             ArgumentNullException.ThrowIfNull(sink);
@@ -68,7 +88,12 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
             _options = options;
             _sink = sink;
             _store = store;
+            _historyStore = historyStore;
             _tracker = new IncidentTracker(tracking);
+
+            _history = options.MinimumHistoryDays > 0
+                ? MetricHistory.Read(historyStore?.Load())
+                : null;
 
             if (store is null)
             {
@@ -131,6 +156,7 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
             var recentFrom = window.End - (window.Step * (recent - 1));
 
             RunRules(window, pipeline, recentFrom, to, recent);
+            RunSilentPods(window, pipeline, from, to);
 
             for (var m = 0; m < (int)MetricIndex.Count; m++)
             {
@@ -175,6 +201,14 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
             // After reporting, so a crash between the two costs a repeated notification rather than a lost
             // one: an operator told twice is annoyed, an operator never told is unprotected.
             _store?.Save(IncidentStateFormat.Write(_tracker.Snapshot(), _tracker.NextId));
+
+            if (_history is not null)
+            {
+                // Forgotten before saving, so a workload that was deleted stops costing storage on the next
+                // restart rather than being carried for ever by a store that only ever grows.
+                _history.Forget(observedAt, TimeSpan.FromDays(MetricHistory.MaxDays * 2));
+                _historyStore?.Save(_history.Write());
+            }
 
             return new GuardCycleResult(
                 pipeline.Count, incidents.Count, opened, ongoing, resolved, blind, partial, unevaluable);
@@ -463,7 +497,12 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
                     AnomalyGuardOptions.FloorFor(_options.MinAbsoluteTrendChange, metric)
             };
 
-            var expectation = ReadOnlySpan<double>.Empty;
+            // Worked out first, because it depends only on the clock and on history — and because it has to
+            // reach the WORKLOAD-level trend as well as the per-pod ones. Applying it only to the per-pod
+            // trends left the one detector that actually sees a movement shared by every replica judging the
+            // raw series, which is the movement a seasonal reference exists to explain.
+            var seasonal = Seasonal(metric, window, from);
+            var expectation = seasonal;
             double[]? common = null;
 
             if (_options.DecomposeCommonMode && podCount >= CrossPeerBaseline.MinimumPeers)
@@ -479,15 +518,26 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
 
                 if (CrossPeerBaseline.TryBuild(peers, common, new double[podCount]))
                 {
-                    expectation = common;
+                    // The cross-peer component says what the replicas are doing as a group right now, which
+                    // removes a difference BETWEEN them and nothing at all from a movement they all share.
+                    // Where history can supply the second, it is the better reference and wins.
+                    if (expectation.IsEmpty)
+                    {
+                        expectation = common;
+                    }
 
-                    var verdict = _trend.Detect(common, times, options);
+                    var verdict = _trend.Detect(common, times, options, double.NaN, seasonal);
 
                     pipeline.Observe(WorkloadSubject(), metric.ToString(), verdict, from, to, common);
 
                     ObserveLevelShift(
-                        pipeline, metric.ToString(), common, from, to,
+                        pipeline, metric.ToString(), Adjust(common, seasonal), from, to,
                         AnomalyGuardOptions.FloorFor(_options.MinAbsoluteGap, metric), null);
+
+                    // The workload's own level this hour, learned from its own aggregate rather than from any
+                    // one replica — so a single odd pod cannot move the baseline the whole deployment is
+                    // later judged against.
+                    _history?.Observe(_options.Workload, metric, from, Median(common));
                 }
             }
 
@@ -507,6 +557,204 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
 
                 pipeline.Observe(Subject(window.Pods[pod]), metric.ToString(), verdict, from, to, series);
             }
+        }
+
+        /// <summary>
+        /// The seasonal expectation for this window, or <paramref name="fallback"/> when there is not enough
+        /// history to have one.
+        ///
+        /// <para><b>Why this beats the cross-peer expectation it replaces.</b> The common component says what
+        /// the replicas are doing <i>as a group right now</i>, which removes a difference between replicas and
+        /// removes nothing at all from a movement they all share — and the daily traffic curve is exactly such
+        /// a movement. Measured on the lab: CPU drift inside a twenty-minute window correlates with traffic
+        /// drift at <b>+1.00</b>, and about 10% of windows drift past the trend gate on that alone. A
+        /// same-hour-yesterday reference is the only thing that can subtract it.</para>
+        ///
+        /// <para>Falls back silently and completely. A partial expectation would be worse than none.</para>
+        /// </summary>
+        private ReadOnlySpan<double> Seasonal(MetricIndex metric, MetricWindow window, DateTimeOffset from)
+        {
+            if (_history is null || _options.MinimumHistoryDays <= 0)
+            {
+                return ReadOnlySpan<double>.Empty;
+            }
+
+            var expectation = new double[window.Length];
+
+            return _history.TryExpectation(
+                _options.Workload, metric, from, window.Step, _options.MinimumHistoryDays, expectation)
+                ? expectation
+                : ReadOnlySpan<double>.Empty;
+        }
+
+        /// <summary>
+        /// Subtracts the seasonal expectation, keeping the signal's own scale.
+        ///
+        /// <para><b>The step detector needs this as much as the trend one does, and finding that out cost two
+        /// wrong guesses.</b> Its gate separates a step from a drift by magnitude alone, so a <i>steep enough
+        /// ramp</i> reads as a step: a window climbing 60% splits into halves 26% apart at Cliff's delta 1.00,
+        /// which clears every gate it has. On a workload that climbs like that every day at noon, that is the
+        /// daily curve being reported as a deployment.</para>
+        ///
+        /// <para><b>The median is added back on purpose.</b> A residual centred on zero has no scale, and the
+        /// relative gate downstream would then be dividing by nothing — the same defect documented on
+        /// <c>TrendOptions.MinAbsoluteChangeOverWindow</c>, where a series sitting at zero made "cannot judge
+        /// the size" read as "the size is large".</para>
+        /// </summary>
+        private static double[] Adjust(double[] series, ReadOnlySpan<double> expectation)
+        {
+            if (expectation.IsEmpty || expectation.Length != series.Length)
+            {
+                return series;
+            }
+
+            var level = Median(expectation.ToArray());
+
+            if (!double.IsFinite(level))
+            {
+                return series;
+            }
+
+            var adjusted = new double[series.Length];
+
+            for (var i = 0; i < series.Length; i++)
+            {
+                adjusted[i] = series[i] - expectation[i] + level;
+            }
+
+            return adjusted;
+        }
+
+        private static double Median(double[] values)
+        {
+            var finite = new List<double>(values.Length);
+
+            for (var i = 0; i < values.Length; i++)
+            {
+                if (double.IsFinite(values[i]))
+                {
+                    finite.Add(values[i]);
+                }
+            }
+
+            if (finite.Count == 0)
+            {
+                return double.NaN;
+            }
+
+            finite.Sort();
+
+            return finite[finite.Count / 2];
+        }
+
+        /// <summary>
+        /// Reports pods the cluster says exist and that reported nothing at all.
+        ///
+        /// <para><b>This is the only check here that looks at what is missing rather than at what was
+        /// measured</b>, and it exists because every other family judges a time series. A pod stuck in
+        /// <c>Pending</c> or <c>ImagePullBackOff</c>, or crash-looping fast enough to die before its first
+        /// scrape, has no series: it is not an outlier, has no trend and breaches no threshold. It is simply
+        /// absent from the window — and eleven healthy pods look exactly the same. The guard would report
+        /// nothing, which the operator would read as health.</para>
+        ///
+        /// <para><b>Silence has to persist before it is reported.</b> A pod created just before a cycle
+        /// legitimately has no samples yet, and one being deleted stops exporting before the cluster forgets
+        /// it. Both clear within a cycle; a rollout that failed does not.</para>
+        ///
+        /// <para>Skipped entirely when the topology cannot supply a roster, because without one there is no
+        /// list of pods that ought to be reporting and the alternative would be inventing it.</para>
+        /// </summary>
+        private void RunSilentPods(
+            MetricWindow window, IncidentPipeline pipeline, DateTimeOffset from, DateTimeOffset to)
+        {
+            if (_options.SilentPodCycles <= 0 || _options.PodTopology is not IPodRoster roster)
+            {
+                return;
+            }
+
+            var known = roster.KnownPods;
+
+            if (known.Count == 0)
+            {
+                // "Nothing known" — not "no pods exist". Treating an empty roster as authoritative would
+                // report every pod in the window as unexpected, which is the inverse of this check's job.
+                return;
+            }
+
+            var reporting = new HashSet<string>(window.Pods, StringComparer.Ordinal);
+
+            for (var i = 0; i < known.Count; i++)
+            {
+                var pod = known[i];
+
+                if (reporting.Contains(pod))
+                {
+                    _silent.Remove(pod);
+
+                    continue;
+                }
+
+                var cycles = _silent.GetValueOrDefault(pod) + 1;
+                _silent[pod] = cycles;
+
+                if (cycles < _options.SilentPodCycles)
+                {
+                    continue;
+                }
+
+                pipeline.ObserveSilentPod(
+                    Subject(pod),
+                    SilentPodSignal,
+                    new SilentPodResult(
+                        DetectionStatus.Anomalous,
+
+                        // Counted in cycles rather than minutes: the guard is handed a window, not a
+                        // schedule, and only the loop that drives it knows the cadence. Printing an invented
+                        // wall-clock figure would be worse than printing none.
+                        $"The cluster lists this pod and it has reported no metrics for {cycles} consecutive "
+                        + "evaluation cycle(s). Nothing about it was measured, so no other check can see it: "
+                        + "a pod that is Pending, cannot pull its image, or restarts before its first scrape "
+                        + "is indistinguishable from a pod that does not exist.",
+                        cycles,
+
+                        // Climbs with the silence and saturates: ten minutes may still be a slow start, an
+                        // hour is a rollout that failed.
+                        Math.Clamp(0.5 + (0.05 * cycles), 0.0, 1.0)),
+                    from,
+                    to);
+            }
+
+            // Forget pods the cluster has forgotten, or a scale-down leaves counters growing for ever.
+            if (_silent.Count > known.Count)
+            {
+                var stale = new List<string>();
+
+                foreach (var pod in _silent.Keys)
+                {
+                    if (!Contains(known, pod))
+                    {
+                        stale.Add(pod);
+                    }
+                }
+
+                for (var i = 0; i < stale.Count; i++)
+                {
+                    _silent.Remove(stale[i]);
+                }
+            }
+        }
+
+        private static bool Contains(IReadOnlyList<string> pods, string pod)
+        {
+            for (var i = 0; i < pods.Count; i++)
+            {
+                if (string.Equals(pods[i], pod, StringComparison.Ordinal))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         /// <summary>

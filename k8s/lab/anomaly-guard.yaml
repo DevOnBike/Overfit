@@ -7,6 +7,26 @@
 #
 # The only dependency is an HTTP route to Prometheus. No API-server access, no RBAC, no CRDs, no operator —
 # which is the claim made to clients, and running it this way is what tests it rather than asserting it.
+#
+# The floors below came from FloorCalibrator run against THIS cluster over 24 windows (288 observations
+# per metric), not from anybody's judgement — see LabFloorCalibrationDiagnostics. Three things about them
+# are worth knowing before anyone edits one:
+#
+# 1. MemoryWorkingSetBytes.minTrendChange was 256MiB and is now 1.089MB. The old value was measured on the
+#    SYNTHETIC population, whose pods carry a 1.23 GB working set; these pods carry 43 MB. A floor of
+#    268 MB against a 43 MB signal cannot fire at all — the gate meant to catch a memory leak was silently
+#    switched off, and would have stayed off through a real one.
+#
+# 2. The latency floors are NOT the calibrated ones. The calibrator proposed about 0.01 ms, correctly:
+#    latency in this lab is near-constant, so that is genuinely what healthy does. It is also not a
+#    threshold anybody would act on. A calibrated floor is a NOISE floor — it says what to ignore, never
+#    what is worth waking for — so where the two disagree the rule is max(calibrated, operational), and
+#    50 ms is the operational one.
+#
+# 3. A calibrated floor is only valid if the period it came from was healthy. A fault inside that window
+#    raises the bar above itself and blinds the guard to that fault at that size, permanently.
+#
+# Note that guard.json is parsed as strict JSON — no comments inside the ConfigMap data.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -20,6 +40,7 @@ data:
       "podRegex": "lab-workload-.*",
       "metrics": {
         "RequestsPerSecond":     { "source": "labapp_requests_total", "kind": "Counter" },
+        "ErrorRate":             { "source": "labapp_errors_total", "kind": "Counter" },
         "LatencyP50Ms":          { "source": "labapp_request_duration_seconds", "kind": "HistogramSeconds", "quantile": 0.50 },
         "LatencyP95Ms":          { "source": "labapp_request_duration_seconds", "kind": "HistogramSeconds", "quantile": 0.95 },
         "LatencyP99Ms":          { "source": "labapp_request_duration_seconds", "kind": "HistogramSeconds", "quantile": 0.99 },
@@ -32,7 +53,15 @@ data:
         "ContainerRestarts":     { "source": "kube_pod_container_status_restarts_total", "kind": "EventCount" }
       },
       "thresholds": {
-        "MemoryWorkingSetBytes": { "minTrendChange": "256MiB" }
+        "CpuUsageRatio":         { "minGap": "0.000159", "minTrendChange": "0.000326" },
+        "MemoryWorkingSetBytes": { "minGap": "9.52MB",   "minTrendChange": "1.089MB" },
+        "GcGen2HeapBytes":       { "minGap": "0.641MB",  "minTrendChange": "3.93MB" },
+        "RequestsPerSecond":     { "minGap": "0.0119",   "minTrendChange": "0.194" },
+        "GcPauseRatio":          { "minGap": "0.0000082" },
+        "LatencyP50Ms":          { "minTrendChange": "50" },
+        "LatencyP95Ms":          { "minTrendChange": "50" },
+        "LatencyP99Ms":          { "minTrendChange": "50" },
+        "ErrorRate":             { "minGap": "0.01",     "minTrendChange": "0.01" }
       }
     }
 ---

@@ -40,6 +40,35 @@ namespace DevOnBike.Overfit.Anomalies.Contracts
         /// </summary>
         public LevelShiftOptions LevelShift { get; init; } = LevelShiftOptions.Balanced;
 
+        /// <summary>
+        /// Consecutive cycles a pod must report nothing before it is called silent. Zero disables the check.
+        ///
+        /// <para><b>It needs to be more than one, and the reason is not conservatism.</b> A pod created a
+        /// moment before a cycle legitimately has no samples yet, and a pod being deleted stops exporting
+        /// before the cluster forgets it — both would be reported at one cycle. Two cycles at the default
+        /// five-minute cadence is ten minutes of silence, which is longer than either transient and far
+        /// shorter than a rollout that has actually failed.</para>
+        ///
+        /// <para>Requires a topology that implements <see cref="IPodRoster"/>. Without one there is no list
+        /// of pods that ought to be reporting, and the check is skipped rather than guessed at.</para>
+        /// </summary>
+        public int SilentPodCycles { get; init; } = 2;
+
+        /// <summary>
+        /// Days of history a workload needs at a given hour before that hour's record is used as a seasonal
+        /// expectation. Zero turns the history off entirely.
+        ///
+        /// <para><b>Two, because one day is a coincidence.</b> A single previous observation cannot say
+        /// whether today is unusual or whether yesterday was; the comparison only means something once there
+        /// is a spread to compare against. It is deliberately low all the same — a client's first week is
+        /// spent in shadow mode, and a baseline that needs a month is a baseline that arrives after the
+        /// decision to keep the tool has been made.</para>
+        ///
+        /// <para>Until the bar is met the guard behaves exactly as it did before history existed: the trend
+        /// family judges the raw series. Nothing degrades on day one; it improves on day three.</para>
+        /// </summary>
+        public int MinimumHistoryDays { get; init; } = 2;
+
         /// <summary>How findings become incidents.</summary>
         public IncidentGroupingOptions Grouping { get; init; } = IncidentGroupingOptions.Balanced;
 

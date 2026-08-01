@@ -147,6 +147,49 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
         }
 
         /// <summary>
+        /// Records a pod that the cluster says exists and that reported nothing.
+        ///
+        /// <para>No series is attached, deliberately: there is none, and passing an empty one would let a
+        /// reader believe a measurement was taken and came back flat.</para>
+        /// </summary>
+        /// <param name="subject">The silent pod.</param>
+        /// <param name="signal">Signal name to file it under.</param>
+        /// <param name="result">What the guard concluded about the silence.</param>
+        /// <param name="windowStart">Start of the evaluated window.</param>
+        /// <param name="windowEnd">End of it.</param>
+        /// <returns>Whether a finding was added.</returns>
+        public bool ObserveSilentPod(
+            IncidentSubject subject,
+            string signal,
+            in SilentPodResult result,
+            DateTimeOffset windowStart,
+            DateTimeOffset windowEnd)
+        {
+            ArgumentNullException.ThrowIfNull(signal);
+
+            if (result.Status != DetectionStatus.Anomalous)
+            {
+                return false;
+            }
+
+            RequireCapacity();
+
+            _findings.Add(new SignalFinding(
+                subject,
+                signal,
+
+                // Infrastructure, not Resource or Symptom: nothing about the application was observed, and
+                // the classification drives how the grouper relates this to other findings.
+                SignalClass.Infrastructure,
+                windowStart,
+                windowEnd,
+                result.Severity,
+                result.Reason));
+
+            return true;
+        }
+
+        /// <summary>
         /// Records a step in the workload's own level, if there was one.
         ///
         /// <para>The subject here is normally the workload rather than a pod, and that is the point: this is

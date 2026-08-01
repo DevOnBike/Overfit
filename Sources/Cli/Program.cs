@@ -503,6 +503,49 @@ anomalyGuardCommand.SetAction((parseResult, ct) => AnomalyGuardCommand.RunAsync(
     parseResult.GetValue(guardWindow),
     ct));
 
+// ---- anomaly-discover: what a cluster exports, and what the guard would be blind to ----
+var discoverPrometheus = new Option<string>("--prometheus", "-p")
+{
+    Description = "Prometheus base URL.",
+    Required = true,
+};
+
+var discoverNamespace = new Option<string>("--namespace", "-n")
+{
+    Description = "Kubernetes namespace to inspect.",
+    Required = true,
+};
+
+var discoverPods = new Option<string>("--pod-regex")
+{
+    Description = "Which pods in that namespace to inspect. Default '.*' — every pod.",
+    DefaultValueFactory = _ => ".*",
+};
+
+var discoverOut = new Option<string?>("--out", "-o")
+{
+    Description = "Write a configuration draft here. Only channels with exactly one evidenced candidate are "
+                + "written; ambiguous ones are reported and deliberately left out rather than guessed.",
+};
+
+var anomalyDiscoverCommand = new Command(
+    "anomaly-discover",
+    "Inspect a cluster's Prometheus and propose a guard configuration: which metrics feed which channel, "
+    + "which need a human decision, and which the guard will be blind to. Run this before deploying.")
+{
+    discoverPrometheus,
+    discoverNamespace,
+    discoverPods,
+    discoverOut,
+};
+
+anomalyDiscoverCommand.SetAction((parseResult, ct) => AnomalyDiscoverCommand.RunAsync(
+    parseResult.GetValue(discoverPrometheus)!,
+    parseResult.GetValue(discoverNamespace)!,
+    parseResult.GetValue(discoverPods)!,
+    parseResult.GetValue(discoverOut),
+    ct));
+
 var rootCommand = new RootCommand("Overfit — run local LLMs, RAG and agents in pure .NET. No Python, no native runtime.")
 {
     pullCommand,
@@ -518,6 +561,7 @@ var rootCommand = new RootCommand("Overfit — run local LLMs, RAG and agents in
     scoreCommand,
     gatewayCommand,
     anomalyGuardCommand,
+    anomalyDiscoverCommand,
 };
 
 // Safety net for anything that escapes a command's own handler. Only OverfitException is caught: every one of

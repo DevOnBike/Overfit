@@ -6,6 +6,56 @@ Zero-allocation, pure C# deep-learning framework targeting high-performance CPU 
 
 ---
 
+## 🎯 ACTIVE TRACK — anomaly guard, from "it detects" to "a client can run it"
+
+**Where it stands.** Detection is not the open problem. Ten of ten injected fault shapes are caught on a
+synthetic population with per-family attribution (`DetectionMatrixDiagnostics`); across six shadow runs on a
+live cluster the degraded replica was found in every cycle. The guard deploys as one pod, configured from a
+ConfigMap, whose only dependency is an HTTP route to Prometheus — no API-server access, no RBAC, no CRDs, no
+operator, no agent inside the client's application. That claim is tested by running it that way, not asserted.
+
+**What is open is trust, not capability.** The things that kill a tool like this are noise, having no way to
+say "that was a false alarm", and silence that looks like health. The list below is ordered by that, not by
+how interesting the work is.
+
+### Must have — before a client deployment can be armed
+
+| # | Item | Why it blocks |
+|---|---|---|
+| 1 | **Cross-cycle history** (rolling per-pod, per-metric, per-hour-of-day summary, persisted beside incident state) | Every cycle judges one 20-min window in isolation. Three consequences, all measured or documented: `SeasonalBaseline` **exists, is measured (2551 → 376 false/day at a 240-min window) and is not wired in**, because it needs history; a **slow leak is invisible** (2 MB/h never moves enough inside 20 min and kills a pod in a week); and "this replica has been the outlier for three days" cannot be distinguished from "for ten minutes", which are opposite operational decisions. One change, three unlocks — the largest single multiplier on the list. |
+| 2 | **Operator feedback** — marking an incident as noise feeds back into thresholds | Calibration is one-shot from a quiet window. Without a feedback path the only available response to a false alarm is muting the whole tool, which is exactly when products like this die. |
+| 3 | **Maintenance / deploy suppression window** | A client rollout *is* a level shift and the step detector will say so, correctly. Without a way to declare "expected, I am deploying", the first rollout after install generates noise and spends the trust before the guard has caught anything. |
+| 4 | **Guard self-monitoring** (own Prometheus metrics: cycles, findings, blind channels, query latency) | Today it only logs. If its Prometheus queries start failing it looks **exactly like a healthy cluster** — the same pathology the product exists to eliminate, in the product itself. This is what makes "the guard has not completed a cycle in 15 minutes" alertable. |
+| 5 | **Operational floor beside the calibrated one** (`max(calibrated, operational)`) | Measured on the lab: the calibrator proposed a latency floor of **0.01 ms** — correct, because latency there is near-constant, and useless as a threshold. A calibrated floor is a **noise** floor: it says what to ignore, never what is worth waking for. Both are needed and only the client can state the second. |
+| 6 | **Durable incident state on a PVC + a restart experiment** | `emptyDir` loses open incidents; the known cost is one duplicate notification per open incident per restart. Known, not measured. |
+| 7 | **Rollout / scale-up / scale-down / HPA validated on the lab** | Each is a day-one event at a client. Declared peer cohorts exist but have never seen a real rollout; the step detector and the silent-pod check have never seen a real cluster event at all. |
+| 8 | **One 24 h measurement on a frozen configuration** | The per-day false-positive figure quoted to a client has to come from an observed day. Iteration runs are 4 h — precision goes as √events, so 6× the wall-clock buys only ~2.4× precision, which is not worth it while the code is still changing. A 4 h run must sit on the **same clock hours** each time, because the load driver runs a real 1440-minute diurnal curve. |
+
+### Optional — valuable, not blocking
+
+| Item | Note |
+|---|---|
+| **Affine work-adjusted trend** for load-sensitive signals | Peer divides CPU by work; trend does not, and lab CPU drift correlates with traffic at **+1.00**. Plain division is right in one regime and wrong in the other (lab fixed-cost ≈ 0; synthetic fixed cost is 22–58% of value), so the affine fit is the correct form. **Blocked on an instrument** — the generator does not contain the phenomenon (0 false CPU trends over 24 h, against ~10% of windows on the lab), so a recorded lab fixture has to come first. |
+| **Causality ordering in narratives** | We group findings into an incident but never say what moved *first*. `SignalClass` already separates cause from consequence; only the time ordering is missing. "Latency rose four minutes after GC pause rose" is the sentence an operator wants. |
+| **Per-workload signal classification** | `PeerSignalCatalog` states load-sensitivity globally. PHP-FPM memory **is** load-sensitive; .NET's is not. A per-stack claim, currently hard-coded for one stack. |
+| **Second stack in the lab** (nginx cheapest, JVM most informative) | De-risks "works with any application", which today rests on one .NET workload. |
+| **More channels** | `kube_pod_status_phase{phase="Pending"}` + `waiting_reason` (why a pod never started, not just that it did not); network bytes (a pod that stopped talking at unchanged CPU); in-flight requests (saturation in the USE sense); volume stats (blocked — Docker Desktop does not export them). |
+| **Learned families** (`Gpt`, `Neuro`) | Lowest ROI now: they need training data a client does not have on day one, and the three statistical families already answer the questions clients ask. |
+| **Service-to-service dependency graph** | The highest diagnostic value on the list and a separate product, not a feature. |
+
+### Shipped in this track
+
+`FloorCalibrator` + hourly proposals (fit on one population, scored on a **held-out** one: 124 → 44
+hand-reasoned → **29** calibrated false incidents/day at identical detection); `LevelShiftDetector` (a step is
+invisible to Mann-Kendall — tau ≈ 0.51 regardless of height, so a 2.5× step scored p = 0.0695 and a **10× step
+scored worse**, p = 0.0794); the peer dominance fix (a replica at Cliff's delta 1.00 and a 190% gap was vetoed
+by two 10% ones — fixed at zero cost in false positives); the silent-pod check (a pod the cluster lists and
+which reports nothing was invisible to every family); and `overfit anomaly-discover`, which proposes a metric
+mapping from what a cluster actually exports — on the lab, 8 of 13 channels bound with no human input, 4
+flagged for a decision, 1 declared blind.
+
+---
+
 ## Status snapshot
 
 | Area | Status |

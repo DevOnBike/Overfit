@@ -36,26 +36,33 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
         /// <summary>Headroom over the largest healthy observation, for what a week did not happen to show.</summary>
         private const double Margin = 1.25;
 
-        private readonly List<double>[] _peerGaps;
-        private readonly List<double>[] _trendChanges;
-        private readonly List<double>[] _magnitudes;
+        private readonly BoundedSamples[] _peerGaps;
+        private readonly BoundedSamples[] _trendChanges;
+        private readonly BoundedSamples[] _magnitudes;
         private readonly TrendDetector _trend = new();
         private readonly TrendOptions _trendOptions;
 
+        /// <summary>
+        /// Accumulates into <see cref="BoundedSamples"/> rather than plain lists, and that is a fix rather
+        /// than a style choice: the first version appended one value per pod per metric per cycle for as long
+        /// as the process ran — about a million doubles across a shadow week on twelve replicas, and eight
+        /// million on a hundred, with no ceiling. The maximum, which is what a floor is actually set from,
+        /// stays exact; only the percentiles become sampled.
+        /// </summary>
         public FloorCalibrator(TrendOptions? trendOptions = null)
         {
             _trendOptions = trendOptions ?? TrendOptions.Balanced;
 
             var count = (int)MetricIndex.Count;
-            _peerGaps = new List<double>[count];
-            _trendChanges = new List<double>[count];
-            _magnitudes = new List<double>[count];
+            _peerGaps = new BoundedSamples[count];
+            _trendChanges = new BoundedSamples[count];
+            _magnitudes = new BoundedSamples[count];
 
             for (var i = 0; i < count; i++)
             {
-                _peerGaps[i] = [];
-                _trendChanges[i] = [];
-                _magnitudes[i] = [];
+                _peerGaps[i] = new BoundedSamples();
+                _trendChanges[i] = new BoundedSamples();
+                _magnitudes[i] = new BoundedSamples();
             }
         }
 
@@ -142,12 +149,8 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
                 var changes = _trendChanges[m];
                 var magnitudes = _magnitudes[m];
 
-                gaps.Sort();
-                changes.Sort();
-                magnitudes.Sort();
-
-                var gapMax = gaps.Count > 0 ? gaps[^1] : 0.0;
-                var changeMax = changes.Count > 0 ? changes[^1] : 0.0;
+                var gapMax = gaps.Count > 0 ? gaps.Max : 0.0;
+                var changeMax = changes.Count > 0 ? changes.Max : 0.0;
 
                 // Counted events are observed and reported like everything else, and proposed for by nobody.
                 // The observations are still worth reading — how often peers differ by a restart is a real
@@ -157,10 +160,10 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
 
                 proposals[m] = new FloorProposal(
                     magnitudes.Count,
-                    Quantile(magnitudes, 0.5),
-                    Quantile(gaps, 0.99),
+                    magnitudes.Quantile(0.5),
+                    gaps.Quantile(0.99),
                     gapMax,
-                    Quantile(changes, 0.99),
+                    changes.Quantile(0.99),
                     changeMax,
                     fittable ? gapMax * Margin : 0.0,
                     fittable ? changeMax * Margin : 0.0);
