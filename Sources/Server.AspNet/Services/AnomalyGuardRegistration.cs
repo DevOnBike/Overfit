@@ -164,6 +164,11 @@ namespace DevOnBike.Overfit.Server.AspNet.Services
                 Guard = given.Guard with
                 {
                     Namespace = file.Namespace,
+
+                    // Set from configuration, and its absence was a silent, two-headed defect: maintenance
+                    // windows naming a workload could never match, and the tracker keyed every deployment-
+                    // level subject on the same empty string, merging unrelated incidents into one identity.
+                    Workload = file.Workload ?? string.Empty,
                     MinAbsoluteGap = gap,
                     MinAbsoluteTrendChange = trendChange,
                     CustomMetrics = map.Custom,

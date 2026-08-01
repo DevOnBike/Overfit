@@ -44,6 +44,20 @@ namespace DevOnBike.Overfit.Anomalies.Contracts
         public string PodRegex { get; set; } = string.Empty;
 
         /// <summary>
+        /// The deployment being watched. Used to key the seasonal baseline, to match maintenance windows, and
+        /// as the subject of findings that are about the workload rather than any one replica.
+        ///
+        /// <para><b>Leaving it blank is not neutral, which is why it is here.</b> Without it the guard ran
+        /// with an empty workload name, and two things broke quietly. A maintenance window naming a workload
+        /// could never match, so an operator who declared one for their rollout was paged during it anyway.
+        /// And the incident tracker keys a pod-less subject on the workload, so every deployment-level
+        /// finding in a namespace collapsed to <c>"namespace/"</c> — one identity shared by unrelated
+        /// problems, reported as a single continuing incident. Visible in the lab's own logs as
+        /// <c>Anomaly incident in lab/:</c> with nothing after the slash.</para>
+        /// </summary>
+        public string Workload { get; set; } = string.Empty;
+
+        /// <summary>
         /// Which known feature comes from which of this cluster's metrics, keyed by
         /// <see cref="MetricIndex"/> name.
         /// </summary>

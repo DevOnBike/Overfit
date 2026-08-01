@@ -14,6 +14,104 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 Pre-release suffixes (e.g. `10.1.0-beta.1`) are used for surface changes that need real-world validation before the public release. Pre-releases are pushed to NuGet with the `-beta`, `-rc`, or `-preview` SemVer suffix.
 
+## [Unreleased]
+
+_The `gimli` branch, anomaly-guard track: two new detector families, a week of memory, thresholds the guard
+calibrates for itself, and the operability layer that decides whether a customer keeps it after month one._
+
+### Added
+
+- **`LevelShiftDetector` — a step is not a trend, and no threshold makes it one.** Mann-Kendall's tau counts
+  rank order, so a step scores ≈ 0.51 whatever its height: on one window shape a **2.5× step gave p = 0.0695
+  and a 10× step scored *worse*, p = 0.0794** — both the wrong side of the gate, with the larger fault less
+  visible. Theil-Sen recovered the slope perfectly well; significance is what failed, which rules out every
+  repair that is merely a lower threshold. Splitting the window and rank-testing the halves separated every
+  step at p ≤ 1.1e-3 and left a flat control alone (delta 0.19, p 0.92). It is the **only** family that
+  catches a signal rising on every replica at once — peer comparison has no outlier when everybody moves
+  together. Runs on the workload's aggregate, not per pod.
+- **Silent-pod detection.** Every other family judges a time *series*, and a pod that never started has none:
+  a replica stuck in `Pending` or `ImagePullBackOff` was invisible to the entire guard, and eleven healthy
+  pods look identical to twelve where one never came up. Compares the cluster's own roster (`IPodRoster`,
+  from kube-state-metrics via Prometheus) against who reported, requiring two consecutive silent cycles so a
+  pod that is merely starting or terminating is not accused.
+- **`MetricHistory` — cross-cycle memory, per workload, per hour of day, across seven days.** Keyed by
+  **workload rather than pod**, because pod names do not survive a deployment and a per-pod baseline would
+  reset exactly when "is the new version worse" became answerable. It supplies the trend and step families a
+  seasonal expectation, **interpolated between hours rather than held flat**: a flat reference subtracts the
+  level and leaves the slope, which is the false positive it exists to remove.
+- **`FloorCalibrator` — the guard proposes its own absolute floors.** The first question about the absolute
+  gates was always "what do I put here", and the honest answer was "only you can know" — true and useless.
+  Fitted on one synthetic population and scored on a **held-out** one: **124 → 44 hand-reasoned → 29
+  calibrated** false incidents a day, at identical detection. Where no floor is configured the learned one
+  now applies automatically, because an absent floor means the gate is off and that measured at 209 false
+  incidents a day. An explicit floor always wins, even a lower one.
+- **`MaintenanceWindow` / `IMaintenanceCalendar`.** A deployment *is* a level shift and the step detector
+  says so, about something the operator did five minutes ago. Declared windows suppress reporting **and
+  learning** — folding a known-abnormal period into "what this cluster does when it is well" takes the one
+  input certainly wrong and treats it as truth. Findings are flagged, never dropped.
+- **`GuardTelemetry` + `/metrics` on the guard itself.** It only logged, so a stopped loop or failing
+  queries produced no incidents — indistinguishable from a healthy cluster, the exact pathology the product
+  exists to eliminate. Ten series; the load-bearing one is
+  `overfit_guard_last_cycle_timestamp_seconds`, which makes `time() - … > 900` an alert anyone can write.
+- **`overfit anomaly-discover`.** Hand-authoring the metric map does not work: the map for this project's own
+  lab was written by the author of the system and still left **two channels of thirteen unbound**, reporting
+  blind for hours. Proposes a mapping from what a cluster actually exports, by name and by **suffix shape**
+  so a bespoke application matches too, and names every channel that will be blind. Ambiguous channels are
+  reported and deliberately left out of the generated file — whether a 4xx is an error is a business
+  decision, and a guess there is a guard confidently measuring the wrong thing.
+- **Durable learned state** (`LearnedState`, `ILearnedStateStore`) on its own volume. Losing it does not
+  cause duplicate notifications like losing incident state; it makes the guard quieter than it should be for
+  a week, which is the failure mode that looks like success.
+- **A recorded window of the live cluster** (`Tests/test_fixtures/lab/lab-window-healthy-12pod.csv`): 60
+  minutes, twelve replicas, 241 scrapes, 12 of 13 channels at 100% coverage.
+
+### Fixed
+
+- **A replica at Cliff's delta 1.00 and a 190% gap was never named.** `PeerGroupOutlierDetector` read
+  "somebody above and somebody below" as an ambiguous group, so two ordinary replicas sitting ~10% *under*
+  the group vetoed one running at 2.5× the CPU of its peers. It now resolves the group when one side dwarfs
+  the other, comparing **absolute** gaps — a relative gap is asymmetric by construction (900 against 100 is
+  +800%, 100 against 900 is −89%) and comparing by proportion would resolve exactly the groups that must
+  stay ambiguous. Measured: the injected fault went from 1 cycle detected to 33, at **zero** cost in false
+  positives.
+- **A memory-trend gate that could not fire.** A 256 MiB floor measured on a population whose pods carry
+  1.23 GB was carried to a lab whose pods carry 43 MB — 246× the calibrated value and six times the whole
+  signal. The gate meant to catch a memory leak was switched off, silently, and would have stayed off
+  through a real one.
+- **The step detector was gated on the peer floor.** It borrowed `MinAbsoluteGap` on the argument that both
+  gates ask "how large a difference matters". Four hours on the lab said otherwise: for the gen-2 heap the
+  peer floor calibrates to 0.64 MB and the trend floor to 4.23 MB — six times apart, because a GC sawtooth
+  moves a heap far more across a window than two replicas differ at any instant. At the peer floor it fired
+  about twice an hour on a healthy cluster and became the largest remaining false-positive source.
+- **`FloorCalibrator` grew without bound** — one value per pod per metric per cycle for the life of the
+  process, about a million doubles across a shadow week on twelve replicas and eight million on a hundred.
+  Now a bounded, deterministically decimated sample with an **exact** maximum, which is the statistic a floor
+  is actually derived from.
+- **A counted event must never have its floor fitted from data.** The calibrator proposed a
+  `ContainerRestarts` floor of **1.25** — arithmetically correct, since pods there restart about once a day,
+  and it would have made a single restart permanently unreportable.
+
+### Performance
+
+- **Guard cycle allocations cut 23×** — 7.41 MB → 328 KB per cycle at four replicas, 22.15 MB → 7.83 MB at
+  two hundred, with the Gen0 column falling from 141 collections per operation to none
+  (`AnomalyGuardScaleBenchmark`, `MemoryDiagnoser`). Two causes. The dominant one ignored pod count entirely,
+  which is what gave it away — a cost that ignores the size of the cluster is not doing work about the
+  cluster: the floor lookup recomputed the whole calibration **39 times a cycle**, sorting up to a thousand
+  values per signal per statistic, for an answer that cannot change within a cycle. The second was two
+  copies of every series per pod per signal, made whether or not anything came of them; the detectors now
+  read the window's own storage and a copy is taken only when a finding is actually recorded.
+
+### Measured and NOT shipped
+
+- **Work-adjusted trend for load-sensitive signals.** The trend family follows traffic (lab CPU drift
+  correlates with traffic at **+1.00**), and dividing by work or fitting an affine cost were the candidates.
+  The first attempt to measure it was **vacuous** — scored on the generator, every arm returned zero false
+  trends, because the generator does not contain the phenomenon. On the recorded cluster window: 15 false
+  trends raw against 11 for both repairs, with Poisson intervals that overlap and windows that overlap by
+  75%, so the effect does not clear its own noise; and the affine fit was **indistinguishable from plain
+  division** on the only real data available. Details and what would settle it in `ROADMAP.md`.
+
 ## [10.0.30] - 2026-07-05
 
 _The `frodo` branch: an on-device Android chat app, an advanced sampler suite, offline prefill acceleration, a local skill-eval harness, a `dotnet new` template + Microsoft.Extensions.AI drop-in, and CI-guard hardening._

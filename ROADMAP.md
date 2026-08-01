@@ -18,6 +18,28 @@ operator, no agent inside the client's application. That claim is tested by runn
 say "that was a false alarm", and silence that looks like health. The list below is ordered by that, not by
 how interesting the work is.
 
+### Fix first — found by reading, on paths no measurement exercises
+
+These came out of a code review after the day's work had passed 1959 tests and four hours on a live cluster.
+**None would have been found by running anything.** Full analysis in `docs/aiops-repair-plan.md`.
+
+| # | Defect | Why it is first |
+|---|---|---|
+| **A** | **`Workload` is empty in the deployed path**, and `SubjectKey` degrades to `"namespace/"` when both pod and workload are empty | Two silent failures from one root. A **maintenance window naming a workload can never match**, so the feature ships half-dead — the operator declares a window for their rollout and gets paged during it anyway. And the incident tracker matches on the subject key, so **every workload-level finding in a namespace collapses into one identity**: a memory incident that closed and a CPU incident that opened are reported as one continuing problem. Visible in the lab's own logs as `Anomaly incident in lab/:`. |
+| **B** | **The calibrator never observes custom channels** | It iterates `MetricIndex` only, and the custom paths read their floors straight off the binding. A customer-mapped signal with no configured floor stays in the "gate off" state that measured at 209 false incidents a day — on exactly the channels a bespoke application relies on most. |
+| **C** | **The seasonal baseline only learns while `DecomposeCommonMode` is on** | One option silently switches off an unrelated subsystem; a week of learning disappears as a side effect nobody would predict from the option's name. |
+| **D** | **`IncidentTracker.Restore` only advances the id counter for adopted incidents** | An incident dropped for staleness or by `MaxOpenIncidents` does not protect the identifier space, and the same method's own documentation warns that reusing an identifier lets a consumer join two unrelated incidents. The truncation is also silent: `adopted = 5` out of fifty saved looks identical to five saved. |
+| **E** | **The silent-pod check trusts a stale roster** | When a topology refresh fails the previous snapshot stands — right for grouping, wrong here. A pod deleted during the outage is still on the roster, stops reporting because it no longer exists, and is accused after two cycles. |
+| **F** | **A comment asserting behaviour the code does not have** | `ObserveSilentPod` claims `SignalClass` "drives how the grouper relates this to other findings". The grouper never reads it. A guarantee that does not exist is worse debt than a missing feature, because the next reader builds on it. |
+
+Also open, and larger than a fix: **one guard instance watches one scope** — a single namespace and a single
+pod regex. At a client with fifty namespaces that is fifty Deployments, ConfigMaps and volumes. The cheap
+answer is a list of scopes in one instance, with a tracker and a baseline per scope; the history is already
+keyed by workload, so the structure fits and only the loop is missing. That is strictly better than becoming
+a Kubernetes operator, which would buy declarative configuration we already have through a ConfigMap while
+costing RBAC, CRDs and a security review — and an operator earns its keep by reconciling cluster state, which
+this never does.
+
 ### Must have — before a client deployment can be armed
 
 | # | Item | Why it blocks |

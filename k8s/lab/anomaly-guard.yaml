@@ -37,6 +37,7 @@ data:
     {
       "prometheus": "http://overfit-lab-prometheus.monitoring.svc.cluster.local:9090",
       "namespace": "lab",
+      "workload": "lab-workload",
       "podRegex": "lab-workload-.*",
       "metrics": {
         "RequestsPerSecond":     { "source": "labapp_requests_total", "kind": "Counter" },
