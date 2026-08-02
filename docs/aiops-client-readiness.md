@@ -46,6 +46,25 @@ Measured on a synthetic population with faults injected one at a time, with per-
 ablation (`DetectionMatrixDiagnostics`). Latency is time from the fault to the first cycle that named the
 affected subject.
 
+> **Read the method before quoting the table. 2026-08-02.** "Named the affected subject" is literal:
+> `SubjectWatchingSink` compares the reported pod and **never the signal**, so any incident on the right pod
+> counts as detecting the fault — including an unrelated one. On a configuration with no calibrated floors
+> there is usually one. The column says *Detected*; what it measures is *the guard said something about this
+> pod after the fault*.
+>
+> A separate harness written the same day
+> (`OperatorFeedbackRegressionDiagnostics`) does compare the signal, and was run in this table's exact
+> configuration. It **independently confirms four rows** — both single-pod leaks, the cluster-wide leak and
+> the latency row — and **contradicts two**: `CPU 2.5× on one replica` and `CPU 2.5× on every replica` were
+> not detected on their own signal in any arm.
+>
+> The second of those is the row the architecture argument rests on. Until the matrix is re-run with a signal
+> check, **treat both CPU rows as unverified and do not quote the "step only" claim** — the family attribution
+> may still be right, but the example that carries it is in doubt. The four confirmed rows stand.
+>
+> The four untested rows — error rate, throttling, OOM, crash-restart — are neither confirmed nor
+> contradicted; nobody has run them with a signal check.
+
 | Fault | Detected | Latency | Which family catches it alone |
 |---|---|---|---|
 | Memory leak, 5 MB/min, one replica | yes | 10 min | peer + trend |

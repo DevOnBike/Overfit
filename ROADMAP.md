@@ -256,6 +256,11 @@ measurement already restarted three times in one day. In order:
 5. **The tensor defects** — `AsMemory()` first; it is the only certain crash and its missing disposed check
    is the silent half.
 6. **Finish the machine-exclusion scheme** (below).
+7. **Re-run the detection matrix with a signal check.** `SubjectWatchingSink` matches the pod and not the
+   signal, so every row is "the guard said something about this pod", not "the guard detected this fault".
+   Four rows were independently confirmed by a stricter harness and two — both CPU rows, including the one
+   the "step only" architecture claim rests on — were contradicted. One condition added to that sink settles
+   it. The table is quoted to clients, so this ranks above most of the defect work above it.
 
 ### The machine-exclusion scheme, in full
 
