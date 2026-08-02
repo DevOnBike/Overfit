@@ -233,6 +233,73 @@ wrong.
 Fix order: 1 and 2 first — both are half-done work that has been described as finished, which is worse than
 work not started. Then 6 (decide the mechanism's fate), then 4, 3, 5.
 
+### Queued behind the 24-hour run (ends 2026-08-03 18:20 UTC)
+
+Nothing here changes what the running guard reports, which is why none of it justifies a fifth restart of a
+measurement already restarted three times in one day. In order:
+
+1. **Read the day's number** — false incidents per day on the warm-up-aware build from a cold start. Report
+   it as the **pre-arming** figure: at +3 h the rate was 0.42/cycle, and 14 of 15 incidents were
+   `GcGen2HeapBytes` against a configured floor three times below what the cluster does when healthy. The
+   proposals in the guard's own log are what stage 4 copies into the ConfigMap.
+2. **Defects 1 and 2 below** — the identifier loop and the store-failure path.
+3. **Compile the three uncompiled changes and prove each one, not merely build it:**
+   - `Tests/Diagnostics/TelemetryInstrumentWiringTests.cs` — the eleven known-dead instruments must match
+     exactly; if the list and the scan disagree, the compiler will not say so, the assertion will.
+   - `Tests/MeasurementExclusion.cs` and `Sources/Benchmark/Program.cs` — **the build proves nothing here.**
+     `[assembly: TestFramework]` takes the type and assembly names as strings, so a typo does not fail the
+     build, it silently fails to register the framework and the guard is simply absent. Verify by
+     **experiment**: start a benchmark in the background, then run `dotnet test` and confirm it refuses with
+     the mutex message; then stop the benchmark and confirm the suite runs again.
+4. **The seven `OVERFIT024` sites** — four in `WhisperGgmlLoader`, plus `RepackedWeightsFile`,
+   `LlamaLoRAAdapter` and the ordering defect in `ModelSerializer`.
+5. **The tensor defects** — `AsMemory()` first; it is the only certain crash and its missing disposed check
+   is the silent half.
+6. **Finish the machine-exclusion scheme** (below).
+
+### The machine-exclusion scheme, in full
+
+This box is a development machine and a measurement instrument, and the two roles are incompatible while the
+second one is active. Three levels, because the right response differs by **how long the activity lasts** and
+by **whether its victim can repair itself afterwards**.
+
+| Level | Mechanism | Applies to |
+|---|---|---|
+| **Exclusion** | one `Global\` mutex, refuse with exit code 2 | benchmark ↔ tests ↔ build |
+| **Registration** | append `start..end` to a machine-load log | every build, test and benchmark run |
+| **Subtraction** | the lab watcher reads the log and reports two figures | the 24-hour measurement |
+
+**Why the lab does not join the mutex.** A benchmark lasts tens of minutes; the lab measurement lasts a day.
+A lock that forbids testing for twenty-four hours will be worked around, and a guard that gets worked around
+is worse than none because everyone believes it is there. The lab gets registration instead — and it can use
+it, which is the asymmetry that decides this: **a benchmark cannot remove a contaminated sample after the
+fact, but the lab measurement can**, because it counts timestamped cycles. Its report becomes two numbers,
+raw and with contaminated cycles excluded, and if they agree the contamination did not matter — which is
+itself a result, and one not available today.
+
+**`dotnet build` joins the exclusion, and the objection to it was wrong.** The argument "you must build in
+order to benchmark, so blocking builds deadlocks" does not hold: you build first and measure after, and
+during a run nothing needs building. The real obstacle is different — **BenchmarkDotNet compiles a generated
+project per benchmark while the run is in progress**, so a naive build guard deadlocks the benchmark against
+itself rather than against a human.
+
+The fix is ownership rather than exemption: the benchmark host sets `OVERFIT_MEASUREMENT_OWNER` to its own
+process id before starting BenchmarkDotNet, child processes inherit the environment, and the build guard
+allows a build that belongs to the run in progress while refusing every other. Implemented as a target in
+`Directory.Build.props` — the same shape as the existing `BanJaggedFloatArrays` and
+`BanMultipleTopLevelTypes` guards, which already fail builds from MSBuild.
+
+**Two things this must get right or it will be ripped out within a week.** A guard that stops the whole
+repository from building is a severe failure mode, so it needs the same named escape hatch as the suite
+(`OVERFIT_ALLOW_CONCURRENT_MEASUREMENT=1`), and it must fail **open** on anything it cannot determine — an
+unreadable mutex or a permissions error means "let the build through", because the cost of a wrongly blocked
+build is higher than the cost of one contaminated sample.
+
+**Scope, stated honestly.** This covers the three CPU and memory consumers the repository owns: build, test,
+benchmark. It does not cover a browser, an IDE indexing pass, a container rebuild or anything else on the
+machine. Those remain discipline, and the registration log is what makes their effect visible after the
+fact rather than invisible.
+
 **Scheduled: 1 and 2 are done when the 24-hour run ends** (started 2026-08-02 18:20 UTC, ends 2026-08-03
 18:20 UTC). Not before, and the reason is not caution about the fixes. Both are latent — the identifier
 collision needs `MaxOpenIncidents` to be reached, and the store-failure path needs a store that fails — so
@@ -571,18 +638,62 @@ every failure and read by nothing — literally this rule, broken in code writte
 whose whole job is to report that it could not write. **Gate it the way the `else` sweep was gated**: enable
 as `suggestion`, count the sites, read a sample, then promote per directory.
 
-**Rule 2, semantically — a candidate `OVERFIT024`.** A value read from `BinaryReader.Read*` or a JSON parser
-must not size an allocation or bound a loop without passing through a validator. Three of today's four
-`LanguageModels` findings are this exact shape, on untrusted model files, in a repository that has already
-had two host-killing loops on that path. What makes it credible as a rule is that the guard **already
-exists** next door: `GgufReader.RequireDeclaredCountFitsInFile` and
-`SafetensorsReader.RequireTensorsFitInTheDataBlock` are the pattern, written by someone who had this thought
-once and had no way to make it stick.
+**Rule 2, semantically — `OVERFIT024`, and the sweep has been run.** A value read from `BinaryReader.Read*`
+or a JSON parser must not size an allocation or bound a loop without passing through a validator.
 
-**Its cost is unmeasured, and that is the reason to start with a sweep rather than a rule.** Local data-flow
-in Roslyn can find "read → use" inside one method; it cannot see a bound checked two calls away, so the false
-positive rate is unknown and could easily make the rule unusable. Measure before promoting, exactly as
-`OVERFIT022`/`OVERFIT023` were measured.
+**Measured before writing the analyser, which is the only reason it is worth writing.** A text approximation
+of the rule was run over `Sources/` on 2026-08-02 — deliberately crude, and its own error rate is part of the
+result:
+
+| | |
+|---|---|
+| read-then-use sites in the whole tree | **19** |
+| already carrying a guard the scan recognised | 8 |
+| flagged | 11 |
+| **real defects, after reading each one** | **7** |
+| false positives | 4 |
+
+All four false positives are the same shape — `if (length != expectedSize) throw` — which the scan missed
+because it looked for `<` and `>`. A Roslyn implementation sees that with ordinary local data flow, so the
+real false-positive rate is close to zero. Nineteen candidates across the tree is not a rule that will bury
+anyone, and the pattern that satisfies it (`Require…`, or equality against a known size) is already the house
+style in the loaders that get it right.
+
+**The seven, which do not need the rule in order to be fixed:**
+
+```
+WhisperGgmlLoader.cs:60    nTokens -> new string[nTokens]
+WhisperGgmlLoader.cs:64    len     -> ReadBytes(len)
+WhisperGgmlLoader.cs:73    nDims   -> new int[nDims]  (twice)
+WhisperGgmlLoader.cs:74    nameLen -> ReadBytes(nameLen)
+RepackedWeightsFile.cs:157 nameLen -> ReadBytes(nameLen)      (also found by the bug hunt)
+LlamaLoRAAdapter.cs:215    count   -> loop bound, unchecked
+ModelSerializer.cs:59      rank    -> see below
+```
+
+**Four of the seven are fifteen consecutive lines of `WhisperGgmlLoader`** — an entire ggml reader with no
+bound on anything.
+
+**`ModelSerializer` is the interesting one, and no review found it.** The guard exists; it is in the wrong
+place:
+
+```csharp
+var rank = br.ReadInt32();
+var fileShape = new int[rank];            // allocated
+for (var i = 0; i < rank; i++) { … }      // and filled
+if (rank != view.Rank) { throw … }        // and only now checked
+```
+
+A file declaring `rank = 2_000_000_000` allocates and reads before anything asks whether the number is
+sane. This is an **ordering** defect rather than a missing one, which is exactly what a human eye skips: the
+check is visible a few lines below and the reader marks it done. A rule that follows the value from its read
+to its first use cannot make that mistake.
+
+**What the sweep cannot settle, and the rule inherits.** Local data flow finds "read → use" inside one
+method; it cannot see a bound established two calls away. Every one of the nineteen sites happened to be
+single-method, so the question did not arise here — but it will, and a site whose guard lives in the caller
+will read as a violation. That is the residual false-positive risk, and it is smaller than the one measured
+away above.
 
 ## ✅ DONE — the `else` sweep (OVERFIT021), 322 → 0
 
