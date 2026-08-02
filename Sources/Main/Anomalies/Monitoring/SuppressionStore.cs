@@ -82,7 +82,8 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
         }
 
         /// <inheritdoc/>
-        public bool IsSuppressed(in IncidentSubject subject, string signal, DateTimeOffset at)
+        public bool IsSuppressed(
+            in IncidentSubject subject, string signal, DateTimeOffset at, double magnitude = double.NaN)
         {
             ArgumentNullException.ThrowIfNull(signal);
 
@@ -90,7 +91,7 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
             {
                 var suppression = _suppressions[i];
 
-                if (suppression.IsActive(at) && suppression.Covers(subject, signal))
+                if (suppression.IsActive(at) && suppression.Covers(subject, signal, magnitude))
                 {
                     return true;
                 }
@@ -129,6 +130,7 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
 
                 text.Append(s.Until.ToUnixTimeSeconds()).Append('\t')
                     .Append(s.IncidentId).Append('\t')
+                    .Append(s.Magnitude.ToString("R", CultureInfo.InvariantCulture)).Append('\t')
                     .Append(Escape(s.Pod)).Append('\t')
                     .Append(Escape(s.Workload)).Append('\t')
                     .Append(Escape(s.Signal)).Append('\t')
@@ -154,22 +156,25 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
             {
                 var parts = lines[i].Split('\t');
 
-                if (parts.Length < 6
+                if (parts.Length < 7
                     || !long.TryParse(parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture,
                                       out var until)
                     || !long.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var id)
-                    || parts[4].Length == 0)
+                    || !double.TryParse(parts[2], NumberStyles.Float, CultureInfo.InvariantCulture,
+                                        out var magnitude)
+                    || parts[5].Length == 0)
                 {
                     continue;
                 }
 
                 store._suppressions.Add(new SignalSuppression(
-                    Unescape(parts[2]),
                     Unescape(parts[3]),
                     Unescape(parts[4]),
+                    Unescape(parts[5]),
                     DateTimeOffset.FromUnixTimeSeconds(until),
                     id,
-                    Unescape(parts[5])));
+                    Unescape(parts[6]),
+                    magnitude));
             }
 
             return store;

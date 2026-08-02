@@ -48,6 +48,9 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
         /// <summary>Signal name silent pods are filed under, stable so a query can group them.</summary>
         private const string SilentPodSignal = "PodReportingNothing";
 
+        /// <summary>How many reported incidents stay acknowledgeable. See <see cref="_recent"/>.</summary>
+        private const int MaxRecentIncidents = 400;
+
         private readonly IIncidentStore? _historyStore;
 
         /// <summary>What this workload normally does, per signal, per hour. Null when history is off.</summary>
@@ -97,6 +100,29 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
         /// <see cref="ResolveWorkload"/> for why an empty one is not an acceptable resting state.
         /// </summary>
         private string _workload;
+
+        /// <summary>
+        /// Serialises a cycle against an acknowledgement arriving from the host's HTTP thread.
+        ///
+        /// <para>The stores in this subsystem are single-threaded by design and say so, and an
+        /// acknowledgement is the first thing that ever wanted to touch them from somewhere else. A lock
+        /// around a cycle is cheap — a cycle is arithmetic over a window already in memory, milliseconds, no
+        /// I/O — and it keeps every store's contract intact instead of making four of them thread-safe for
+        /// one rare caller.</para>
+        /// </summary>
+        private readonly object _gate = new();
+
+        /// <summary>
+        /// What each recently reported incident was about, so an acknowledgement carrying only an identifier
+        /// can be turned into a label with a magnitude.
+        ///
+        /// <para><b>In memory rather than in the durable state, deliberately.</b> An operator acknowledges an
+        /// incident they can see, which is one this process reported; carrying the index across restarts
+        /// would mean widening the persisted incident format for a lookup that is only useful while somebody
+        /// is looking. An identifier this guard has never reported is refused with a message that says so,
+        /// which is a better answer than a label about a magnitude nobody can vouch for.</para>
+        /// </summary>
+        private readonly Dictionary<long, SignalFinding> _recent = [];
 
         /// <summary>Names the window covering <paramref name="at"/>, or empty when none does.</summary>
         private string SuppressionReason(DateTimeOffset at)
@@ -243,6 +269,111 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
         {
             ArgumentNullException.ThrowIfNull(window);
 
+            lock (_gate)
+            {
+                return RunCycleCore(window, observedAt, trace, peerTrace);
+            }
+        }
+
+        /// <summary>
+        /// Acknowledges an incident an operator has looked at.
+        ///
+        /// <para><b>Both effects, or the feature is one of the two halves that do not work alone.</b> The
+        /// suppression is the relief the operator needs in seconds; the label is what makes the threshold
+        /// right in days. A <c>--real</c> acknowledgement records only the label, and that label then caps
+        /// every future floor proposal for the signal — the constraint that stops a hundred honest
+        /// dismissals from converging on a guard that reports nothing.</para>
+        ///
+        /// <para>The configured floor is never touched. That stays a human decision in a file somebody
+        /// reviews; a production threshold moved by a sample of one is how a guard goes blind to a real
+        /// fault at exactly the size somebody once dismissed.</para>
+        /// </summary>
+        /// <param name="incidentId">An incident this guard has reported since it started.</param>
+        /// <param name="kind">Whether the operator judged it noise or real.</param>
+        /// <param name="mute">
+        /// How long to stop reporting this signal on this subject. Ignored for
+        /// <see cref="OperatorLabelKind.Real"/> — silencing something an operator just confirmed is a
+        /// contradiction, and accepting it quietly would be worse than refusing it.
+        /// </param>
+        /// <param name="reason">What the operator typed.</param>
+        /// <param name="now">Clock, supplied so tests do not depend on the wall clock.</param>
+        /// <returns>What was recorded, for the caller to echo back.</returns>
+        /// <exception cref="ArgumentException">The identifier is not one this guard has reported.</exception>
+        public string Acknowledge(
+            long incidentId,
+            OperatorLabelKind kind,
+            TimeSpan? mute,
+            string reason,
+            DateTimeOffset now)
+        {
+            ArgumentNullException.ThrowIfNull(reason);
+
+            lock (_gate)
+            {
+                if (!_recent.TryGetValue(incidentId, out var finding))
+                {
+                    throw new ArgumentException(
+                        $"Incident {incidentId} is not one this guard has reported since it started. Only "
+                        + "incidents it has seen can be acknowledged, because the label has to carry the "
+                        + "finding's size in the signal's own units and nothing else knows it.",
+                        nameof(incidentId));
+                }
+
+                Labels.Add(new OperatorLabel(
+                    incidentId, finding.Signal, kind, finding.Magnitude, now, reason));
+
+                _calibrator.UseLabels(Labels);
+
+                if (kind == OperatorLabelKind.Real || mute is not { } window)
+                {
+                    return $"recorded {kind} on {finding.Signal} "
+                           + $"(magnitude {finding.Magnitude:G4}); no suppression opened";
+                }
+
+                Suppressions.Add(
+                    new SignalSuppression(
+                        finding.Subject.Pod,
+                        finding.Subject.Workload,
+                        finding.Signal,
+                        now + window,
+                        incidentId,
+                        reason,
+                        finding.Magnitude),
+                    now);
+
+                var who = finding.Subject.Pod.Length > 0 ? finding.Subject.Pod : finding.Subject.Workload;
+
+                return $"recorded {kind} on {finding.Signal} (magnitude {finding.Magnitude:G4}) and muted it "
+                       + $"for {who} until {now + window:u}";
+            }
+        }
+
+        /// <summary>The suppressions an operator can read back, copied out under the cycle lock.</summary>
+        public SignalSuppression[] ActiveSuppressions(DateTimeOffset at)
+        {
+            lock (_gate)
+            {
+                var active = new List<SignalSuppression>(Suppressions.Count);
+
+                for (var i = 0; i < Suppressions.Suppressions.Count; i++)
+                {
+                    if (Suppressions.Suppressions[i].IsActive(at))
+                    {
+                        active.Add(Suppressions.Suppressions[i]);
+                    }
+                }
+
+                return active.ToArray();
+            }
+        }
+
+        private GuardCycleResult RunCycleCore(
+            MetricWindow window,
+            DateTimeOffset observedAt,
+            Action<IncidentMatchTrace>? trace,
+            Action<PeerDecisionTrace>? peerTrace)
+        {
+
             var pipeline = new IncidentPipeline
             {
                 Suppressor = Suppressions,
@@ -328,6 +459,26 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
             // for why the second half matters as much as the first — folding a deployment into "what this
             // cluster does when it is well" takes the one input known to be wrong and treats it as truth.
             var suppressedBy = SuppressionReason(observedAt);
+
+            // Indexed before reporting, so an operator acting on a row they have just seen finds it here.
+            // Bounded, and the oldest go first: the index exists to serve somebody looking at a screen, and
+            // nobody acknowledges an incident from four hundred incidents ago.
+            for (var i = 0; i < tracked.Count; i++)
+            {
+                _recent[tracked[i].Id] = tracked[i].Incident.Primary;
+            }
+
+            while (_recent.Count > MaxRecentIncidents)
+            {
+                var oldest = long.MaxValue;
+
+                foreach (var id in _recent.Keys)
+                {
+                    oldest = Math.Min(oldest, id);
+                }
+
+                _recent.Remove(oldest);
+            }
 
             IncidentReporter.Report(tracked, _sink, suppressedBy);
 

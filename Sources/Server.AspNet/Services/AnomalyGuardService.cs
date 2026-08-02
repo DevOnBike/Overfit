@@ -173,6 +173,20 @@ namespace DevOnBike.Overfit.Server.AspNet.Services
         /// </summary>
         public GuardTelemetry Telemetry => _guard.Telemetry;
 
+        /// <summary>
+        /// The guard itself, so a host can route an operator's acknowledgement to it.
+        ///
+        /// <para><b>Through the running process, not through the state file.</b> The guard rewrites its
+        /// learned state every cycle from memory, so a CLI editing that file would have its work overwritten
+        /// within one cadence — silently, with no error anywhere. That is why acknowledging is an HTTP call
+        /// to this process rather than the obvious file edit; the obvious version loses data and looks like
+        /// it worked.</para>
+        ///
+        /// <para>Its acknowledgement methods take the cycle lock, so calling them from a request thread is
+        /// safe while the evaluation loop runs.</para>
+        /// </summary>
+        public AnomalyGuard Guard => _guard;
+
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
             // Said once, at startup, because it is the only evidence an operator has that durable state is

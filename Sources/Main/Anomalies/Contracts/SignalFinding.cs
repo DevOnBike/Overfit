@@ -39,6 +39,25 @@ namespace DevOnBike.Overfit.Anomalies.Contracts
             get; init;
         }
 
+        /// <summary>
+        /// How large this finding is <b>in the signal's own units</b>, or <see cref="double.NaN"/> when the
+        /// family that produced it has no absolute size to report.
+        ///
+        /// <para><b>Severity cannot do this job.</b> Severity is an effect size on 0..1 — a Kendall tau, a
+        /// Cliff's delta — which is exactly what makes it comparable across families and exactly what makes
+        /// it useless for constraining a threshold. The floors are compared in bytes, in requests per second,
+        /// in fractions of a core. An operator confirming "this was real" is confirming a quantity, and the
+        /// quantity has to survive as far as the acknowledgement or the confirmation constrains nothing.</para>
+        ///
+        /// <para>Peer findings report the absolute gap to their peers; trend findings the fitted change over
+        /// the window; a level shift the size of the step; a threshold rule its peak. A silent pod has none,
+        /// and reports <c>NaN</c> rather than a zero that would read as "no difference".</para>
+        /// </summary>
+        public double Magnitude
+        {
+            get; init;
+        } = double.NaN;
+
         /// <summary>How long the behaviour lasted.</summary>
         public TimeSpan Duration => End - Start;
     }

@@ -538,6 +538,77 @@ var discoverOut = new Option<string?>("--out", "-o")
                 + "written; ambiguous ones are reported and deliberately left out rather than guessed.",
 };
 
+// ---- anomaly ack / suppressions: the operator's half of the loop ----
+var ackUrl = new Option<string>("--url")
+{
+    Description = "Base URL of the running guard's metrics endpoint.",
+    DefaultValueFactory = _ => "http://127.0.0.1:9469",
+};
+var ackId = new Argument<long>("incident")
+{
+    Description = "Incident identifier, as printed in the guard's log.",
+};
+var ackReal = new Option<bool>("--real")
+{
+    Description = "The finding was correct. Pins it: no future floor proposal may silence a finding this "
+        + "size on this signal. Never opens a suppression.",
+};
+var ackNoise = new Option<bool>("--noise")
+{
+    Description = "The finding was not worth reporting. Mutes it for --for, and records the window as "
+        + "healthy so calibration folds it in.",
+};
+var ackFor = new Option<string?>("--for")
+{
+    Description = "How long to mute it: 30m, 12h, 7d. Noise only, and required for a mute to open.",
+};
+var ackReason = new Option<string?>("--reason")
+{
+    Description = "What to record alongside the judgement.",
+};
+var anomalyAckCommand = new Command(
+    "anomaly-ack",
+    "Tell a running guard whether an incident was noise or real.")
+{
+    ackId,
+    ackReal,
+    ackNoise,
+    ackFor,
+    ackReason,
+    ackUrl,
+};
+anomalyAckCommand.SetAction((parseResult, ct) =>
+{
+    var real = parseResult.GetValue(ackReal);
+    var noise = parseResult.GetValue(ackNoise);
+
+    if (real == noise)
+    {
+        Console.Error.WriteLine(
+            "Pass exactly one of --real or --noise. One silences a signal and the other pins it so nothing "
+            + "may silence it later; there is no sensible default between them.");
+
+        return Task.FromResult(2);
+    }
+
+    return AnomalyAckCommand.AckAsync(
+        parseResult.GetValue(ackUrl)!,
+        parseResult.GetValue(ackId),
+        real,
+        parseResult.GetValue(ackFor),
+        parseResult.GetValue(ackReason),
+        ct);
+});
+
+var anomalySuppressionsCommand = new Command(
+    "anomaly-suppressions",
+    "List what an operator has currently muted, and when each mute expires.")
+{
+    ackUrl,
+};
+anomalySuppressionsCommand.SetAction((parseResult, ct) =>
+    AnomalyAckCommand.ListAsync(parseResult.GetValue(ackUrl)!, ct));
+
 var anomalyDiscoverCommand = new Command(
     "anomaly-discover",
     "Inspect a cluster's Prometheus and propose a guard configuration: which metrics feed which channel, "
@@ -572,6 +643,8 @@ var rootCommand = new RootCommand("Overfit — run local LLMs, RAG and agents in
     gatewayCommand,
     anomalyGuardCommand,
     anomalyDiscoverCommand,
+    anomalyAckCommand,
+    anomalySuppressionsCommand,
 };
 
 // Safety net for anything that escapes a command's own handler. Only OverfitException is caught: every one of

@@ -21,6 +21,12 @@ namespace DevOnBike.Overfit.Anomalies.Contracts
     public interface ISignalSuppressor
     {
         /// <summary>Whether <paramref name="signal"/> on <paramref name="subject"/> is muted at <paramref name="at"/>.</summary>
-        bool IsSuppressed(in IncidentSubject subject, string signal, DateTimeOffset at);
+        /// <param name="magnitude">
+        /// The finding's size in the signal's own units, so a mute opened on a small one does not hide a
+        /// large one. See <see cref="SignalSuppression.Magnitude"/> — measured, that omission silenced a whole
+        /// channel.
+        /// </param>
+        bool IsSuppressed(
+            in IncidentSubject subject, string signal, DateTimeOffset at, double magnitude = double.NaN);
     }
 }

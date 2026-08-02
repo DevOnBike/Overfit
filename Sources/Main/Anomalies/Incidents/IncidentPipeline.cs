@@ -89,9 +89,10 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
         /// <para>Asked only for findings that are already decided anomalies, so the counter reports what was
         /// actually silenced rather than every healthy verdict a suppression happens to overlap.</para>
         /// </summary>
-        private bool IsMuted(in IncidentSubject subject, string signal, DateTimeOffset at)
+        private bool IsMuted(
+            in IncidentSubject subject, string signal, DateTimeOffset at, double magnitude = double.NaN)
         {
-            if (Suppressor is null || !Suppressor.IsSuppressed(subject, signal, at))
+            if (Suppressor is null || !Suppressor.IsSuppressed(subject, signal, at, magnitude))
             {
                 return false;
             }
@@ -129,7 +130,9 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
                 return false;
             }
 
-            if (IsMuted(subject, signal, windowEnd) || !HasCapacity())
+            var magnitude = Math.Abs(result.SlopePerSecond) * (windowEnd - windowStart).TotalSeconds;
+
+            if (IsMuted(subject, signal, windowEnd, magnitude) || !HasCapacity())
             {
                 return false;
             }
@@ -143,7 +146,11 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
                 Severity(result.KendallTau),
                 result.Reason)
             {
-                Series = series
+                Series = series,
+
+                // The fitted change across the window — the same quantity MinAbsoluteChangeOverWindow is
+                // compared against, so a confirmed finding constrains the gate that would have hidden it.
+                Magnitude = magnitude,
             });
 
             return true;
@@ -184,7 +191,7 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
                 return false;
             }
 
-            if (IsMuted(subject, signal, windowEnd) || !HasCapacity())
+            if (IsMuted(subject, signal, windowEnd, result.PeakValue) || !HasCapacity())
             {
                 return false;
             }
@@ -198,7 +205,8 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
                 result.Severity,
                 result.Reason)
             {
-                Series = series
+                Series = series,
+                Magnitude = result.PeakValue,
             });
 
             return true;
@@ -284,7 +292,7 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
                 return false;
             }
 
-            if (IsMuted(subject, signal, windowEnd) || !HasCapacity())
+            if (IsMuted(subject, signal, windowEnd, Math.Abs(result.AbsoluteChange)) || !HasCapacity())
             {
                 return false;
             }
@@ -298,7 +306,8 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
                 result.Severity,
                 result.Reason)
             {
-                Series = series
+                Series = series,
+                Magnitude = Math.Abs(result.AbsoluteChange),
             });
 
             return true;
@@ -344,7 +353,8 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
 
             for (var i = 0; i < findings.Length; i++)
             {
-                if (!findings[i].IsOutlier || IsMuted(subjects[i], signal, windowEnd))
+                if (!findings[i].IsOutlier
+                    || IsMuted(subjects[i], signal, windowEnd, Math.Abs(findings[i].AbsoluteGap)))
                 {
                     continue;
                 }
@@ -372,7 +382,10 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
                     windowStart,
                     windowEnd,
                     Severity(findings[i].Comparison.EffectSize),
-                    Describe(findings[i], result)));
+                    Describe(findings[i], result))
+                {
+                    Magnitude = Math.Abs(findings[i].AbsoluteGap),
+                });
 
                 added++;
             }

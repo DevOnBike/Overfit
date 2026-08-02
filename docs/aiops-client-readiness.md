@@ -6,6 +6,10 @@ Everything with a number behind it names where the number came from; everything 
 
 ---
 
+**For the engagement itself — what happens on which day, what they hand over, what comes out of each stage
+and how each one is known to have worked — see `aiops-client-flow.md`.** This document is about capability;
+that one is about a week.
+
 ## The short answer
 
 **Deploy it in shadow mode, on a defined protocol. Do not arm it on day one.**

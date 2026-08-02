@@ -168,8 +168,13 @@ namespace DevOnBike.Overfit.Cli
             // The guard's own metrics, so "this has stopped" is detectable from outside. Without a scrape the
             // counters are a property nobody reads, and an alert written against a series that never arrives
             // reads as healthy in most alerting rules.
+            var service = host.Services.GetRequiredService<AnomalyGuardService>();
+
+            // The guard goes with the telemetry, so the same port also serves /ack and /suppressions. One
+            // port rather than two: it is already scraped, already in the Service, and an operator endpoint
+            // nobody exposed is an operator endpoint nobody can use.
             using var metrics = GuardMetricsEndpoint.TryStart(
-                host.Services.GetRequiredService<AnomalyGuardService>().Telemetry, logger, metricsPort);
+                service.Telemetry, logger, metricsPort, service.Guard);
 
             if (metrics is not null)
             {
