@@ -148,6 +148,66 @@ flagged for a decision, 1 declared blind.
 
 ---
 
+## 🐞 OPEN DEFECTS — language models, loading and tokenizers (found 2026-08-02)
+
+`Runtime/` was excluded — already hunted twice, three defects recorded. The hunt covered `Loading/`,
+`Tokenizers/`, `Rope/`, `Quantization/`, `Chat/`, `Agents/`, `Tools/`, `Contracts/` and `Memory/`, and
+**stopped voluntarily at 5.5 minutes of a ten-minute budget on a 217-file module**. Four findings is a
+statement about how much was read, not about the module: `JsonGrammarConstraint`, `JsonSchemaConstraint` and
+most of `GgufLlamaLoader` were never opened. Report in
+`docs/bug-hunts/languagemodels-2026-08-02-2009-bugs-game-findings.md`.
+
+**Three of the four are one defect wearing three hats**: a length or count read from an untrusted model file
+and used without a bound — the same class as the two host-killing loops the NASA-rules analyzers caught here
+earlier. In every case a sibling reader in the same directory already has the guard, which is what makes
+these omissions rather than decisions.
+
+| # | Defect | Why it matters |
+|---|---|---|
+| **1** | **`RepackedWeightsFile.Open` reads an unbounded name length.** Verified: `var nameLen = reader.ReadInt32(); Encoding.UTF8.GetString(reader.ReadBytes(nameLen));` — no bound, where `GgufReader` guards the identical shape with `RequireDeclaredCountFitsInFile` and a comment explaining why. `count` is checked for negativity but not against the file size. | **The caller's promise is false.** `TryOpenSidecar` comments that "a corrupt/incompatible sidecar must never block loading" and catches only `OverfitFormatException` and `IOException`; a negative length raises `ArgumentOutOfRangeException` and a huge one `OutOfMemoryException`. Neither is caught, so the one case the comment exists for is the one it does not cover. |
+| **2** | **`GgufTokenizer` indexes three parallel GGUF arrays by one length.** Verified: the constructor loops `id < tokens.Length` and reads `tokenTypes[id]`, while `token_type` and `scores` come from separate file arrays whose lengths are never compared to `tokens`'. | A truncated or crafted file produces `IndexOutOfRangeException` instead of the `OverfitFormatException` every sibling path produces — so a caller that handles malformed models does not handle this one. |
+| **3** | **`GgufTensorInfo.ElementCount` multiplies dimensions unchecked.** Verified: `n *= (long)Dims[i]` over `ulong` dims, so a huge dimension casts to a negative `long` and the product wraps. `SafetensorsReader` guards the same class explicitly via `RequireTensorsFitInTheDataBlock`. | The dangerous half is not the crash. A wrapped count can **match** the loader's expected-shape check while the real on-disk layout disagrees — silently wrong weights, no exception, output that is merely worse. |
+| **4** | **`ReActAgent.Run` re-appends its tool-menu system prompt on every call**, growing `ChatSession.History` without bound across repeated calls on one agent. The sibling `Memory/SummarizingChatSession` avoids exactly this by rebuilding through `ResetConversation()`. | Reported, not independently verified here. It degrades rather than fails: each call carries a longer prompt, so latency and cost climb and the model's attention is spent on repeated instructions. |
+
+Fix order: 1, 2, 3 together — they are one review of the untrusted-input boundary, and fixing them
+separately means reading the same three files three times. Then 4.
+
+## 🐞 OPEN DEFECTS — tensors (found 2026-08-02 by `overfit-find-bugs-game`)
+
+All thirteen files read; the hunt **ended by scope, not by the clock**, and spent its remaining budget tracing
+call sites. Report in `docs/bug-hunts/tensors-2026-08-02-1948-bugs-game-findings.md`.
+
+**This batch is a different animal from the other two that day.** The anomaly-guard and diagnostics hunts
+found almost nothing but prose disagreeing with code. This one — the foundation every other module allocates
+and slices through — found ordinary logic and lifetime defects, including a certain `NullReferenceException`
+on a live path. The lesson is not "documentation is what rots here": it is that documentation rots where
+code was written most recently, and the old foundation has plain bugs nobody had read for.
+
+| # | Defect | Why it matters |
+|---|---|---|
+| **1** | **`TensorStorage<T>.AsMemory()` crashes on arena-backed storage, and skips the disposed check.** Verified: `AsSpan()` branches on `_isBorrowedMemory` and calls `ObjectDisposedException.ThrowIf` first; `AsMemory()` does **neither**, falling into `_data!.AsMemory(...)` where `_data` is null. | Two defects in one method. The crash is loud; the missing disposed check is the dangerous half — a disposed storage hands out `Memory<T>` over an array that may already be back in the pool, silently. |
+| **2** | **Two kernels are missing the overlap guard their siblings have.** Verified by scanning every `public static void` in `TensorKernels`: the raw-span `Add` and one `Relu` overload lack `ValidateInputOutputSpanNonOverlapping`; `AddInPlace`, the `TensorSpan` `Add`, `Multiply`, `Scale` and the other `Relu` all have it. The hunt reported `Add` alone. | A partially overlapping destination produces wrong numbers instead of throwing. Wrong numbers from a kernel do not announce themselves — they propagate into a loss curve that merely looks worse than it should. |
+| **3** | **Size products are `checked` in `FastTensor` and unchecked in `TensorShape`/`TensorStrides`/`TensorView`.** Verified: `FastTensor` uses `checked(s0 * s1 * s2 * s3)` in three places; `TensorShape.cs` contains no `checked` at all. | `OVERFIT028` only scans `new T[...]` array-creation syntax, so it cannot see a property getter or a constructor. A shape whose element count overflows `int` yields a positive, plausible, wrong size long before memory runs out. |
+| **4** | **`NativeBuffer<T>.Dispose()` has no double-free guard**, unlike `PooledBuffer<T>` (nulls the rented array) and `NativeBufferManaged<T>` (a disposed flag). Its `readonly ref struct` shape makes a guard impossible without changing the type. | Reported, not independently verified here. A double free on unmanaged memory is the one failure in this directory that corrupts another allocation rather than the caller's own. |
+| **5** | **`FastTensor<T>.FromView` may leak a rented buffer on a non-contiguous view of rank 1, 3 or 4.** **Unverified** — reading the method did not settle it, and the reported throw is an `OverfitRuntimeException` raised before any rent, not the `NotImplementedException` the report names. Needs a second look before it is treated as real. | Recorded with its uncertainty rather than as a finding, so nobody fixes a bug that is not there. |
+
+Noticed while verifying, not part of the hunt: `FastTensor.FromView` throws with the message
+**"Nieobsługiwany wymiar"** — Polish, in a public exception, in a tree that is otherwise English.
+
+Fix order: 1 first — it is the only certain crash and its second half is silent. Then 2, then 3. Settle 5
+before scheduling it.
+
+## 🐞 OPEN DEFECTS — diagnostics (found 2026-08-02 by `overfit-find-bugs-game`)
+
+Seven files, ended by scope in under five minutes, then followed the callers. Report in
+`docs/bug-hunts/diagnostics-2026-08-02-1942-bugs-game-findings.md`.
+
+| # | Defect | Why it matters |
+|---|---|---|
+| **1** | **`[OverfitHotPath]` promises more than it enforces.** Verified: its documentation says `OVERFIT001`–`OVERFIT014` escalate to a hard `OVERFIT900` error inside a marked member, but `RawParallelForAnalyzer` (008) and `FinalizerAnalyzer` (012) contain no `HotPathRule` or `OverfitPerfAnalysis` hook at all, where `BoxingAnalyzer` does. | The attribute is on real decode-path members. A raw `Parallel.For` or a finalizer added inside one builds at warning severity while the attribute above it says it cannot. |
+| **2** | **Eleven of forty-two declared telemetry instruments are fed by nothing.** Verified by scanning every call site in `Sources/Main`: `AllocationBytes`, `GraphAllocatedBytes`, `GraphBackwardDurationMs`, `GraphCount`, `KernelCount`, `KernelDurationMs`, `ModuleAllocatedBytes`, `ModuleCount`, `ModuleDurationMs`, `NativeMemoryBytes`, `TapeOpCount`. | Each has a real description and exports a flat zero, which reads as "this never happens". Same shape as `overfit_guard_state_failures_total` found the same afternoon. **Guarded from now on** by `Tests/Diagnostics/TelemetryInstrumentWiringTests.cs`, a ratchet that fails on a new dead instrument and also fails when a listed one is revived, so the list can only shrink. |
+| **3** | **The tensor-storage counter carries one bit where it needs two.** `RecordTensorStorageCreated(int, int, bool borrowed)` — signature verified; the specific miscount of the `Unpooled()` GC-array path was not independently checked. | If it holds, a dashboard watching pool pressure is contaminated by one-time weight-load allocations, which is a metric that misleads rather than one that is merely absent. |
+
 ## 🐞 OPEN DEFECTS — anomaly guard (found 2026-08-02 by `overfit-find-bugs-game`)
 
 Run against `Sources/Main/Anomalies` a few hours after most of it was written, and it ended by the ten-minute
@@ -366,6 +426,163 @@ enumerates and what it disposes, which this one did not systematically do.
 | GPU backend | ❌ Not started |
 
 ---
+
+## 📋 NASA Power of 10 — audited against this codebase (2026-08-02)
+
+Prompted by a day in which four `overfit-find-bugs-game` hunts produced eighteen defects. Mapping them onto
+Holzmann's ten rules turned out to be diagnostic rather than decorative, so the audit is recorded here with a
+verdict per rule — including the ones deliberately **not** adopted, so nobody re-opens them.
+
+| # | Rule | Verdict here |
+|---|---|---|
+| 1 | No `goto`, no recursion | **Adopted.** `OVERFIT022` is an error globally, with the `#pragma BOUND:` contract for the rare justified site. |
+| 2 | Every loop has a statically provable bound | **Half adopted — see below.** `OVERFIT023` bans `while(true)`, which is the syntactic half. The semantic half is missing and cost us three defects today. |
+| 3 | No dynamic allocation after initialisation | **Adopted in spirit, which is the right form for a managed runtime.** `InferenceEngine` takes caller-owned buffers, `PooledBuffer` replaces raw pooling, `OVERFIT001` flags allocation in per-call code. A literal ban is not expressible in C# and would buy nothing the hot-path rules do not. |
+| 4 | ≤ 60 lines per function | **Rejected, on a measurement.** Splitting a hot method cost **2.25×** where the JIT declined to inline it. Do not re-open without a benchmark that says otherwise. |
+| 5 | ≥ 2 assertions per function | **Rejected as a mechanical rule, adopted as a review question.** Enforcing a count produces decorative assertions, which are worse than none because they train readers to skim them. But three of today's findings are missing assertions on invariants an author assumed — so it belongs on the hunt checklist, where a human asks "what does this code assume and never checks". |
+| 6 | Smallest possible variable scope | **Not pursued.** The language and the existing style rules already deliver most of it, and the residual risk in this codebase is low. |
+| 7 | Check every returned status; validate every argument | **Half adopted — see below.** Argument validation is near-universal; return-status checking is not, and that gap produced a defect in code written this same morning. |
+| 8 | Restricted preprocessor | **Not applicable** in the C# sense. The nearest analogue — a `#pragma warning disable` that hides logic rather than documenting a bound — is already governed by the per-site convention of naming the justification. |
+| 9 | One level of pointer dereference, no function pointers | **Partly not applicable.** The kernels use raw pointers deliberately and measurably. The rule's actual purpose — keeping the program analysable — is served here by the Native-AOT ban on reflection, which is enforced at every build. |
+| 10 | Zero warnings, daily static analysis | **Adopted most fully of the ten.** `TreatWarningsAsErrors` on the AOT guard, `RS0030`, `CS4014`, `NU1901`–`NU1904`, the OVERFIT analyser family and two MSBuild structural guards. |
+
+**The observation that makes this worth writing down.** Today's eighteen defects land almost entirely on
+rules **2, 5 and 7** — precisely the three adopted *halfway*. Rule 10, adopted completely, produced none,
+because everything it can catch is already caught at every build. Half a rule does not buy half the
+protection; it buys the illusion of the whole one.
+
+### Audit every `#pragma BOUND:` — is the bound proved or assumed?
+
+`OVERFIT022` does not forbid recursion; it demands that an exemption **name its bound**. The audit asks one
+question of every site: does the stated bound follow from a constant or from validation at entry, or does it
+follow from how somebody expects the API to be used?
+
+**Prompted by getting it wrong the same day the rule was being praised.** Two exemptions were added on
+2026-08-02 and they are not of equal quality:
+
+```csharp
+// FastRandomForest.BuildRecursive — a proof.
+// depth >= _maxDepth returns above, and _maxDepth <= MaxAllowedDepth (64) is enforced in the constructor.
+
+// CheckpointedModule.FindNonDeterministic — a hope.
+// "recursion follows Sequential nesting, which a caller builds explicitly and is a handful of levels at most"
+```
+
+The second names no bound at all. It describes a habit. Nothing prevents a caller nesting `Sequential`
+a thousand deep, and **C# has no tail-call optimisation to fall back on**: the runtime supports the `tail.`
+IL prefix, the C# compiler never emits it, and the JIT eliminates such calls only sometimes — which is worse
+than never, because code then passes in Release on one platform and dies on another.
+
+The fix where a bound cannot be proved is not a bigger number. It is an **explicit stack on the heap**: the
+depth becomes a `Count` that can be checked and reported, instead of a stack-frame count that can only be
+exceeded.
+
+**Audit result, 2026-08-02: 58 exemption sites in the tree; 9 of the 10 recursion exemptions are proved.**
+
+| Site | Stated bound | Verdict |
+|---|---|---|
+| `FastRandomForest.BuildRecursive` | `_maxDepth <= 64`, validated in the constructor | proved |
+| `JsonSchemaCompiler` (2 sites) | `MaxSchemaDepth` = 32, checked on entry, throws catchably | proved |
+| `GgufReader` | `MaxValueNestingDepth` = 8, checked on entry, throws catchably | proved |
+| `HuggingFaceBpeTokenizer` (2 sites) | `MaxPreTokenizerDepth`, checked on entry, throws catchably | proved |
+| `TokenSampler` sift-down | descends one heap level per call, `<= log2(n)` | proved, structurally |
+| `PartialSort` quicksort | recurses into the smaller half only, `<= log2(n)` | proved, structurally |
+| `CheckpointedModule.FindNonDeterministic` | "a handful of levels at most" | **assumed** |
+
+The one lapse was written the same afternoon the rule was being praised, which is the useful part of the
+result: the discipline holds across code written by many hands over months, and broke in the code written
+while admiring it.
+
+**The other half of the audit, which was not the question but is the larger risk.** A stack overflow is the
+product of depth and frame size, and `OVERFIT026` guards the second. No method in the tree carries both an
+`OVERFIT022` and an `OVERFIT026` exemption — so there is no deep recursion with a fat frame anywhere, which
+is a real protection nobody had named. But four `stackalloc` sites are far over budget and say so themselves:
+
+```
+Whisper/WhisperKernels.cs       32 KB   "the largest stack frame left in the library, 64x the budget"
+TrainableLlamaModel.cs          16 KB   32x
+Conv2DKernels.cs (2 sites)       8 KB   16x
+SentenceEmbedder.cs (2 sites)    4 KB   8x
+```
+
+None is recursive, so none overflows on its own. The Whisper comment names the real concern: on a pool thread
+with a 1 MB stack, a 32 KB frame deep in a call chain is a different proposition from the same frame on the
+main thread.
+
+### `EnsureSufficientExecutionStack()` — and why it is not being added anywhere yet
+
+`RuntimeHelpers.EnsureSufficientExecutionStack()` throws `InsufficientExecutionStackException`, which **is**
+catchable, when the remaining stack falls below a probe threshold. It converts an uncatchable process kill
+into a reportable error, and it costs a comparison.
+
+**It has nowhere to go in this codebase today, and adding it anyway would be decoration.** Every recursion
+here is either counted with an explicit depth limit that already throws a catchable
+`OverfitFormatException` — the three untrusted-input sites — or structurally logarithmic. A probe adds a
+second, weaker guarantee behind a stronger one.
+
+It is recorded as **the documented mitigation for a case that does not exist yet**: a recursion over a
+structure whose depth comes from user data and cannot be counted cheaply. If such a site is ever accepted,
+the probe at method entry is the price of accepting it.
+
+### Do we need a rule for "uncatchable exceptions"?
+
+Asked, and the answer is no — because the set is enumerable and three quarters of it is already covered.
+
+| Process-killing path | Covered by |
+|---|---|
+| `StackOverflowException` from unbounded recursion or loops | `OVERFIT022`, `OVERFIT023` |
+| An exception escaping a finalizer | `OVERFIT012` (`FinalizerAnalyzer`) |
+| An exception escaping an `async void` | `OVERFIT027` |
+| `AccessViolationException` from pointer arithmetic in `unsafe` code | **nothing** |
+
+The fourth is the gap, and it matters here because the kernels use raw pointers deliberately. But a rule
+cannot be written for it directly: proving pointer safety in general is not something an analyser does. What
+*can* be checked is the thing that actually produces these faults — **a length or an offset taken from
+outside and used in address arithmetic without validation** — which is the same rule as `OVERFIT024` above,
+applied to pointers instead of to `new T[n]`.
+
+The general form the question suggests — flag every throw that might not be catchable — would find nothing,
+because the danger is never at a throw site. Nothing throws `StackOverflowException`; it happens where a
+bound is missing. A rule that inspected throws would be looking in the one place the defect never is.
+
+**How to establish the real limit, when one is needed.** Two ways, and neither is a constant of the language:
+
+- **Exactly, per build**: the frame size is the `sub rsp, N` in the method prologue plus the return address
+  and any pushed registers. BenchmarkDotNet's `--disasm` already gives this. Depth ≈ usable stack / frame
+  size — roughly 1 MB by default for the main and thread-pool threads, so a 100-byte frame gives order
+  10 000 calls and a frame carrying a 4 KB `stackalloc` gives 256. This is why `OVERFIT026` caps `stackalloc`
+  at 512 bytes: a `stackalloc` inside a recursive method changes the answer by two orders of magnitude.
+- **Empirically, in a sacrificial child process**: recurse with a counter until it dies. It must be a child
+  process because **`StackOverflowException` cannot be caught in .NET** — the process is terminated, which is
+  also why this failure mode deserves a rule rather than a `try`.
+
+Both numbers move with the JIT, the platform and Debug versus Release, which is the argument for demanding a
+bound rather than an estimate.
+
+**Where a recursion genuinely cannot be removed**, `RuntimeHelpers.EnsureSufficientExecutionStack()` throws
+`InsufficientExecutionStackException` — which *is* catchable — before the stack is actually exhausted. That
+is the honest mitigation: it converts an uncatchable process kill into a reportable error.
+
+### Worth building — 7 first, then 2
+
+**Rule 7, mechanically.** The .NET analysers already ship most of it (`CA1806` and friends: do not ignore a
+method's result). This is the cheap one, and it is not theoretical: `FileIncidentStore.LastError` is set on
+every failure and read by nothing — literally this rule, broken in code written the same morning, in a class
+whose whole job is to report that it could not write. **Gate it the way the `else` sweep was gated**: enable
+as `suggestion`, count the sites, read a sample, then promote per directory.
+
+**Rule 2, semantically — a candidate `OVERFIT024`.** A value read from `BinaryReader.Read*` or a JSON parser
+must not size an allocation or bound a loop without passing through a validator. Three of today's four
+`LanguageModels` findings are this exact shape, on untrusted model files, in a repository that has already
+had two host-killing loops on that path. What makes it credible as a rule is that the guard **already
+exists** next door: `GgufReader.RequireDeclaredCountFitsInFile` and
+`SafetensorsReader.RequireTensorsFitInTheDataBlock` are the pattern, written by someone who had this thought
+once and had no way to make it stick.
+
+**Its cost is unmeasured, and that is the reason to start with a sweep rather than a rule.** Local data-flow
+in Roslyn can find "read → use" inside one method; it cannot see a bound checked two calls away, so the false
+positive rate is unknown and could easily make the rule unusable. Measure before promoting, exactly as
+`OVERFIT022`/`OVERFIT023` were measured.
 
 ## ✅ DONE — the `else` sweep (OVERFIT021), 322 → 0
 
