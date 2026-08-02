@@ -37,9 +37,25 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
         /// <summary>Headroom over the largest healthy observation, for what a week did not happen to show.</summary>
         private const double Margin = 1.25;
 
+        /// <summary>Marks a custom channel's line in the serialised form, so a channel named like a
+        /// <see cref="MetricIndex"/> member - or like an integer, which also parses as one - cannot be read
+        /// back as that member.</summary>
+        private const char CustomMarker = '~';
+
         private BoundedSamples[] _peerGaps;
         private BoundedSamples[] _trendChanges;
         private BoundedSamples[] _magnitudes;
+
+        /// <summary>
+        /// The same three accumulators for channels the enum does not have, keyed by name.
+        ///
+        /// <para><b>Custom channels were observed by every detector and by nothing that proposes a floor.</b>
+        /// Their gates read <c>CustomMetricBinding.MinAbsoluteGap</c>, which defaults to zero, and zero means
+        /// the gate is off - so the one part of the configuration a customer is most likely to own started in
+        /// exactly the state measured at 209 false incidents a day, with no proposal ever offered to get it
+        /// out of there.</para>
+        /// </summary>
+        private readonly Dictionary<string, CustomChannel> _customChannels = new(StringComparer.Ordinal);
         /// <summary>
         /// The last computed proposal, or null when an observation has invalidated it. Not thread-safe, like
         /// the rest of this type: one guard, one cycle at a time.
@@ -81,6 +97,11 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
             // Invalidated before the early returns as well: a window that contributes nothing still leaves
             // the cache correct, and reasoning about which returns are "safe" is how a stale cache is born.
             _cached = null;
+
+            foreach (var channel in _customChannels.Values)
+            {
+                channel.Cached = null;
+            }
 
             var pods = window.Pods.Count;
 
@@ -147,6 +168,82 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
                     }
                 }
             }
+
+            var custom = window.CustomChannels;
+
+            for (var c = 0; c < custom.Count; c++)
+            {
+                var name = custom[c];
+
+                if (!_customChannels.TryGetValue(name, out var channel))
+                {
+                    channel = new CustomChannel();
+                    _customChannels[name] = channel;
+                }
+
+                ObserveChannel(window, name, channel, times, windowSeconds, medians);
+            }
+        }
+
+        /// <summary>
+        /// One custom channel, folded exactly as a built-in one is. Kept as its own method rather than
+        /// generalising the loop above: the built-in path indexes by <see cref="MetricIndex"/> and this one
+        /// looks up by name, and merging them would put a dictionary lookup on the inner loop of the common
+        /// case to save a duplicated shape.
+        /// </summary>
+        private void ObserveChannel(
+            MetricWindow window,
+            string name,
+            CustomChannel channel,
+            double[] times,
+            double windowSeconds,
+            double[] medians)
+        {
+            var pods = window.Pods.Count;
+            var usable = 0;
+
+            for (var pod = 0; pod < pods; pod++)
+            {
+                var series = window.Series(pod, name);
+                var median = Median(series);
+
+                medians[pod] = median;
+
+                if (!double.IsFinite(median))
+                {
+                    continue;
+                }
+
+                usable++;
+                channel.Magnitudes.Add(Math.Abs(median));
+
+                var verdict = _trend.Detect(series, times, _trendOptions);
+
+                if (double.IsFinite(verdict.SlopePerSecond) && windowSeconds > 0.0)
+                {
+                    channel.TrendChanges.Add(Math.Abs(verdict.SlopePerSecond) * windowSeconds);
+                }
+            }
+
+            if (usable < 3)
+            {
+                return;
+            }
+
+            for (var pod = 0; pod < pods; pod++)
+            {
+                if (!double.IsFinite(medians[pod]))
+                {
+                    continue;
+                }
+
+                var others = MedianOfOthers(medians, pod);
+
+                if (double.IsFinite(others))
+                {
+                    channel.PeerGaps.Add(Math.Abs(medians[pod] - others));
+                }
+            }
         }
 
         /// <summary>
@@ -167,6 +264,17 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
                     .Append(_peerGaps[m].Write()).Append('\t')
                     .Append(_trendChanges[m].Write()).Append('\t')
                     .Append(_magnitudes[m].Write()).Append('\n');
+            }
+
+            // Custom lines come after the fixed ones and are marked, so a file written before custom channels
+            // existed still reads, and a reader that does not know the marker skips them rather than
+            // mistaking a name for an enum member.
+            foreach (var (name, channel) in _customChannels)
+            {
+                text.Append(CustomMarker).Append(name).Append('\t')
+                    .Append(channel.PeerGaps.Write()).Append('\t')
+                    .Append(channel.TrendChanges.Write()).Append('\t')
+                    .Append(channel.Magnitudes.Write()).Append('\n');
             }
 
             return text.ToString();
@@ -191,8 +299,25 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
             {
                 var parts = lines[i].Split('\t');
 
-                if (parts.Length != 4 || !Enum.TryParse<MetricIndex>(parts[0], out var metric)
-                    || metric == MetricIndex.Count)
+                if (parts.Length != 4)
+                {
+                    continue;
+                }
+
+                if (parts[0].Length > 1 && parts[0][0] == CustomMarker)
+                {
+                    calibrator._cached = null;
+                    calibrator._customChannels[parts[0][1..]] = new CustomChannel
+                    {
+                        PeerGaps = BoundedSamples.Read(parts[1]),
+                        TrendChanges = BoundedSamples.Read(parts[2]),
+                        Magnitudes = BoundedSamples.Read(parts[3])
+                    };
+
+                    continue;
+                }
+
+                if (!Enum.TryParse<MetricIndex>(parts[0], out var metric) || metric == MetricIndex.Count)
                 {
                     continue;
                 }
@@ -237,6 +362,52 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
 
             return copy;
         }
+
+        /// <summary>
+        /// The proposal for a custom channel, or a proposal with zero samples when nothing has been observed
+        /// under that name - which <see cref="FloorProposal.IsUsable"/> already reports as unusable, so a
+        /// caller has one thing to check rather than two.
+        ///
+        /// <para><b>Every custom channel is treated as fittable</b>, unlike the built-ins, because nothing
+        /// here can tell a restart counter from a latency. The equivalent of
+        /// <c>PeerSignalCatalog.IsCountedEvent</c> is a statement about a signal's unit, and for a channel the
+        /// customer named there is no catalogue to ask. Where that is wrong the proposal sets the bar above a
+        /// single event; it is a suggestion for a human either way, and a configured value wins over it.</para>
+        /// </summary>
+        public FloorProposal Propose(string custom)
+        {
+            ArgumentNullException.ThrowIfNull(custom);
+
+            if (!_customChannels.TryGetValue(custom, out var channel))
+            {
+                return default;
+            }
+
+            if (channel.Cached is { } cached)
+            {
+                return cached;
+            }
+
+            var gapMax = channel.PeerGaps.Count > 0 ? channel.PeerGaps.Max : 0.0;
+            var changeMax = channel.TrendChanges.Count > 0 ? channel.TrendChanges.Max : 0.0;
+
+            var proposal = new FloorProposal(
+                channel.Magnitudes.Count,
+                channel.Magnitudes.Quantile(0.5),
+                channel.PeerGaps.Quantile(0.99),
+                gapMax,
+                channel.TrendChanges.Quantile(0.99),
+                changeMax,
+                gapMax * Margin,
+                changeMax * Margin);
+
+            channel.Cached = proposal;
+
+            return proposal;
+        }
+
+        /// <summary>Custom channel names observed so far, so a report can enumerate them.</summary>
+        public IReadOnlyCollection<string> CustomChannels => _customChannels.Keys;
 
         private FloorProposal[] Compute()
         {
@@ -326,6 +497,21 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
             var index = (int)(q * (sorted.Count - 1));
 
             return sorted[Math.Clamp(index, 0, sorted.Count - 1)];
+        }
+
+        /// <summary>
+        /// The three accumulators plus a cached proposal, for one named channel. A class rather than a struct
+        /// because it is mutated in place through a dictionary lookup, and a struct would be updating a copy.
+        /// </summary>
+        private sealed class CustomChannel
+        {
+            public BoundedSamples PeerGaps { get; init; } = new();
+
+            public BoundedSamples TrendChanges { get; init; } = new();
+
+            public BoundedSamples Magnitudes { get; init; } = new();
+
+            public FloorProposal? Cached { get; set; }
         }
     }
 }

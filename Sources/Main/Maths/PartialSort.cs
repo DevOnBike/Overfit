@@ -111,10 +111,14 @@ namespace DevOnBike.Overfit.Maths
         ///     O(n log n) average, O(n^2) worst case (standard quicksort).
         ///     Zero managed allocations. For inputs ≤ 16 elements, falls back to insertion sort.
         /// </remarks>
-        public static void SortIndices(int[] indices, ReadOnlySpan<float> values, bool ascending)
+        /// <remarks>
+        /// Takes a <see cref="Span{T}"/> rather than an array so a caller reusing a buffer that grows
+        /// monotonically can pass the part of it that is live. <c>CenteredRankFitnessShaper</c> promises
+        /// exactly that reuse and used to hand over the whole array, which threw the moment a population
+        /// shrank - a crash in the case its own documentation described as safe.
+        /// </remarks>
+        public static void SortIndices(Span<int> indices, ReadOnlySpan<float> values, bool ascending)
         {
-            ArgumentNullException.ThrowIfNull(indices);
-
             if (values.Length != indices.Length)
             {
                 throw new ArgumentException("indices and values must have the same length.");
@@ -161,7 +165,7 @@ namespace DevOnBike.Overfit.Maths
             return ascending ? CompareAsc(left, right, values) : CompareDesc(left, right, values);
         }
 
-        private static void IndirectQuickSort(int[] indices, ReadOnlySpan<float> values, int lo, int hi, bool ascending)
+        private static void IndirectQuickSort(Span<int> indices, ReadOnlySpan<float> values, int lo, int hi, bool ascending)
         {
             while (lo < hi)
             {

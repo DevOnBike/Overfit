@@ -27,6 +27,44 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Monitoring
             DataCenterLabel = string.Empty
         };
 
+        /// <summary>
+        /// A pod regex is written by a human, and regex syntax and PromQL string syntax overlap on exactly the
+        /// backslash. Interpolated raw it produced a malformed query, which the caller could only read as
+        /// "these pods export nothing" - the same answer a working query gives about an absent metric.
+        /// </summary>
+        [Fact]
+        public void AwkwardLabelValuesAreEscaped()
+        {
+            var config = new PrometheusMetricSourceConfig
+            {
+                PrometheusBaseUrl = "http://127.0.0.1:9090",
+                PodRegex = "svc-\\d+",
+                Namespace = "we\"ird",
+                DataCenterLabel = string.Empty
+            };
+
+            var query = PromqlCatalog.PodOwnershipQuery(config);
+
+            Assert.Contains("pod=~\"svc-\\\\d+\"", query, StringComparison.Ordinal);
+            Assert.Contains("namespace=\"we\\\"ird\"", query, StringComparison.Ordinal);
+
+            // The braces still balance, which is what a malformed value destroys.
+            Assert.Equal(1, CountOf(query, '{'));
+            Assert.Equal(1, CountOf(query, '}'));
+        }
+
+        private static int CountOf(string text, char c)
+        {
+            var n = 0;
+
+            for (var i = 0; i < text.Length; i++)
+            {
+                n += text[i] == c ? 1 : 0;
+            }
+
+            return n;
+        }
+
         [Fact]
         public void PodOwnership_FiltersByPodAndNamespace_AndPinsTheOwnerKind()
         {

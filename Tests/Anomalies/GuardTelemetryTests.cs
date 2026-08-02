@@ -117,7 +117,9 @@ namespace DevOnBike.Overfit.Tests.Anomalies
                 }
             }
 
-            Assert.Equal(10, series);
+            // Eleven since overfit_guard_state_failures_total joined them: a durable-state write that fails
+            // is otherwise perfectly silent until the next restart reopens everything at once.
+            Assert.Equal(11, series);
         }
 
         private static AnomalyGuard Guard(out NullSink sink)

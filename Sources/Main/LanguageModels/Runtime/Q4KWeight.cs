@@ -95,7 +95,27 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// <summary>Resident size in bytes.</summary>
         public long ByteCount => Blocks.Length;
 
+        /// <summary>
+        /// The pre-attached repacked view, or null. Written once by <see cref="SetPrepacked"/> at load time,
+        /// before any session exists, and read-only thereafter.
+        /// </summary>
         private ReadOnlyMemory<byte>? _repacked;
+
+        /// <summary>
+        /// The lazily built repack, kept as a reference rather than inside <see cref="_repacked"/>.
+        ///
+        /// <para><b>Because a nullable struct cannot be published atomically.</b> One weight set is shared
+        /// across concurrently created sessions on purpose - cheap session creation is the whole point of the
+        /// design - so two first decodes can enter <see cref="EnsureRepacked"/> at once. Writing a
+        /// <c>ReadOnlyMemory&lt;byte&gt;?</c> is several stores (object, offset, length, has-value), and a
+        /// reader can observe a half-written one: a length from the new value against an offset from the old.
+        /// A reference assignment cannot tear, so the cache is a <c>byte[]</c> and the publish is one store.</para>
+        /// </summary>
+        private byte[]? _built;
+
+        /// <summary>Serialises the build, so two threads racing produce one repack rather than two.</summary>
+        private readonly object _repackLock = new();
+
         private bool _hasPrepacked;
 
         /// <summary>True when this weight can be repacked to <c>block_q4_Kx8</c> for the fast
@@ -141,12 +161,34 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// </summary>
         public ReadOnlySpan<byte> EnsureRepacked()
         {
-            if (_repacked is null)
+            if (_hasPrepacked)
             {
-                ReadOnlyMemory<byte> built = Q4KRepack.RepackMatrix(BlockSpan, OutputSize, InputSize);
-                _repacked = built;
+                return _repacked!.Value.Span;
             }
-            return _repacked.Value.Span;
+
+            // Read once through Volatile so a caller that sees a non-null reference also sees the bytes the
+            // building thread wrote into it.
+            var built = Volatile.Read(ref _built);
+
+            if (built is not null)
+            {
+                return built;
+            }
+
+            lock (_repackLock)
+            {
+                built = _built;
+
+                if (built is null)
+                {
+                    built = Q4KRepack.RepackMatrix(BlockSpan, OutputSize, InputSize);
+
+                    // Published last, so the array is fully written before any lock-free reader can see it.
+                    Volatile.Write(ref _built, built);
+                }
+            }
+
+            return built;
         }
 
         /// <summary>

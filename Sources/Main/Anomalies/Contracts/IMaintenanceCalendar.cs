@@ -31,5 +31,20 @@ namespace DevOnBike.Overfit.Anomalies.Contracts
         /// no explanation is indistinguishable from a bug six weeks later.
         /// </param>
         bool IsDeclaredAbnormal(DateTimeOffset at, string workload, out string reason);
+
+        /// <summary>
+        /// Whether any window this calendar knows about is scoped to a named workload, rather than covering
+        /// everything in the namespace.
+        ///
+        /// <para><b>Asked once at startup, to catch a contradiction that is otherwise silent.</b> A
+        /// workload-scoped window compared against an empty workload can never match: the operator declares a
+        /// window for their rollout, the guard pages them during it anyway, and nothing anywhere says why. The
+        /// combination is detectable before the first cycle, and detecting it there costs one check against a
+        /// silence nobody would ever attribute to configuration.</para>
+        ///
+        /// <para>Defaulted to <c>false</c> so a calendar that cannot enumerate its windows - one backed by a
+        /// deployment pipeline, for instance - keeps compiling and simply declines to make the claim.</para>
+        /// </summary>
+        bool HasWorkloadScopedWindow => false;
     }
 }

@@ -205,7 +205,11 @@ namespace DevOnBike.Overfit.Cli
                 return cached;
             }
 
-            var query = $"count by (pod) ({series}{{namespace=\"{namespaceName}\",pod=~\"{podRegex}\"}})";
+            // Escaped rather than interpolated raw: a backslash is ordinary in a pod regex and is the
+            // PromQL string escape, so an unescaped one produced a malformed query that the caller could only
+            // read as "these pods export nothing".
+            var query = $"count by (pod) ({series}{{namespace=\"{PromqlCatalog.EscapeLabelValue(namespaceName)}\","
+                + $"pod=~\"{PromqlCatalog.EscapeLabelValue(podRegex)}\"}})";
             var url = $"{prometheus.TrimEnd('/')}/api/v1/query?query={Uri.EscapeDataString(query)}";
             var pods = 0;
 

@@ -43,10 +43,22 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
         /// <summary>Findings accumulated so far this cycle.</summary>
         public int Count => _findings.Count;
 
+        /// <summary>
+        /// Findings turned away this cycle because the grouping bound was already reached. Non-zero means the
+        /// reported incidents are a subset of what was detected, and a caller that does not say so is
+        /// under-reporting an event large enough to overflow the pipeline.
+        /// </summary>
+        public int Dropped
+        {
+            get;
+            private set;
+        }
+
         /// <summary>Discards everything, so the instance can serve the next cycle.</summary>
         public void Clear()
         {
             _findings.Clear();
+            Dropped = 0;
         }
 
         /// <summary>
@@ -77,7 +89,10 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
                 return false;
             }
 
-            RequireCapacity();
+            if (!HasCapacity())
+            {
+                return false;
+            }
 
             _findings.Add(new SignalFinding(
                 subject,
@@ -129,7 +144,10 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
                 return false;
             }
 
-            RequireCapacity();
+            if (!HasCapacity())
+            {
+                return false;
+            }
 
             _findings.Add(new SignalFinding(
                 subject,
@@ -172,14 +190,20 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
                 return false;
             }
 
-            RequireCapacity();
+            if (!HasCapacity())
+            {
+                return false;
+            }
 
             _findings.Add(new SignalFinding(
                 subject,
                 signal,
 
-                // Infrastructure, not Resource or Symptom: nothing about the application was observed, and
-                // the classification drives how the grouper relates this to other findings.
+                // Infrastructure, not Resource or Symptom: nothing about the application was observed.
+                // The class is carried into the report and read by a human; IncidentGrouper does NOT use it —
+                // it relates findings by subject similarity and time only. An earlier version of this comment
+                // claimed otherwise, which is the worse kind of debt: the next reader builds on a guarantee
+                // that was never there.
                 SignalClass.Infrastructure,
                 windowStart,
                 windowEnd,
@@ -220,7 +244,10 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
                 return false;
             }
 
-            RequireCapacity();
+            if (!HasCapacity())
+            {
+                return false;
+            }
 
             _findings.Add(new SignalFinding(
                 subject,
@@ -282,7 +309,21 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
                     continue;
                 }
 
-                RequireCapacity();
+                if (!HasCapacity())
+                {
+                    // Shed rather than thrown: see HasCapacity. The rest of the group is counted here rather
+                    // than one per iteration, so Dropped reports how many findings were lost and not merely
+                    // that something was.
+                    for (var rest = i + 1; rest < findings.Length; rest++)
+                    {
+                        if (findings[rest].IsOutlier)
+                        {
+                            Dropped++;
+                        }
+                    }
+
+                    break;
+                }
 
                 _findings.Add(new SignalFinding(
                     subjects[i],
@@ -324,17 +365,30 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
             return Math.Clamp(Math.Abs(effectSize), 0.0, 1.0);
         }
 
-        private void RequireCapacity()
+        /// <summary>
+        /// Whether there is room for one more finding, counting the ones turned away.
+        ///
+        /// <para><b>It used to throw, and throwing lost the whole cycle.</b> The bound exists because grouping
+        /// scores pairs and a thousand findings is half a million comparisons - a real limit, worth keeping.
+        /// But the event most likely to reach it is a cluster-wide one: every pod deviating on every signal at
+        /// once, which is the moment the operator most needs an incident. Exceeding the bound then threw out
+        /// of <c>RunCycle</c>, so the guard reported <b>nothing at all</b> about the largest event it had ever
+        /// seen, and the exception named a threshold rather than the outage.</para>
+        ///
+        /// <para>Shedding is the honest failure: the first thousand findings are grouped and reported, the
+        /// remainder are counted, and <see cref="Dropped"/> says how many so the report can state it. A
+        /// truncated incident about a real outage beats a correct exception about a bound.</para>
+        /// </summary>
+        private bool HasCapacity()
         {
             if (_findings.Count < IncidentGrouper.MaxFindingsPerCall)
             {
-                return;
+                return true;
             }
 
-            throw new InvalidOperationException(
-                $"Pipeline already holds {IncidentGrouper.MaxFindingsPerCall} findings, the per-call grouping "
-                + "bound. A cycle this large means a detector has stopped filtering; raise its thresholds or "
-                + "group in batches rather than scoring half a million pairs.");
+            Dropped++;
+
+            return false;
         }
 
         /// <summary>

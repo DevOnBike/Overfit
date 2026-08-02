@@ -29,5 +29,26 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring.Abstractions
         /// second reading would report every pod in the window as unexpected.</para>
         /// </summary>
         IReadOnlyList<string> KnownPods { get; }
+
+        /// <summary>
+        /// When <see cref="KnownPods"/> was last successfully rebuilt, or <c>null</c> when the implementation
+        /// does not track it.
+        ///
+        /// <para><b>A roster that stopped refreshing is indistinguishable from a fresh one, and it is wrong in
+        /// both directions.</b> Pods the cluster has since deleted stay on the list and get reported as silent
+        /// — a fabricated incident about a pod that correctly does not exist — while pods created since the
+        /// last successful refresh are missing from it, so a replica that never started is not noticed. The
+        /// second is the failure this whole interface exists to prevent, so the guard must be able to tell that
+        /// its list is old instead of quietly answering from it.</para>
+        ///
+        /// <para>It must advance only on a <b>successful</b> rebuild. An implementation that stamps it on every
+        /// attempt reports freshness it does not have, which is worse than reporting none: the caller then has
+        /// a number it believes.</para>
+        ///
+        /// <para><c>null</c> means "not tracked", never "just refreshed". The guard treats it as unverifiable
+        /// and proceeds — the same behaviour as before this member existed — so an existing implementation
+        /// keeps working and simply offers no freshness guarantee.</para>
+        /// </summary>
+        DateTimeOffset? LastRefreshed => null;
     }
 }

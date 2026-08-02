@@ -278,6 +278,50 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             Assert.Equal(4, tracker.OpenCount);
         }
 
+        /// <summary>
+        /// An identifier belonging to an incident that was <b>not</b> adopted must still be retired.
+        ///
+        /// <para>Restore advanced the counter only for the records it kept, so one dropped for age - or by
+        /// <c>MaxOpenIncidents</c> - left its number free to be handed out again. The method's own
+        /// documentation warns that a reused identifier lets a consumer join two unrelated incidents: a
+        /// dashboard following incident 41 would see a memory problem that closed last month and a CPU
+        /// problem that opened today as one continuing event.</para>
+        /// </summary>
+        [Fact]
+        public void RestoreProtectsTheIdentifiersOfIncidentsItDropped()
+        {
+            var source = new IncidentTracker(IncidentTrackingOptions.Balanced);
+
+            // Ten separate incidents, so the saved payload carries ten spent identifiers.
+            for (var i = 0; i < 10; i++)
+            {
+                source.Observe(Cycle(($"pod-{i}", "cpu")), T0.AddMinutes(5 * i));
+            }
+
+            var saved = source.Snapshot();
+            var highest = 0L;
+
+            Assert.NotEmpty(saved);
+
+            for (var i = 0; i < saved.Count; i++)
+            {
+                highest = Math.Max(highest, saved[i].Id);
+            }
+
+            Assert.True(highest > 1, "the payload carries no spent identifier, so nothing is proven");
+
+            // Restored a month later: every record is older than the staleness bound, so none is adopted.
+            // nextId is deliberately understated, so only the records themselves can protect the range.
+            var restored = new IncidentTracker(IncidentTrackingOptions.Balanced);
+            var adopted = restored.Restore(
+                saved, nextId: 1, now: T0.AddDays(30), maxAge: TimeSpan.FromDays(1));
+
+            Assert.Equal(0, adopted);
+            Assert.True(restored.NextId > highest,
+                $"next id is {restored.NextId} against {highest} already issued, so an identifier will be "
+                + "handed out twice");
+        }
+
         [Fact]
         public void RejectsUnusableOptions()
         {

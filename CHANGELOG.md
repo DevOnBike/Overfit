@@ -67,6 +67,87 @@ calibrates for itself, and the operability layer that decides whether a customer
 
 ### Fixed
 
+_2026-08-02 — the six defects a code review found on paths no measurement exercises, plus eighteen from
+five `overfit-find-bugs-game` hunts. Everything below was verified by test; the kernel change was verified
+by parity, benchmark and an end-to-end generation on a real model._
+
+- **The guard's workload could be empty, and two things failed silently on it.** A maintenance window scoped
+  to a named workload could never match — the operator declared a window for their rollout and got paged
+  during it anyway — and the incident tracker's subject key collapsed to `"namespace/"`, so a memory
+  incident that closed and a CPU incident that opened were reported as one continuing problem. The lab's own
+  logs carried the evidence for weeks as `Anomaly incident in lab/:` with nothing after the slash. The
+  workload is now configurable, **derived from topology** when it is not configured, and the combination that
+  cannot work — a workload-scoped window, no workload, no topology — is refused at construction.
+- **Custom metric channels were never calibrated.** Their floors defaulted to zero, zero means the gate is
+  off, and nothing ever proposed a value: the one part of the configuration a customer is most likely to own
+  started in the state measured at 209 false incidents a day. `FloorCalibrator` now keeps name-keyed
+  accumulators, `IAbsoluteFloorSource` answers for a signal name, and the custom paths route through it.
+- **`DecomposeCommonMode` switched off the seasonal baseline as a side effect.** Turning off the
+  decomposition — which the test suite itself does — silently discarded a week of learning, and nothing in
+  the option's name suggests it.
+- **`IncidentTracker.Restore` could hand out an identifier twice**, because it advanced its counter only for
+  the incidents it adopted; one dropped for age or by `MaxOpenIncidents` left its number free. Truncation is
+  now reported rather than looking like "there were only that many".
+- **The silent-pod check trusted a roster nobody had refreshed.** A failed topology refresh keeps the
+  previous snapshot on purpose, which is right for grouping and wrong here: a pod deleted during the outage
+  is still on the list, stops reporting because it no longer exists, and is accused after two cycles.
+  `IPodRoster.LastRefreshed` and `MaxRosterAge` let the check stand down instead.
+- **A store that could not write said nothing** until the next restart reopened every incident at once.
+  `IIncidentStore.LastError` is read after each save, surfaced as `AnomalyGuard.StateError`, and counted in
+  `overfit_guard_state_failures_total`.
+- **A cluster-wide event could discard its own cycle.** `IncidentPipeline` threw once the grouping bound was
+  reached, so the largest event the guard had ever seen produced no incident at all. It now sheds the
+  overflow and counts it in `Dropped`.
+- **`FastRandomForest` never split its data.** It computed a feature and a threshold, then handed the
+  identical unpartitioned rows to both children — so every leaf averaged the whole target column, every tree
+  returned a constant, and the importance scores that `BorutaSelectionLayer` and `ShapSelectionLayer`
+  consume were a tally of random draws. Because the row count never shrank, the `rows < 2` stop could never
+  fire either: every tree was a **complete** binary tree, which at the `maxDepth` the constructor accepts is
+  over two billion nodes regardless of dataset size.
+- **`LstmCell.Save` and `Load` were empty method bodies** — not incomplete, `{ }` — and `LstmLayer`,
+  `LstmAutoencoder` and `Crnn` all delegate through them. A trained CRNN saved and reloaded came back with
+  its convolutions, norms and classifier intact and its recurrent core at random initialisation. Nothing
+  threw and the model reported as loaded.
+- **`DepthwiseConv2DLayer.Load` desynchronised the stream** when the file carried a bias section and the
+  layer was built without one: it consumed the flag and skipped the floats, misaligning every read after it.
+- **The synthetic-speech marker was optional where it mattered.** `WavAudioSink` wrote an unmarked file when
+  the metadata argument was omitted, so any new caller got unmarked audio by default — the wrong direction
+  for a default to fail in on a voice-cloning path. Omission now marks; unmarked output requires naming
+  `SyntheticSpeechMetadata.Unmarked` at the call site. The server's `response_format=pcm` reply has no
+  container to carry the marker and now carries it on the media type instead.
+- **Two parsers trusted a length from inside a validated envelope.** `Mp3Decoder` used the raw 9-bit
+  `big_values` field unclamped against a 576-entry buffer, so a corrupt MP3 took the process down;
+  `WavReader` accepted a negative chunk size as a raw `ArgumentOutOfRangeException` and, worse, **silently
+  truncated** the audio when a chunk claimed more than the file held.
+- **`CachedLlamaSession.Embed` returned the wrong vector for `EmbeddingPooling.Cls`** — the last token
+  instead of the first. Correct dimension, correctly normalised, nothing thrown, just worse similarities.
+- **AVX-512 was inert on the banded Q4_K prefill.** `TiledBandChunk` had no dispatch branch while its three
+  siblings all had one. Measured after wiring it up: **1.15–1.17× on `ffn_gate_up`, 1.05–1.06× on
+  `attn_qo`, a tie on `ffn_down` and `llama_ref`**, with the untouched arms flat as canaries. The banded
+  path is off by default, so this speeds an opt-in path rather than the shipped one.
+- **`Q4KWeight.EnsureRepacked` built its cache without synchronisation** while one weight set is shared
+  across concurrently created sessions by design; a `ReadOnlyMemory<byte>?` cannot be published atomically.
+- **`GenerationalGeneticAlgorithm.Tell` could rank an uninitialised population** — a `PooledBuffer<float>`
+  taken with `clearMemory: false`, so leftover pool contents rather than zeros — and store the winner as the
+  best genome.
+- **`GridEliteArchive` filed a NaN descriptor into cell 0**, because `value < min || value > max` is false
+  for NaN in both directions.
+- **`CenteredRankFitnessShaper` threw when the population shrank**, contradicting its own promise of a
+  monotonically growing reuse buffer. `PartialSort.SortIndices` now takes a `Span<int>`.
+- **`ConstantColumnFilterLayer`'s strictest setting was a no-op** — at `minUniqueRatio = 1.0` no column could
+  clear the bar, so the filter turned itself off entirely and left the constant columns that make a later
+  scaler divide by zero.
+- **`BorutaSelectionLayer` re-selected on every call**, unlike every sibling in `Prepare/`, so a second call
+  could leave later layers holding column indices that no longer refer to the same columns.
+- **`CheckpointedModule` accepted a segment it cannot recompute.** A checkpointed segment runs twice, and
+  dropout draws from an unseeded generator, so the backward recomputation would use a different mask than
+  the forward pass did — wrong gradients, no error. Refused unless explicitly allowed.
+- **`TabularToTensorConverter` could not persist its category ordering**, so re-fitting at inference
+  produced one-hot columns of the right width in the wrong order. Shapes agreed and nothing threw.
+- **`IEvolutionCheckpoint`'s documentation said the opposite of what every implementation does** about RNG
+  state and resume reproducibility — the direction that costs work, since it would send a reader off to
+  build determinism the implementations already had.
+
 - **A replica at Cliff's delta 1.00 and a 190% gap was never named.** `PeerGroupOutlierDetector` read
   "somebody above and somebody below" as an ambiguous group, so two ordinary replicas sitting ~10% *under*
   the group vetoed one running at 2.5× the CPU of its peers. It now resolves the group when one side dwarfs

@@ -1010,7 +1010,18 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                         dst[j] += h[j];
                     }
                 }
-                if (pooling != EmbeddingPooling.Mean && i == tokens.Length - 1)
+                // Cls is the FIRST token, LastToken the last. The branch used to be
+                // `pooling != Mean && i == tokens.Length - 1`, which quietly handed Cls the last-token
+                // vector: the right dimension, correctly normalised, nothing thrown — just worse
+                // similarities that nobody could account for. BertEncoder implements the same enum
+                // correctly, so this was one path breaking a live contract rather than an unimplemented
+                // option, and it is public API.
+                if (pooling == EmbeddingPooling.Cls && i == 0)
+                {
+                    h[..d].CopyTo(dst);
+                }
+
+                if (pooling == EmbeddingPooling.LastToken && i == tokens.Length - 1)
                 {
                     h[..d].CopyTo(dst);
                 }

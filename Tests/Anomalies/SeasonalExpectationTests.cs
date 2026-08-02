@@ -96,6 +96,48 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             Assert.Equal(3, summary.Days);
         }
 
+        /// <summary>
+        /// Learning must not be a side effect of an unrelated option.
+        ///
+        /// <para><c>_history.Observe</c> sat inside the <c>DecomposeCommonMode</c> branch, so turning the
+        /// decomposition off - a reasonable thing to do, and something this suite does elsewhere - silently
+        /// threw away a week of seasonal learning. Nothing about the option's name suggests it.</para>
+        /// </summary>
+        [Fact]
+        public void HistoryIsLearnedWithTheDecompositionOff()
+        {
+            var store = new MemoryStore();
+
+            var guard = new AnomalyGuard(
+                new AnomalyGuardOptions
+                {
+                    Namespace = "lab",
+                    Workload = Workload,
+                    Grouping = IncidentGroupingOptions.Balanced with { Topology = TopologyWeights.SingleNode },
+                    MinimumHistoryDays = 2,
+                    DecomposeCommonMode = false,
+                },
+                new CapturingSink(),
+                IncidentTrackingOptions.Balanced,
+                store: null,
+                restoredAt: null,
+                historyStore: store);
+
+            for (var day = 0; day < 3; day++)
+            {
+                guard.RunCycle(
+                    RisingWindow(at: WindowStart.AddDays(day)), WindowStart.AddDays(day).AddMinutes(20));
+            }
+
+            var (restored, _) = LearnedState.Read(store.State);
+
+            Assert.True(
+                restored.TryGet(Workload, MetricIndex.RequestsPerSecond, WindowStart, out var summary),
+                "nothing was learned, so DecomposeCommonMode is still switching off an unrelated subsystem");
+
+            Assert.Equal(3, summary.Days);
+        }
+
         private static AnomalyGuard Guard(
             CapturingSink sink, MetricHistory? history, IIncidentStore? historyStore = null)
         {

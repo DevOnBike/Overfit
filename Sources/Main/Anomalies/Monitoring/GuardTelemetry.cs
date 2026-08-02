@@ -34,6 +34,7 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
     {
         private long _cycles;
         private long _failedCycles;
+        private long _stateWriteFailures;
         private long _findings;
         private long _opened;
         private long _resolved;
@@ -73,6 +74,19 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
             Interlocked.Increment(ref _failedCycles);
         }
 
+        /// <summary>
+        /// Records a cycle whose durable state could not be read or written.
+        ///
+        /// <para>Its own series because the failure is otherwise perfectly silent: the stores swallow their
+        /// exceptions so a full volume degrades rather than crashes, cycles keep completing, incidents keep
+        /// being reported, and the only symptom arrives at the next restart when everything reopens at once.
+        /// An alert on this fires hours before that.</para>
+        /// </summary>
+        public void StateWriteFailed()
+        {
+            Interlocked.Increment(ref _stateWriteFailures);
+        }
+
         /// <summary>Renders the Prometheus text exposition format.</summary>
         public string ToPrometheusText()
         {
@@ -80,6 +94,11 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
 
             Counter(text, "overfit_guard_cycles_total",
                 "Evaluation cycles the guard has completed.", Interlocked.Read(ref _cycles));
+
+            Counter(text, "overfit_guard_state_failures_total",
+                "Cycles whose durable state could not be read or written. Incidents will not survive the next "
+                + "restart, and the restart is when anyone would otherwise notice.",
+                Interlocked.Read(ref _stateWriteFailures));
 
             Counter(text, "overfit_guard_cycle_failures_total",
                 "Cycles that threw and were skipped. A guard failing every cycle reports no incidents, "

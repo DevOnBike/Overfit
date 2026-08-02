@@ -22,7 +22,22 @@ listening does not scale, so a similarity report and an assertion do.
 model that produces those tokens, with `OrpheusSnacBridge` between them and a LoRA-based voice-cloning
 path (`VoiceCloneDatasetBuilder`, `VoiceCloneTrainer`).
 
-**`SyntheticSpeechMetadata` is mandatory, not optional.** Generated speech carries a marker identifying
-it as synthetic. This is a deliberate constraint on the feature — a voice-cloning path that can produce
-unmarked audio of a real person is not something to ship, and the marker is enforced at the engine
-rather than left to the caller.
+**`SyntheticSpeechMetadata` is the intended policy and is NOT currently enforced.** Generated speech is
+meant to carry a marker identifying it as synthetic — a voice-cloning path that can produce unmarked audio
+of a real person is not something to ship.
+
+An earlier version of this paragraph claimed the marker was "enforced at the engine rather than left to the
+caller". **That was false**, and it was found by a review on 2026-08-01 rather than by anything failing:
+
+- `Orpheus/OrpheusVoiceEngine` does not reference `SyntheticSpeechMetadata` at all. Nothing in the synthesis
+  path applies it.
+- It is applied by callers — two sites in `Sources/Cli/Commands.cs` and one in
+  `Sources/Server/OpenAi/SpeechExchange.cs` — so a new caller gets unmarked audio by default.
+- `WavAudioSink` takes it as `SyntheticSpeechMetadata? metadata = null`. Omitting it writes an unmarked file
+  and nothing objects.
+- The server's `response_format=pcm` path emits raw samples with no container, so it has nowhere to put the
+  marker and carries none.
+
+The policy stands; the enforcement does not exist yet. Until it does, **treat unmarked output as reachable**
+— see the open-defect entry in `ROADMAP.md`. A safety property that lives only in a document is a documented
+intention, not a guarantee, and a document asserting otherwise is worse than no document at all.

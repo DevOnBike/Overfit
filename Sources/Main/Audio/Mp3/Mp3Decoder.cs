@@ -486,7 +486,14 @@ namespace DevOnBike.Overfit.Audio.Mp3
             var region2Start = shortBlock ? 576 : bandsLong[_region0[g] + _region1[g] + 2];
 
             var pos = 0;
-            var bigEnd = _bigValues[g] * 2;
+
+            // Clamped, because big_values is a raw 9-bit side-info field: 0..511, doubled to as much as 1022,
+            // written into a 576-entry granule. A crafted or merely corrupt file therefore indexed past the
+            // buffer, and nothing on the path from Mp3Reader or AudioFile catches it — user-supplied input
+            // taking the process down. Truncating to the granule is what every other bound in this method
+            // already does with an overlong stream.
+            var bigEnd = Math.Min(_bigValues[g] * 2, 576);
+
             while (pos < bigEnd)
             {
                 int table = pos < region1Start ? _tableSelect[g * 3]

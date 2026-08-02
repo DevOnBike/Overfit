@@ -24,8 +24,12 @@ namespace DevOnBike.Overfit.Audio.Tts
             ["", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"];
 
         // Index = number of 3-digit groups from the right.
+        // Index = number of 3-digit groups from the right. Six entries covers up to 999 quadrillion; long
+        // reaches 9.22 quintillion, so the last two entries exist because the type does, not because anyone
+        // will say them. Without them a nineteen-digit number in ordinary text threw IndexOutOfRange out of
+        // POST /v1/audio/speech and out of the CLI — a crash from a number, on a text-normalisation path.
         private static readonly string[] Scales =
-            ["", " thousand", " million", " billion", " trillion", " quadrillion"];
+            ["", " thousand", " million", " billion", " trillion", " quadrillion", " quintillion"];
 
         /// <summary>Converts <paramref name="value"/> to English cardinal words (e.g. -42 → "minus forty two").</summary>
         public static string Convert(long value)
@@ -64,7 +68,10 @@ namespace DevOnBike.Overfit.Audio.Tts
                     sb.Append(' ');
                 }
                 AppendBelowThousand(sb, groups[g]);
-                sb.Append(Scales[g]);
+
+                // Belt and braces: ulong cannot produce a group index past six, and a silent wrong reading is
+                // still better than taking a request down if that ever stops being true.
+                sb.Append(g < Scales.Length ? Scales[g] : string.Empty);
                 first = false;
             }
             return sb.ToString();

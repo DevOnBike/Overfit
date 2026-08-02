@@ -799,20 +799,39 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 {
                     var s = t * c.Nr;
                     var cols = Math.Min(c.Nr, c.Rows - s);
+                    var weights = new ReadOnlySpan<byte>(c.Repacked, c.RepackedLength);
+                    var quants = new ReadOnlySpan<sbyte>(c.Quants + (long)s * c.InputSize, cols * c.InputSize);
+                    var scales = new ReadOnlySpan<float>(c.Scales + (long)s * c.Spr, cols * c.Spr);
+                    var sums = new ReadOnlySpan<short>(c.Bsums + (long)s * c.BsumsPerRow, cols * c.BsumsPerRow);
+                    var dst = new Span<float>(c.Output + (long)s * c.OutputSize, cols * c.OutputSize);
+                    var bias = new ReadOnlySpan<float>(c.Bias, c.BiasLength);
+                    var decoded = new ReadOnlySpan<float>(c.DecodedScales, c.DecodedScalesLength);
+
+                    // This branch was missing while TiledChunk, TiledQ6KChunk and TiledQ6KBandChunk all had
+                    // it, which is what identified it as an omission rather than a decision: the band path
+                    // silently ran 256-bit on a machine configured for 512.
+                    if (c.Avx512)
+                    {
+                        Q4KGemvKernel.GemmTiled512(
+                            weights, c.OutputSize, c.InputSize, cols, quants, scales, sums, dst, bias,
+                            decoded, groupStart, groupCount);
+
+                        continue;
+                    }
 
                     Q4KGemvKernel.GemmTiled(
-                        new ReadOnlySpan<byte>(c.Repacked, c.RepackedLength),
+                        weights,
                         c.OutputSize,
                         c.InputSize,
                         cols,
-                        new ReadOnlySpan<sbyte>(c.Quants + (long)s * c.InputSize, cols * c.InputSize),
-                        new ReadOnlySpan<float>(c.Scales + (long)s * c.Spr, cols * c.Spr),
-                        new ReadOnlySpan<short>(c.Bsums + (long)s * c.BsumsPerRow, cols * c.BsumsPerRow),
-                        new Span<float>(c.Output + (long)s * c.OutputSize, cols * c.OutputSize),
-                        new ReadOnlySpan<float>(c.Bias, c.BiasLength),
+                        quants,
+                        scales,
+                        sums,
+                        dst,
+                        bias,
                         groupStart,
                         groupCount,
-                        new ReadOnlySpan<float>(c.DecodedScales, c.DecodedScalesLength));
+                        decoded);
                 }
             }
         }

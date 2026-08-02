@@ -27,6 +27,23 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
         }
 
         /// <inheritdoc/>
+        public bool HasWorkloadScopedWindow
+        {
+            get
+            {
+                for (var i = 0; i < _windows.Count; i++)
+                {
+                    if (_windows[i].Workload.Length > 0)
+                    {
+                        return true;
+                    }
+                }
+
+                return false;
+            }
+        }
+
+        /// <inheritdoc/>
         public bool IsDeclaredAbnormal(DateTimeOffset at, string workload, out string reason)
         {
             ArgumentNullException.ThrowIfNull(workload);

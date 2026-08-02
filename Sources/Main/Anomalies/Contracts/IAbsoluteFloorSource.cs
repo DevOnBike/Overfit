@@ -31,5 +31,22 @@ namespace DevOnBike.Overfit.Anomalies.Contracts
 
         /// <summary>Smallest movement across a window, in the signal's own units, worth reporting.</summary>
         double MinAbsoluteTrendChange(MetricIndex metric);
+
+        /// <summary>
+        /// The same question for a channel the enum does not have. Zero means the gate is off.
+        ///
+        /// <para><b>The named overloads exist because the customer's own metrics were the one part of the
+        /// configuration with no fallback at all.</b> A built-in signal left unconfigured falls back to what a
+        /// healthy period measured; a custom binding left unconfigured simply had its gate off, which is the
+        /// arrangement measured at 209 false incidents a day - on precisely the signals the customer chose to
+        /// add, and therefore cares most about.</para>
+        ///
+        /// <para>Defaulted to zero rather than abstract so an existing implementation keeps compiling and
+        /// keeps its current behaviour, which was already "no floor for custom channels".</para>
+        /// </summary>
+        double MinAbsoluteGap(string signal) => 0.0;
+
+        /// <inheritdoc cref="MinAbsoluteGap(string)"/>
+        double MinAbsoluteTrendChange(string signal) => 0.0;
     }
 }

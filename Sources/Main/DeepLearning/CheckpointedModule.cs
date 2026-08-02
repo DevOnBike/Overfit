@@ -22,11 +22,79 @@ namespace DevOnBike.Overfit.DeepLearning
         private readonly IModule _inner;
         private readonly int _subArenaElements;
 
-        public CheckpointedModule(IModule inner, int subArenaElements = 1 << 20)
+        /// <param name="inner">The segment to recompute rather than keep on the tape.</param>
+        /// <param name="subArenaElements">Working set for the recomputed forward.</param>
+        /// <param name="allowNonDeterministic">
+        /// Accepts a segment whose forward pass draws randomness. <b>Off by default, and the default is the
+        /// point.</b>
+        /// </param>
+        /// <exception cref="ArgumentException">
+        /// The segment contains a layer that draws randomness on the forward path - dropout - and
+        /// <paramref name="allowNonDeterministic"/> was not set.
+        ///
+        /// <para><b>Checkpointing requires a deterministic segment, and nothing used to check.</b>
+        /// <c>ComputationGraph.Checkpoint</c> documents the requirement; this type accepted any
+        /// <see cref="IModule"/>, and <c>TensorMath.Dropout</c> draws from an unseeded
+        /// <c>Random.Shared</c>. The recomputation during backward then uses a <i>different mask</i> than the
+        /// forward pass did, so the gradients belong to a network that was never evaluated. Nothing throws,
+        /// the loss goes down, and the model quietly optimises a different objective - which is why this is
+        /// refused at construction rather than reported afterwards.</para>
+        ///
+        /// <para>No shipped path was wrong when this was found: <c>GPT1Model</c>'s transformer block carries
+        /// no dropout. The composition was simply unguarded.</para>
+        /// </exception>
+        public CheckpointedModule(
+            IModule inner, int subArenaElements = 1 << 20, bool allowNonDeterministic = false)
         {
             _inner = inner ?? throw new ArgumentNullException(nameof(inner));
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(subArenaElements);
             _subArenaElements = subArenaElements;
+
+            if (!allowNonDeterministic && FindNonDeterministic(inner) is { } offender)
+            {
+                throw new ArgumentException(
+                    $"{offender} draws randomness on its forward path, and a checkpointed segment is run "
+                    + "twice: the backward recomputation would use a different mask than the forward pass "
+                    + "did, producing gradients for a network that was never evaluated. Nothing would throw. "
+                    + "Move the dropout outside the checkpointed segment, or pass allowNonDeterministic: true "
+                    + "if the randomness is seeded per call.",
+                    nameof(inner));
+            }
+        }
+
+        /// <summary>
+        /// The first layer in <paramref name="module"/> that draws randomness on the forward path, or null.
+        ///
+        /// <para>Structural rather than exhaustive: it recognises this project's dropout layers and looks one
+        /// composition level down through <see cref="Sequential"/>, which is the shape a checkpointed segment
+        /// actually has. A custom module that draws internally is not detectable from here, which is what
+        /// <c>allowNonDeterministic</c> documents rather than hides.</para>
+        /// </summary>
+        private static string? FindNonDeterministic(IModule module)
+        {
+            if (module is DropoutLayer or Dropout2DLayer)
+            {
+                return module.GetType().Name;
+            }
+
+            if (module is not Sequential sequential)
+            {
+                return null;
+            }
+
+            for (var i = 0; i < sequential.Modules.Count; i++)
+            {
+#pragma warning disable OVERFIT022 // Bounded: recursion follows Sequential nesting, which a caller builds explicitly and is a handful of levels at most.
+                var offender = FindNonDeterministic(sequential.Modules[i]);
+#pragma warning restore OVERFIT022
+
+                if (offender is not null)
+                {
+                    return offender;
+                }
+            }
+
+            return null;
         }
 
         public bool IsTraining => _inner.IsTraining;

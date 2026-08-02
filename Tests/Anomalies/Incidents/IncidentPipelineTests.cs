@@ -26,6 +26,40 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Incidents
         private static readonly TrendDetector Trend = new();
         private static readonly PeerGroupOutlierDetector Peers = new();
 
+        /// <summary>
+        /// Reaching the grouping bound must cost the overflow, not the cycle.
+        ///
+        /// <para>It used to throw out of <c>RunCycle</c>. The event most likely to reach a thousand findings
+        /// is a cluster-wide one - every pod deviating on every signal at once - so the guard reported
+        /// <b>nothing at all</b> about the largest event it had ever seen, and the exception named a threshold
+        /// rather than the outage.</para>
+        /// </summary>
+        [Fact]
+        public void ExceedingTheGroupingBound_ShedsTheOverflowRatherThanTheCycle()
+        {
+            var pipeline = new IncidentPipeline();
+            var (values, times) = LeakySeries(120);
+            var result = Trend.Detect(values, times, TrendOptions.Balanced);
+
+            Assert.Equal(DetectionStatus.Anomalous, result.Status);
+
+            for (var i = 0; i < IncidentGrouper.MaxFindingsPerCall + 50; i++)
+            {
+                pipeline.Observe(Subject($"pod-{i}"), "process_resident_memory_bytes", result,
+                    WindowStart, WindowEnd);
+            }
+
+            Assert.Equal(IncidentGrouper.MaxFindingsPerCall, pipeline.Count);
+            Assert.Equal(50, pipeline.Dropped);
+
+            // And what was kept is still groupable, which is the whole point of shedding.
+            Assert.NotEmpty(pipeline.Group(IncidentGroupingOptions.Balanced));
+
+            pipeline.Clear();
+
+            Assert.Equal(0, pipeline.Dropped);
+        }
+
         [Fact]
         public void AHealthyTrend_ProducesNothing()
         {

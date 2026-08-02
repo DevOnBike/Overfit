@@ -255,6 +255,31 @@ namespace Benchmarks
         }
 
         /// <summary>
+        /// The banded path as it behaved before 2026-08-02: <c>TiledBandChunk</c> had no AVX-512 branch, so a
+        /// machine with the wider kernel configured ran the 256-bit one here regardless.
+        ///
+        /// <para>The A/B for that fix. <see cref="Tiled_Banded8"/> is the same call with the branch present,
+        /// and the two kernels are bit-identical (<c>Avx512PrefillParityTests</c>), so this pair measures the
+        /// dispatch and nothing else. <see cref="WeightStationary"/> and <see cref="Tiled"/> are untouched by
+        /// the change and serve as canaries: if either moves between runs, the box moved.</para>
+        /// </summary>
+        [Benchmark]
+        public void Tiled_Banded8_NoAvx512()
+        {
+            var original = BatchedQuantProjection.UseAvx512PrefillQ4K;
+            BatchedQuantProjection.UseAvx512PrefillQ4K = false;
+
+            try
+            {
+                RunTiledWithCols(8, banded: true);
+            }
+            finally
+            {
+                BatchedQuantProjection.UseAvx512PrefillQ4K = original;
+            }
+        }
+
+        /// <summary>
         /// Banding plus the wide tile. Banding decouples work-item count from NR, so the tile width that lost
         /// 8% to scheduling imbalance at 672 rows should now keep its halved weight traffic.
         /// </summary>

@@ -69,9 +69,17 @@ namespace DevOnBike.Overfit.DeepLearning
         {
             get;
         }
+        /// <summary>
+        /// Per-channel bias, or <c>null</c> when the layer was built without one.
+        ///
+        /// <para>Settable privately so <see cref="Load"/> can construct it on demand, the way
+        /// <see cref="ConvLayer"/> already does. Without that, a file carrying a bias section could only be
+        /// read by skipping it, and skipping it is what desynchronised the stream.</para>
+        /// </summary>
         public Parameter? Bias
         {
             get;
+            private set;
         }
         public bool IsTraining { get; private set; } = true;
 
@@ -163,13 +171,37 @@ namespace DevOnBike.Overfit.DeepLearning
                 kSpan[i] = br.ReadSingle();
             }
 
-            if (br.ReadInt32() == 1 && Bias is not null)
+            // The flag says what the FILE contains; what this layer happens to have is a separate question,
+            // and conflating them is how the stream came apart. The old condition was
+            // `if (br.ReadInt32() == 1 && Bias is not null)`, which consumed the flag and then skipped the
+            // floats whenever the file had a bias and the layer was built with useBias: false - misaligning
+            // every read after it in a composite Load. A misaligned stream does not fail where it went wrong:
+            // it fails later, in another layer, as dimensions that do not match, or it does not fail at all
+            // and loads plausible garbage.
+            var hasBias = br.ReadInt32() == 1;
+
+            if (!hasBias)
             {
-                var bSpan = Bias.DataSpan;
-                for (var i = 0; i < bSpan.Length; i++)
+                if (Bias is not null)
                 {
-                    bSpan[i] = br.ReadSingle();
+                    throw new OverfitFormatException(
+                        "This depthwise layer has a bias and the file carries none. Reading on would leave "
+                        + "the bias at whatever it was initialised to while every other parameter came from "
+                        + "the file.");
                 }
+
+                return;
+            }
+
+            // Constructed on demand: a file with a bias is readable into a layer built without one, and the
+            // floats are consumed either way.
+            Bias ??= new Parameter(new TensorShape(_channels), requiresGrad: true, clearData: false);
+
+            var bSpan = Bias.DataSpan;
+
+            for (var i = 0; i < bSpan.Length; i++)
+            {
+                bSpan[i] = br.ReadSingle();
             }
         }
 

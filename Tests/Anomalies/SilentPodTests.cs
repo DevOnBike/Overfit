@@ -121,6 +121,70 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             Assert.DoesNotContain(sink.Messages, m => m.Contains("reported no metrics", StringComparison.Ordinal));
         }
 
+        /// <summary>
+        /// A roster nobody has refreshed is wrong in both directions, and confidently so. This is the
+        /// direction that fabricates: a pod deleted during a Prometheus outage is still on the stale list,
+        /// stops reporting because it no longer exists, and gets accused of being silent.
+        /// </summary>
+        [Fact]
+        public void AStaleRosterIsNotTrusted()
+        {
+            var sink = new CapturingSink();
+            var topology = new FakeTopology(["pod-0", "pod-1", "pod-2", "pod-missing"])
+            {
+                // Older than MaxRosterAge, so nothing this list says about the cluster is current.
+                LastRefreshed = T0.AddHours(-3)
+            };
+
+            var guard = new AnomalyGuard(
+                new AnomalyGuardOptions
+                {
+                    Namespace = "lab",
+                    Workload = "svc",
+                    PodTopology = topology,
+                    Grouping = IncidentGroupingOptions.Balanced with { Topology = TopologyWeights.SingleNode },
+                },
+                sink,
+                IncidentTrackingOptions.Balanced);
+
+            guard.RunCycle(Window(3), T0);
+            guard.RunCycle(Window(3), T0.AddMinutes(5));
+            guard.RunCycle(Window(3), T0.AddMinutes(10));
+
+            Assert.DoesNotContain(
+                sink.Messages, m => m.Contains("reported no metrics", StringComparison.Ordinal));
+        }
+
+        /// <summary>
+        /// The freshness gate must not become a way of never checking. A stamped, current roster reports the
+        /// missing pod exactly as an unstamped one does.
+        /// </summary>
+        [Fact]
+        public void AFreshRosterStillReports()
+        {
+            var sink = new CapturingSink();
+            var topology = new FakeTopology(["pod-0", "pod-1", "pod-2", "pod-missing"])
+            {
+                LastRefreshed = T0.AddMinutes(-1)
+            };
+
+            var guard = new AnomalyGuard(
+                new AnomalyGuardOptions
+                {
+                    Namespace = "lab",
+                    Workload = "svc",
+                    PodTopology = topology,
+                    Grouping = IncidentGroupingOptions.Balanced with { Topology = TopologyWeights.SingleNode },
+                },
+                sink,
+                IncidentTrackingOptions.Balanced);
+
+            guard.RunCycle(Window(3), T0);
+            guard.RunCycle(Window(3), T0.AddMinutes(5));
+
+            Assert.Contains(sink.Messages, m => m.Contains("reported no metrics", StringComparison.Ordinal));
+        }
+
         private static AnomalyGuard Guard(CapturingSink sink, List<string> roster)
         {
             return new AnomalyGuard(
@@ -173,6 +237,9 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             }
 
             public IReadOnlyList<string> KnownPods => _pods;
+
+            /// <summary>Null by default, which the guard reads as "not tracked" and therefore trusts.</summary>
+            public DateTimeOffset? LastRefreshed { get; init; }
 
             public bool TryResolve(string pod, out PodPlacement placement)
             {

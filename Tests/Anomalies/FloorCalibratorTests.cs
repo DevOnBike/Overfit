@@ -108,6 +108,85 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             Assert.Equal(0.0, proposal.ProposedMinAbsoluteTrendChange);
         }
 
+        /// <summary>
+        /// A channel the enum does not have is calibrated like any other.
+        ///
+        /// <para>It was not, and the consequence was silent: a custom binding's floor defaults to zero, zero
+        /// means the gate is off, and nothing ever proposed a value to replace it. The customer's own metrics
+        /// were the one part of the configuration with no fallback at all.</para>
+        /// </summary>
+        [Fact]
+        public void ACustomChannelIsCalibratedLikeAnyOther()
+        {
+            var calibrator = new FloorCalibrator();
+
+            for (var cycle = 0; cycle < 20; cycle++)
+            {
+                calibrator.Observe(WithQueueDepth(seed: cycle));
+            }
+
+            var proposal = calibrator.Propose("myapp_queue_depth");
+
+            Assert.True(proposal.IsUsable, $"only {proposal.Samples} samples");
+            Assert.True(proposal.ProposedMinAbsoluteGap > proposal.PeerGapMax,
+                $"proposed {proposal.ProposedMinAbsoluteGap} is not above the observed max {proposal.PeerGapMax}");
+
+            // A name nobody observed proposes nothing rather than inventing a floor from no data.
+            Assert.False(calibrator.Propose("never_seen").IsUsable);
+        }
+
+        /// <summary>
+        /// The learned floors have to survive a restart, or a rolling update of the guard puts it back into
+        /// the state that measured at 209 false incidents a day for as long as it takes to relearn them.
+        /// </summary>
+        [Fact]
+        public void ACustomChannelSurvivesARoundTrip()
+        {
+            var calibrator = new FloorCalibrator();
+
+            for (var cycle = 0; cycle < 20; cycle++)
+            {
+                calibrator.Observe(WithQueueDepth(seed: cycle));
+            }
+
+            var before = calibrator.Propose("myapp_queue_depth");
+            var after = FloorCalibrator.Read(calibrator.Write()).Propose("myapp_queue_depth");
+
+            Assert.True(after.IsUsable);
+            Assert.Equal(before.PeerGapMax, after.PeerGapMax, 6);
+            Assert.Equal(before.ProposedMinAbsoluteGap, after.ProposedMinAbsoluteGap, 6);
+        }
+
+        /// <summary>The healthy window plus one channel the enum knows nothing about.</summary>
+        private static MetricWindow WithQueueDepth(int seed)
+        {
+            var names = new List<string>(12);
+
+            for (var p = 0; p < 12; p++)
+            {
+                names.Add($"pod-{p}");
+            }
+
+            var window = new MetricWindow(
+                names, 80, T0.AddMinutes(5 * seed), TimeSpan.FromSeconds(15), ["myapp_queue_depth"]);
+            var rng = new Random(20260802 + seed);
+
+            for (var pod = 0; pod < names.Count; pod++)
+            {
+                var depth = window.Series(pod, "myapp_queue_depth");
+                var cpu = window.Series(pod, MetricIndex.CpuUsageRatio);
+                var level = 40.0 * (1.0 + ((rng.NextDouble() - 0.5) * 0.5));
+
+                for (var i = 0; i < window.Length; i++)
+                {
+                    depth[i] = level * (1.0 + ((rng.NextDouble() - 0.5) * 0.06));
+                    cpu[i] = 0.02;
+                }
+            }
+
+            return window;
+        }
+
         /// <summary>Twelve replicas, some of which have restarted once and some twice.</summary>
         private static MetricWindow Restarting(int seed)
         {

@@ -50,6 +50,36 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
         /// <inheritdoc/>
         public double MinAbsoluteTrendChange(MetricIndex metric) => Resolve(_trend, metric, trend: true);
 
+        /// <inheritdoc/>
+        /// <remarks>
+        /// No configured table to consult: a custom channel's explicit floor lives on its
+        /// <c>CustomMetricBinding</c>, which the guard holds and applies ahead of asking here. This answers
+        /// only the second half of the question - what a healthy period turned out to look like.
+        /// </remarks>
+        public double MinAbsoluteGap(string signal) => Learned(signal, trend: false);
+
+        /// <inheritdoc cref="MinAbsoluteGap(string)"/>
+        public double MinAbsoluteTrendChange(string signal) => Learned(signal, trend: true);
+
+        private double Learned(string signal, bool trend)
+        {
+            ArgumentNullException.ThrowIfNull(signal);
+
+            if (_calibrator is null)
+            {
+                return 0.0;
+            }
+
+            var proposal = _calibrator.Propose(signal);
+
+            if (!proposal.IsUsable)
+            {
+                return 0.0;
+            }
+
+            return trend ? proposal.ProposedMinAbsoluteTrendChange : proposal.ProposedMinAbsoluteGap;
+        }
+
         private double Resolve(IReadOnlyList<double>? configured, MetricIndex metric, bool trend)
         {
             var explicitly = AnomalyGuardOptions.FloorFor(configured, metric);

@@ -23,6 +23,21 @@ namespace DevOnBike.Overfit.Audio.Tts
         private bool _completed;
         private bool _disposed;
 
+        /// <param name="metadata">
+        /// The synthetic-speech marker written into the file's INFO chunk. <b>Omitting it now marks the file
+        /// anyway</b>, with a marker naming no voice profile.
+        ///
+        /// <para>It used to mean "write nothing", and that was the wrong direction for a default to fail in.
+        /// This sink lives in the TTS namespace: everything it writes is generated speech, and a
+        /// voice-cloning path able to produce unmarked audio of a real person is the one property in this
+        /// repository that must not be merely intended. It was intended - <c>Sources/Main/Audio/README.md</c>
+        /// asserted the marker was enforced at the engine, and the engine never referenced it; the three call
+        /// sites that passed it were the whole of the enforcement, so any new caller got unmarked output by
+        /// default.</para>
+        ///
+        /// <para>To write a genuinely unmarked file - a decision, not an omission - pass
+        /// <see cref="SyntheticSpeechMetadata.Unmarked"/> and say why at the call site.</para>
+        /// </param>
         public WavAudioSink(
             Stream output,
             int sampleRate,
@@ -35,7 +50,7 @@ namespace DevOnBike.Overfit.Audio.Tts
             _output = output;
             SampleRate = sampleRate;
             _format = format;
-            _infoComment = metadata?.ToInfoComment();
+            _infoComment = (metadata ?? SyntheticSpeechMetadata.ForNow(null)).ToInfoComment();
             _leaveOpen = leaveOpen;
         }
 

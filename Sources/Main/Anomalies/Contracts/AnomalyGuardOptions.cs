@@ -55,6 +55,24 @@ namespace DevOnBike.Overfit.Anomalies.Contracts
         public int SilentPodCycles { get; init; } = 2;
 
         /// <summary>
+        /// How old <see cref="IPodRoster.KnownPods"/> may be before the silent-pod check declines to use it.
+        ///
+        /// <para><b>A roster that stopped refreshing looks exactly like one that just did.</b> The refresh
+        /// keeps the previous snapshot when Prometheus is unreachable — deliberately, so grouping does not
+        /// collapse — and the consequence is that this check would keep comparing the live window against a
+        /// list of pods from an hour ago. Every pod deleted since then is reported as silent, and every pod
+        /// created since then is not watched at all: a fabricated incident and a missed one, from the same
+        /// stale list, with nothing in the output to say so.</para>
+        ///
+        /// <para>The default is six times the five-minute cadence, so a couple of failed refreshes are
+        /// tolerated and a sustained outage is not. <see cref="TimeSpan.Zero"/> disables the freshness gate
+        /// and trusts the roster unconditionally; a roster reporting <c>null</c> is unverifiable and is
+        /// trusted either way, because refusing there would silently disable the check for every existing
+        /// implementation.</para>
+        /// </summary>
+        public TimeSpan MaxRosterAge { get; init; } = TimeSpan.FromMinutes(30);
+
+        /// <summary>
         /// Days of history a workload needs at a given hour before that hour's record is used as a seasonal
         /// expectation. Zero turns the history off entirely.
         ///

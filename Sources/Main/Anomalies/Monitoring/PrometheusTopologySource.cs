@@ -137,6 +137,18 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
             }
         }
 
+        /// <inheritdoc/>
+        /// <remarks>
+        /// Written by <see cref="RefreshAsync"/> only where it also replaces the snapshot, which is the point:
+        /// a failed refresh keeps the old pod list on purpose, and if this advanced alongside it the caller
+        /// would be told an hour-old list is current.
+        /// </remarks>
+        public DateTimeOffset? LastRefreshed
+        {
+            get;
+            private set;
+        }
+
         /// <summary>
         /// Re-reads ownership and placement. Returns how many pods were resolved; on any failure the previous
         /// snapshot is kept and <c>-1</c> is returned, so a caller can report degraded topology without
@@ -237,6 +249,11 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
                 }
 
                 _snapshot = resolved;
+
+                // Stamped here and nowhere else — every other exit from this method leaves the previous
+                // snapshot in place, and a timestamp that moved with them would describe an attempt rather
+                // than a list.
+                LastRefreshed = DateTimeOffset.UtcNow;
 
                 return resolved.Count;
             }

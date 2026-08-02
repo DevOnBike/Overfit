@@ -179,6 +179,16 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
         /// opposite sign.</para>
         /// </param>
         /// <returns>How many were adopted.</returns>
+        /// <summary>
+        /// Saved incidents that were not adopted because <c>MaxOpenIncidents</c> was reached. Zero when the
+        /// whole payload fitted; non-zero means the caller is running with less identity than it saved.
+        /// </summary>
+        public int Truncated
+        {
+            get;
+            private set;
+        }
+
         public int Restore(
             IReadOnlyList<PersistedIncident> incidents,
             long nextId,
@@ -195,6 +205,15 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
             for (var i = 0; i < incidents.Count && _open.Count < _options.MaxOpenIncidents; i++)
             {
                 var saved = incidents[i];
+
+                // Advanced for EVERY saved record, before the staleness filter and regardless of adoption.
+                // It used to move only for the ones that survived, so an incident dropped for age — or by
+                // MaxOpenIncidents — left its identifier free to be handed out again, which this method's own
+                // documentation warns lets a consumer join two unrelated incidents.
+                if (saved.Id >= _nextId)
+                {
+                    _nextId = saved.Id + 1;
+                }
 
                 if (now - saved.LastSeen > maxAge)
                 {
@@ -219,12 +238,13 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
 
                 _open.Add(tracked);
                 adopted++;
-
-                if (saved.Id >= _nextId)
-                {
-                    _nextId = saved.Id + 1;
-                }
             }
+
+            // Truncation is reported rather than left to look like "there were only that many". A caller
+            // logging "adopted 5" cannot otherwise tell five saved from fifty saved and forty-five dropped.
+            Truncated = incidents.Count > 0 && _open.Count >= _options.MaxOpenIncidents
+                ? incidents.Count - adopted
+                : 0;
 
             return adopted;
         }

@@ -18,12 +18,23 @@ namespace DevOnBike.Overfit.Evolutionary.Abstractions
     ///     </para>
     ///     <para>
     ///         Checkpoints capture the observable state of the algorithm: population or mean
-    ///         vector, generation counter, best-candidate tracking. They do NOT capture the
-    ///         internal state of the <see cref="System.Random"/> instance � after
-    ///         <see cref="Load"/> the RNG restarts from a fresh seed. Evolutionary training
-    ///         is inherently stochastic, so this is a deliberate simplification rather than a
-    ///         correctness issue: a resumed run is statistically equivalent to continuing the
-    ///         original, but not bit-identical.
+    ///         vector, generation counter, best-candidate tracking, <b>and the generator
+    ///         state</b>. All three shipped strategies persist it, so a resumed run is
+    ///         bit-identical to continuing the original rather than merely statistically
+    ///         equivalent.
+    ///     </para>
+    ///     <para>
+    ///         <b>This paragraph said the opposite until 2026-08-02</b>, and it is worth
+    ///         recording why that mattered more than a stale comment usually does:
+    ///         reproducibility of a resumed search is exactly the property a person opens this
+    ///         interface to check, and the answer they found was wrong in the direction that
+    ///         costs work - it would send them off to build determinism the implementations
+    ///         already had.
+    ///     </para>
+    ///     <para>
+    ///         One caveat that is real: schema v1 streams predate the generator state.
+    ///         <see cref="Load"/> still accepts them, and a run resumed from one keeps the
+    ///         generator's constructor seed - statistically equivalent, not bit-identical.
     ///     </para>
     ///     <para>
     ///         Checkpoints should only be written between complete Ask/Tell cycles. Saving

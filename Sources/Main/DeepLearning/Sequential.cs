@@ -32,6 +32,13 @@ namespace DevOnBike.Overfit.DeepLearning
             }
         }
 
+        /// <summary>
+        /// The modules in order. Exposed so a wrapper can inspect what it is about to take responsibility
+        /// for - <see cref="CheckpointedModule"/> has to know whether the segment it recomputes is
+        /// deterministic, and a segment is almost always a Sequential.
+        /// </summary>
+        public IReadOnlyList<IModule> Modules => _modules;
+
         public bool IsTraining { get; private set; } = true;
 
         public void Train()

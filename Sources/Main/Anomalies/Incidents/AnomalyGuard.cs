@@ -91,10 +91,17 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
         /// </summary>
         private bool _declaredAbnormal;
 
+        /// <summary>
+        /// The workload every subject and every maintenance-window comparison is written against. Starts as
+        /// the configured value and is filled in from topology on the first cycle that can resolve it; see
+        /// <see cref="ResolveWorkload"/> for why an empty one is not an acceptable resting state.
+        /// </summary>
+        private string _workload;
+
         /// <summary>Names the window covering <paramref name="at"/>, or empty when none does.</summary>
         private string SuppressionReason(DateTimeOffset at)
         {
-            return _calendar.IsDeclaredAbnormal(at, _options.Workload, out var reason)
+            return _calendar.IsDeclaredAbnormal(at, _workload, out var reason)
                 ? reason
                 : string.Empty;
         }
@@ -147,6 +154,23 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
                 options.ApplyCalibratedFloors);
 
             _calendar = options.Calendar ?? new StaticMaintenanceCalendar(options.MaintenanceWindows);
+            _workload = options.Workload;
+
+            // The one contradiction that can be settled before the first cycle: a window scoped to a named
+            // workload, no workload configured, and no topology from which one could be derived. Every such
+            // window is dead on arrival, and the symptom - being paged during your own declared maintenance -
+            // points at the detector rather than at the configuration that caused it.
+            if (_workload.Length == 0
+                && _calendar.HasWorkloadScopedWindow
+                && options.PodTopology is null)
+            {
+                throw new ArgumentException(
+                    "A maintenance window names a workload, but no workload is configured and there is no "
+                    + "pod topology to derive one from, so no window can ever match. Set "
+                    + nameof(AnomalyGuardOptions.Workload) + ", supply a topology, or scope the window to the "
+                    + "namespace by leaving its workload blank.",
+                    nameof(options));
+            }
 
             if (store is null)
             {
@@ -205,6 +229,8 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
             // going". They need different amounts of time — see AnomalyGuardOptions.RecentWindow — so the
             // caller supplies the long window and the two present-tense families take its tail. The interval
             // travels with them, or a peer finding would report an observation window it never looked at.
+            ResolveWorkload(window);
+
             var recent = RecentSamples(window);
             var recentFrom = window.End - (window.Step * (recent - 1));
 
@@ -348,6 +374,29 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
             return blind;
         }
 
+        /// <summary>
+        /// The binding's own floor, falling back to what a healthy period measured for that channel.
+        ///
+        /// <para>Same precedence as the built-in signals - an explicit value is a decision somebody made and
+        /// wins even when it is lower - but for custom channels the fallback did not exist at all, so an
+        /// unconfigured binding ran with the gate off. That is the configuration measured at 209 false
+        /// incidents a day, reached by default on the metrics the customer added themselves.</para>
+        /// </summary>
+        private double GapFloor(in CustomMetricBinding binding)
+        {
+            return binding.MinAbsoluteGap > 0.0
+                ? binding.MinAbsoluteGap
+                : _floors.MinAbsoluteGap(binding.Name);
+        }
+
+        /// <inheritdoc cref="GapFloor"/>
+        private double TrendFloor(in CustomMetricBinding binding)
+        {
+            return binding.MinAbsoluteTrendChange > 0.0
+                ? binding.MinAbsoluteTrendChange
+                : _floors.MinAbsoluteTrendChange(binding.Name);
+        }
+
         /// <returns>Whether the group reached a verdict; false means nobody was compared at all.</returns>
         private bool RunCustomPeer(
             MetricWindow window,
@@ -374,7 +423,7 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
 
             var options = _options.Peer with
             {
-                MinAbsoluteGap = binding.MinAbsoluteGap
+                MinAbsoluteGap = GapFloor(binding)
             };
             var findings = new PeerOutlierFinding[podCount];
             var result = _peer.Detect(peers, binding.SignalKind, options, findings);
@@ -393,9 +442,10 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
             DateTimeOffset to)
         {
             var podCount = window.Pods.Count;
+            var trendFloor = TrendFloor(binding);
             var options = _options.Trend with
             {
-                MinAbsoluteChangeOverWindow = binding.MinAbsoluteTrendChange
+                MinAbsoluteChangeOverWindow = trendFloor
             };
 
             var expectation = ReadOnlySpan<double>.Empty;
@@ -422,8 +472,7 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
                         WorkloadSubject(), binding.Name, verdict, from, to, common, binding.Class);
 
                     ObserveLevelShift(
-                        pipeline, binding.Name, common, from, to, binding.MinAbsoluteTrendChange,
-                        binding.Class);
+                        pipeline, binding.Name, common, from, to, trendFloor, binding.Class);
                 }
             }
 
@@ -614,14 +663,20 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
                         pipeline, metric.ToString(), Adjust(common, seasonal), from, to,
                         _floors.MinAbsoluteTrendChange(metric), null);
 
-                    // The workload's own level this hour, learned from its own aggregate rather than from any
-                    // one replica — so a single odd pod cannot move the baseline the whole deployment is
-                    // later judged against.
-                    if (!_declaredAbnormal)
-                    {
-                        _history?.Observe(_options.Workload, metric, from, Median(common));
-                    }
                 }
+            }
+
+            // Learned OUTSIDE the decomposition branch, and that placement is the fix rather than a detail.
+            // It used to sit inside, so turning DecomposeCommonMode off silently disabled a week of seasonal
+            // learning — one option switching off an unrelated subsystem as a side effect nobody would
+            // predict from its name. The level comes from the common component when there is one and from
+            // the pods' own medians when there is not; the two are close, and a slightly coarser baseline
+            // beats no baseline by a distance.
+            if (!_declaredAbnormal && _history is not null)
+            {
+                var level = common is not null ? Median(common) : MedianAcrossPods(window, metric);
+
+                _history.Observe(_workload, metric, from, level);
             }
 
             for (var pod = 0; pod < podCount; pod++)
@@ -674,7 +729,7 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
             var expectation = new double[window.Length];
 
             return _history.TryExpectation(
-                _options.Workload, metric, from, window.Step, _options.MinimumHistoryDays, expectation)
+                _workload, metric, from, window.Step, _options.MinimumHistoryDays, expectation)
                 ? expectation
                 : ReadOnlySpan<double>.Empty;
         }
@@ -715,6 +770,35 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
             }
 
             return adjusted;
+        }
+
+        /// <summary>
+        /// The workload's level for one signal when no common component was built — the median across each
+        /// pod's own median, which is the same quantity the cross-peer baseline centres on.
+        /// </summary>
+        private static double MedianAcrossPods(MetricWindow window, MetricIndex metric)
+        {
+            var pods = window.Pods.Count;
+            var medians = new List<double>(pods);
+
+            for (var pod = 0; pod < pods; pod++)
+            {
+                var median = Median(window.Series(pod, metric).ToArray());
+
+                if (double.IsFinite(median))
+                {
+                    medians.Add(median);
+                }
+            }
+
+            if (medians.Count == 0)
+            {
+                return double.NaN;
+            }
+
+            medians.Sort();
+
+            return medians[medians.Count / 2];
         }
 
         private static double Median(double[] values)
@@ -761,6 +845,22 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
         {
             if (_options.SilentPodCycles <= 0 || _options.PodTopology is not IPodRoster roster)
             {
+                return;
+            }
+
+            // Freshness before contents. The roster keeps its previous snapshot when a refresh fails, so an
+            // unreachable Prometheus leaves a list that is confidently wrong in both directions: deleted pods
+            // still on it get reported as silent, and pods created since are absent so a failed replica is
+            // missed. Declining is the honest outcome — the check has no input, rather than a bad one.
+            if (_options.MaxRosterAge > TimeSpan.Zero
+                && roster.LastRefreshed is { } refreshed
+                && to - refreshed > _options.MaxRosterAge)
+            {
+                // The counters go with it. They count consecutive cycles of verified silence, and cycles
+                // judged against a list nobody could confirm are not that; keeping them would let an outage
+                // of the topology query mature into an incident about a pod.
+                _silent.Clear();
+
                 return;
             }
 
@@ -988,7 +1088,7 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
                 }
             }
 
-            return _options.Workload;
+            return _workload;
         }
 
         /// <summary>
@@ -998,7 +1098,58 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
         private IncidentSubject WorkloadSubject()
         {
             return new IncidentSubject(
-                _options.Namespace, _options.Workload, string.Empty, string.Empty, string.Empty);
+                _options.Namespace, _workload, string.Empty, string.Empty, string.Empty);
+        }
+
+        /// <summary>
+        /// Fills in the workload from the cluster's own answer when configuration did not state one.
+        ///
+        /// <para><b>Deriving beats defaulting to empty, and the difference is two silent failures.</b> An empty
+        /// workload makes every workload-scoped maintenance window unmatchable, and it collapses the incident
+        /// tracker's subject key to <c>"namespace/"</c> - so a memory incident that closed and a CPU incident
+        /// that opened are reported as one continuing problem. kube-state-metrics already knows the owner of
+        /// every pod and <see cref="IPodTopology"/> already reads it, so the answer costs no new query.</para>
+        ///
+        /// <para>The most common owner across the window, not the first: a namespace can hold more than one
+        /// deployment, and the majority is the one this guard's scope is about. Resolved once and kept - it
+        /// keys the seasonal history, and a value that moved between cycles would split a workload's learned
+        /// baseline across two names.</para>
+        /// </summary>
+        private void ResolveWorkload(MetricWindow window)
+        {
+            if (_workload.Length > 0 || _options.PodTopology is not { } topology)
+            {
+                return;
+            }
+
+            var counts = new Dictionary<string, int>(StringComparer.Ordinal);
+
+            for (var pod = 0; pod < window.Pods.Count; pod++)
+            {
+                if (!topology.TryResolve(window.Pods[pod], out var placement)
+                    || !placement.IsKnown
+                    || placement.Workload.Length == 0)
+                {
+                    continue;
+                }
+
+                counts[placement.Workload] = counts.GetValueOrDefault(placement.Workload) + 1;
+            }
+
+            var best = string.Empty;
+            var bestCount = 0;
+
+            foreach (var (name, count) in counts)
+            {
+                // Ties broken by name, so the resolved workload does not depend on dictionary ordering.
+                if (count > bestCount || (count == bestCount && string.CompareOrdinal(name, best) < 0))
+                {
+                    best = name;
+                    bestCount = count;
+                }
+            }
+
+            _workload = best;
         }
     }
 }

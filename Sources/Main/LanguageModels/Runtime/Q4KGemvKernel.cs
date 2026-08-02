@@ -611,6 +611,16 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// unchanged, two columns merely execute at once. Measured ceilings on this machine: the kernel's own
         /// instruction mix runs at 4.63 TFLOP/s at 256 bits and 7.71–9.08 at 512.</para>
         /// </summary>
+        /// <param name="groupStart">First output group of eight rows to compute.</param>
+        /// <param name="groupCount">
+        /// How many groups, or zero for all of them from <paramref name="groupStart"/>.
+        ///
+        /// <para>Added so the banded prefill path can reach this kernel at all. It could not: only
+        /// <see cref="GemmTiled"/> took a band, so <c>BatchedQuantProjection.TiledBandChunk</c> always called
+        /// the 256-bit kernel while its three siblings each branched on AVX-512. A feature that is
+        /// configured, parity-tested and documented as active did not run on one path - and that path is the
+        /// short-prompt case banding exists for.</para>
+        /// </param>
         public static void GemmTiled512(
             ReadOnlySpan<byte> repacked,
             int outputSize,
@@ -621,7 +631,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             ReadOnlySpan<short> actBsums,
             Span<float> output,
             ReadOnlySpan<float> bias = default,
-            ReadOnlySpan<float> decodedScales = default)
+            ReadOnlySpan<float> decodedScales = default,
+            int groupStart = 0,
+            int groupCount = 0)
         {
             if (cols is < 1 or > MaxTileCols)
             {
@@ -667,7 +679,14 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             fixed (float* bs = bias)
             fixed (float* ds = decodedScales)
             {
-                for (var x = 0; x < outputSize / 8; x++)
+                // Banded when the caller asked for one; the whole matrix otherwise. Same bound GemmTiled
+                // computes, so the two kernels cover identical groups for identical arguments.
+                var totalGroups = outputSize / 8;
+                var groupEnd = groupCount <= 0
+                    ? totalGroups
+                    : Math.Min(groupStart + groupCount, totalGroups);
+
+                for (var x = groupStart; x < groupEnd; x++)
                 {
                     var bptr = w + (long)x * nb * BlockKx8Bytes;
 

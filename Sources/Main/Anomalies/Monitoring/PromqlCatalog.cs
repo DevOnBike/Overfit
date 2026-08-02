@@ -30,6 +30,57 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
         public const string SelectorToken = "%selector%";
 
         /// <summary>
+        /// A label value, escaped for the quoted string PromQL expects.
+        ///
+        /// <para><b>A quote or a backslash in a namespace or pod regex produced a malformed query.</b> Not a
+        /// hypothetical: a pod regex is written by a human and regex syntax and PromQL string syntax overlap
+        /// on exactly the backslash. The query then fails, and the caller reads that as "these pods export
+        /// nothing" - the same answer a correct query gives about a metric that is genuinely absent, and the
+        /// two call for opposite fixes.</para>
+        ///
+        /// <para>Backslash first, or the escaping would double-escape the ones it just added. A newline is
+        /// escaped too: PromQL string literals do not span lines, so an unescaped one truncates the query at a
+        /// point that still parses.</para>
+        /// </summary>
+        public static string EscapeLabelValue(string value)
+        {
+            ArgumentNullException.ThrowIfNull(value);
+
+            if (value.IndexOfAny(NeedsEscaping) < 0)
+            {
+                return value;
+            }
+
+            var sb = new StringBuilder(value.Length + 8);
+
+            for (var i = 0; i < value.Length; i++)
+            {
+                var c = value[i];
+
+                if (c == '\\' || c == '"')
+                {
+                    sb.Append('\\');
+                    sb.Append(c);
+
+                    continue;
+                }
+
+                if (c == '\n')
+                {
+                    sb.Append("\\n");
+
+                    continue;
+                }
+
+                sb.Append(c);
+            }
+
+            return sb.ToString();
+        }
+
+        private static readonly char[] NeedsEscaping = ['\\', '"', '\n'];
+
+        /// <summary>
         /// The label matcher set every template expands <see cref="SelectorToken"/> to. Built once per data
         /// centre and shared by all twelve queries, so a namespace or pod-regex mistake is wrong everywhere at
         /// once rather than in eleven places out of twelve.
@@ -39,11 +90,11 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
             ArgumentNullException.ThrowIfNull(selector);
 
             var sb = new StringBuilder(96);
-            sb.Append("pod=~\"").Append(selector.PodRegex).Append('"');
+            sb.Append("pod=~\"").Append(EscapeLabelValue(selector.PodRegex)).Append('"');
 
             if (selector.Namespace.Length > 0)
             {
-                sb.Append(",namespace=\"").Append(selector.Namespace).Append('"');
+                sb.Append(",namespace=\"").Append(EscapeLabelValue(selector.Namespace)).Append('"');
             }
 
             if (IsSingleDataCenter(selector))
@@ -52,7 +103,8 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
             }
 
             var value = dc == DataCenter.West ? selector.DcWestLabel : selector.DcEastLabel;
-            sb.Append(',').Append(selector.DataCenterLabel).Append("=\"").Append(value).Append('"');
+            sb.Append(',').Append(selector.DataCenterLabel).Append("=\"")
+                .Append(EscapeLabelValue(value)).Append('"');
 
             return sb.ToString();
         }
@@ -69,7 +121,7 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
 
             if (selector.Namespace.Length > 0)
             {
-                sb.Append("namespace=\"").Append(selector.Namespace).Append('"');
+                sb.Append("namespace=\"").Append(EscapeLabelValue(selector.Namespace)).Append('"');
             }
 
             if (IsSingleDataCenter(selector))

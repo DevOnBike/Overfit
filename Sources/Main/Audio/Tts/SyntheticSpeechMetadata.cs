@@ -41,8 +41,25 @@ namespace DevOnBike.Overfit.Audio.Tts
         public bool SyntheticSpeech => true;
 
         /// <summary>Renders the marker as the WAV <c>ICMT</c> comment string.</summary>
+        /// <summary>
+        /// Whether this instance actually marks the output. False only for
+        /// <see cref="Unmarked"/>.
+        /// </summary>
+        public bool Marks => !ReferenceEquals(this, Unmarked);
+
+        /// <summary>
+        /// An explicit decision to write audio without the synthetic marker.
+        ///
+        /// <para>It exists so that unmarked output requires naming this property at a call site, where a
+        /// reviewer can see it, rather than being what happens when an optional argument is left out. Sinks
+        /// treat a missing marker as "mark it"; they treat this as "the caller decided".</para>
+        /// </summary>
+        public static SyntheticSpeechMetadata Unmarked { get; } = new(null, string.Empty);
+
         public string ToInfoComment()
-            => $"generatedBy=Overfit; synthetic=true; voice={VoiceProfileId ?? "-"}; createdUtc={CreatedUtc}";
+            => Marks
+                ? $"generatedBy=Overfit; synthetic=true; voice={VoiceProfileId ?? "-"}; createdUtc={CreatedUtc}"
+                : string.Empty;
 
         /// <summary>Convenience: a marker stamped with the current UTC time.</summary>
         public static SyntheticSpeechMetadata ForNow(string? voiceProfileId)

@@ -15,6 +15,8 @@ namespace DevOnBike.Overfit.Data.Prepare
         private readonly int _maxDepth;
         private readonly int _numIterations;
         private readonly int _numTrees;
+        private bool _fitted;
+        private int[]? _keptIndices;
 
         public BorutaSelectionLayer(
             int iterations = 20,
@@ -37,6 +39,17 @@ namespace DevOnBike.Overfit.Data.Prepare
             _confirmationRatio = confirmationRatio;
         }
 
+        /// <summary>
+        /// Selects on the first call and applies the same selection afterwards.
+        ///
+        /// <para><b>It used to re-select every time, and every sibling in this directory does not.</b> A
+        /// second call on the same instance retrained the forests, required <c>context.Targets</c> again, and
+        /// could return a different column set - at which point the indices every later layer is holding no
+        /// longer refer to the columns they were chosen for. The Data README already records that failure
+        /// happening once; this was the same failure in a new place.</para>
+        ///
+        /// <para>Call <see cref="Reset"/> to select again deliberately.</para>
+        /// </summary>
         public PipelineContext Process(PipelineContext context)
         {
             var rows = context.Features.GetView().GetDim(0);
@@ -45,6 +58,20 @@ namespace DevOnBike.Overfit.Data.Prepare
             if (cols == 0 || rows == 0)
             {
                 return context;
+            }
+
+            if (_fitted)
+            {
+                if (_keptIndices is null)
+                {
+                    return context;
+                }
+
+                var reapplied = ExtractSelectedColumns(context.Features, _keptIndices);
+
+                context.Features.Dispose();
+
+                return new PipelineContext(reapplied, context.Targets);
             }
 
             using var hitCounts = new PooledBuffer<int>(cols, clearMemory: true);
@@ -86,16 +113,31 @@ namespace DevOnBike.Overfit.Data.Prepare
                 }
             }
 
+            _fitted = true;
+
             if (keptIndices.Count == 0 || keptIndices.Count == cols)
             {
+                // Selecting everything or nothing is recorded as "no selection", so a later call takes the
+                // same decision rather than re-running the search and possibly taking a different one.
+                _keptIndices = null;
+
                 return context;
             }
 
-            var filteredFeatures = ExtractSelectedColumns(context.Features, keptIndices);
+            _keptIndices = keptIndices.ToArray();
+
+            var filteredFeatures = ExtractSelectedColumns(context.Features, _keptIndices);
 
             context.Features.Dispose();
 
             return new PipelineContext(filteredFeatures, context.Targets);
+        }
+
+        /// <summary>Discards the selection, so the next <see cref="Process"/> runs it again.</summary>
+        public void Reset()
+        {
+            _keptIndices = null;
+            _fitted = false;
         }
 
         private FastTensor<float> CreateShadowDataset(FastTensor<float> original)
@@ -139,11 +181,11 @@ namespace DevOnBike.Overfit.Data.Prepare
             return extended;
         }
 
-        private FastTensor<float> ExtractSelectedColumns(FastTensor<float> src, List<int> indices)
+        private FastTensor<float> ExtractSelectedColumns(FastTensor<float> src, ReadOnlySpan<int> indices)
         {
             var rows = src.GetView().GetDim(0);
             var oldCols = src.GetView().GetDim(1);
-            var newCols = indices.Count;
+            var newCols = indices.Length;
 
             var result = new FastTensor<float>(rows, newCols, clearMemory: false);
             var srcSpan = src.GetView().AsReadOnlySpan();

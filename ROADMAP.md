@@ -18,27 +18,35 @@ operator, no agent inside the client's application. That claim is tested by runn
 say "that was a false alarm", and silence that looks like health. The list below is ordered by that, not by
 how interesting the work is.
 
-### Fix first — found by reading, on paths no measurement exercises
+### ✅ Fixed 2026-08-02 — the six found by reading
 
-These came out of a code review after the day's work had passed 1959 tests and four hours on a live cluster.
-**None would have been found by running anything.** Full analysis in `docs/aiops-repair-plan.md`.
+All six are fixed, with tests, and the suite is green. They came out of a code review after the day's work
+had passed 1959 tests and four hours on a live cluster; **none would have been found by running anything**,
+which is the argument for the review. Analysis kept in `docs/aiops-repair-plan.md`.
 
-| # | Defect | Why it is first |
+| # | Defect | Fix |
 |---|---|---|
-| **A** | **`Workload` is empty in the deployed path**, and `SubjectKey` degrades to `"namespace/"` when both pod and workload are empty | Two silent failures from one root. A **maintenance window naming a workload can never match**, so the feature ships half-dead — the operator declares a window for their rollout and gets paged during it anyway. And the incident tracker matches on the subject key, so **every workload-level finding in a namespace collapses into one identity**: a memory incident that closed and a CPU incident that opened are reported as one continuing problem. Visible in the lab's own logs as `Anomaly incident in lab/:`. |
-| **B** | **The calibrator never observes custom channels** | It iterates `MetricIndex` only, and the custom paths read their floors straight off the binding. A customer-mapped signal with no configured floor stays in the "gate off" state that measured at 209 false incidents a day — on exactly the channels a bespoke application relies on most. |
-| **C** | **The seasonal baseline only learns while `DecomposeCommonMode` is on** | One option silently switches off an unrelated subsystem; a week of learning disappears as a side effect nobody would predict from the option's name. |
-| **D** | **`IncidentTracker.Restore` only advances the id counter for adopted incidents** | An incident dropped for staleness or by `MaxOpenIncidents` does not protect the identifier space, and the same method's own documentation warns that reusing an identifier lets a consumer join two unrelated incidents. The truncation is also silent: `adopted = 5` out of fifty saved looks identical to five saved. |
-| **E** | **The silent-pod check trusts a stale roster** | When a topology refresh fails the previous snapshot stands — right for grouping, wrong here. A pod deleted during the outage is still on the roster, stops reporting because it no longer exists, and is accused after two cycles. |
-| **F** | **A comment asserting behaviour the code does not have** | `ObserveSilentPod` claims `SignalClass` "drives how the grouper relates this to other findings". The grouper never reads it. A guarantee that does not exist is worse debt than a missing feature, because the next reader builds on it. |
+| **A** | `Workload` empty in the deployed path — a maintenance window naming a workload could never match, and `SubjectKey` collapsed to `"namespace/"` so every workload-level finding in a namespace shared one identity | `workload` in the config file and the host wiring; when absent it is **derived from topology** (the most common `PodPlacement.Workload` across the window, ties broken by name); a window naming a workload with no workload and no topology is now **refused at construction**. Tests: `WorkloadResolutionTests`. |
+| **B** | The calibrator never observed custom channels, so a customer-mapped signal with no configured floor kept the gate off for ever | Name-keyed accumulators beside the indexed ones, a `Propose(string)`, `IAbsoluteFloorSource` overloads taking a signal name, and the custom peer/trend paths routed through `_floors`. Serialised under a `~`-marked line so old payloads still read. Tests: `FloorCalibratorTests`. |
+| **C** | The seasonal baseline only learned while `DecomposeCommonMode` was on | The observation moved out of that branch; the workload level falls back to the median across pods. Test: `SeasonalExpectationTests.HistoryIsLearnedWithTheDecompositionOff`. |
+| **D** | `IncidentTracker.Restore` advanced the id counter only for adopted incidents, and truncation was silent | The counter advances for **every** saved record before the staleness filter; `Truncated` reports what `MaxOpenIncidents` dropped. Test: `IncidentTrackerTests.RestoreProtectsTheIdentifiersOfIncidentsItDropped`. |
+| **E** | The silent-pod check trusted a stale roster | `IPodRoster.LastRefreshed` (stamped only on a successful rebuild) plus `AnomalyGuardOptions.MaxRosterAge`; the check stands down and clears its counters when the list cannot be verified. Tests: `SilentPodTests`. |
+| **F** | A comment asserting the grouper reads `SignalClass`, which it does not | Corrected in place. |
 
-Also open, and larger than a fix: **one guard instance watches one scope** — a single namespace and a single
-pod regex. At a client with fifty namespaces that is fifty Deployments, ConfigMaps and volumes. The cheap
-answer is a list of scopes in one instance, with a tracker and a baseline per scope; the history is already
-keyed by workload, so the structure fits and only the loop is missing. That is strictly better than becoming
-a Kubernetes operator, which would buy declarative configuration we already have through a ConfigMap while
-costing RBAC, CRDs and a security review — and an operator earns its keep by reconciling cluster state, which
-this never does.
+Fixed alongside them, from the same review: `FileIncidentStore.LastError` is now read after both saves and
+surfaced as `AnomalyGuard.StateError` plus an `overfit_guard_state_failures_total` series (a store that
+cannot write was otherwise silent until the next restart reopened everything); `IncidentPipeline` **sheds**
+findings past the grouping bound and counts them in `Dropped` instead of throwing, because the event most
+likely to reach a thousand findings is the cluster-wide one an operator most needs reported; and PromQL
+label values are escaped in `PromqlCatalog` and `overfit anomaly-discover`.
+
+Still open, and larger than a fix: **one guard instance watches one scope** — a single namespace and a
+single pod regex. At a client with fifty namespaces that is fifty Deployments, ConfigMaps and volumes. The
+cheap answer is a list of scopes in one instance, with a tracker and a baseline per scope; the history is
+already keyed by workload, so the structure fits and only the loop is missing. That is strictly better than
+becoming a Kubernetes operator, which would buy declarative configuration we already have through a
+ConfigMap while costing RBAC, CRDs and a security review — and an operator earns its keep by reconciling
+cluster state, which this never does.
 
 ### Must have — before a client deployment can be armed
 
@@ -125,7 +133,21 @@ flagged for a decision, 1 declared blind.
 
 ---
 
-## 🐞 OPEN DEFECTS — decode runtime (found 2026-08-01 by `overfit-find-bugs-game`)
+## ✅ FIXED — decode runtime (found 2026-08-01 by `overfit-find-bugs-game`, fixed 2026-08-02)
+
+**All three fixed 2026-08-02.** (1) `Cls` pooling now takes the FIRST token in `CachedLlamaSession.Embed`;
+the branch was `pooling != Mean && i == last`, which handed `Cls` the last-token vector. (2)
+`GemmTiled512` gained the `groupStart`/`groupCount` parameters `GemmTiled` already had and
+`TiledBandChunk` now branches on `c.Avx512` like its three siblings — **verified**: the banded parity
+theory in `Avx512PrefillParityTests` is bit-identical across every band and against the unbanded result,
+and a four-arm benchmark (untouched `WeightStationary` and `Tiled` as canaries, both flat at ratio
+1.00–1.01 and unchanged respectively) puts the banded 512 path at **1.15–1.17× on `ffn_gate_up`, 1.05–1.06×
+on `attn_qo`, and a tie on `ffn_down`/`llama_ref`** against the same call with AVX-512 forced off. Note the
+banded path is `UseOutputBlocking`, which is **off by default**, so this speeds an opt-in path rather than
+the shipped one — and banding remains slower than plain `Tiled` on this box. (3) `Q4KWeight.EnsureRepacked`
+publishes through a `byte[]` reference under a lock instead of writing a `ReadOnlyMemory<byte>?`, which
+cannot be published atomically; a weight set is shared across concurrently created sessions by design.
+E2E coherence re-checked on the real Qwen2.5-0.5B Q4_K_M after the kernel change.
 
 Two bug hunts over `Sources/Main/LanguageModels/Runtime`. The first read a third of the directory in five
 minutes and returned **nothing**; its value was the list of files it had *not* opened, which pointed the
@@ -148,7 +170,20 @@ needs a test harness before it can be confirmed or dismissed.
 `Q8DotKernel.cs`, `Q6KRepack.cs`, `Gpt1SlmModelAdapter.cs`, `CachedGpt1ModelAdapter.cs`,
 `SingleTokenLayerNormKernel.cs`, `SingleTokenProjectionKernel.cs`.
 
-## 🐞 OPEN DEFECTS — evolutionary (found 2026-08-01 by `overfit-find-bugs-game`)
+## ✅ FIXED — evolutionary (found 2026-08-01 by `overfit-find-bugs-game`, fixed 2026-08-02)
+
+**All four fixed 2026-08-02**, with one correction to the hunt's own prescription worth recording.
+
+The report said `GenerationalGeneticAlgorithm.Tell()` should carry its siblings' `if (!_hasPendingPopulation)
+throw`. Applying that broke **seven existing tests**, and the tests were right: for `OpenAiEsStrategy` and
+`SeparableCmaEsStrategy`, `Ask` *draws* the population being scored, so fitness without a draw is
+meaningless; here the population is durable state that `Initialize` creates and `Ask` merely copies out, so
+`Initialize` → `Tell` is a legitimate loop. The real hole was the missing **initialization** guard, which is
+what shipped — the reachable garbage (a `PooledBuffer<float>` taken with `clearMemory: false`) was the
+finding, and the prescribed fix was the wrong shape for it. The other three went in as written: NaN
+descriptors are rejected by `!(value >= min && value <= max)`, `PartialSort.SortIndices` takes a
+`Span<int>` so a shrinking population no longer throws, and `IEvolutionCheckpoint`'s documentation now says
+what all three implementations actually do.
 
 All 29 files read, and the hunt **ended by scope rather than by the clock** — which is what makes the score
 meaningful. Four defects against a target of eleven says the module is in better shape than the game
@@ -169,7 +204,15 @@ then the doc. Nothing here is large; 4 is a single paragraph.
 `Ask` and `Tell` — the trick the whole OpenAI-ES memory profile rests on — and the parallel population
 evaluator's order-independence, which is what a reproducible-from-seed claim needs in order to hold.
 
-## 🐞 OPEN DEFECTS — deep learning layers (found 2026-08-01 by `overfit-find-bugs-game`)
+## ✅ FIXED — deep learning layers (found 2026-08-01 by `overfit-find-bugs-game`, fixed 2026-08-02)
+
+**All three fixed 2026-08-02.** `LstmCell.Save`/`Load` and `LstmLayer.Save(string)`/`Load(string)` were
+empty bodies and now write and read the three parameter tensors in the same length-then-floats wire format
+`Parameter.Save` uses. `DepthwiseConv2DLayer.Load` reads the bias flag as a statement about the FILE and
+constructs `Bias` on demand — the old `flag == 1 && Bias is not null` consumed the flag and skipped the
+floats, misaligning every later read in a composite `Load`. `CheckpointedModule` refuses a segment
+containing dropout unless `allowNonDeterministic: true`, since a checkpointed segment is run twice and the
+recomputation would use a different mask than the forward pass did.
 
 Breadth-first over the high-yield areas; the hunt **stopped voluntarily with time left but without full
 coverage**, so the score says nothing about the parts it did not open. Report in
@@ -184,7 +227,63 @@ coverage**, so the score says nothing about the parts it did not open. Report in
 Fix order: 1, 2, 3. The first is a shipped model that cannot be reloaded; the second corrupts loading
 silently; the third is a trap that nothing currently steps in.
 
-**Note for the next hunt here:** this run predated the agent's README-first step, and
+## ✅ FIXED — data preparation (found 2026-08-01 by `overfit-find-bugs-game`, fixed 2026-08-02)
+
+**All four fixed 2026-08-02.** `FastRandomForest` now carries rows as an index array partitioned in
+place, so a node sees its own subset, both stopping conditions became reachable, and a split that separates
+nothing becomes a leaf instead of two identical children — the defect made every tree a constant, every
+importance score a tally of random draws, and every tree a complete binary tree regardless of dataset size.
+`BorutaSelectionLayer` selects once and reapplies, with `Reset()` to select again deliberately.
+`ConstantColumnFilterLayer.IdentifyByUniqueRatio` compares with `>=` and floors the bar at one, so
+`minUniqueRatio = 1.0` is the strictest setting rather than a no-op. `TabularToTensorConverter` gained
+`WriteCategories`/`ReadCategories` so the fitted one-hot ordering can be stored beside the weights, and
+`Convert` refuses to run without a fitted schema rather than inventing a column order.
+
+Stopped voluntarily at ~5 minutes with coverage incomplete. Report in
+`docs/bug-hunts/data-2026-08-01-2316-bugs-game-findings.md`.
+
+**The first entry is the most severe defect found anywhere in the solution today.**
+
+| # | Defect | Why it matters |
+|---|---|---|
+| **1** | **`FastRandomForest` never splits its data.** `BuildRecursive` computes a feature and a threshold, stores them on the node, and then passes the **identical, unpartitioned** `x` and `y` to both children. Verified by reading. | Two consequences, and the second was not obvious. **The forest cannot predict anything**: every leaf averages the whole target column, so every tree returns a constant, and the "importance" scores are just a tally of which features were picked at random. `BorutaSelectionLayer` and `ShapSelectionLayer` both select features with it, so **feature selection is noise wearing the clothes of statistics**. And because `rows` never shrinks, the `rows < 2` stop can never fire — the only exit is `depth >= _maxDepth`, so it always builds a **complete** binary tree. The constructor permits `maxDepth` up to 64 on the reasonable assumption that data size bounds tree size; it does not. At the default 10 that is ~2 000 nodes per tree and merely wrong; at 30, which the constructor accepts, it is over two billion nodes per tree regardless of how small the dataset is. |
+| **2** | **`BorutaSelectionLayer` has no `_fitted` guard**, unlike every sibling in `Prepare/`. It reruns full selection — retraining forests, requiring `context.Targets` — on every `Process()`. | Shares the learned-selection root cause with #1. A second call on the same pipeline instance re-selects, so **the column indices every later layer holds no longer refer to the same columns**. This is precisely the failure the Data README already records as having happened once, in a new place. |
+| **3** | **`ConstantColumnFilterLayer.IdentifyByUniqueRatio` is off by one.** With `minUniqueRatio = 1.0` — a value the layer validates and accepts — `count > minUnique` cannot hold for any column, and the "kept nothing, so keep everything" fallback then turns the filter off entirely. | **The strictest available setting silently becomes a no-op.** Worse than an error, because the constant columns this layer exists to remove are exactly what makes a later scaler divide by a zero range. |
+| **4** | **`TabularToTensorConverter._categoryMaps` is never persisted**, and `ModelSerializer` validates tensor shape but not schema. | A re-`Fit` at inference with a different category set produces one-hot columns of matching width in a different order. Shapes agree, nothing throws, and the model reads scrambled inputs. |
+
+Fix order: 1 first and alone — it invalidates every consumer of the forest, and until it is fixed any
+measurement of Boruta or SHAP selection is meaningless. Then 2 (same family), then 3, then 4.
+
+## ✅ FIXED — audio (found 2026-08-01 by `overfit-find-bugs-game`, fixed 2026-08-02)
+
+**All four fixed 2026-08-02.** The synthetic-speech marker is now what happens when a caller says
+nothing: `WavAudioSink` marks the file when `metadata` is omitted, and writing genuinely unmarked audio
+requires naming `SyntheticSpeechMetadata.Unmarked` at the call site where a reviewer can see it. The
+server's `response_format=pcm` path has no container to carry the marker, so it travels on the media type
+(`audio/pcm; synthetic=true; generated-by=Overfit`) and reaches the client in the Content-Type header.
+`Mp3Decoder` clamps `big_values * 2` to the 576-entry granule; `WavReader` validates every chunk size
+against the file and **fails loudly on a short data chunk** rather than silently transcribing truncated
+audio; `EnglishNumberToWords` covers the whole `long` range.
+
+Stopped voluntarily at ~4.5 minutes with coverage incomplete. Report in
+`docs/bug-hunts/audio-2026-08-01-2245-bugs-game-findings.md`.
+
+**Read the first entry before the others.** It is the only defect found today that concerns a safety
+property rather than correctness, and it was concealed by a document — one written the same day, from
+memory, without checking the code.
+
+| # | Defect | Why it matters |
+|---|---|---|
+| **1** | **The synthetic-speech marker is not enforced anywhere in the synthesis path**, and `Sources/Main/Audio/README.md` asserted that it was. Verified: `OrpheusVoiceEngine` does not reference `SyntheticSpeechMetadata` at all; it is applied by three call sites (two in the CLI, one in the server); `WavAudioSink` takes it as `SyntheticSpeechMetadata? metadata = null`, so omitting it writes an unmarked file; and the server's `response_format=pcm` path emits raw samples with no container to carry it. | **A voice-cloning path that can produce unmarked audio of a real person is the one thing in this repository that must not be merely intended.** Any new caller gets unmarked output by default, which is the wrong direction for a default to fail in. The README has been corrected already — a document asserting a safety property that does not exist is worse than no document, because it stops the next person checking. Enforcement belongs at the engine or the sink, where omission is impossible rather than merely discouraged. |
+| **2** | **`Mp3Decoder` indexes past a fixed buffer on a malformed frame.** `_bigValues[g]` is a raw 9-bit side-info field (0–511) used unclamped as `bigValues * 2` — up to 1022 — against a 576-entry array. Unhandled in `Mp3Reader` and `AudioFile`. | A crafted or merely corrupt MP3 crashes the process. This is user-supplied input on a path with no `try`. |
+| **3** | **`WavReader` trusts file-supplied chunk sizes.** A negative size throws a raw `ArgumentOutOfRangeException` instead of this project's `OverfitFormatException`, and an oversized-but-positive one **silently truncates the audio** with no signal to the caller. | The truncation is the worse half: shorter audio is not obviously wrong, and everything downstream — transcription, similarity scoring — accepts it. Shares a root cause with #2: a length taken from inside an already-validated envelope and used in buffer arithmetic without a second check. |
+| **4** | **`EnglishNumberToWords.Convert` throws on any number ≥ 10¹⁸** — a `Scales` array of six entries indexed from a value that is still inside `long` range. Reachable unhandled from `POST /v1/audio/speech` and from the CLI. | A nineteen-digit number in ordinary text takes down the request. Cheapest fix on this list. |
+
+Fix order: 1 first and separately — it is a policy gap, not a bug, and deserves its own change with a test
+that a sink cannot emit unmarked audio. Then 2 and 3 together, since they are one root cause on two parsers.
+Then 4.
+
+**Note for the next hunt in `DeepLearning`:** that run predated the agent's README-first step, and
 `Sources/Main/DeepLearning/README.md` states the contract *"layers own their parameters;
 `TrainableParameters()` is the canonical way to enumerate them"* — a testable assertion that was supplied to
 the agent by hand rather than found. A re-run should check every layer's allocations against what it
