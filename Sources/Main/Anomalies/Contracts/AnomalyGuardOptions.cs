@@ -73,6 +73,33 @@ namespace DevOnBike.Overfit.Anomalies.Contracts
         public TimeSpan MaxRosterAge { get; init; } = TimeSpan.FromMinutes(30);
 
         /// <summary>
+        /// How long after a pod is created the trend family declines to judge it.
+        ///
+        /// <para><b>A new pod's metrics rise because it is warming up, not because anything is wrong.</b>
+        /// Measured on the lab across a rollout, a manual scale-up and an HPA scale-up: a fresh replica's
+        /// working set climbs <b>13-17% of typical over its first 10-20 minutes</b> at a Kendall tau of
+        /// 0.70-0.94. That is a textbook trend and it is about nothing. The scale-up phases ran <b>zero quiet
+        /// cycles out of seven</b> against four of six for the opposite transition, and the whole asymmetry is
+        /// this. Every client deploy and every autoscale event produces one per new pod.</para>
+        ///
+        /// <para><b>Why not raise the floor instead.</b> On that lab the memory trend floor is 1.089 MB
+        /// against pods of ~45 MB, so a floor large enough to swallow a 13% warm-up is large enough to
+        /// swallow a real leak. The rise is genuine; what is missing is the knowledge that the subject is new,
+        /// which no threshold can express.</para>
+        ///
+        /// <para><b>The trend family only.</b> Peer comparison keeps judging young pods deliberately: a
+        /// replica that differs from its peers <i>right now</i> is worth reporting whatever its age, and
+        /// during a rollout every pod is young, so a peer-wide grace would blind the guard exactly when a bad
+        /// version is going out. The rule is about a series' history, and only the trend family reads one.</para>
+        ///
+        /// <para>Requires a topology that reports <see cref="PodPlacement.CreatedAt"/>. Without an age the
+        /// pod is judged as before — an unknown age must not be read as "young", or a pod
+        /// kube-state-metrics has not caught up with would be silently exempt.
+        /// <see cref="TimeSpan.Zero"/> disables the grace.</para>
+        /// </summary>
+        public TimeSpan WarmUpGrace { get; init; } = TimeSpan.FromMinutes(15);
+
+        /// <summary>
         /// Days of history a workload needs at a given hour before that hour's record is used as a seasonal
         /// expectation. Zero turns the history off entirely.
         ///

@@ -35,6 +35,10 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
         private long _cycles;
         private long _failedCycles;
         private long _stateWriteFailures;
+        private long _labels;
+        private long _realLabels;
+        private long _muted;
+        private int _activeSuppressions;
         private long _findings;
         private long _opened;
         private long _resolved;
@@ -87,6 +91,23 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
             Interlocked.Increment(ref _stateWriteFailures);
         }
 
+        /// <summary>
+        /// Records what operator feedback is currently doing to the guard.
+        ///
+        /// <para><b>This is the series that keeps the feature honest.</b> Everything an operator can press
+        /// makes the guard quieter, and a mute nobody can see is indistinguishable from a detector that
+        /// stopped working. An alert on <c>overfit_guard_suppressions_active</c> climbing, or on
+        /// <c>overfit_guard_findings_muted_total</c> outrunning the findings that survive, is how a team
+        /// notices they have silenced their way to a green dashboard.</para>
+        /// </summary>
+        public void Feedback(int activeSuppressions, int mutedThisCycle, int labels, int realLabels)
+        {
+            Interlocked.Exchange(ref _activeSuppressions, activeSuppressions);
+            Interlocked.Add(ref _muted, mutedThisCycle);
+            Interlocked.Exchange(ref _labels, labels);
+            Interlocked.Exchange(ref _realLabels, realLabels);
+        }
+
         /// <summary>Renders the Prometheus text exposition format.</summary>
         public string ToPrometheusText()
         {
@@ -94,6 +115,22 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
 
             Counter(text, "overfit_guard_cycles_total",
                 "Evaluation cycles the guard has completed.", Interlocked.Read(ref _cycles));
+
+            Gauge(text, "overfit_guard_suppressions_active",
+                "Operator suppressions muting a signal right now. Climbing without bound is a team silencing "
+                + "its way to a green dashboard.", Volatile.Read(ref _activeSuppressions));
+
+            Counter(text, "overfit_guard_findings_muted_total",
+                "Findings dropped because an operator asked not to hear them.",
+                Interlocked.Read(ref _muted));
+
+            Gauge(text, "overfit_guard_labels_total",
+                "Operator judgements recorded about past incidents.", (int)Interlocked.Read(ref _labels));
+
+            Gauge(text, "overfit_guard_labels_real",
+                "Judgements marking a finding as correct. These constrain every future floor proposal; a "
+                + "feedback loop with none of them converges on a detector that reports nothing.",
+                (int)Interlocked.Read(ref _realLabels));
 
             Counter(text, "overfit_guard_state_failures_total",
                 "Cycles whose durable state could not be read or written. Incidents will not survive the next "

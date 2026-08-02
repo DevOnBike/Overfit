@@ -34,4 +34,13 @@ while a count is running** — the run's own denominator is the number of cycles
 a restart silently resets it. Grafana is not started during a measurement either; Prometheus is
 required (the guard reads it), Grafana is a discretionary consumer of the same instrument.
 
+**A warning from `kubectl` is a failed action, not noise.** `apply` and `patch` accept a field they do not
+recognise, print a warning, and exit 0. On 2026-08-02 the day-one-events harness patched this namespace's
+HPA with `spec.targetCPUUtilizationPercentage` — the `autoscaling/v1` name on an `autoscaling/v2` object.
+kubectl warned `unknown field`, reported `patched (no change)`, and returned success; the phase then spent
+38 minutes observing a cluster that never scaled, and would have reported a clean HPA scale-down that never
+happened. Read every warning, fix it, and **read the state back and assert it** before anything downstream
+measures. A phase that cannot confirm its own premise must abort with a message rather than produce a
+number — the same rule as verifying that an A/B flag is actually live.
+
 Build and monitoring stacks live in `../overfit` and `../monitoring`.

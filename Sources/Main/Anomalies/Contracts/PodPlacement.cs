@@ -33,11 +33,22 @@ namespace DevOnBike.Overfit.Anomalies.Contracts
     /// <para>Empty means "no grouping declared", and every pod then compares against every other — the
     /// behaviour before this existed.</para>
     /// </param>
+    /// <param name="CreatedAt">
+    /// When the cluster created this pod, or <c>default</c> when the topology cannot say.
+    ///
+    /// <para><b>Taken from the cluster rather than counted in the guard, and the difference is a blind
+    /// spot.</b> Counting cycles-since-first-seen would be simpler and would reset on every guard restart,
+    /// so a rolling update of the monitoring tool would silence the trend family on every pod at once for
+    /// the length of the grace — silence that looks exactly like health, which is the failure this whole
+    /// subsystem exists to remove. kube-state-metrics already knows the answer and it survives anything the
+    /// guard does. See <c>AnomalyGuardOptions.WarmUpGrace</c>.</para>
+    /// </param>
     public readonly record struct PodPlacement(
         string Workload,
         string ReplicaSet,
         string Node,
-        string PeerGroup = "")
+        string PeerGroup = "",
+        DateTimeOffset CreatedAt = default)
     {
         /// <summary>
         /// Whether anything was actually resolved.

@@ -25,9 +25,15 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
     {
         private const string HistorySection = "### history";
         private const string CalibrationSection = "### calibration";
+        private const string LabelSection = "### labels";
+        private const string SuppressionSection = "### suppressions";
 
         /// <summary>Renders both parts into one payload.</summary>
-        public static string Write(MetricHistory history, FloorCalibrator calibrator)
+        public static string Write(
+            MetricHistory history,
+            FloorCalibrator calibrator,
+            OperatorLabelStore? labels = null,
+            SuppressionStore? suppressions = null)
         {
             ArgumentNullException.ThrowIfNull(history);
             ArgumentNullException.ThrowIfNull(calibrator);
@@ -43,29 +49,54 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
 
             text.Append(CalibrationSection).Append('\n').Append(calibrator.Write());
 
+            if (!text.ToString().EndsWith('\n'))
+            {
+                text.Append('\n');
+            }
+
+            // Written last and read by position, so a payload from before labels existed still parses: the
+            // section simply is not there and Read hands back an empty store.
+            text.Append(LabelSection).Append('\n').Append(labels?.Write() ?? string.Empty);
+
+            if (!text.ToString().EndsWith('\n'))
+            {
+                text.Append('\n');
+            }
+
+            text.Append(SuppressionSection).Append('\n').Append(suppressions?.Write() ?? string.Empty);
+
             return text.ToString();
         }
 
         /// <summary>
         /// Splits a payload back into its two parts. Either may come back empty; neither throws.
         /// </summary>
-        public static (MetricHistory History, FloorCalibrator Calibrator) Read(
-            string? state, TrendOptions? trendOptions = null)
+        public static LearnedStateSnapshot Read(string? state, TrendOptions? trendOptions = null)
         {
             if (string.IsNullOrWhiteSpace(state))
             {
-                return (new MetricHistory(), new FloorCalibrator(trendOptions));
+                return new LearnedStateSnapshot(
+                    new MetricHistory(),
+                    new FloorCalibrator(trendOptions),
+                    new OperatorLabelStore(),
+                    new SuppressionStore());
             }
 
             var historyStart = state.IndexOf(HistorySection, StringComparison.Ordinal);
             var calibrationStart = state.IndexOf(CalibrationSection, StringComparison.Ordinal);
+            var labelStart = state.IndexOf(LabelSection, StringComparison.Ordinal);
+            var suppressionStart = state.IndexOf(SuppressionSection, StringComparison.Ordinal);
 
             // A payload written before the calibration section existed carries the baseline alone. Reading it
             // as "no sections found, therefore nothing" would silently discard a week of learning and look
             // exactly like a cold start — the failure mode this whole subsystem is built to make loud.
             if (historyStart < 0 && calibrationStart < 0)
             {
-                return (MetricHistory.Read(state), new FloorCalibrator(trendOptions));
+                return new LearnedStateSnapshot(
+                    MetricHistory.Read(state),
+                    new FloorCalibrator(trendOptions),
+                    new OperatorLabelStore(),
+                    new SuppressionStore());
             }
 
             var history = historyStart >= 0
@@ -73,10 +104,24 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
                 : null;
 
             var calibration = calibrationStart >= 0
-                ? state[(calibrationStart + CalibrationSection.Length)..]
+                ? Section(state, calibrationStart + CalibrationSection.Length, labelStart)
                 : null;
 
-            return (MetricHistory.Read(history), FloorCalibrator.Read(calibration, trendOptions));
+            var labels = labelStart >= 0
+                ? Section(state, labelStart + LabelSection.Length, suppressionStart)
+                : null;
+
+            var suppressions = suppressionStart >= 0
+                ? state[(suppressionStart + SuppressionSection.Length)..]
+                : null;
+
+            var calibrator = FloorCalibrator.Read(calibration, trendOptions);
+            var store = OperatorLabelStore.Read(labels);
+
+            calibrator.UseLabels(store);
+
+            return new LearnedStateSnapshot(
+                MetricHistory.Read(history), calibrator, store, SuppressionStore.Read(suppressions));
         }
 
         private static string Section(string state, int from, int until)

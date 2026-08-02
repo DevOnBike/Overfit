@@ -66,6 +66,12 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
         private readonly TrendOptions _trendOptions;
 
         /// <summary>
+        /// Confirmed-real findings, which a proposal may not silence. Null until one is supplied, which is
+        /// the state every guard starts in.
+        /// </summary>
+        private OperatorLabelStore? _labels;
+
+        /// <summary>
         /// Accumulates into <see cref="BoundedSamples"/> rather than plain lists, and that is a fix rather
         /// than a style choice: the first version appended one value per pod per metric per cycle for as long
         /// as the process ran — about a million doubles across a shadow week on twelve replicas, and eight
@@ -86,6 +92,25 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
                 _peerGaps[i] = new BoundedSamples();
                 _trendChanges[i] = new BoundedSamples();
                 _magnitudes[i] = new BoundedSamples();
+            }
+        }
+
+        /// <summary>
+        /// Supplies the operator judgements a proposal has to respect.
+        ///
+        /// <para><b>This is the half that makes the feedback loop safe.</b> Everything else an operator can
+        /// press makes the guard quieter; without a constraint pulling the other way, a hundred honest
+        /// dismissals converge on a detector that reports nothing, and it gets there gradually enough that
+        /// nobody notices the day it stopped working.</para>
+        /// </summary>
+        public void UseLabels(OperatorLabelStore? labels)
+        {
+            _labels = labels;
+            _cached = null;
+
+            foreach (var channel in _customChannels.Values)
+            {
+                channel.Cached = null;
             }
         }
 
@@ -391,6 +416,10 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
             var gapMax = channel.PeerGaps.Count > 0 ? channel.PeerGaps.Max : 0.0;
             var changeMax = channel.TrendChanges.Count > 0 ? channel.TrendChanges.Max : 0.0;
 
+            var proposedGap = gapMax * Margin;
+            var proposedChange = changeMax * Margin;
+            var capped = Cap(custom, ref proposedGap, ref proposedChange);
+
             var proposal = new FloorProposal(
                 channel.Magnitudes.Count,
                 channel.Magnitudes.Quantile(0.5),
@@ -398,8 +427,9 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
                 gapMax,
                 channel.TrendChanges.Quantile(0.99),
                 changeMax,
-                gapMax * Margin,
-                changeMax * Margin);
+                proposedGap,
+                proposedChange,
+                capped);
 
             channel.Cached = proposal;
 
@@ -428,6 +458,10 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
                 // restart, which is the event the signal exists to report. See PeerSignalCatalog.
                 var fittable = !PeerSignalCatalog.IsCountedEvent((MetricIndex)m);
 
+                var proposedGap = fittable ? gapMax * Margin : 0.0;
+                var proposedChange = fittable ? changeMax * Margin : 0.0;
+                var capped = Cap(((MetricIndex)m).ToString(), ref proposedGap, ref proposedChange);
+
                 proposals[m] = new FloorProposal(
                     magnitudes.Count,
                     magnitudes.Quantile(0.5),
@@ -435,11 +469,52 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
                     gapMax,
                     changes.Quantile(0.99),
                     changeMax,
-                    fittable ? gapMax * Margin : 0.0,
-                    fittable ? changeMax * Margin : 0.0);
+                    proposedGap,
+                    proposedChange,
+                    capped);
             }
 
             return proposals;
+        }
+
+        /// <summary>
+        /// Holds a proposal below anything an operator has confirmed is real, and says whether it had to.
+        ///
+        /// <para>Strictly below, not equal: a floor <i>at</i> the confirmed magnitude gates it out, since
+        /// every gate in this family compares with <c>&gt;=</c>. The margin is the same 1.25 the proposal
+        /// itself uses, applied in the other direction — a confirmed finding should survive comfortably, not
+        /// by a rounding error.</para>
+        /// </summary>
+        private bool Cap(string signal, ref double proposedGap, ref double proposedChange)
+        {
+            if (_labels is null)
+            {
+                return false;
+            }
+
+            var smallest = _labels.SmallestRealMagnitude(signal);
+
+            if (!double.IsFinite(smallest) || smallest <= 0.0)
+            {
+                return false;
+            }
+
+            var ceiling = smallest / Margin;
+            var capped = false;
+
+            if (proposedGap > ceiling)
+            {
+                proposedGap = ceiling;
+                capped = true;
+            }
+
+            if (proposedChange > ceiling)
+            {
+                proposedChange = ceiling;
+                capped = true;
+            }
+
+            return capped;
         }
 
         private static double MedianOfOthers(double[] medians, int skip)

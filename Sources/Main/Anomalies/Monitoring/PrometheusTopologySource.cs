@@ -166,6 +166,8 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
                     .ConfigureAwait(false);
                 var podNodes = await QueryAsync(PromqlCatalog.PodNodeQuery(_selector), ct)
                     .ConfigureAwait(false);
+                var podCreated = await QueryValuesAsync(PromqlCatalog.PodCreatedQuery(_selector), ct)
+                    .ConfigureAwait(false);
 
                 // Only issued when a label was named. Asking for kube_pod_labels on every refresh would cost
                 // a query per cycle to fill a field nobody configured, and the series is one of the widest
@@ -185,6 +187,21 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
                         && Label(labels, "owner_name") is { Length: > 0 } owner)
                     {
                         deploymentOf[replicaSet] = owner;
+                    }
+                }
+
+                // Pod -> creation time. Absent for a pod kube-state-metrics has not caught up with, which
+                // reads as "age unknown" downstream rather than as "brand new" — guessing young would
+                // silence the trend family on a pod that may have been running for a week.
+                var createdOf = new Dictionary<string, DateTimeOffset>(StringComparer.Ordinal);
+
+                for (var i = 0; i < podCreated.Count; i++)
+                {
+                    var (createdLabels, createdValue) = podCreated[i];
+
+                    if (Label(createdLabels, "pod") is { Length: > 0 } createdPod && createdValue > 0.0)
+                    {
+                        createdOf[createdPod] = DateTimeOffset.FromUnixTimeSeconds((long)createdValue);
                     }
                 }
 
@@ -237,7 +254,8 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
                         workload,
                         replicaSet,
                         nodeOf.TryGetValue(pod, out var node) ? node : string.Empty,
-                        peerGroup);
+                        peerGroup,
+                        createdOf.TryGetValue(pod, out var created) ? created : default);
                 }
 
                 if (resolved.Count == 0)
@@ -304,6 +322,62 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
                 }
 
                 result.Add(labels);
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// The same instant query, keeping the sample <b>value</b> alongside the labels.
+        ///
+        /// <para>Separate from <see cref="QueryAsync"/> rather than replacing it: for the ownership and
+        /// placement metrics the value is always 1 and discarding it is the honest thing to do. For
+        /// <c>kube_pod_created</c> the value <i>is</i> the answer.</para>
+        /// </summary>
+        private async Task<List<(Dictionary<string, string> Labels, double Value)>> QueryValuesAsync(
+            string promql, CancellationToken ct)
+        {
+            var url = $"{_baseUrl}/api/v1/query?query={Uri.EscapeDataString(promql)}";
+
+            using var response = await _http.GetAsync(url, ct).ConfigureAwait(false);
+            response.EnsureSuccessStatusCode();
+
+            var body = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            var result = new List<(Dictionary<string, string>, double)>();
+
+            using var document = JsonDocument.Parse(body);
+
+            if (!document.RootElement.TryGetProperty("data", out var data)
+                || !data.TryGetProperty("result", out var series))
+            {
+                return result;
+            }
+
+            foreach (var entry in series.EnumerateArray())
+            {
+                if (!entry.TryGetProperty("metric", out var metric)
+                    || !entry.TryGetProperty("value", out var sample)
+                    || sample.GetArrayLength() < 2)
+                {
+                    continue;
+                }
+
+                var labels = new Dictionary<string, string>(StringComparer.Ordinal);
+
+                foreach (var label in metric.EnumerateObject())
+                {
+                    labels[label.Name] = label.Value.GetString() ?? string.Empty;
+                }
+
+                // Prometheus renders the value as a STRING in the JSON, always.
+                if (double.TryParse(
+                        sample[1].GetString(),
+                        System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        out var value))
+                {
+                    result.Add((labels, value));
+                }
             }
 
             return result;

@@ -141,10 +141,14 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
             _historyStore = historyStore;
             _tracker = new IncidentTracker(tracking);
 
-            var (history, calibrator) = LearnedState.Read(historyStore?.Load(), options.Trend);
+            var learned = LearnedState.Read(historyStore?.Load(), options.Trend);
+            var history = learned.History;
+            var calibrator = learned.Calibrator;
 
             _history = options.MinimumHistoryDays > 0 ? history : null;
             _calibrator = calibrator;
+            Labels = learned.Labels;
+            Suppressions = learned.Suppressions;
 
             // Built here rather than injected, so the default deployment needs nothing but options — and
             // replaceable, because the two things a customer is most likely to own are their own threshold
@@ -189,6 +193,31 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
             get;
         }
 
+        /// <summary>
+        /// What operators have said about past incidents, and the constraint their <c>--real</c> judgements
+        /// place on every future floor proposal.
+        ///
+        /// <para>Exposed rather than hidden because the host owns the acknowledgement path — the guard
+        /// evaluates windows, it does not read a CLI. Adding a label here takes effect on the next proposal
+        /// and survives a restart with the rest of the learned state.</para>
+        /// </summary>
+        public OperatorLabelStore Labels
+        {
+            get;
+        }
+
+        /// <summary>
+        /// What an operator has asked not to hear, and until when.
+        ///
+        /// <para>Every entry expires. A suppression with no end date is a configuration change wearing the
+        /// clothes of an acknowledgement — nobody reviews it, nothing reminds anyone it exists, and the pod
+        /// most likely to carry one is the pod that eventually breaks.</para>
+        /// </summary>
+        public SuppressionStore Suppressions
+        {
+            get;
+        }
+
         /// <summary>Incidents currently open, including any inside their grace period.</summary>
         public int OpenIncidents => _tracker.OpenCount;
 
@@ -214,7 +243,16 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
         {
             ArgumentNullException.ThrowIfNull(window);
 
-            var pipeline = new IncidentPipeline();
+            var pipeline = new IncidentPipeline
+            {
+                Suppressor = Suppressions,
+            };
+
+            // Expiry enforced before the cycle rather than trusted: IsSuppressed checks the clock too, but a
+            // store that is never pruned grows for as long as the process runs, and the listing an operator
+            // reads would fill with entries that mute nothing.
+            Suppressions.Prune(observedAt);
+
             var from = window.Start;
             var to = window.End;
 
@@ -302,7 +340,8 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
                 // Forgotten before saving, so a workload that was deleted stops costing storage on the next
                 // restart rather than being carried for ever by a store that only ever grows.
                 _history?.Forget(observedAt, TimeSpan.FromDays(MetricHistory.MaxDays * 2));
-                _historyStore.Save(LearnedState.Write(_history ?? new MetricHistory(), _calibrator));
+                _historyStore.Save(LearnedState.Write(
+                    _history ?? new MetricHistory(), _calibrator, Labels, Suppressions));
             }
 
             var result = new GuardCycleResult(
@@ -311,6 +350,15 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
             // The guard measuring itself, in the same shape it demands of everything else. Without it, a loop
             // that has stopped or whose queries have started failing produces no incidents — indistinguishable
             // from a healthy cluster, which is the one failure mode this whole subsystem exists to make loud.
+            var realLabels = 0;
+
+            for (var i = 0; i < Labels.Labels.Count; i++)
+            {
+                realLabels += Labels.Labels[i].Kind == OperatorLabelKind.Real ? 1 : 0;
+            }
+
+            Telemetry.Feedback(Suppressions.ActiveCount(observedAt), pipeline.Muted, Labels.Count, realLabels);
+
             Telemetry.Cycle(result, window.Pods.Count, observedAt, _declaredAbnormal);
 
             return result;
@@ -681,6 +729,11 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
 
             for (var pod = 0; pod < podCount; pod++)
             {
+                if (IsWarmingUp(window.Pods[pod], to))
+                {
+                    continue;
+                }
+
                 // Judged from the window's own storage. The copy that used to happen here was made for every
                 // pod and every signal whether or not anything came of it — two hundred replicas times
                 // thirteen channels of eighty samples, several megabytes a cycle, for series that are read
@@ -1051,6 +1104,27 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
             }
 
             return string.Empty;
+        }
+
+        /// <summary>
+        /// Whether <paramref name="pod"/> is too young for the trend family to have an opinion about it.
+        ///
+        /// <para>See <see cref="AnomalyGuardOptions.WarmUpGrace"/> for the measurement behind this. Three
+        /// things make it fail closed rather than open: no configured grace means no exemption, no topology
+        /// means no exemption, and an <b>unknown</b> creation time means no exemption. A pod is only spared
+        /// when the cluster positively states that it is new.</para>
+        /// </summary>
+        private bool IsWarmingUp(string pod, DateTimeOffset at)
+        {
+            if (_options.WarmUpGrace <= TimeSpan.Zero
+                || _options.PodTopology is not { } topology
+                || !topology.TryResolve(pod, out var placement)
+                || placement.CreatedAt == default)
+            {
+                return false;
+            }
+
+            return at - placement.CreatedAt < _options.WarmUpGrace;
         }
 
         private IncidentSubject Subject(string pod)

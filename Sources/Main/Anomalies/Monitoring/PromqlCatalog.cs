@@ -217,6 +217,23 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
         }
 
         /// <summary>
+        /// <b>When each pod was created</b>, as a unix time in the sample's value.
+        ///
+        /// <para>The trend family needs it to tell a leak from a warm-up. Measured on the lab: a freshly
+        /// created replica's working set climbs 13-17% of typical over its first ten to twenty minutes, with
+        /// a Kendall tau of 0.70-0.94 — a textbook trend, entirely real, and about nothing. Every deploy and
+        /// every autoscale event produces one per new pod.</para>
+        /// </summary>
+        public static string PodCreatedQuery(IPrometheusQuerySelector selector)
+        {
+            var matchers = BuildSelector(selector, DataCenter.West);
+
+            return matchers.Length > 0
+                ? $"kube_pod_created{{{matchers}}}"
+                : "kube_pod_created";
+        }
+
+        /// <summary>
         /// <b>The rollout timestamp</b>, as a unix time in the sample's value rather than in a label.
         ///
         /// <para>An incident whose start coincides with this moving is <i>more</i> informative, not less: "this

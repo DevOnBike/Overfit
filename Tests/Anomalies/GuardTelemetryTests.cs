@@ -117,9 +117,11 @@ namespace DevOnBike.Overfit.Tests.Anomalies
                 }
             }
 
-            // Eleven since overfit_guard_state_failures_total joined them: a durable-state write that fails
-            // is otherwise perfectly silent until the next restart reopens everything at once.
-            Assert.Equal(11, series);
+            // Fifteen. Eleven once overfit_guard_state_failures_total joined them — a durable-state write
+            // that fails is otherwise silent until the next restart reopens everything at once — and four
+            // more for operator feedback. Those four exist because every response an operator can give makes
+            // the guard quieter, so the amount of silence they have bought has to be visible from outside.
+            Assert.Equal(15, series);
         }
 
         private static AnomalyGuard Guard(out NullSink sink)

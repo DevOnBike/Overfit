@@ -40,6 +40,27 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
         private readonly List<SignalFinding> _findings = [];
         private readonly IncidentGrouper _grouper = new();
 
+        /// <summary>
+        /// Consulted for every finding before it is recorded, or null when nothing is muted.
+        ///
+        /// <para>Here rather than at each detector because every finding already passes through this type:
+        /// five families down six code paths would otherwise each need the check, and the guarantee would
+        /// depend on all six staying in step as families are added.</para>
+        /// </summary>
+        public ISignalSuppressor? Suppressor
+        {
+            get; set;
+        }
+
+        /// <summary>
+        /// Findings an operator has muted this cycle. Counted rather than merely dropped: a mute nobody can
+        /// see is indistinguishable from a detector that stopped working.
+        /// </summary>
+        public int Muted
+        {
+            get; private set;
+        }
+
         /// <summary>Findings accumulated so far this cycle.</summary>
         public int Count => _findings.Count;
 
@@ -59,6 +80,25 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
         {
             _findings.Clear();
             Dropped = 0;
+            Muted = 0;
+        }
+
+        /// <summary>
+        /// Whether the operator has asked not to hear about this one.
+        ///
+        /// <para>Asked only for findings that are already decided anomalies, so the counter reports what was
+        /// actually silenced rather than every healthy verdict a suppression happens to overlap.</para>
+        /// </summary>
+        private bool IsMuted(in IncidentSubject subject, string signal, DateTimeOffset at)
+        {
+            if (Suppressor is null || !Suppressor.IsSuppressed(subject, signal, at))
+            {
+                return false;
+            }
+
+            Muted++;
+
+            return true;
         }
 
         /// <summary>
@@ -89,7 +129,7 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
                 return false;
             }
 
-            if (!HasCapacity())
+            if (IsMuted(subject, signal, windowEnd) || !HasCapacity())
             {
                 return false;
             }
@@ -144,7 +184,7 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
                 return false;
             }
 
-            if (!HasCapacity())
+            if (IsMuted(subject, signal, windowEnd) || !HasCapacity())
             {
                 return false;
             }
@@ -190,7 +230,7 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
                 return false;
             }
 
-            if (!HasCapacity())
+            if (IsMuted(subject, signal, windowEnd) || !HasCapacity())
             {
                 return false;
             }
@@ -244,7 +284,7 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
                 return false;
             }
 
-            if (!HasCapacity())
+            if (IsMuted(subject, signal, windowEnd) || !HasCapacity())
             {
                 return false;
             }
@@ -304,7 +344,7 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
 
             for (var i = 0; i < findings.Length; i++)
             {
-                if (!findings[i].IsOutlier)
+                if (!findings[i].IsOutlier || IsMuted(subjects[i], signal, windowEnd))
                 {
                     continue;
                 }

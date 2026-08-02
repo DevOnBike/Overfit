@@ -49,8 +49,19 @@ namespace DevOnBike.Overfit.Anomalies.Contracts
         double TrendChangeP99,
         double TrendChangeMax,
         double ProposedMinAbsoluteGap,
-        double ProposedMinAbsoluteTrendChange)
+        double ProposedMinAbsoluteTrendChange,
+        bool CappedByOperator = false)
     {
+        /// <summary>
+        /// Whether an operator's <c>--real</c> label held this proposal below what the data alone suggested.
+        ///
+        /// <para>Reported rather than applied silently, because a capped proposal is a disagreement between
+        /// two sources of truth and the operator is entitled to see it: the observed period says a gap this
+        /// large is normal, and somebody who looked at one said it was not. Suppressing that would make the
+        /// proposal look like a measurement when it is a negotiated number.</para>
+        /// </summary>
+        public bool WasCapped => CappedByOperator;
+
         /// <summary>Whether enough was observed for the proposal to be worth reading.</summary>
         public bool IsUsable => Samples >= 30;
     }
