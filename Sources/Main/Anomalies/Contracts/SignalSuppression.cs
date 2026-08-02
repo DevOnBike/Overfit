@@ -29,14 +29,19 @@ namespace DevOnBike.Overfit.Anomalies.Contracts
     /// How large the dismissed finding was, in the signal's own units, or <see cref="double.NaN"/> when it
     /// had no measurable size.
     ///
-    /// <para><b>Without this a dismissal silences a channel rather than an alert, and it was measured
-    /// doing exactly that.</b> Replaying the injected-fault panel after a simulated shadow week — 23
-    /// dismissals, each a seven-day mute — left <c>cpu 2.5x</c> undetected on one pod <i>and</i> on every
-    /// pod at once. The shadow week's noise was small CPU gaps; muting the pair (pod, CpuUsageRatio) then
-    /// hid a two-and-a-half-fold rise as well. Literally what the operator asked for, and nothing anyone
-    /// means by it.</para>
+    /// <para><b>The reasoning, stated as reasoning because it has no measurement behind it.</b> A mute
+    /// scoped to a pod and a signal alone hides everything that signal will ever do on that pod, including a
+    /// fault ten times larger than the one somebody dismissed. That is literally what the operator asked for
+    /// and nothing anyone means by it, so <see cref="Ceiling"/> bounds what a dismissal covers.</para>
     ///
-    /// <para>See <see cref="Ceiling"/> for what is muted as a result.</para>
+    /// <para><b>An earlier version of this paragraph claimed a measurement, and the measurement was
+    /// wrong.</b> It cited a replay showing a week of dismissals leaving <c>cpu 2.5x</c> undetected. That
+    /// result came from a harness which matched incidents on the subject without checking the signal, so an
+    /// unrelated <c>GcPauseRatio</c> incident on the same pod counted as detecting a CPU fault; with the
+    /// check added, the three-arm replay shows a week of dismissals costing <b>no</b> detection at all and
+    /// this mechanism doing nothing observable. It is kept because the argument above stands on its own —
+    /// but it is an argument, and this module's README promises that numbers are measured. It has no number
+    /// yet. See the open-defect entry in <c>ROADMAP.md</c>.</para>
     /// </param>
     public readonly record struct SignalSuppression(
         string Pod,

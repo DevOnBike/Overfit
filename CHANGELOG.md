@@ -92,9 +92,6 @@ by parity, benchmark and an end-to-end generation on a real model._
   previous snapshot on purpose, which is right for grouping and wrong here: a pod deleted during the outage
   is still on the list, stops reporting because it no longer exists, and is accused after two cycles.
   `IPodRoster.LastRefreshed` and `MaxRosterAge` let the check stand down instead.
-- **A store that could not write said nothing** until the next restart reopened every incident at once.
-  `IIncidentStore.LastError` is read after each save, surfaced as `AnomalyGuard.StateError`, and counted in
-  `overfit_guard_state_failures_total`.
 - **A cluster-wide event could discard its own cycle.** `IncidentPipeline` threw once the grouping bound was
   reached, so the largest event the guard had ever seen produced no incident at all. It now sheds the
   overflow and counts it in `Dropped`.

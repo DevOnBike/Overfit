@@ -206,10 +206,13 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
             {
                 var saved = incidents[i];
 
-                // Advanced for EVERY saved record, before the staleness filter and regardless of adoption.
-                // It used to move only for the ones that survived, so an incident dropped for age — or by
-                // MaxOpenIncidents — left its identifier free to be handed out again, which this method's own
-                // documentation warns lets a consumer join two unrelated incidents.
+                // Advanced before the staleness filter, so a record dropped for age still spends its
+                // identifier.
+                //
+                // INCOMPLETE, and the previous version of this comment said otherwise. The loop above also
+                // ends once MaxOpenIncidents is reached, so saved records beyond the cap are never visited
+                // and never advance the counter — exactly the case this comment used to claim was covered.
+                // See the open-defect entry in ROADMAP.md.
                 if (saved.Id >= _nextId)
                 {
                     _nextId = saved.Id + 1;

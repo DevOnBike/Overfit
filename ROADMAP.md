@@ -148,6 +148,38 @@ flagged for a decision, 1 declared blind.
 
 ---
 
+## 🐞 OPEN DEFECTS — anomaly guard (found 2026-08-02 by `overfit-find-bugs-game`)
+
+Run against `Sources/Main/Anomalies` a few hours after most of it was written, and it ended by the ten-minute
+cap rather than by covering the module — `Rules/`, the learned families, `IncidentGrouper`, `IncidentReporter`
+and `MetricHistory` were never opened, so no claim is made about them. Report in
+`docs/bug-hunts/anomalies-2026-08-02-1836-bugs-game-findings.md`.
+
+**Four of the six are the same shape, and it is not a coding mistake.** They are gaps between what the code
+does and what was written about it — a comment, a changelog entry, and two "fixed" claims that were half or
+wholly untrue. The measurement caught three such gaps earlier the same day; reading caught four more. Whatever
+is producing them is not caught by tests, because the tests agree with the code and it is the prose that is
+wrong.
+
+| # | Defect | Why it matters |
+|---|---|---|
+| **1** | **`IncidentTracker.Restore` still allows identifier reuse.** Verified: the loop is `for (i = 0; i < incidents.Count && _open.Count < MaxOpenIncidents; i++)`, so records beyond the cap are never visited and never advance `_nextId`. | The morning's fix covered the staleness path and not the capacity path, and the comment beside it claimed both. A reused identifier lets a consumer join two unrelated incidents — the failure the method's own documentation warns about. Comment corrected; the code is still half-fixed. |
+| **2** | **Store write failures are still silent.** Verified: `AnomalyGuard` contains no `StateError`, `IIncidentStore` has no `LastError` member, and `GuardTelemetry.StateWriteFailed()` is called from nowhere. The patch that was supposed to add all three never landed. | Worse than the defect: **`CHANGELOG.md` claimed it shipped**. That entry has been removed. `overfit_guard_state_failures_total` is exported and can never increment, which is a monitoring series that lies — the exact pathology this subsystem exists to remove. |
+| **3** | **`OperatorLabelStore.Evict` protects the label kind but not the magnitude.** At capacity it drops the oldest `Real` label once the `Noise` ones are gone, rather than the largest — but the *smallest* confirmed magnitude is the one doing the work, since it is what caps every future floor proposal. | The constraint that matters most can age out silently. Not urgent at 2000 labels, and it is a one-line change to the eviction order. |
+| **4** | **`FloorCalibrator.Write` does not escape custom channel names**, unlike `OperatorLabelStore` and `SuppressionStore` written the same day. Verified by reading. | A tab or newline in a channel name corrupts the persisted line; a name containing `### labels` moves `LearnedState`'s section boundary and silently redistributes the payload between calibration and labels. |
+| **5** | **`AnomalyGuard.FloorProposals` bypasses the `_gate` lock** that `Acknowledge` and `ActiveSuppressions` take. Latent — nothing calls it yet. | The lock exists because the acknowledgement endpoint made this class cross-thread for the first time. A property that skips it is a trap for whoever wires the next reader. |
+| **6** | **`SignalSuppression.Magnitude`'s documentation asserted a measurement that had been refuted.** Corrected. | The cited replay came from a harness that matched incidents on the subject without checking the signal; with the check, a week of dismissals costs no detection and this mechanism does nothing observable. **The mechanism now has no measurement behind it at all** — it stays on the argument alone, which this project's rules say is a guess however good it sounds. It needs a number or it needs removing. |
+
+Fix order: 1 and 2 first — both are half-done work that has been described as finished, which is worse than
+work not started. Then 6 (decide the mechanism's fate), then 4, 3, 5.
+
+**Scheduled: 1 and 2 are done when the 24-hour run ends** (started 2026-08-02 18:20 UTC, ends 2026-08-03
+18:20 UTC). Not before, and the reason is not caution about the fixes. Both are latent — the identifier
+collision needs `MaxOpenIncidents` to be reached, and the store-failure path needs a store that fails — so
+neither changes what the running guard reports. Landing them means a rebuild, a redeploy and a fourth restart
+of a measurement that has already been restarted three times today, which would cost the day's number to buy
+nothing the day is measuring.
+
 ## ✅ FIXED — decode runtime (found 2026-08-01 by `overfit-find-bugs-game`, fixed 2026-08-02)
 
 **All three fixed 2026-08-02.** (1) `Cls` pooling now takes the FIRST token in `CachedLlamaSession.Embed`;
