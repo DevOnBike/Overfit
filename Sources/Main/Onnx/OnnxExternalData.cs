@@ -109,17 +109,18 @@ namespace DevOnBike.Overfit.Onnx
             var offset = CheckedToInt64(
                 external.Offset, $"External data offset for initializer '{initializer.Name}'");
 
-            // Zero means "to the end of the file" in the ONNX external-data convention, and the subtraction
-            // that expresses it is where a negative allocation used to be reachable: nothing established
-            // that the offset was inside the file first. The bounds check below now precedes it.
-            var available = file.Length - offset;
-
+            // The offset is proved to be inside the file BEFORE anything is computed from it. The
+            // subtraction below expresses the "zero means read to the end" convention, and it is where a
+            // negative allocation used to be reachable, because nothing had established that the offset was
+            // inside the file. A comment here previously claimed this order and the code had the other one.
             if (offset < 0 || offset > file.Length)
             {
                 throw new OverfitFormatException(
                     $"External data for '{initializer.Name}' starts at byte {offset}, but "
                     + $"'{Path.GetFileName(fullPath)}' is {file.Length} bytes.");
             }
+
+            var available = file.Length - offset;
 
             var length = external.Length == 0
                 ? available

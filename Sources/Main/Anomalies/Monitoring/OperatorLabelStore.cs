@@ -205,18 +205,10 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
         }
 
         /// <summary>Tabs and newlines are the record separators, so they cannot survive inside a field.</summary>
-        private static string Escape(string value)
-        {
-            return value.Replace("\\", "\\\\", StringComparison.Ordinal)
-                        .Replace("\t", "\\t", StringComparison.Ordinal)
-                        .Replace("\n", "\\n", StringComparison.Ordinal);
-        }
+        /// <inheritdoc cref="LearnedStateText.Escape"/>
+        private static string Escape(string value) => LearnedStateText.Escape(value);
 
-        private static string Unescape(string value)
-        {
-            return value.Replace("\\n", "\n", StringComparison.Ordinal)
-                        .Replace("\\t", "\t", StringComparison.Ordinal)
-                        .Replace("\\\\", "\\", StringComparison.Ordinal);
-        }
+        /// <inheritdoc cref="LearnedStateText.Unescape"/>
+        private static string Unescape(string value) => LearnedStateText.Unescape(value);
     }
 }

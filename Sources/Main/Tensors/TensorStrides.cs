@@ -45,11 +45,12 @@ namespace DevOnBike.Overfit.Tensors
         /// <summary>
         /// Computes contiguous row-major strides for the given shape.
         ///
-        /// <para><c>checked</c> for the reason given on <see cref="TensorShape.Size"/>: a stride that
-        /// overflows wraps to a small or negative number and every index computed from it lands somewhere
-        /// plausible and wrong, with no fault at the point the mistake was made.</para>
+        /// <para><b>Unchecked on purpose — see <see cref="TensorShape.Size"/> for the measurement and the
+        /// reasoning.</b> Briefly: these dimensions come from the caller's own code rather than from a
+        /// model file, overflowing one needs a tensor larger than the machine can allocate, and the check
+        /// measured at ~0.12 ns per call for no benefit at this layer. The file-driven products in the GGUF
+        /// and ONNX loaders are checked, and that difference is the point.</para>
         /// </summary>
-        /// <exception cref="OverflowException">A stride does not fit an <see cref="int"/>.</exception>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static TensorStrides Contiguous(TensorShape shape)
         {
@@ -57,8 +58,8 @@ namespace DevOnBike.Overfit.Tensors
             {
                 1 => new TensorStrides(1),
                 2 => new TensorStrides(shape.D1, 1),
-                3 => new TensorStrides(checked(shape.D1 * shape.D2), shape.D2, 1),
-                4 => new TensorStrides(checked(shape.D1 * shape.D2 * shape.D3), checked(shape.D2 * shape.D3), shape.D3, 1),
+                3 => new TensorStrides(shape.D1 * shape.D2, shape.D2, 1),
+                4 => new TensorStrides(shape.D1 * shape.D2 * shape.D3, shape.D2 * shape.D3, shape.D3, 1),
 
                 _ => throw new OverfitRuntimeException($"Unsupported rank: {shape.Rank}")
             };

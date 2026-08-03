@@ -71,6 +71,29 @@ _2026-08-02 — the six defects a code review found on paths no measurement exer
 five `overfit-find-bugs-game` hunts. Everything below was verified by test; the kernel change was verified
 by parity, benchmark and an end-to-end generation on a real model._
 
+- **Escaping in the three learned-state stores did not round-trip, and the same defect was in all
+  three.** *(2026-08-04.)* Each carried a private `Escape`/`Unescape` pair built from sequential
+  `string.Replace` calls, and a chain of replacements is not a decoder: a later pass re-reads what an
+  earlier one emitted. A custom channel named `a\hb` — literal backslash, then `h` — escaped to `a\\hb`
+  and decoded to `a\#b`, so the calibration reattached under a name the operator never configured. Tab and
+  newline corrupt the same way in the label and suppression stores. One implementation now
+  (`LearnedStateText`), decoding in a single left-to-right pass, escaping `#` as well so a name or an
+  operator's typed reason cannot forge a `### labels` section boundary. Found by review, not by the
+  round-trip test that already existed — that test used `myapp_queue_depth`, which needs no escaping.
+
+- **`checked` on the tensor shape types was added and then reverted, and the measurement is why.**
+  *(Added 2026-08-03, reverted 2026-08-04.)* Five unchecked dimension products were fixed together as one
+  defect; they were two. `GgufTensorInfo.ElementCount`, `OnnxTensor.ElementCount` and the ONNX graph
+  importer multiply numbers **read out of a model file**, where a wrapped product is small, positive and
+  plausible enough to pass a later shape check and load silently wrong weights — those stay checked.
+  `TensorShape.Size`, `TensorStrides.Contiguous` and `TensorView.Reshape` multiply dimensions **from the
+  caller's own code**, where overflowing an `int` means asking for an 8.6 GB tensor. Measured at ~0.11 ns
+  per call (1.34x a sub-nanosecond property); end-to-end an A/B over a full small-CNN forward+backward
+  moved two of six arms the wrong way by up to 18%, which is that benchmark's own spread, and the
+  arithmetic bound is ~0.1%. Reverted for having no benefit at that layer rather than for the cost — and
+  because `checked` evaluates left to right, so a shape with large leading dimensions and a trailing zero
+  threw despite a correct result of zero.
+
 - **The step detector could not report anything, for any fault, once the guard had calibrated itself.**
   *(2026-08-03. Two defects, stacked, the second hidden by the first.)* The level-shift gate was fed
   `MinAbsoluteTrendChange`, a floor accumulated from a Theil-Sen slope fitted to each pod **individually**,

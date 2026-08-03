@@ -193,6 +193,29 @@ Fix order: 1 and 2 first — both are half-done work that has been described as 
 work not started. **Both done 2026-08-03**; suite 2002 passing, 0 failing. Then 6 (decide the mechanism's
 fate), then 4, 3, 5.
 
+### ▶ RESUME HERE — 2026-08-04, start of day
+
+**The 24-hour measurement has not been started, and starting it is the first action.** Everything it was
+waiting behind is done. Tree is clean, suite **2051 passing / 0 failing**.
+
+**Run it like this**, and the details are load-bearing:
+
+1. Nothing else may touch this box for the day. The benchmark↔test mutex covers those two; the lab is a
+   third participant and is **not** covered yet (item 9 below), so it is discipline until it is code.
+2. Deploy the current build to the lab first. The 112/day figure was taken on a build whose step gate
+   could not fire and whose calibrated floors contained the window they were gating — **both are now
+   different**, so that number describes software that no longer exists.
+3. Record the clean-start marker (`Tests/bin/fp-run-clean-start.txt`) and the build windows file the
+   analysis reads. `.claude/analyse_run.py` was written and dry-run before the last run ended, and it
+   should be dry-run again before this one ends rather than at the moment its answer is wanted.
+4. **What the run has to answer**: false incidents per day on the fixed build, and whether the two floor
+   repairs bought detection with noise. The synthetic control said one incident before and one after, but
+   that is one seed over 69 cycles and **must not be quoted as a rate**.
+
+Expected shape of the answer, written down first so a surprise is visible as a surprise: the previous run
+gave 112/day of which 96.4% came from one misconfigured `GcGen2HeapBytes` floor. If arming that floor is
+the only change, the non-heap remainder was 4/day.
+
 ### Queued behind the 24-hour run (ends 2026-08-03 18:20 UTC)
 
 Nothing here changes what the running guard reports, which is why none of it justifies a fifth restart of a

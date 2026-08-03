@@ -97,6 +97,14 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
                 RequireFits(nameLen >= 0 && nameLen <= Remaining(stream),
                     $"tensor name of length {nameLen}", stream);
 
+                // Validated HERE rather than after the read loop below, which is where it used to sit.
+                // The element width is what the size bound is expressed in, so an unknown ftype has to be
+                // rejected before anything is sized against it — and rejecting it after the data has been
+                // read is a check standing behind the thing it guards.
+                RequireFits(ftype is 0 or 1, $"tensor '{nameLen}-byte name' with ftype {ftype}", stream);
+
+                var bytesPerElement = ftype == 0 ? sizeof(float) : sizeof(ushort);
+
                 // Dimensions are written reversed (ggml ne[]); un-reverse to logical shape.
                 var ne = new int[nDims];
                 for (var i = 0; i < nDims; i++)
@@ -120,7 +128,16 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
 
                     // Bounded as it grows rather than after: the product is what overflows, and an
                     // overflowed product is small, positive and plausible.
-                    RequireFits(count <= Remaining(stream), $"tensor '{name}' with {count} elements", stream);
+                    //
+                    // Multiplied by the element width, like the mel and vocab guards forty lines above.
+                    // It was not, and comparing an element COUNT against remaining BYTES assumes one byte
+                    // per element where the real minimum is two — the same "one sibling has the guard, its
+                    // twin does not" shape this whole sweep was hunting, planted by hand inside a method
+                    // that already contained two correct examples.
+                    RequireFits(
+                        count * bytesPerElement <= Remaining(stream),
+                        $"tensor '{name}' with {count} elements of {bytesPerElement} bytes",
+                        stream);
                 }
 
                 var data = new float[count];
@@ -137,11 +154,6 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
                     {
                         data[i] = (float)BitConverter.UInt16BitsToHalf(br.ReadUInt16());
                     }
-                }
-
-                if (ftype is not (0 or 1))
-                {
-                    throw new OverfitRuntimeException($"Tensor '{name}' has unsupported ftype {ftype} (only F32/F16 supported so far).");
                 }
 
                 tensors[name] = new WhisperTensor(shape, data);
