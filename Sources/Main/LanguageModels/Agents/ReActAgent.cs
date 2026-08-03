@@ -37,6 +37,12 @@ namespace DevOnBike.Overfit.LanguageModels.Agents
         private readonly Dictionary<string, Func<JsonElement, string>> _handlers;
         private readonly int _maxSteps;
 
+        /// <summary>
+        /// The tool menu, built once. It depends only on <see cref="_allTools"/>, which cannot change after
+        /// construction, so rebuilding it per call produced an identical string every time.
+        /// </summary>
+        private readonly string _systemPrompt;
+
         public ReActAgent(
             ChatSession chat,
             ITokenizer tokenizer,
@@ -86,9 +92,40 @@ namespace DevOnBike.Overfit.LanguageModels.Agents
 
             _allTools = combined.ToArray();
             _handlers = new Dictionary<string, Func<JsonElement, string>>(handlers, StringComparer.Ordinal);
+            _systemPrompt = BuildSystemPrompt(_allTools);
         }
 
         public int MaxSteps => _maxSteps;
+
+        /// <summary>
+        /// Puts the tool menu in the conversation, unless it is already there.
+        ///
+        /// <para><b>It was appended on every call, and the session is long-lived.</b> Ten runs on one agent
+        /// left ten copies of the same instructions in <c>ChatSession.History</c>, each one re-encoded into
+        /// every subsequent prompt: latency and cost climb, and the model spends its attention re-reading
+        /// instructions it already has. It degrades rather than fails, which is why nothing caught it.</para>
+        ///
+        /// <para><b>Checked against the history rather than latched on a flag</b>, because the caller owns
+        /// the session and may reset it between runs — <c>SummarizingChatSession</c> rebuilds through
+        /// <c>ResetConversation()</c> precisely so this kind of growth cannot happen. A flag would then be
+        /// telling us the prompt is present when it has just been dropped, which is the same defect wearing
+        /// the opposite sign.</para>
+        /// </summary>
+        private void AddSystemPromptOnce()
+        {
+            var history = _chat.History;
+
+            for (var i = 0; i < history.Count; i++)
+            {
+                if (string.Equals(history[i].Role, "system", StringComparison.Ordinal)
+                    && string.Equals(history[i].Content, _systemPrompt, StringComparison.Ordinal))
+                {
+                    return;
+                }
+            }
+
+            _chat.AddSystem(_systemPrompt);
+        }
 
         /// <summary>The full tool menu the agent presents to the model (user tools + <c>finish</c>).</summary>
         public IReadOnlyList<ToolDefinition> Tools => _allTools;
@@ -101,7 +138,7 @@ namespace DevOnBike.Overfit.LanguageModels.Agents
         {
             ArgumentNullException.ThrowIfNull(userQuery);
 
-            _chat.AddSystem(BuildSystemPrompt(_allTools));
+            AddSystemPromptOnce();
 
             var capturedOptions = options;
             var chatStopTokenId = options.StopOnEndOfTextToken ? options.EndOfTextTokenId : -1;

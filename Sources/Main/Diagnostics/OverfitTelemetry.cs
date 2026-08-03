@@ -25,7 +25,21 @@ namespace DevOnBike.Overfit.Diagnostics
         public static readonly Meter Meter = new(MeterName, Version);
         public static readonly ActivitySource Tracer = new(MeterName, Version);
 
-        // Existing runtime metrics
+        // --------------------------------------------------------------------
+        // Eleven of the instruments below are declared and recorded to by nothing — verified by scanning
+        // every call site in Sources/Main, and stopped from growing by
+        // Tests/Diagnostics/TelemetryInstrumentWiringTests, a ratchet whose list can only shrink.
+        //
+        // Said here, in the code, and NOT in the descriptions: the descriptions are operator-facing
+        // metadata, and an instrument that has never taken a measurement does not export a series at all,
+        // so there is no zero on anybody's dashboard to explain. Prefixing eleven descriptions with a
+        // status marker put an internal note into a customer-visible catalogue and fixed nothing.
+        //
+        // The kernel pair will most likely never be wired, and that is a decision rather than a gap:
+        // timing every kernel invocation means a clock read on the zero-allocation hot path, which is
+        // precisely the kind of change this project requires a benchmark to justify — against the thing it
+        // is measuring. The graph and module ones are wireable and are recorded in ROADMAP.md.
+        // --------------------------------------------------------------------
         public static readonly Histogram<double> KernelDurationMs = Meter.CreateHistogram<double>(
             "overfit.kernel.duration.ms",
             unit: "ms",
@@ -114,6 +128,21 @@ namespace DevOnBike.Overfit.Diagnostics
             "overfit.tensor_storage.borrowed.created",
             unit: "{storage}",
             description: "Number of borrowed arena TensorStorage instances created.");
+
+        /// <summary>
+        /// GC-owned, never-pooled storage — long-lived weights. Split out of the pooled counter, which
+        /// had been reporting these as pool churn; see <see cref="TensorStorageKind"/>.
+        /// </summary>
+        public static readonly Counter<long> TensorStorageUnpooledCreated = Meter.CreateCounter<long>(
+            "overfit.tensor_storage.unpooled.created",
+            unit: "{storage}",
+            description: "Number of GC-owned (never pooled) TensorStorage instances created.");
+
+        /// <inheritdoc cref="TensorStorageUnpooledCreated"/>
+        public static readonly Counter<long> TensorStorageUnpooledDisposed = Meter.CreateCounter<long>(
+            "overfit.tensor_storage.unpooled.disposed",
+            unit: "{storage}",
+            description: "Number of GC-owned (never pooled) TensorStorage instances disposed.");
 
         public static readonly Counter<long> TensorStoragePooledDisposed = Meter.CreateCounter<long>(
             "overfit.tensor_storage.pooled.disposed",
@@ -305,11 +334,28 @@ namespace DevOnBike.Overfit.Diagnostics
             GraphRecordTotalCount.Add(1, tags);
         }
 
+        /// <summary>
+        /// Kept so an external caller keeps compiling, and <b>it cannot express the unpooled case</b> —
+        /// which is the defect. It maps <c>false</c> to <see cref="TensorStorageKind.Pooled"/>, exactly as
+        /// before, so nothing silently changes meaning; new call sites should pass a
+        /// <see cref="TensorStorageKind"/>.
+        /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static void RecordTensorStorageCreated(
             int length,
             int elementSizeBytes,
             bool borrowed)
+        {
+            RecordTensorStorageCreated(
+                length, elementSizeBytes, borrowed ? TensorStorageKind.Borrowed : TensorStorageKind.Pooled);
+        }
+
+        /// <inheritdoc cref="TensorStorageKind"/>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static void RecordTensorStorageCreated(
+            int length,
+            int elementSizeBytes,
+            TensorStorageKind kind)
         {
             if (!Enabled)
             {
@@ -320,17 +366,36 @@ namespace DevOnBike.Overfit.Diagnostics
             TensorStorageElementsCreated.Add(length);
             TensorStorageBytesCreated.Add((long)length * elementSizeBytes);
 
-            if (borrowed)
+            switch (kind)
             {
-                TensorStorageBorrowedCreated.Add(1);
-                return;
-            }
+                case TensorStorageKind.Borrowed:
+                    TensorStorageBorrowedCreated.Add(1);
 
-            TensorStoragePooledCreated.Add(1);
+                    return;
+
+                case TensorStorageKind.Unpooled:
+                    TensorStorageUnpooledCreated.Add(1);
+
+                    return;
+
+                default:
+                    TensorStoragePooledCreated.Add(1);
+
+                    return;
+            }
         }
 
+        /// <inheritdoc cref="RecordTensorStorageCreated(int, int, bool)"/>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static void RecordTensorStorageDisposed(bool borrowed)
+        {
+            RecordTensorStorageDisposed(
+                borrowed ? TensorStorageKind.Borrowed : TensorStorageKind.Pooled);
+        }
+
+        /// <inheritdoc cref="TensorStorageKind"/>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static void RecordTensorStorageDisposed(TensorStorageKind kind)
         {
             if (!Enabled)
             {
@@ -339,13 +404,23 @@ namespace DevOnBike.Overfit.Diagnostics
 
             TensorStorageDisposed.Add(1);
 
-            if (borrowed)
+            switch (kind)
             {
-                TensorStorageBorrowedDisposed.Add(1);
-                return;
-            }
+                case TensorStorageKind.Borrowed:
+                    TensorStorageBorrowedDisposed.Add(1);
 
-            TensorStoragePooledDisposed.Add(1);
+                    return;
+
+                case TensorStorageKind.Unpooled:
+                    TensorStorageUnpooledDisposed.Add(1);
+
+                    return;
+
+                default:
+                    TensorStoragePooledDisposed.Add(1);
+
+                    return;
+            }
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]

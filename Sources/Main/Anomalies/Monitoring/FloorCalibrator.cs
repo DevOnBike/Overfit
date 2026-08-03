@@ -393,7 +393,12 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
             // mistaking a name for an enum member.
             foreach (var (name, channel) in _customChannels)
             {
-                text.Append(CustomMarker).Append(name).Append('\t')
+                // Escaped, like OperatorLabelStore and SuppressionStore do for their own text fields. A
+                // channel name is the one string here that comes from a customer's config file, and a tab
+                // in it splits the record while a newline ends it — but the sharp case is a name
+                // containing "### labels", which moves LearnedState's section boundary and silently
+                // redistributes the payload between the calibration and the labels.
+                text.Append(CustomMarker).Append(Escape(name)).Append('\t')
                     .Append(channel.PeerGaps.Write()).Append('\t')
                     .Append(channel.TrendChanges.Write()).Append('\t')
                     .Append(channel.Magnitudes.Write()).Append('\t')
@@ -437,7 +442,7 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
                 if (parts[0].Length > 1 && parts[0][0] == CustomMarker)
                 {
                     calibrator._cached = null;
-                    calibrator._customChannels[parts[0][1..]] = new CustomChannel
+                    calibrator._customChannels[Unescape(parts[0][1..])] = new CustomChannel
                     {
                         PeerGaps = BoundedSamples.Read(parts[1]),
                         TrendChanges = BoundedSamples.Read(parts[2]),
@@ -688,6 +693,29 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
             finite.Sort();
 
             return Quantile(finite, 0.5);
+        }
+
+        /// <summary>
+        /// Tabs and newlines are the record separators, so they cannot survive inside a field. Same
+        /// encoding as <c>OperatorLabelStore</c> and <c>SuppressionStore</c>, deliberately: three stores
+        /// share one file through <c>LearnedState</c>, and three escaping schemes in one file is a format
+        /// nobody can reason about.
+        /// </summary>
+        private static string Escape(string value)
+        {
+            return value.Replace("\\", "\\\\", StringComparison.Ordinal)
+                        .Replace("\t", "\\t", StringComparison.Ordinal)
+                        .Replace("\n", "\\n", StringComparison.Ordinal)
+                        .Replace("#", "\\h", StringComparison.Ordinal);
+        }
+
+        /// <inheritdoc cref="Escape"/>
+        private static string Unescape(string value)
+        {
+            return value.Replace("\\h", "#", StringComparison.Ordinal)
+                        .Replace("\\n", "\n", StringComparison.Ordinal)
+                        .Replace("\\t", "\t", StringComparison.Ordinal)
+                        .Replace("\\\\", "\\", StringComparison.Ordinal);
         }
 
         /// <summary>Nearest-rank quantile of an already sorted list; zero when there is nothing to rank.</summary>

@@ -82,6 +82,26 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
             string model, string[] tokens, int[] tokenTypes, float[] scores, string[] merges,
             int bos, int eos, int unk, bool addBos, bool addSpacePrefix, string preType)
         {
+            ArgumentNullException.ThrowIfNull(tokens);
+            ArgumentNullException.ThrowIfNull(tokenTypes);
+            ArgumentNullException.ThrowIfNull(scores);
+
+            // Three arrays that arrive as three separate GGUF metadata entries and are then indexed by one
+            // loop bound. A truncated or crafted file makes the shorter ones raise IndexOutOfRangeException
+            // deep inside the constructor — not the OverfitFormatException every sibling loading path
+            // produces, so a caller that handles malformed models does not handle this one.
+            //
+            // `scores` is absent for byte-level BPE vocabularies and is supplied as a zero array of the
+            // right length by the caller, so equality is the correct bound for all three rather than a
+            // "long enough" test that would let a silently short one through.
+            if (tokenTypes.Length != tokens.Length || scores.Length != tokens.Length)
+            {
+                throw new OverfitFormatException(
+                    $"Tokenizer arrays disagree: {tokens.Length} tokens, {tokenTypes.Length} token types, "
+                    + $"{scores.Length} scores. All three are indexed by token id and must be the same "
+                    + "length.");
+            }
+
             _model = model;
             _tokens = tokens;
             _tokenTypes = tokenTypes;

@@ -1845,3 +1845,190 @@ Qwen / Llama / LoRA / quantization are **no longer deferred — they shipped**. 
 - [x] **Stabilize `GPT1_GradientCheck_BackwardIsCorrect`** — pre-fix: model weights randomly initialized + tight `relErr < 10 %` threshold → ~1-in-3 sweeps red. Fix: seeded weight init (deterministic per run) + mixed tolerance (`relErr < 50 %` OR `absErr < 5e-4`) that accepts the inherent FP32 finite-diff noise floor (~ loss_precision / (2 × eps) ≈ 2.5e-3 per gradient). Test still catches sign errors, factor-of-2 backward bugs, and zero-vs-non-zero regressions. 5/5 full sweeps green post-fix.
 
 ---
+
+## ✅ FIXED — constrained decoding (manual review, 2026-08-03; fixed 2026-08-03)
+
+**All four fixed.** The predicate is evaluated once and branched on; `JsonGrammarConstraint` gained the
+dead-end escape its sibling already had, pinned by `JsonGrammarConstraintTests.ADeadEndUnmasksEndOfText…`
+and its counterpart proving the escape does not fire while the document can continue; both constraints now
+take their vocabulary table from `TokenTextTable`, keyed weakly on the tokenizer, so it is decoded once per
+tokenizer instead of once per constraint; and both `Accept` methods now throw when `TryAdvance` refuses
+instead of discarding the result under a comment asserting it cannot fail.
+
+Writing the dead-end test took two attempts, which is worth recording: the first built a vocabulary of
+structural tokens and opened a string, and inside a JSON string almost every character is legal, so nothing
+was stuck. The reachable dead end is after `{`, where only whitespace, `"` or `}` may follow.
+
+Read by hand. `JsonStateMachine`, `JsonGrammarConstraint` and `JsonSchemaConstraint` in full — the last two
+were flagged as never opened by the 2026-08-02 hunt. **Not read**: `Regex/RegexDfa.cs` (602 lines),
+`Schema/JsonSchemaTracker.cs` (504) and `Schema/JsonStringTrie.cs`. No claim is made about those.
+
+**`JsonStateMachine` is exemplary and should be left alone.** Nesting is a 64-bit bit-stack with `MaxDepth`
+enforced by the width of the type itself, `Push` returns false at the limit, and there is no allocation per
+level. It is the shape the rest of this repository's bounded-recursion exemptions are trying to describe in
+comments.
+
+| # | Defect | Why it matters |
+|---|---|---|
+| **1** | **`JsonSchemaConstraint.ApplyMask` evaluates the same predicate twice per token.** The second `if` is the literal negation of the first, recomputed rather than an `else`: `if (!allowed || !Accepts(text)) { mask } if (!(!allowed \|\| !Accepts(text))) { anyAllowed = true; }`. | `Accepts` replays the whole token text through the state machine **and** the schema tracker. That is repeated for every vocabulary entry (151 936 on Qwen) at every decode step, and the loop does it twice. This is a claim about structure, not speed — **how much of decode time it costs has not been measured** and would need a benchmark before any number is quoted. |
+| **2** | **`JsonGrammarConstraint` has no dead-end escape, and its sibling does.** `JsonSchemaConstraint` deliberately unmasks end-of-text when no token is schema-valid, so generation ends on a valid prefix. The grammar variant masks EOS whenever the document is incomplete and never checks whether anything else survived. | In a BPE dead-end **every logit becomes −∞**. That is not a refusal, it is a degenerate distribution handed to the sampler: softmax over all −∞ is NaN. Same shape as four other findings this week — two implementations of one pattern, one of them carrying the guard. |
+| **3** | **Both constraints decode the entire vocabulary, one token at a time, in their constructor.** ~152 000 `DecodeToString` calls and as many string allocations per instance, in identical code in both classes. | If the server builds a constraint per request — which is what the API shape suggests — every JSON-constrained request pays that before its first token. One cache per tokenizer removes it once for both. |
+| **4** | **`Accept` discards `TryAdvance`'s result under a comment asserting it cannot fail** — *"The token was unmasked, so every character must advance the committed machine."* | NASA rule 7 exactly. If the invariant ever breaks — another path calling `Accept` without the mask, or the two drifting apart in a later edit — the machine desynchronises from the text silently and every subsequent mask is computed from a wrong state. An assertion turns a silent wrong answer into a reportable one. |
+
+Fix order: 2 first — it is the only one that produces a wrong result rather than wasted work, and the fix is
+the three lines its sibling already has. Then 1, then 4, then 3.
+
+## ✅ FIXED — ONNX import (manual review, 2026-08-03; fixed 2026-08-03)
+
+**All five fixed, by deleting the duplicate rather than patching it.** `OnnxExternalData` is now the single
+implementation both importers call; the graph importer's "minimal version" — whose own comment admitted it
+was re-implemented to avoid duplication — is gone. Path validation, checked narrowing and the bounds test
+therefore apply to both, and `MalformedSizeAndPathTests` pins the absolute path, the traversal, the empty
+location and the sibling-file case that must still work.
+
+Finding 4 was fixed by removing the read rather than bounding it: the resolver now seeks to the offset and
+reads only the requested slice instead of pulling whole `.data` files into memory and caching them. For a
+multi-gigabyte external-data file that was gigabytes of peak RAM to extract one tensor, which on this
+project's target hardware is worth more than the defect that prompted it.
+
+Finding 5 is one of three copies of the same unchecked dimension product — see the loaders section below.
+
+Read by hand rather than hunted. `ProtoReader` in full, both importers' external-data paths in full, the
+schema records, and a scan of dimension arithmetic. **Not read**: the sixteen operators, most of
+`OnnxProtoParser`, and `OnnxGraphModel`'s execution — no claim is made about those. Full write-up in
+`docs/bug-hunts/onnx-2026-08-03-manual-review-findings.md`.
+
+**Worth saying first: `ProtoReader` is good.** It bounds `ReadVarint` twice and compares a declared length
+against the remaining buffer **as `ulong` before the cast**, with a comment naming the attack it closes — a
+length whose low 32 bits are negative would otherwise rewind the read position and hang the parse loop with
+no exception. Somebody did a hostile-input pass here and did it properly, which is why the rest is worth
+reporting rather than expected.
+
+| # | Defect | Why it matters |
+|---|---|---|
+| **1** | **`OnnxGraphImporter.ResolveExternalData` performs no path validation.** Its sibling `OnnxImporter.ResolveExternalDataPath` rejects an empty location, rejects an absolute one, and proves containment via `IsPathInsideDirectory`. The graph importer does `Path.Combine(dir, location)` and reads. | **`Path.Combine` returns its second argument whole when that argument is rooted** — so a model naming an absolute path is not combined with anything, the process just reads that file; `../../..` escapes as easily. This is the importer required for skip-connection models, i.e. the ones anybody actually imports, so the guarded path is the less-used one. The method's own opening comment — *"To avoid duplication we just re-implement the minimal version here"* — is where the three checks went. |
+| **2** | **File-supplied `Offset` and `Length` are narrowed with a raw `(int)` cast**, where the sibling uses `CheckedToInt32` with the initializer's name in the message. | A wrapped value surfaces as `ArgumentOutOfRangeException` instead of the `OverfitFormatException` every other malformed-model path produces, so a caller that handles bad models does not handle this one. |
+| **3** | **A negative allocation is reachable.** With `Length == 0` ("read to end"), `length = fileBytes.Length - offset` is computed with nothing establishing `offset <= fileBytes.Length`. | `new byte[negative]`. The sibling routes the same computation through `GetExternalDataLength`. |
+| **4** | **`File.ReadAllBytes` on an unbounded, attacker-chosen path.** | With finding 1, pointing it at a large file is an out-of-memory kill. The linear importer performs the same read against a path it has proved is inside the model directory. |
+| **5** | **Dimension products computed unchecked** — `OnnxGraphImporter.cs:276`, `OnnxTensor.cs:52`. | Identical to `GgufTensorInfo.ElementCount` from the day before: a wrapped product can pass a later shape check while the real layout disagrees, giving silently wrong weights rather than an exception. |
+
+Fix 1 through 4 together — they are four defects inside one twenty-line method, and the fix for 1 (share
+`ResolveExternalDataPath` instead of re-implementing it) removes the conditions for 2 and 3 at the same time.
+5 belongs with the GGUF `ElementCount` fix already queued.
+
+**Findings 2, 3 and 5 are exactly what `OVERFIT024` is for. Finding 1 is not** — no analyser will notice that
+one method validates a path and its neighbour does not. That one needed a reader, which is the case for
+continuing to review by hand alongside the rules rather than instead of them.
+
+## ✅ FIXED — language models, loading and tokenizers (found 2026-08-02; fixed 2026-08-03)
+
+**All four fixed.** `RepackedWeightsFile.Open` bounds its entry count and every name length against the
+bytes remaining, and validates each record's offset and length before the mapping is sliced;
+`GgufTokenizer` refuses three parallel arrays of disagreeing lengths with an `OverfitFormatException`
+rather than an `IndexOutOfRangeException` from deep inside a loop; `GgufTensorInfo.ElementCount` is checked;
+and `ReActAgent.Run` adds its tool menu only when the conversation does not already carry it — checked
+against the history rather than latched on a flag, because the caller owns the session and may reset it.
+
+**The unchecked dimension product turned out to be one defect in three modules**: `GgufTensorInfo`,
+`OnnxTensor.ElementCount` and the ONNX graph importer, plus `TensorShape`/`TensorStrides`/`TensorView` in
+the tensors section. All are now checked. The reason the analyser reported these directories clean is that
+`OVERFIT028` scans `new T[...]` array-creation syntax, so a property getter or a constructor is invisible to
+it — recorded as an open item below.
+
+`Runtime/` was excluded — already hunted twice, three defects recorded. The hunt covered `Loading/`,
+`Tokenizers/`, `Rope/`, `Quantization/`, `Chat/`, `Agents/`, `Tools/`, `Contracts/` and `Memory/`, and
+**stopped voluntarily at 5.5 minutes of a ten-minute budget on a 217-file module**. Four findings is a
+statement about how much was read, not about the module: `JsonGrammarConstraint`, `JsonSchemaConstraint` and
+most of `GgufLlamaLoader` were never opened. Report in
+`docs/bug-hunts/languagemodels-2026-08-02-2009-bugs-game-findings.md`.
+
+**Three of the four are one defect wearing three hats**: a length or count read from an untrusted model file
+and used without a bound — the same class as the two host-killing loops the NASA-rules analyzers caught here
+earlier. In every case a sibling reader in the same directory already has the guard, which is what makes
+these omissions rather than decisions.
+
+| # | Defect | Why it matters |
+|---|---|---|
+| **1** | **`RepackedWeightsFile.Open` reads an unbounded name length.** Verified: `var nameLen = reader.ReadInt32(); Encoding.UTF8.GetString(reader.ReadBytes(nameLen));` — no bound, where `GgufReader` guards the identical shape with `RequireDeclaredCountFitsInFile` and a comment explaining why. `count` is checked for negativity but not against the file size. | **The caller's promise is false.** `TryOpenSidecar` comments that "a corrupt/incompatible sidecar must never block loading" and catches only `OverfitFormatException` and `IOException`; a negative length raises `ArgumentOutOfRangeException` and a huge one `OutOfMemoryException`. Neither is caught, so the one case the comment exists for is the one it does not cover. |
+| **2** | **`GgufTokenizer` indexes three parallel GGUF arrays by one length.** Verified: the constructor loops `id < tokens.Length` and reads `tokenTypes[id]`, while `token_type` and `scores` come from separate file arrays whose lengths are never compared to `tokens`'. | A truncated or crafted file produces `IndexOutOfRangeException` instead of the `OverfitFormatException` every sibling path produces — so a caller that handles malformed models does not handle this one. |
+| **3** | **`GgufTensorInfo.ElementCount` multiplies dimensions unchecked.** Verified: `n *= (long)Dims[i]` over `ulong` dims, so a huge dimension casts to a negative `long` and the product wraps. `SafetensorsReader` guards the same class explicitly via `RequireTensorsFitInTheDataBlock`. | The dangerous half is not the crash. A wrapped count can **match** the loader's expected-shape check while the real on-disk layout disagrees — silently wrong weights, no exception, output that is merely worse. |
+| **4** | **`ReActAgent.Run` re-appends its tool-menu system prompt on every call**, growing `ChatSession.History` without bound across repeated calls on one agent. The sibling `Memory/SummarizingChatSession` avoids exactly this by rebuilding through `ResetConversation()`. | Reported, not independently verified here. It degrades rather than fails: each call carries a longer prompt, so latency and cost climb and the model's attention is spent on repeated instructions. |
+
+Fix order: 1, 2, 3 together — they are one review of the untrusted-input boundary, and fixing them
+separately means reading the same three files three times. Then 4.
+
+## ✅ FIXED — tensors (found 2026-08-02 by `overfit-find-bugs-game`; fixed 2026-08-03)
+
+**All five fixed, and finding 5 turned out to be real after being recorded as doubtful.** `AsMemory()` now
+performs the disposed check its sibling does and refuses native-backed storage outright (a `Memory<T>` over
+a raw pointer cannot exist); the raw-span `Add` gained the overlap guard every sibling had;
+`TensorShape.Size`, `Flatten2D`, `TensorStrides.Contiguous` and `TensorView.Reshape` are checked;
+`NativeBuffer<T>` stopped being a `readonly ref struct` so `Dispose` can null its pointer, which is what
+makes a double free impossible rather than merely unlikely.
+
+**Finding 5 was scepticism misapplied.** It was filed as "unverified — the reported throw is raised before
+any rent". That was true of the rank switch's default case and false of the one that mattered: a second
+throw, for a non-contiguous view of rank 1, 3 or 4, sat *after* the destination tensor had rented from the
+pool. The guard now runs first. Recording a doubt is right; letting the doubt close the question is not.
+
+`NativeBuffer<T>` is referenced by exactly one test and no production code — noted in its own summary so a
+reader does not go looking for the arena the graph actually uses, which is `NativeBufferManaged<T>`.
+
+All thirteen files read; the hunt **ended by scope, not by the clock**, and spent its remaining budget tracing
+call sites. Report in `docs/bug-hunts/tensors-2026-08-02-1948-bugs-game-findings.md`.
+
+**This batch is a different animal from the other two that day.** The anomaly-guard and diagnostics hunts
+found almost nothing but prose disagreeing with code. This one — the foundation every other module allocates
+and slices through — found ordinary logic and lifetime defects, including a certain `NullReferenceException`
+on a live path. The lesson is not "documentation is what rots here": it is that documentation rots where
+code was written most recently, and the old foundation has plain bugs nobody had read for.
+
+| # | Defect | Why it matters |
+|---|---|---|
+| **1** | **`TensorStorage<T>.AsMemory()` crashes on arena-backed storage, and skips the disposed check.** Verified: `AsSpan()` branches on `_isBorrowedMemory` and calls `ObjectDisposedException.ThrowIf` first; `AsMemory()` does **neither**, falling into `_data!.AsMemory(...)` where `_data` is null. | Two defects in one method. The crash is loud; the missing disposed check is the dangerous half — a disposed storage hands out `Memory<T>` over an array that may already be back in the pool, silently. |
+| **2** | **Two kernels are missing the overlap guard their siblings have.** Verified by scanning every `public static void` in `TensorKernels`: the raw-span `Add` and one `Relu` overload lack `ValidateInputOutputSpanNonOverlapping`; `AddInPlace`, the `TensorSpan` `Add`, `Multiply`, `Scale` and the other `Relu` all have it. The hunt reported `Add` alone. | A partially overlapping destination produces wrong numbers instead of throwing. Wrong numbers from a kernel do not announce themselves — they propagate into a loss curve that merely looks worse than it should. |
+| **3** | **Size products are `checked` in `FastTensor` and unchecked in `TensorShape`/`TensorStrides`/`TensorView`.** Verified: `FastTensor` uses `checked(s0 * s1 * s2 * s3)` in three places; `TensorShape.cs` contains no `checked` at all. | `OVERFIT028` only scans `new T[...]` array-creation syntax, so it cannot see a property getter or a constructor. A shape whose element count overflows `int` yields a positive, plausible, wrong size long before memory runs out. |
+| **4** | **`NativeBuffer<T>.Dispose()` has no double-free guard**, unlike `PooledBuffer<T>` (nulls the rented array) and `NativeBufferManaged<T>` (a disposed flag). Its `readonly ref struct` shape makes a guard impossible without changing the type. | Reported, not independently verified here. A double free on unmanaged memory is the one failure in this directory that corrupts another allocation rather than the caller's own. |
+| **5** | **`FastTensor<T>.FromView` may leak a rented buffer on a non-contiguous view of rank 1, 3 or 4.** **Unverified** — reading the method did not settle it, and the reported throw is an `OverfitRuntimeException` raised before any rent, not the `NotImplementedException` the report names. Needs a second look before it is treated as real. | Recorded with its uncertainty rather than as a finding, so nobody fixes a bug that is not there. |
+
+Noticed while verifying, not part of the hunt: `FastTensor.FromView` throws with the message
+**"Nieobsługiwany wymiar"** — Polish, in a public exception, in a tree that is otherwise English.
+
+Fix order: 1 first — it is the only certain crash and its second half is silent. Then 2, then 3. Settle 5
+before scheduling it.
+
+## ✅ FIXED — diagnostics (found 2026-08-02 by `overfit-find-bugs-game`; fixed 2026-08-03)
+
+**All three addressed, one of them by refusing to do the obvious thing.**
+
+`RawParallelForAnalyzer` and `FinalizerAnalyzer` now report through `OverfitPerfAnalysis.Report`, which
+needed a new `SymbolAnalysisContext` overload — they report per symbol, and only the per-operation overload
+existed, which is why `[OverfitHotPath]` could not escalate them however loudly its documentation said it
+would. `OverfitPerfAnalysis.Report` also stopped evaluating `IsInHotPath` twice per diagnostic.
+
+The tensor-storage counter now carries three states through `TensorStorageKind`. The `Unpooled` path was
+reporting itself as pooled, so `overfit.tensor_storage.pooled.created` included one-time weight-load
+allocations — a metric that misleads rather than one that is absent, and worst exactly at startup, which is
+when somebody looks. Two new series carry the split.
+
+**The eleven dead instruments were left alone, and the first attempt at "fixing" them was reverted.** Their
+descriptions were briefly prefixed with `NOT EMITTED`; that was wrong on three counts and is worth keeping
+as a record rather than quietly undoing. The premise went unchecked — an instrument that has never taken a
+measurement does not export a series at all, so there is no flat zero on anybody's dashboard to explain,
+which is the whole justification the finding rested on. It was not a fix either: a status marker in a
+description neither wires an instrument nor removes one. And it put an internal note into operator-facing
+metadata, so a catalogue of forty-two metrics announced that eleven of them were unfinished.
+
+What stands instead: the code-level comment in `OverfitTelemetry` naming which are dead and why, and
+`TelemetryInstrumentWiringTests` — a ratchet whose list can only shrink. Wiring the kernel pair would mean
+a clock read on the zero-allocation hot path, which this project requires a benchmark to justify against
+the very thing it measures; that one is a decision, not a gap. The graph and module ones remain wireable.
+
+Seven files, ended by scope in under five minutes, then followed the callers. Report in
+`docs/bug-hunts/diagnostics-2026-08-02-1942-bugs-game-findings.md`.
+
+| # | Defect | Why it matters |
+|---|---|---|
+| **1** | **`[OverfitHotPath]` promises more than it enforces.** Verified: its documentation says `OVERFIT001`–`OVERFIT014` escalate to a hard `OVERFIT900` error inside a marked member, but `RawParallelForAnalyzer` (008) and `FinalizerAnalyzer` (012) contain no `HotPathRule` or `OverfitPerfAnalysis` hook at all, where `BoxingAnalyzer` does. | The attribute is on real decode-path members. A raw `Parallel.For` or a finalizer added inside one builds at warning severity while the attribute above it says it cannot. |
+| **2** | **Eleven of forty-two declared telemetry instruments are fed by nothing.** Verified by scanning every call site in `Sources/Main`: `AllocationBytes`, `GraphAllocatedBytes`, `GraphBackwardDurationMs`, `GraphCount`, `KernelCount`, `KernelDurationMs`, `ModuleAllocatedBytes`, `ModuleCount`, `ModuleDurationMs`, `NativeMemoryBytes`, `TapeOpCount`. | Each has a real description and exports a flat zero, which reads as "this never happens". Same shape as `overfit_guard_state_failures_total` found the same afternoon. **Guarded from now on** by `Tests/Diagnostics/TelemetryInstrumentWiringTests.cs`, a ratchet that fails on a new dead instrument and also fails when a listed one is revived, so the list can only shrink. |
+| **3** | **The tensor-storage counter carries one bit where it needs two.** `RecordTensorStorageCreated(int, int, bool borrowed)` — signature verified; the specific miscount of the `Unpooled()` GC-array path was not independently checked. | If it holds, a dashboard watching pool pressure is contaminated by one-time weight-load allocations, which is a metric that misleads rather than one that is merely absent. |

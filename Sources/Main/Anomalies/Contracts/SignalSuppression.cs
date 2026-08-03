@@ -38,10 +38,16 @@ namespace DevOnBike.Overfit.Anomalies.Contracts
     /// wrong.</b> It cited a replay showing a week of dismissals leaving <c>cpu 2.5x</c> undetected. That
     /// result came from a harness which matched incidents on the subject without checking the signal, so an
     /// unrelated <c>GcPauseRatio</c> incident on the same pod counted as detecting a CPU fault; with the
-    /// check added, the three-arm replay shows a week of dismissals costing <b>no</b> detection at all and
-    /// this mechanism doing nothing observable. It is kept because the argument above stands on its own —
-    /// but it is an argument, and this module's README promises that numbers are measured. It has no number
-    /// yet. See the open-defect entry in <c>ROADMAP.md</c>.</para>
+    /// check added, the three-arm replay showed a week of dismissals costing <b>no</b> detection at all and
+    /// this mechanism doing nothing observable.</para>
+    ///
+    /// <para><b>That was the wrong experiment, not a verdict on the mechanism.</b> A replay over a healthy
+    /// shadow week followed by a fault only exercises the ceiling when a dismissal happens to land on the
+    /// same pod and signal as the fault, inside the mute window — otherwise it measures nothing and says
+    /// so. The claim here is behavioural rather than statistical, so it is now pinned behaviourally by
+    /// <c>SuppressionCeilingTests</c>: the dismissed event stays muted, an event 25% larger stays muted, an
+    /// event ten times larger reaches the operator, and the guard's own store honours all three. That is
+    /// the number this needed — a boundary, tested — rather than a rate.</para>
     /// </param>
     public readonly record struct SignalSuppression(
         string Pod,

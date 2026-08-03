@@ -43,15 +43,7 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints
 
             _requireObject = requireObject;
             _eosTokenId = tokenizer.EndOfTextTokenId;
-
-            var vocab = tokenizer.VocabularySize;
-            _tokenText = new string[vocab];
-            Span<int> one = stackalloc int[1];
-            for (var t = 0; t < vocab; t++)
-            {
-                one[0] = t;
-                _tokenText[t] = tokenizer.DecodeToString(one);
-            }
+            _tokenText = TokenTextTable.For(tokenizer);
         }
 
         public bool IsComplete => _committed.IsComplete;
@@ -68,39 +60,52 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints
                     nameof(logits));
             }
 
+            var anyAllowed = false;
+
             for (var t = 0; t < logits.Length; t++)
             {
                 if (t == _eosTokenId)
                 {
-                    // The end-of-text token is allowed only once the JSON is complete.
-                    if (!_committed.IsComplete)
-                    {
-                        logits[t] = float.NegativeInfinity;
-                    }
+                    // Decided after the loop: whether it may terminate depends on whether anything else
+                    // survived, which is not known yet.
                     continue;
                 }
 
                 // Padding slots beyond the tokenizer vocab, and special/control tokens that render
                 // empty, never belong inside JSON output.
                 var text = t < _tokenText.Length ? _tokenText[t] : string.Empty;
-                if (text.Length == 0)
+
+                // One evaluation, one branch. Whether the token is allowed and whether anything is allowed
+                // are the same question asked twice, and asking it twice is how the sibling constraint came
+                // to replay every token through its state machine two times per decode step.
+                var allowed = text.Length > 0
+                              && (!_requireObject || _rootStarted || OpensObject(text))
+                              && Accepts(text);
+
+                if (!allowed)
                 {
                     logits[t] = float.NegativeInfinity;
+
                     continue;
                 }
 
-                // Object-root mode: before the first value char is committed, only "{" (or leading
-                // whitespace) may open the document.
-                if (_requireObject && !_rootStarted && !OpensObject(text))
-                {
-                    logits[t] = float.NegativeInfinity;
-                    continue;
-                }
+                anyAllowed = true;
+            }
 
-                if (!Accepts(text))
-                {
-                    logits[t] = float.NegativeInfinity;
-                }
+            // End-of-text is allowed once the document is complete, OR as an escape from a BPE dead-end
+            // where nothing else is grammar-valid.
+            //
+            // WITHOUT the second condition every logit went to negative infinity, which is not a refusal:
+            // it is a degenerate distribution handed to the sampler, and softmax over all -inf is NaN. The
+            // sibling JsonSchemaConstraint already had this escape and this one did not — the same
+            // one-of-a-pair-carries-the-guard shape as four other findings the same week.
+            //
+            // The dead-end itself is a tokenizer problem: a BPE vocabulary need not contain any token that
+            // continues a valid prefix. Token healing is the real repair; terminating on the valid prefix
+            // is the honest interim answer.
+            if (_eosTokenId >= 0 && _eosTokenId < logits.Length && !_committed.IsComplete && anyAllowed)
+            {
+                logits[_eosTokenId] = float.NegativeInfinity;
             }
         }
 
@@ -116,10 +121,23 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints
             }
 
             var text = _tokenText[token];
+
             for (var i = 0; i < text.Length; i++)
             {
-                // The token was unmasked, so every character must advance the committed machine.
-                _committed.TryAdvance(text[i]);
+                // The invariant is that this token was unmasked, so every character advances. It was
+                // asserted in a comment and the result discarded — NASA rule 7 exactly. If it ever breaks
+                // (a caller accepting a token it did not mask, or the mask and this loop drifting apart in
+                // a later edit) the machine desynchronises from the text and every subsequent mask is
+                // computed from a state that does not describe the document. That is silent and permanent;
+                // this turns it into one exception at the moment it happens.
+                if (!_committed.TryAdvance(text[i]))
+                {
+                    throw new OverfitRuntimeException(
+                        $"Token {token} ('{text}') was accepted but character '{text[i]}' does not advance "
+                        + "the JSON state machine. The constraint's mask and its committed state have "
+                        + "diverged; continuing would compute every later mask from a wrong state.");
+                }
+
                 if (!IsJsonWhitespace(text[i]))
                 {
                     _rootStarted = true;

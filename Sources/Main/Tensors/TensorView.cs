@@ -146,7 +146,10 @@ namespace DevOnBike.Overfit.Tensors
                 throw new OverfitRuntimeException("Nie można zmienić kształtu nieciągłego widoku.");
             }
 
-            if (newS0 * newS1 != Size)
+            // checked: an unchecked product that wraps can land exactly on Size and pass this test, which
+            // turns the one guard protecting the reshape into the thing that waves the bad shape through.
+            // See TensorShape.Size for why OVERFIT028 does not see any of these.
+            if (checked(newS0 * newS1) != Size)
             {
                 throw new ArgumentException($"Nowy rozmiar {newS0 * newS1} nie pasuje do obecnego {Size}");
             }

@@ -243,9 +243,28 @@ namespace DevOnBike.Overfit.Tensors
         /// <summary>
         /// Creates a new, contiguous physical tensor from any (even transposed) view.
         /// </summary>
+        /// <summary>
+        /// Materialises a view into a fresh, contiguous tensor.
+        ///
+        /// <para><b>The unsupported case is refused before anything is rented, and it used not to be.</b>
+        /// The rank check for non-contiguous copies sat <i>after</i> the destination was constructed, so a
+        /// non-contiguous view of rank 1, 3 or 4 threw with a <c>PooledBuffer</c> already taken from
+        /// <c>ArrayPool</c> and nobody left holding it — a leak on an error path, which is the shape that
+        /// survives longest because the error path is the one nobody exercises twice.</para>
+        /// </summary>
+        /// <exception cref="OverfitRuntimeException">
+        /// The rank is above 4, or the view is non-contiguous and not rank 2.
+        /// </exception>
         public static FastTensor<T> FromView(
             TensorView<T> view)
         {
+            if (!view.IsContiguous && view.Rank != 2)
+            {
+                throw new OverfitRuntimeException(
+                    $"Copying a non-contiguous view of rank {view.Rank} is not implemented; only rank 2 is "
+                    + "supported. Make the view contiguous first.");
+            }
+
             var materializedTensor = view.Rank switch
             {
                 1 => new FastTensor<T>(
@@ -282,14 +301,10 @@ namespace DevOnBike.Overfit.Tensors
                 return materializedTensor;
             }
 
+            // Rank is 2 here by the guard at the top of the method; the check that used to live at this
+            // point is what leaked the tensor allocated above.
             var targetSpan = materializedTensor.AsSpan();
             var index = 0;
-
-            if (view.Rank != 2)
-            {
-                throw new NotImplementedException(
-                    "todo: Kopiowanie nieciągłych widoków > 2D nie jest zaimplementowane.");
-            }
 
             for (var i = 0; i < view.GetDim(0); i++)
             {

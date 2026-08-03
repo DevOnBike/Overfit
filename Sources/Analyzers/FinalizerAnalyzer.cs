@@ -32,7 +32,9 @@ namespace DevOnBike.Overfit.Analyzers
             isEnabledByDefault: true,
             description: "Finalizers put objects on the finalization queue at construction and delay reclamation by a GC generation. Prefer deterministic IDisposable cleanup; if a finalizer is a required safety net, suppress it in Dispose with GC.SuppressFinalize.");
 
-        public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = [Rule];
+        /// <inheritdoc cref="RawParallelForAnalyzer.SupportedDiagnostics"/>
+        public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } =
+            [Rule, OverfitPerfAnalysis.HotPathRule];
 
         public override void Initialize(AnalysisContext context)
         {
@@ -52,10 +54,8 @@ namespace DevOnBike.Overfit.Analyzers
 
             var location = method.Locations.Length > 0 ? method.Locations[0] : Location.None;
 
-            context.ReportDiagnostic(Diagnostic.Create(
-                Rule,
-                location,
-                method.ContainingType?.Name ?? method.Name));
+            OverfitPerfAnalysis.Report(
+                context, Rule, location, method.ContainingType?.Name ?? method.Name);
         }
     }
 }

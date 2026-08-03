@@ -32,15 +32,34 @@ namespace DevOnBike.Overfit.Analyzers
         /// <see cref="HotPathRule"/> in its <c>SupportedDiagnostics</c>.</summary>
         internal static void Report(OperationAnalysisContext context, DiagnosticDescriptor rule, Location location, params object[] messageArgs)
         {
-            if (IsInHotPath(context.ContainingSymbol))
-            {
-                context.ReportDiagnostic(Diagnostic.Create(HotPathRule, location, rule.Id));
-            }
+            // One evaluation. The two branches used to call IsInHotPath separately, which walks the whole
+            // containing-symbol chain and reads attributes at each level — twice per reported diagnostic,
+            // for an answer that cannot differ between the two calls.
+            var hot = IsInHotPath(context.ContainingSymbol);
 
-            if (!(IsInHotPath(context.ContainingSymbol)))
-            {
-                context.ReportDiagnostic(Diagnostic.Create(rule, location, messageArgs));
-            }
+            context.ReportDiagnostic(hot
+                ? Diagnostic.Create(HotPathRule, location, rule.Id)
+                : Diagnostic.Create(rule, location, messageArgs));
+        }
+
+        /// <summary>
+        /// The same escalation for a symbol-level rule.
+        ///
+        /// <para>It did not exist, so the two analyzers that report per symbol rather than per operation —
+        /// <c>FinalizerAnalyzer</c> (OVERFIT012) and, before it was moved onto <see cref="Report"/>,
+        /// <c>RawParallelForAnalyzer</c> (OVERFIT008) — called <c>ReportDiagnostic</c> directly and could
+        /// never escalate. <c>[OverfitHotPath]</c>'s documentation promised OVERFIT001–OVERFIT014 became a
+        /// hard error inside a marked member, and for those two it did not: a finalizer or a raw
+        /// <c>Parallel.For</c> added inside a decode-path type built at warning severity, under an
+        /// attribute saying that was impossible.</para>
+        /// </summary>
+        internal static void Report(SymbolAnalysisContext context, DiagnosticDescriptor rule, Location location, params object[] messageArgs)
+        {
+            var hot = IsInHotPath(context.Symbol);
+
+            context.ReportDiagnostic(hot
+                ? Diagnostic.Create(HotPathRule, location, rule.Id)
+                : Diagnostic.Create(rule, location, messageArgs));
         }
 
         /// <summary>True when the operation lives in a member, accessor, or (containing) type carrying

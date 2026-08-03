@@ -147,19 +147,56 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                 }
 
                 var count = reader.ReadInt32();
-                if (count < 0)
+
+                // Against the file's own size, not merely against zero. The smallest entry this format can
+                // encode is 28 bytes (4 name length + 4 + 4 + 8 + 8, with an empty name), so a declared
+                // count needing more than the file holds is a malformed header rather than a very large
+                // model — and taking it at face value is a loop that allocates until something dies.
+                // `GgufReader.RequireDeclaredCountFitsInFile` guards the identical shape; this is the
+                // sibling that did not.
+                const long SmallestEntryBytes = 28;
+                var remaining = stream.Length - stream.Position;
+
+                if (count < 0 || (long)count * SmallestEntryBytes > remaining)
                 {
-                    throw new OverfitFormatException($"'{path}' has a negative entry count ({count}).");
+                    throw new OverfitFormatException(
+                        $"'{path}' declares {count} entries, which needs at least "
+                        + $"{(long)count * SmallestEntryBytes} bytes and only {remaining} remain.");
                 }
 
                 for (var i = 0; i < count; i++)
                 {
                     var nameLen = reader.ReadInt32();
+
+                    // Unbounded before this check, and the caller's promise made that worse rather than
+                    // better: TryOpenSidecar says "a corrupt or incompatible sidecar must never block
+                    // loading" and catches OverfitFormatException and IOException. A negative length raises
+                    // ArgumentOutOfRangeException and a huge one OutOfMemoryException — so the one case that
+                    // comment exists for was the one case it did not cover.
+                    if (nameLen < 0 || nameLen > stream.Length - stream.Position)
+                    {
+                        throw new OverfitFormatException(
+                            $"'{path}' declares a {nameLen}-byte tensor name at entry {i}, which does not "
+                            + "fit in the remaining file.");
+                    }
+
                     var name = Encoding.UTF8.GetString(reader.ReadBytes(nameLen));
                     var inputSize = reader.ReadInt32();
                     var outputSize = reader.ReadInt32();
                     var offset = reader.ReadInt64();
                     var length = reader.ReadInt64();
+
+                    // TryGet slices the mapping at these two and casts the length to int unchecked-by-shape;
+                    // a record pointing outside the file would fault on access rather than here, which is
+                    // the wrong place and the wrong exception.
+                    if (offset < 0 || length < 0 || offset > stream.Length
+                        || length > stream.Length - offset || length > int.MaxValue)
+                    {
+                        throw new OverfitFormatException(
+                            $"'{path}' entry '{name}' claims bytes [{offset}, {offset + length}) of a "
+                            + $"{stream.Length}-byte file.");
+                    }
+
                     index[name] = new TensorRecord(inputSize, outputSize, offset, length);
                 }
             }

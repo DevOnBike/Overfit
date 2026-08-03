@@ -73,8 +73,26 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
         /// <summary>Which moments were declared abnormal on purpose.</summary>
         private readonly IMaintenanceCalendar _calendar;
 
-        /// <summary>What a healthy period has looked like so far, per signal. Empty until enough is seen.</summary>
-        public FloorProposal[] FloorProposals => _calibrator.Propose();
+        /// <summary>
+        /// What a healthy period has looked like so far, per signal. Empty until enough is seen.
+        ///
+        /// <para><b>Takes <see cref="_gate"/>, which it did not.</b> <c>FloorCalibrator</c> says plainly
+        /// that it is not thread-safe, and <c>Propose</c> is not a pure read: it computes and caches, and
+        /// a cycle running concurrently invalidates that cache and refills the accumulators underneath it.
+        /// Nothing calls this yet, which is exactly why it was easy to miss — the lock exists because the
+        /// acknowledgement endpoint made this class cross-thread for the first time, and a property that
+        /// skips it is a trap laid for whoever wires the next reader.</para>
+        /// </summary>
+        public FloorProposal[] FloorProposals
+        {
+            get
+            {
+                lock (_gate)
+                {
+                    return _calibrator.Propose();
+                }
+            }
+        }
 
         /// <summary>
         /// The guard's own counters, for a host to expose. <b>Alert on

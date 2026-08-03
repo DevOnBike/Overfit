@@ -37,12 +37,26 @@ namespace DevOnBike.Overfit.Tensors
             }
         }
 
+        /// <summary>
+        /// Elements the shape describes.
+        ///
+        /// <para><b><c>checked</c>, matching <see cref="FastTensor{T}"/>, which has used it here since it
+        /// was written.</b> A product that overflows <see cref="int"/> silently yields a positive,
+        /// plausible, smaller number — and this value goes on to size buffers and bound loops, so the
+        /// failure is an out-of-range read long after the shape was built, or worse, a buffer that is
+        /// quietly too small and merely produces wrong numbers.</para>
+        ///
+        /// <para><c>OVERFIT028</c> cannot see this: it scans <c>new T[...]</c> array-creation syntax, so a
+        /// property getter is invisible to it. That gap is the reason three of this codebase's four
+        /// dimension products were unchecked while the analyser reported the directory clean.</para>
+        /// </summary>
+        /// <exception cref="OverflowException">The product does not fit an <see cref="int"/>.</exception>
         public int Size
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
             get
             {
-                return D0 * D1 * D2 * D3;
+                return checked(D0 * D1 * D2 * D3);
             }
         }
 
@@ -106,7 +120,7 @@ namespace DevOnBike.Overfit.Tensors
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public TensorShape Flatten2D()
         {
-            return new TensorShape(D0, D1 * D2 * D3);
+            return new TensorShape(D0, checked(D1 * D2 * D3));
         }
 
         public override string ToString()

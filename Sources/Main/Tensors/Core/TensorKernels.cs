@@ -38,10 +38,25 @@ namespace DevOnBike.Overfit.Tensors.Core
             TensorPrimitives.Add(target, source, target);
         }
 
+        /// <summary>
+        /// Element-wise sum into a separate destination.
+        ///
+        /// <para><b>The overlap guard was missing here and present on every sibling</b> — <c>AddInPlace</c>,
+        /// the <c>TensorSpan</c> overload above, <c>Multiply</c>, <c>Scale</c> and <c>Relu</c> all had it.
+        /// A partially overlapping destination does not fault; <c>TensorPrimitives</c> processes in vector
+        /// blocks and simply reads inputs it has already overwritten, so the result is arithmetically wrong
+        /// and silent. Wrong numbers out of a kernel do not announce themselves — they arrive as a loss
+        /// curve that merely looks worse than it should, which is days of looking in the wrong place.</para>
+        ///
+        /// <para>Exact aliasing (<c>destination</c> identical to an input) is what <c>AddInPlace</c> is for
+        /// and is allowed there; it is only the partial overlap that has no correct answer.</para>
+        /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static void Add(ReadOnlySpan<float> left, ReadOnlySpan<float> right, Span<float> destination)
         {
             TensorKernelGuards.ValidateSameLengthAndDestination(left, right, destination);
+            TensorKernelGuards.ValidateInputOutputSpanNonOverlapping(left, right, destination);
+
             TensorPrimitives.Add(left, right, destination);
         }
 

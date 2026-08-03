@@ -153,9 +153,20 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
         }
 
         /// <summary>
-        /// Drops the oldest label that is safe to drop: a noise one if any exists, and only then the oldest
-        /// real one. A dismissal that is forgotten costs a repeated alert; a constraint that is forgotten
-        /// costs the guard's ability to see something an operator confirmed matters.
+        /// Drops the label that is safest to drop: the oldest noise one if any exists, and only then the
+        /// <b>largest</b> real one.
+        ///
+        /// <para>A dismissal that is forgotten costs a repeated alert; a constraint that is forgotten costs
+        /// the guard's ability to see something an operator confirmed matters. That much was already
+        /// right.</para>
+        ///
+        /// <para><b>What was wrong is which real label goes.</b> It dropped the oldest, and age is not what
+        /// makes a real label useful — every one of them caps future floor proposals through
+        /// <c>SmallestRealMagnitude</c>, so <b>only the smallest is doing any work</b>. Dropping by age
+        /// removes the binding constraint roughly one time in N, and the symptom is a floor drifting
+        /// upward past something an operator has explicitly confirmed is real: the guard going quiet about
+        /// exactly the thing it was told to keep reporting. Dropping the largest is free — it was already
+        /// dominated by a smaller one.</para>
         /// </summary>
         private void Evict()
         {
@@ -169,7 +180,28 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
                 }
             }
 
-            _labels.RemoveAt(0);
+            // All real. Drop the one that constrains nothing: the largest magnitude, since the cap is a
+            // minimum over them. A non-finite magnitude sorts as largest, because it constrains nothing
+            // either — SmallestRealMagnitude skips it.
+            var victim = 0;
+
+            for (var i = 1; i < _labels.Count; i++)
+            {
+                var current = _labels[i].Magnitude;
+                var best = _labels[victim].Magnitude;
+
+                if (!double.IsFinite(best))
+                {
+                    continue;
+                }
+
+                if (!double.IsFinite(current) || current > best)
+                {
+                    victim = i;
+                }
+            }
+
+            _labels.RemoveAt(victim);
         }
 
         /// <summary>Tabs and newlines are the record separators, so they cannot survive inside a field.</summary>

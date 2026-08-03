@@ -106,6 +106,74 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Constraints
             Assert.True(c.IsComplete);
         }
 
+        /// <summary>
+        /// A dead end must terminate, not produce a distribution the sampler cannot use.
+        ///
+        /// <para><b>Every logit went to negative infinity before this was fixed.</b> That is not a refusal:
+        /// softmax over all <c>-inf</c> is NaN, so the sampler is handed a degenerate distribution and the
+        /// caller gets whatever NaN comparisons happen to select. The sibling <c>JsonSchemaConstraint</c>
+        /// deliberately unmasks end-of-text in exactly this case so generation stops on the valid prefix,
+        /// and this class did not — one implementation of a pattern carrying the guard while its twin does
+        /// not, which is the dominant defect shape in this codebase.</para>
+        ///
+        /// <para><b>Reaching a real dead end takes some care</b>, and the first attempt at this test did
+        /// not: inside a JSON string almost every character is legal, so a vocabulary of structural tokens
+        /// continues happily. After an opening brace, though, only whitespace, <c>"</c> or <c>}</c> may
+        /// follow — a vocabulary holding none of those is genuinely stuck.</para>
+        /// </summary>
+        [Fact]
+        public void ADeadEndUnmasksEndOfTextInsteadOfMaskingEverything()
+        {
+            // After '{' the machine wants a key quote or a closing brace. Neither exists here.
+            string[] vocab = ["{", "a", ""];
+            const int Eos2 = 2;
+
+            var c = new JsonGrammarConstraint(new FakeTokenizer(vocab, Eos2));
+
+            c.Accept(0);   // '{' — inside an object, expecting a key
+
+            var logits = new float[vocab.Length];
+
+            c.ApplyMask(logits);
+
+            Assert.False(c.IsComplete);
+
+            var survivors = 0;
+
+            for (var t = 0; t < logits.Length; t++)
+            {
+                survivors += float.IsNegativeInfinity(logits[t]) ? 0 : 1;
+            }
+
+            Assert.True(
+                survivors > 0,
+                "every logit is -inf, so softmax over them is NaN — the sampler receives a degenerate "
+                + "distribution rather than a stop signal");
+
+            Assert.False(
+                float.IsNegativeInfinity(logits[Eos2]),
+                "the escape must be end-of-text, so generation ends on the valid prefix");
+        }
+
+        /// <summary>
+        /// The escape must not fire while the document can still continue, or JSON mode stops being a
+        /// guarantee — the model could end mid-object whenever it felt like it.
+        /// </summary>
+        [Fact]
+        public void EndOfTextStaysMaskedWhileTheDocumentCanContinue()
+        {
+            var c = new JsonGrammarConstraint(new FakeTokenizer(Vocab, Eos));
+
+            c.Accept(OpenBrace);
+
+            var logits = new float[Vocab.Length];
+
+            c.ApplyMask(logits);
+
+            Assert.False(c.IsComplete);
+            Assert.False(Allowed(logits, Eos));
+        }
+
         private static float[] MaskFreshZeros(JsonGrammarConstraint c)
         {
             var logits = new float[Vocab.Length];

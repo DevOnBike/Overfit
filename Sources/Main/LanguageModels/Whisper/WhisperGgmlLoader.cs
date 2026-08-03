@@ -47,10 +47,19 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
                 F16: br.ReadInt32() != 0);
 
 #pragma warning disable OVERFIT001 // Load-time model parse — runs once per model load (mel filterbank, vocab, per-tensor shape + data), not on any serving path.
+            // Every count below comes out of the file and sizes an allocation. Each is checked against the
+            // bytes actually remaining, because a declared count that cannot fit is a malformed header
+            // rather than a very large model — and taken at face value it is an allocation the file gets
+            // to choose the size of. This is OVERFIT024's shape, four times in one method.
             // ── mel filters ──
             var melRows = br.ReadInt32();
             var melCols = br.ReadInt32();
-            var melFilters = new float[(long)melRows * melCols];
+            var melCount = (long)melRows * melCols;
+
+            RequireFits(melRows >= 0 && melCols >= 0 && melCount * sizeof(float) <= Remaining(stream),
+                $"mel filterbank {melRows}x{melCols}", stream);
+
+            var melFilters = new float[melCount];
             for (var i = 0; i < melFilters.Length; i++)
             {
                 melFilters[i] = br.ReadSingle();
@@ -58,10 +67,18 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
 
             // ── vocab (byte-level BPE strings; specials are computed at use, not stored) ──
             var nTokens = br.ReadInt32();
+
+            // Four bytes is the smallest a token can be: its own length prefix and an empty string.
+            RequireFits(nTokens >= 0 && (long)nTokens * sizeof(int) <= Remaining(stream),
+                $"{nTokens} vocabulary entries", stream);
+
             var vocab = new string[nTokens];
             for (var i = 0; i < nTokens; i++)
             {
                 var len = br.ReadInt32();
+
+                RequireFits(len >= 0 && len <= Remaining(stream), $"token {i} of length {len}", stream);
+
                 var bytes = br.ReadBytes(len);
                 vocab[i] = Encoding.UTF8.GetString(bytes);
             }
@@ -73,6 +90,12 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
                 var nDims = br.ReadInt32();
                 var nameLen = br.ReadInt32();
                 var ftype = br.ReadInt32(); // 0 = f32, 1 = f16
+
+                // ggml tensors are at most 4-dimensional. An unbounded nDims sizes two arrays and a read
+                // loop straight from the file.
+                RequireFits(nDims is >= 1 and <= 4, $"tensor rank {nDims}", stream);
+                RequireFits(nameLen >= 0 && nameLen <= Remaining(stream),
+                    $"tensor name of length {nameLen}", stream);
 
                 // Dimensions are written reversed (ggml ne[]); un-reverse to logical shape.
                 var ne = new int[nDims];
@@ -91,7 +114,13 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
                 long count = 1;
                 for (var i = 0; i < nDims; i++)
                 {
+                    RequireFits(shape[i] >= 0, $"tensor '{name}' dimension {i} is {shape[i]}", stream);
+
                     count *= shape[i];
+
+                    // Bounded as it grows rather than after: the product is what overflows, and an
+                    // overflowed product is small, positive and plausible.
+                    RequireFits(count <= Remaining(stream), $"tensor '{name}' with {count} elements", stream);
                 }
 
                 var data = new float[count];
@@ -120,6 +149,27 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
 
             return new WhisperModel(config, melRows, melCols, melFilters, vocab, tensors);
 #pragma warning restore OVERFIT001
+        }
+
+        /// <summary>Bytes left after the reader's current position.</summary>
+        private static long Remaining(Stream stream) => stream.Length - stream.Position;
+
+        /// <summary>
+        /// Refuses a file-declared count that the file cannot back.
+        ///
+        /// <para>Deliberately compares against <b>bytes remaining</b> rather than a fixed ceiling. A
+        /// constant would have to be either large enough to be useless or small enough to reject a real
+        /// model one day; the file's own size cannot be either, and it is the bound that actually matters —
+        /// no honest header asks for more data than it shipped.</para>
+        /// </summary>
+        private static void RequireFits(bool ok, string what, Stream stream)
+        {
+            if (!ok)
+            {
+                throw new OverfitFormatException(
+                    $"whisper ggml file declares {what}, which does not fit the {Remaining(stream)} bytes "
+                    + "remaining. The file is truncated or not a whisper ggml model.");
+            }
         }
     }
 }

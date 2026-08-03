@@ -268,14 +268,36 @@ namespace DevOnBike.Overfit.Onnx
             }
         }
 
+        /// <summary>
+        /// Elements a shape describes, refusing a product that cannot be one.
+        ///
+        /// <para>The shape comes from the model file. Multiplied unchecked it wraps to something small,
+        /// positive and plausible, which then sizes a buffer that every later read overruns — or passes a
+        /// shape comparison the real layout fails. The same unchecked product existed in
+        /// <c>OnnxTensor.ElementCount</c> and <c>GgufTensorInfo.ElementCount</c>.</para>
+        /// </summary>
         private static int ComputeSize(int[] shape)
         {
-            var size = 1;
+            long size = 1;
+
             foreach (var dim in shape)
             {
+                if (dim < 0)
+                {
+                    throw new OverfitFormatException($"Shape declares a negative dimension ({dim}).");
+                }
+
                 size *= dim;
+
+                if (size > int.MaxValue)
+                {
+                    throw new OverfitFormatException(
+                        $"Shape declares {size} or more elements, which exceeds the {int.MaxValue} this "
+                        + "runtime can address.");
+                }
             }
-            return size;
+
+            return (int)size;
         }
 
         private static void ValidateOpsets(OnnxModel model)
@@ -296,54 +318,17 @@ namespace DevOnBike.Overfit.Onnx
             }
         }
 
+        /// <summary>
+        /// Shared with <see cref="OnnxImporter"/>, and the sharing is the fix.
+        ///
+        /// <para>This method used to hold a second implementation whose own comment said it was
+        /// "the minimal version" — minimal meaning without the path validation, the checked narrowing or
+        /// the bounds test its sibling has. See <see cref="OnnxExternalData"/> for what each of those
+        /// closes.</para>
+        /// </summary>
         private static void ResolveExternalData(OnnxModel model, string? externalDataDir)
         {
-            // Delegate to OnnxImporter's implementation (same assembly, internal access).
-            // Reflection workaround: call Load which resolves internally, or duplicate.
-            // To avoid duplication we just re-implement the minimal version here.
-            if (externalDataDir == null)
-            {
-                return;
-            }
-
-            var fileCache = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
-
-            for (var i = 0; i < model.Graph.Initializers.Count; i++)
-            {
-                var init = model.Graph.Initializers[i];
-                if (init.ExternalData == null)
-                {
-                    continue;
-                }
-
-                var fullPath = Path.GetFullPath(
-                    Path.Combine(externalDataDir, init.ExternalData.Location));
-
-                if (!fileCache.TryGetValue(fullPath, out var fileBytes))
-                {
-                    fileBytes = File.ReadAllBytes(fullPath);
-                    fileCache[fullPath] = fileBytes;
-                }
-
-                var offset = (int)init.ExternalData.Offset;
-                var length = init.ExternalData.Length > 0
-                    ? (int)init.ExternalData.Length
-                    : fileBytes.Length - offset;
-
-                var raw = new byte[length];
-                fileBytes.AsSpan(offset, length).CopyTo(raw);
-
-                model.Graph.Initializers[i] = new OnnxTensor
-                {
-                    Name = init.Name,
-                    DataType = init.DataType,
-                    Dims = init.Dims,
-                    RawData = raw,
-                    FloatData = init.FloatData,
-                    Int64Data = init.Int64Data,
-                    ExternalData = null,
-                };
-            }
+            OnnxExternalData.Resolve(model, externalDataDir);
         }
 
         private static Dictionary<string, OnnxTensor> BuildInitializerLookup(
