@@ -47,6 +47,21 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
         private BoundedSamples[] _magnitudes;
 
         /// <summary>
+        /// How far the <b>workload's common level</b> moved across a window, per cycle — one sample per
+        /// window rather than one per pod, because that is what the step gate judges.
+        ///
+        /// <para><b>Its own accumulator because borrowing the trend one was a real defect, measured.</b> A
+        /// trend change is fitted to a single pod's series; a step is measured on the median across every
+        /// replica, which is roughly <c>√N</c> less scattered. Feeding the first into the second's gate put
+        /// the CPU floor at about 1.5× the signal's own level — nothing below a 150% step was reportable,
+        /// and a real 2.5× cluster-wide rise was thrown away at 0.39 against a floor of 0.81.</para>
+        ///
+        /// <para>This is the second time the step gate has been fed a floor calibrated on a different
+        /// quantity; see the remarks on <see cref="IAbsoluteFloorSource"/> for the first.</para>
+        /// </summary>
+        private BoundedSamples[] _levelShifts;
+
+        /// <summary>
         /// The same three accumulators for channels the enum does not have, keyed by name.
         ///
         /// <para><b>Custom channels were observed by every detector and by nothing that proposes a floor.</b>
@@ -86,12 +101,14 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
             _peerGaps = new BoundedSamples[count];
             _trendChanges = new BoundedSamples[count];
             _magnitudes = new BoundedSamples[count];
+            _levelShifts = new BoundedSamples[count];
 
             for (var i = 0; i < count; i++)
             {
                 _peerGaps[i] = new BoundedSamples();
                 _trendChanges[i] = new BoundedSamples();
                 _magnitudes[i] = new BoundedSamples();
+                _levelShifts[i] = new BoundedSamples();
             }
         }
 
@@ -141,10 +158,18 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
             var windowSeconds = times[^1] - times[0];
             var medians = new double[pods];
 
+            // Reused across metrics rather than allocated per metric: thirteen channels every cycle for as
+            // long as the process runs.
+            var common = new double[window.Length];
+            var scratch = new double[CrossPeerBaseline.RequiredScratchLength(pods)];
+            var peers = new List<PeerSeries>(pods);
+
             for (var m = 0; m < (int)MetricIndex.Count; m++)
             {
                 var metric = (MetricIndex)m;
                 var usable = 0;
+
+                ObserveLevelShift(window, metric, pods, common, scratch, peers, m);
 
                 for (var pod = 0; pod < pods; pod++)
                 {
@@ -206,7 +231,52 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
                     _customChannels[name] = channel;
                 }
 
-                ObserveChannel(window, name, channel, times, windowSeconds, medians);
+                ObserveChannel(window, name, channel, times, windowSeconds, medians, common, scratch, peers);
+            }
+        }
+
+        /// <summary>
+        /// Folds this window's <b>common-level step</b> into the accumulated picture for one metric.
+        ///
+        /// <para><b>Built the same way the guard builds what it judges</b> — a cross-peer median per sample,
+        /// then <see cref="LevelShiftDetector.StepSize"/> — so the floor and the gate cannot describe
+        /// different quantities. That they did is the defect this method exists to close.</para>
+        ///
+        /// <para>Contributes nothing below <see cref="CrossPeerBaseline.MinimumPeers"/>, or where the window
+        /// is too short to split. Silence is correct there: the gate cannot fire on such a window either, so
+        /// a floor learned from one would describe a case that never arises.</para>
+        /// </summary>
+        private void ObserveLevelShift(
+            MetricWindow window,
+            MetricIndex metric,
+            int pods,
+            double[] common,
+            double[] scratch,
+            List<PeerSeries> peers,
+            int index)
+        {
+            if (pods < CrossPeerBaseline.MinimumPeers)
+            {
+                return;
+            }
+
+            peers.Clear();
+
+            for (var pod = 0; pod < pods; pod++)
+            {
+                peers.Add(new PeerSeries(window.Pods[pod], window.SeriesMemory(pod, metric)));
+            }
+
+            if (!CrossPeerBaseline.TryBuild(peers, common, scratch))
+            {
+                return;
+            }
+
+            var step = LevelShiftDetector.StepSize(common);
+
+            if (double.IsFinite(step))
+            {
+                _levelShifts[index].Add(step);
             }
         }
 
@@ -222,10 +292,36 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
             CustomChannel channel,
             double[] times,
             double windowSeconds,
-            double[] medians)
+            double[] medians,
+            double[] common,
+            double[] scratch,
+            List<PeerSeries> peers)
         {
             var pods = window.Pods.Count;
             var usable = 0;
+
+            // The customer's own channels are gated by the step detector exactly as the built-ins are
+            // (see RunCustomTrend), so they need the same floor learned the same way. Leaving this out is
+            // how custom channels came to have no floors at all the first time.
+            if (pods >= CrossPeerBaseline.MinimumPeers)
+            {
+                peers.Clear();
+
+                for (var pod = 0; pod < pods; pod++)
+                {
+                    peers.Add(new PeerSeries(window.Pods[pod], window.SeriesMemory(pod, name)));
+                }
+
+                if (CrossPeerBaseline.TryBuild(peers, common, scratch))
+                {
+                    var step = LevelShiftDetector.StepSize(common);
+
+                    if (double.IsFinite(step))
+                    {
+                        channel.LevelShifts.Add(step);
+                    }
+                }
+            }
 
             for (var pod = 0; pod < pods; pod++)
             {
@@ -288,7 +384,8 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
                 text.Append((MetricIndex)m).Append('\t')
                     .Append(_peerGaps[m].Write()).Append('\t')
                     .Append(_trendChanges[m].Write()).Append('\t')
-                    .Append(_magnitudes[m].Write()).Append('\n');
+                    .Append(_magnitudes[m].Write()).Append('\t')
+                    .Append(_levelShifts[m].Write()).Append('\n');
             }
 
             // Custom lines come after the fixed ones and are marked, so a file written before custom channels
@@ -299,7 +396,8 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
                 text.Append(CustomMarker).Append(name).Append('\t')
                     .Append(channel.PeerGaps.Write()).Append('\t')
                     .Append(channel.TrendChanges.Write()).Append('\t')
-                    .Append(channel.Magnitudes.Write()).Append('\n');
+                    .Append(channel.Magnitudes.Write()).Append('\t')
+                    .Append(channel.LevelShifts.Write()).Append('\n');
             }
 
             return text.ToString();
@@ -324,10 +422,17 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
             {
                 var parts = lines[i].Split('\t');
 
-                if (parts.Length != 4)
+                // Four columns is the format written before the step accumulator existed, and it still
+                // reads: that column comes back empty and the step floor is relearned within a window or
+                // two. Refusing the file instead would drop a week of peer and trend calibration to gain
+                // nothing, and the state a guard runs in with no floors at all was measured at 209 false
+                // incidents a day — so a strict reader would turn an upgrade into exactly that.
+                if (parts.Length is not (4 or 5))
                 {
                     continue;
                 }
+
+                var steps = parts.Length == 5 ? BoundedSamples.Read(parts[4]) : new BoundedSamples();
 
                 if (parts[0].Length > 1 && parts[0][0] == CustomMarker)
                 {
@@ -336,7 +441,8 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
                     {
                         PeerGaps = BoundedSamples.Read(parts[1]),
                         TrendChanges = BoundedSamples.Read(parts[2]),
-                        Magnitudes = BoundedSamples.Read(parts[3])
+                        Magnitudes = BoundedSamples.Read(parts[3]),
+                        LevelShifts = steps
                     };
 
                     continue;
@@ -353,6 +459,7 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
                 calibrator._peerGaps[m] = BoundedSamples.Read(parts[1]);
                 calibrator._trendChanges[m] = BoundedSamples.Read(parts[2]);
                 calibrator._magnitudes[m] = BoundedSamples.Read(parts[3]);
+                calibrator._levelShifts[m] = steps;
             }
 
             return calibrator;
@@ -415,10 +522,12 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
 
             var gapMax = channel.PeerGaps.Count > 0 ? channel.PeerGaps.Max : 0.0;
             var changeMax = channel.TrendChanges.Count > 0 ? channel.TrendChanges.Max : 0.0;
+            var stepMax = channel.LevelShifts.Count > 0 ? channel.LevelShifts.Max : 0.0;
 
             var proposedGap = gapMax * Margin;
             var proposedChange = changeMax * Margin;
-            var capped = Cap(custom, ref proposedGap, ref proposedChange);
+            var proposedStep = stepMax * Margin;
+            var capped = Cap(custom, ref proposedGap, ref proposedChange, ref proposedStep);
 
             var proposal = new FloorProposal(
                 channel.Magnitudes.Count,
@@ -427,8 +536,11 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
                 gapMax,
                 channel.TrendChanges.Quantile(0.99),
                 changeMax,
+                channel.LevelShifts.Quantile(0.99),
+                stepMax,
                 proposedGap,
                 proposedChange,
+                proposedStep,
                 capped);
 
             channel.Cached = proposal;
@@ -448,9 +560,11 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
                 var gaps = _peerGaps[m];
                 var changes = _trendChanges[m];
                 var magnitudes = _magnitudes[m];
+                var steps = _levelShifts[m];
 
                 var gapMax = gaps.Count > 0 ? gaps.Max : 0.0;
                 var changeMax = changes.Count > 0 ? changes.Max : 0.0;
+                var stepMax = steps.Count > 0 ? steps.Max : 0.0;
 
                 // Counted events are observed and reported like everything else, and proposed for by nobody.
                 // The observations are still worth reading — how often peers differ by a restart is a real
@@ -460,7 +574,9 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
 
                 var proposedGap = fittable ? gapMax * Margin : 0.0;
                 var proposedChange = fittable ? changeMax * Margin : 0.0;
-                var capped = Cap(((MetricIndex)m).ToString(), ref proposedGap, ref proposedChange);
+                var proposedStep = fittable ? stepMax * Margin : 0.0;
+                var capped = Cap(
+                    ((MetricIndex)m).ToString(), ref proposedGap, ref proposedChange, ref proposedStep);
 
                 proposals[m] = new FloorProposal(
                     magnitudes.Count,
@@ -469,8 +585,11 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
                     gapMax,
                     changes.Quantile(0.99),
                     changeMax,
+                    steps.Quantile(0.99),
+                    stepMax,
                     proposedGap,
                     proposedChange,
+                    proposedStep,
                     capped);
             }
 
@@ -485,7 +604,8 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
         /// itself uses, applied in the other direction — a confirmed finding should survive comfortably, not
         /// by a rounding error.</para>
         /// </summary>
-        private bool Cap(string signal, ref double proposedGap, ref double proposedChange)
+        private bool Cap(
+            string signal, ref double proposedGap, ref double proposedChange, ref double proposedStep)
         {
             if (_labels is null)
             {
@@ -511,6 +631,15 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
             if (proposedChange > ceiling)
             {
                 proposedChange = ceiling;
+                capped = true;
+            }
+
+            // Capped like the other two: a confirmed finding must survive every gate that could hide it, and
+            // an operator who says "this 40 MB step was real" has constrained the step gate whether or not
+            // the family that reported it was the step one.
+            if (proposedStep > ceiling)
+            {
+                proposedStep = ceiling;
                 capped = true;
             }
 
@@ -585,6 +714,9 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
             public BoundedSamples TrendChanges { get; init; } = new();
 
             public BoundedSamples Magnitudes { get; init; } = new();
+
+            /// <inheritdoc cref="FloorCalibrator._levelShifts"/>
+            public BoundedSamples LevelShifts { get; init; } = new();
 
             public FloorProposal? Cached { get; set; }
         }

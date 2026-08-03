@@ -33,7 +33,7 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
             _path = path;
         }
 
-        /// <summary>What went wrong on the last operation, or <c>null</c>. Cleared on success.</summary>
+        /// <inheritdoc/>
         public string? LastError
         {
             get; private set;

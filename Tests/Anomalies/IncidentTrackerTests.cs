@@ -322,6 +322,88 @@ namespace DevOnBike.Overfit.Tests.Anomalies
                 + "handed out twice");
         }
 
+        /// <summary>
+        /// The other half of the same defect: identifiers spent by records the <b>capacity</b> bound refused.
+        ///
+        /// <para>The sibling test above covers records dropped for age, and that half was fixed on
+        /// 2026-08-02 while this one was not — the loop still ended as soon as <c>MaxOpenIncidents</c> was
+        /// reached, so a payload larger than the cap left its highest identifiers unread. The consequence is
+        /// worse than the staleness case rather than milder: those incidents are <b>fresh and still open</b>,
+        /// so the identifier is handed out again while the original is still being looked at.</para>
+        ///
+        /// <para>Reachable in the one situation a client actually creates: lowering <c>MaxOpenIncidents</c>
+        /// in the ConfigMap and restarting, with the previous run's state file still on disk.</para>
+        /// </summary>
+        [Fact]
+        public void RestoreProtectsTheIdentifiersOfIncidentsItHadNoRoomFor()
+        {
+            var saved = new List<PersistedIncident>();
+
+            for (var i = 1; i <= 10; i++)
+            {
+                saved.Add(Persisted(i, $"pod-{i}"));
+            }
+
+            var tracker = new IncidentTracker(IncidentTrackingOptions.Balanced with { MaxOpenIncidents = 3 });
+
+            // Every record is one minute old, so nothing here is refused for age: capacity is the only
+            // filter under test.
+            var adopted = tracker.Restore(
+                saved, nextId: 1, now: T0.AddMinutes(1), maxAge: TimeSpan.FromDays(1));
+
+            Assert.Equal(3, adopted);
+            Assert.Equal(7, tracker.Truncated);
+
+            Assert.True(
+                tracker.NextId > 10,
+                $"next id is {tracker.NextId} against 10 already issued, so the next incident opened will "
+                + "reuse the identifier of one that is still running");
+        }
+
+        /// <summary>
+        /// Truncation counts capacity refusals only. A stale record was let go deliberately, and counting it
+        /// as truncation would report a working staleness bound as a sizing problem — sending an operator to
+        /// raise a limit that is not the constraint.
+        /// </summary>
+        [Fact]
+        public void StaleRecordsAreNotCountedAsTruncation()
+        {
+            var saved = new List<PersistedIncident> { Persisted(1, "pod-1"), Persisted(2, "pod-2") };
+
+            var tracker = new IncidentTracker(IncidentTrackingOptions.Balanced);
+            var adopted = tracker.Restore(
+                saved, nextId: 1, now: T0.AddDays(30), maxAge: TimeSpan.FromDays(1));
+
+            Assert.Equal(0, adopted);
+            Assert.Equal(0, tracker.Truncated);
+            Assert.True(tracker.NextId > 2);
+        }
+
+        private static PersistedIncident Persisted(long id, string pod)
+        {
+            return new PersistedIncident(
+                id,
+                T0,
+                T0,
+                CyclesSeen: 1,
+                CyclesMissing: 0,
+                PrimaryKey: pod,
+                SubjectKeys: [pod],
+                Namespace: "overfit",
+                Workload: "overfit-server",
+                ReplicaSet: string.Empty,
+                Pod: pod,
+                Node: string.Empty,
+                Signal: "cpu",
+                Class: SignalClass.Resource,
+                Severity: 0.5,
+                Start: T0,
+                End: T0.AddMinutes(20),
+                Subjects: 1,
+                Signals: 1,
+                Summary: "synthetic");
+        }
+
         [Fact]
         public void RejectsUnusableOptions()
         {

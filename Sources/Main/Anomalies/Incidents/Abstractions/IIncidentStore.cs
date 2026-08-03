@@ -20,9 +20,31 @@ namespace DevOnBike.Overfit.Anomalies.Incidents.Abstractions
     public interface IIncidentStore
     {
         /// <summary>
+        /// What went wrong on the last <see cref="Load"/> or <see cref="Save"/>, or <c>null</c> when it
+        /// succeeded. Cleared on success, so it describes the current state rather than the run's history.
+        ///
+        /// <para><b>On the interface, not just on the implementation, because otherwise nobody can read
+        /// it.</b> <c>FileIncidentStore</c> has recorded this since it was written; the guard holds the
+        /// interface, so it could not see the field and no caller ever asked. A recorded reason nobody reads
+        /// is not a report — the failure stayed exactly as silent as if it had never been captured, which is
+        /// the whole condition these two methods promise not to create by swallowing their exceptions.</para>
+        ///
+        /// <para>Implementations that cannot fail return <c>null</c> always, which is honest: there is
+        /// nothing to report.</para>
+        /// </summary>
+        string? LastError
+        {
+            get;
+        }
+
+        /// <summary>
         /// Reads the last saved state, or <c>null</c> when there is none or it cannot be read. Never throws
         /// for a missing or corrupt store: starting cold is a worse outcome than not starting at all only if
         /// the alternative were correct, and here it is not.
+        ///
+        /// <para>A <c>null</c> return is ambiguous by design — no state saved yet, or state that could not
+        /// be read — and <see cref="LastError"/> is what separates the two. A cold start on an empty volume
+        /// and a cold start on an unreadable one call for very different responses.</para>
         /// </summary>
         string? Load();
 

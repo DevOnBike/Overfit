@@ -33,6 +33,23 @@ namespace DevOnBike.Overfit.Anomalies.Contracts
         double MinAbsoluteTrendChange(MetricIndex metric);
 
         /// <summary>
+        /// Smallest <b>step in the workload's common level</b>, in the signal's own units, worth reporting.
+        ///
+        /// <para><b>Its own method for the reason stated above, which this repository has now proved
+        /// twice.</b> The step gate was first fed the peer-gap floor — six times off on the lab — and then
+        /// the trend-change floor, which is fitted to a single pod's slope while the gate judges a median
+        /// across every replica, roughly <c>√N</c> less scattered. Measured on the synthetic population, the
+        /// borrowed CPU floor stood at 0.81 cores against a real 0.39-core step, so a 2.5× rise on every
+        /// replica at once — the fault only this family can see — was never reportable.</para>
+        ///
+        /// <para>Defaulted to <see cref="MinAbsoluteTrendChange(MetricIndex)"/> rather than abstract, so an
+        /// existing implementation keeps compiling with exactly the behaviour it had. That default is the
+        /// defect; it is here so the fix does not become a breaking change for a customer's own floor
+        /// source, and it is documented as wrong rather than silently plausible.</para>
+        /// </summary>
+        double MinAbsoluteLevelShift(MetricIndex metric) => MinAbsoluteTrendChange(metric);
+
+        /// <summary>
         /// The same question for a channel the enum does not have. Zero means the gate is off.
         ///
         /// <para><b>The named overloads exist because the customer's own metrics were the one part of the
@@ -48,5 +65,8 @@ namespace DevOnBike.Overfit.Anomalies.Contracts
 
         /// <inheritdoc cref="MinAbsoluteGap(string)"/>
         double MinAbsoluteTrendChange(string signal) => 0.0;
+
+        /// <inheritdoc cref="MinAbsoluteLevelShift(MetricIndex)"/>
+        double MinAbsoluteLevelShift(string signal) => MinAbsoluteTrendChange(signal);
     }
 }

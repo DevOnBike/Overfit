@@ -93,7 +93,14 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
         public void MeasuresTheFalsePositiveRateOnAHealthyPopulation()
         {
             var pods = Env("OVERFIT_FP_PODS", 20);
-            var hours = Env("OVERFIT_FP_HOURS", 24);
+
+            // 72 rather than 24, and the old default measured nothing at all. The warm-up below skips two
+            // complete 24-hour periods so both arms judge the same windows, which left the default run with
+            // 24 hours generated, 48 skipped and zero evaluations — reported as "0 incidents, 0.00 per day",
+            // a line that reads like a perfect result. Every real measurement was taken with the knob set;
+            // the default was the broken one, which is the wrong way round for a tool whose whole purpose is
+            // to be believed.
+            var hours = Env("OVERFIT_FP_HOURS", 72);
             var seed = Env("OVERFIT_FP_SEED", 20260729);
 
             // OVERFIT_FP_RESTARTS=0 ablates restarts. A restarted pod's memory ramp and the GC sawtooth are two
@@ -365,7 +372,14 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
 
             // Reported, not asserted. The first run of a measurement has no baseline to fail against, and
             // picking a bound now would mean picking one that whatever came out happens to satisfy.
-            Assert.True(evaluations > 0, "no window fitted in the generated history");
+            //
+            // The one thing that IS asserted is that something was measured. Zero evaluations print as a
+            // clean report with a zero rate, and a zero rate from a run that judged nothing is the most
+            // misleading output this file can produce.
+            Assert.True(
+                evaluations > 0,
+                $"no window fitted: {hours} h generated against a {warmup * cluster.ScrapeSeconds / 3600.0:F0} h "
+                + "warm-up. Raise OVERFIT_FP_HOURS above the warm-up or the run measures nothing.");
         }
 
         /// <summary>

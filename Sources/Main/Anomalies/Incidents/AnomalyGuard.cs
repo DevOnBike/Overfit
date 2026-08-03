@@ -202,21 +202,61 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
                     nameof(options));
             }
 
-            if (store is null)
+            if (store is not null)
             {
-                return;
+                var saved = IncidentStateFormat.Read(store.Load(), out var nextId);
+
+                RestoredIncidents = _tracker.Restore(
+                    saved, nextId, restoredAt ?? DateTimeOffset.UtcNow, options.MaxRestoredIncidentAge);
             }
 
-            var saved = IncidentStateFormat.Read(store.Load(), out var nextId);
-
-            RestoredIncidents = _tracker.Restore(
-                saved, nextId, restoredAt ?? DateTimeOffset.UtcNow, options.MaxRestoredIncidentAge);
+            // After both loads, and reached even when there is no incident store, because the learned-state
+            // load happened either way. A start that could not read its state is the moment this matters
+            // most: what follows is a cold start, which is indistinguishable from a healthy first run at
+            // every layer above — the guard reports nothing unusual while running with none of its history.
+            RefreshStateError();
         }
 
         /// <summary>How many incidents were adopted from durable state at construction.</summary>
         public int RestoredIncidents
         {
             get;
+        }
+
+        /// <summary>
+        /// Why durable state could not be read or written, or <c>null</c> when the last attempt succeeded.
+        ///
+        /// <para><b>The failure this exposes is invisible by every other route.</b> The stores swallow their
+        /// exceptions on purpose — detection that stops because a volume filled up has replaced the problem
+        /// it was bought to detect — so cycles keep completing, incidents keep being reported, and nothing
+        /// looks wrong. The bill arrives at the next restart, when every open incident reopens at once and
+        /// a week of calibration is gone. An operator watching <c>overfit_guard_state_failures_total</c>
+        /// learns hours earlier.</para>
+        ///
+        /// <para>Set at construction from the loads, and re-evaluated after the saves in every cycle. The
+        /// incident store is named first when both have failed, because losing incident identity is felt
+        /// immediately and losing learned state is felt slowly.</para>
+        /// </summary>
+        public string? StateError
+        {
+            get; private set;
+        }
+
+        /// <summary>
+        /// Refreshes <see cref="StateError"/> from both stores and counts a failure when there is one.
+        ///
+        /// <para>One increment per check, not one per store: the counter answers "how many cycles could not
+        /// persist", and a full volume that fails both writes is one such cycle, not two. A host alerting on
+        /// the rate would otherwise see a step change from a configuration that added a second store.</para>
+        /// </summary>
+        private void RefreshStateError()
+        {
+            StateError = _store?.LastError ?? _historyStore?.LastError;
+
+            if (StateError is not null)
+            {
+                Telemetry.StateWriteFailed();
+            }
         }
 
         /// <summary>
@@ -406,16 +446,7 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
             RunRules(window, pipeline, recentFrom, to, recent);
             RunSilentPods(window, pipeline, from, to);
 
-            // Learned from the same window it is about to judge. That is not circular: the floor derived from
-            // it applies to LATER cycles, and one window cannot lift a bar that is set from the maximum of
-            // hundreds. What it does mean is stated plainly in FloorProposal — a fault inside the observed
-            // period raises the bar above itself, so the observed period has to have been healthy.
             _declaredAbnormal = SuppressionReason(observedAt).Length > 0;
-
-            if (!_declaredAbnormal)
-            {
-                _calibrator.Observe(window);
-            }
 
             for (var m = 0; m < (int)MetricIndex.Count; m++)
             {
@@ -440,6 +471,29 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
 
             blind += RunCustom(
                 window, times, pipeline, from, to, recentFrom, recent, ref partial, ref unevaluable);
+
+            // AFTER every detector, and the position is the whole point rather than a tidying-up.
+            //
+            // The comment that used to sit above this call — at the TOP of the cycle — said "the floor
+            // derived from it applies to LATER cycles". That was the intent and it was not what the code
+            // did: `Observe` invalidates the proposal cache, so every gate below then read a floor that
+            // already contained the window it was about to judge. With the proposal set from the MAXIMUM
+            // times a 1.25 margin, the floor was therefore never below 1.25x the very quantity being gated,
+            // and the gate could not fire — not "rarely", but never, for any fault, once thirty samples
+            // existed.
+            //
+            // It went unnoticed for as long as the floor was calibrated on a DIFFERENT quantity from the one
+            // it gated: a per-pod slope against a cross-pod step is a loose enough relationship that the
+            // inequality did not always hold. Fixing that mismatch is what made the self-reference exact and
+            // therefore visible — a repair that exposed the defect it was standing next to.
+            //
+            // Moved here, a cycle is judged only against what earlier cycles measured. A sustained fault
+            // still raises the bar for the cycles that follow, which is the hazard FloorProposal documents
+            // and the reason calibration is meant to run over a period somebody has confirmed was healthy.
+            if (!_declaredAbnormal)
+            {
+                _calibrator.Observe(window);
+            }
 
             var incidents = pipeline.Group(_options.Grouping);
             var tracked = _tracker.Observe(incidents, observedAt, trace);
@@ -494,6 +548,8 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
                 _historyStore.Save(LearnedState.Write(
                     _history ?? new MetricHistory(), _calibrator, Labels, Suppressions));
             }
+
+            RefreshStateError();
 
             var result = new GuardCycleResult(
                 pipeline.Count, incidents.Count, opened, ongoing, resolved, blind, partial, unevaluable);
@@ -596,6 +652,19 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
                 : _floors.MinAbsoluteTrendChange(binding.Name);
         }
 
+        /// <inheritdoc cref="GapFloor"/>
+        /// <remarks>
+        /// The binding's configured value is <c>MinAbsoluteTrendChange</c> for this gate too — there is no
+        /// separate step field on a binding, and adding one would move every existing custom channel onto
+        /// the calibrator overnight. Only the fallback changes, and it changes to the right distribution.
+        /// </remarks>
+        private double LevelShiftFloor(in CustomMetricBinding binding)
+        {
+            return binding.MinAbsoluteTrendChange > 0.0
+                ? binding.MinAbsoluteTrendChange
+                : _floors.MinAbsoluteLevelShift(binding.Name);
+        }
+
         /// <returns>Whether the group reached a verdict; false means nobody was compared at all.</returns>
         private bool RunCustomPeer(
             MetricWindow window,
@@ -671,7 +740,7 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
                         WorkloadSubject(), binding.Name, verdict, from, to, common, binding.Class);
 
                     ObserveLevelShift(
-                        pipeline, binding.Name, common, from, to, trendFloor, binding.Class);
+                        pipeline, binding.Name, common, from, to, LevelShiftFloor(binding), binding.Class);
                 }
             }
 
@@ -858,9 +927,11 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
 
                     pipeline.Observe(WorkloadSubject(), metric.ToString(), verdict, from, to, common);
 
+                    // Its OWN floor, not the trend one. Sharing them put the CPU gate at 0.81 cores against
+                    // a real 0.39-core step and made the only fault this family can see unreportable.
                     ObserveLevelShift(
                         pipeline, metric.ToString(), Adjust(common, seasonal), from, to,
-                        _floors.MinAbsoluteTrendChange(metric), null);
+                        _floors.MinAbsoluteLevelShift(metric), null);
 
                 }
             }

@@ -43,27 +43,18 @@ time; it is not discoverable later without knowing to look.
 ## What it detects
 
 Measured on a synthetic population with faults injected one at a time, with per-family attribution by
-ablation (`DetectionMatrixDiagnostics`). Latency is time from the fault to the first cycle that named the
-affected subject.
+ablation (`DetectionMatrixDiagnostics`). A fault counts as detected when a cycle named the affected subject
+**on a channel the fault actually moved**; the affected channels are diffed out of the injection rather than
+listed by hand. Latency is time from the fault to the first such cycle.
 
-> **Read the method before quoting the table. 2026-08-02.** "Named the affected subject" is literal:
-> `SubjectWatchingSink` compares the reported pod and **never the signal**, so any incident on the right pod
-> counts as detecting the fault — including an unrelated one. On a configuration with no calibrated floors
-> there is usually one. The column says *Detected*; what it measures is *the guard said something about this
-> pod after the fault*.
+> **Re-measured with the signal check, then again after two floor defects were fixed. 2026-08-03.** The
+> previous version counted any incident about the right pod as a detection and carried a warning saying so.
+> The criterion is now strict, the affected channels are derived from the injector rather than listed by
+> hand, and the strict criterion **agreed with the loose one on every row** — the worry that the table was
+> crediting coincidences was unfounded, and both are still reported so the answer stays visible.
 >
-> A separate harness written the same day
-> (`OperatorFeedbackRegressionDiagnostics`) does compare the signal, and was run in this table's exact
-> configuration. It **independently confirms four rows** — both single-pod leaks, the cluster-wide leak and
-> the latency row — and **contradicts two**: `CPU 2.5× on one replica` and `CPU 2.5× on every replica` were
-> not detected on their own signal in any arm.
->
-> The second of those is the row the architecture argument rests on. Until the matrix is re-run with a signal
-> check, **treat both CPU rows as unverified and do not quote the "step only" claim** — the family attribution
-> may still be right, but the example that carries it is in doubt. The four confirmed rows stand.
->
-> The four untested rows — error rate, throttling, OOM, crash-restart — are neither confirmed nor
-> contradicted; nobody has run them with a signal check.
+> The strict re-run put **both CPU rows at `no`**, which sent the investigation to the size gates and found
+> two defects, both since fixed and both measured. See *Why the CPU rows used to read `no`* below.
 
 | Fault | Detected | Latency | Which family catches it alone |
 |---|---|---|---|
@@ -72,20 +63,57 @@ affected subject.
 | Memory leak, every replica together | yes | 5 min | trend + step |
 | Latency 3× on one replica | yes | 0 min | peer + trend |
 | Error rate 15% on one replica | yes | 0 min | peer + trend |
-| CPU 2.5× on one replica | yes | 5 min | peer + trend |
+| CPU 2.5× on one replica | yes | 5 min | trend |
 | CPU 2.5× on **every** replica | yes | 0 min | **step only** |
 | CPU throttling 30%, one replica | yes | 0 min | rules only |
 | OOM kill, one replica | yes | 0 min | peer + rules |
 | Crash-restart, one replica | yes | 0 min | peer + rules |
+| **No fault at all (control)** | **no** | – | – |
 
-Two rows carry the architecture. **CPU rising on every replica at once is caught by the step detector and by
-nothing else** — peer comparison has no outlier when everybody moves together. **Throttling is caught by the
-rules family and by nothing else.** A guard with fewer families is not a simpler guard; it is a blind one.
+**The control row is the one to read first.** Nothing is injected, and the table says `no`: the criterion is
+not matching background noise, so every row above it means what it says. Over the same 69 cycles the control
+opened **one** incident across twelve replicas — and the faulted runs opened two or three, the difference
+being the fault itself.
 
-A note on the "step only" row: a step is visible while it passes through the window and not afterwards. Once
-both halves of a window sit at the new level there is nothing to compare, exactly as a finished ramp has no
-slope. That is the shape of the fault, not a weakness — and it is why the incident tracker, which keeps the
-incident open afterwards, matters.
+**Two rows carry the architecture.** CPU rising on every replica at once is caught by the step detector and
+by nothing else — peer comparison has no outlier when everybody moves together. Throttling is caught by the
+rules family and by nothing else, because the CFS counters exist only on containers with a CPU limit, so a
+peer group can hold exactly one member, on precisely the pod being throttled. A guard with fewer families is
+not a simpler guard; it is a blind one.
+
+A step is visible while it passes through the window and not afterwards: once both halves sit at the new
+level there is nothing to compare, exactly as a finished ramp has no slope. That is the shape of the fault,
+not a weakness, and it is why the incident tracker — which keeps the incident open afterwards — matters.
+
+### Why the CPU rows used to read `no`
+
+Two defects, stacked, and the second was hidden by the first.
+
+**The step gate was calibrated on the wrong quantity.** It was fed `MinAbsoluteTrendChange`, which
+`FloorCalibrator` accumulates from a Theil-Sen slope fitted to each pod **individually**, and applied it to a
+step in the **cross-pod common component** — a median over twelve replicas, roughly √N less scattered. On CPU
+the borrowed floor landed near 1.5× the signal's own level, so no step below 150% was reportable. Measured:
+the step detector reported the cluster-wide rise at delta 0.47, p = 0.00017, and the gate threw it away at
+0.39 against a floor of 0.81. The step gate now has its own accumulator, fed by the same function the gate
+compares against, so the two cannot describe different quantities again.
+
+**The calibrator learned from the window it was about to judge.** `Observe` ran at the top of the cycle and
+invalidates the proposal cache, so every gate below read a floor that already contained that window. With the
+proposal set from the maximum times a 1.25 margin, the floor was never below 1.25× the very quantity being
+gated — so the gate could not fire, for any fault, once thirty samples existed. This survived because the
+floor was calibrated on a *different* quantity from the one it gated, which is loose enough that the
+inequality did not always hold; fixing that mismatch made the self-reference exact and therefore visible.
+Calibration now runs after the detectors, which is what the code's own comment had claimed all along.
+
+**What this cost in noise: nothing measurable.** The control row opened one incident before the fix and one
+after. That is a single seed over 69 cycles, so it is not a false-positive *rate* — the rate comes from the
+lab, and a lab re-run is owed before this is quoted as a noise figure at a client.
+
+**One caveat on the attribution column.** `Options(trend: false)` ablates the trend family by setting
+`MinimumSamples` to 100 000, and `FloorCalibrator` fits its own samples with **the same options object**, so
+turning the trend family off also switches off every calibrated floor. Any row whose family is gated by a
+calibrated floor is comparing configurations that differ in more than one thing, until the ablation is
+separated from the calibration.
 
 ---
 

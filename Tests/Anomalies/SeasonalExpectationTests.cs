@@ -214,6 +214,9 @@ namespace DevOnBike.Overfit.Tests.Anomalies
 
             public string? State { get; private set; }
 
+            /// <summary>Memory does not fill up in a test; there is nothing to report.</summary>
+            public string? LastError => null;
+
             public string? Load() => State;
 
             public void Save(string state) => State = state;

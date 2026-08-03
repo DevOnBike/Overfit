@@ -378,6 +378,19 @@ namespace DevOnBike.Overfit.Server.AspNet.Services
                         window.Pods.Count, result.Incidents, null);
                 }
 
+                // A warning rather than the cycle line, and repeated every cycle it persists. The counter
+                // `overfit_guard_state_failures_total` is the alertable form of this, but an operator
+                // reading logs after a restart that reopened everything needs to find the cause here rather
+                // than infer it from a series they were not watching at the time.
+                if (_guard.StateError is { } stateError)
+                {
+                    _logger.LogWarning(
+                        CycleEvent,
+                        "durable state is not being written: {StateError}. Incidents and calibration will "
+                        + "not survive the next restart.",
+                        stateError);
+                }
+
                 ProposeFloors(window, now);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)

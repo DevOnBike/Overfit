@@ -74,25 +74,56 @@ namespace DevOnBike.Overfit.Tests
             {
                 mutex.Dispose();
 
-                throw new InvalidOperationException(
+                // Ending the process rather than throwing, and the difference was measured rather than
+                // assumed: an exception from this constructor is CAUGHT BY THE RUNNER, which then falls
+                // back to the default framework and runs the whole suite. Verified on 2026-08-03 by
+                // holding the mutex externally — the suite passed, and a marker file proved the
+                // constructor had run and its exception had been discarded. A guard whose refusal is
+                // swallowed is worse than no guard, because the green result looks like proof.
+                //
+                // Exit code 2 is the same "someone else is measuring" code the benchmark host uses, so a
+                // script can tell it from a test failure.
+                Console.Error.WriteLine(
                     "An Overfit benchmark is running on this machine, so the test suite is refusing to "
                     + "start: thirty-two cores of test load inside a benchmark's sampling window produces a "
                     + "wrong number that looks like a measurement. Wait for it to finish, or set "
                     + "OVERFIT_ALLOW_CONCURRENT_MEASUREMENT=1 if you know the two are not sharing a box.");
+                Console.Error.Flush();
+
+                Environment.Exit(2);
             }
 
             _held = mutex;
+
+            ReleaseOnExit();
         }
 
-        protected override void Dispose(bool disposing)
+        /// <summary>
+        /// Releases the lock when the process ends, rather than from a disposal override.
+        ///
+        /// <para><b>Deliberately not tied to the base class's lifetime.</b> `XunitTestFramework` exposes no
+        /// `Dispose(bool)` to override in xUnit 2.9, and guessing at a base class's disposal shape is how a
+        /// guard ends up released at a moment nobody intended. A test run's lifetime <i>is</i> the process
+        /// lifetime, so the process exiting is the correct and simplest signal.</para>
+        ///
+        /// <para>If the process dies without running this — killed, crashed — the operating system releases
+        /// the mutex anyway and the next acquirer sees `AbandonedMutexException`, which both sides already
+        /// treat as "nobody is measuring, the lock is ours". There is no state to leave stale.</para>
+        /// </summary>
+        private void ReleaseOnExit()
         {
-            if (disposing && _held is not null)
+            AppDomain.CurrentDomain.ProcessExit += (_, _) =>
             {
-                _held.ReleaseMutex();
-                _held.Dispose();
-            }
-
-            base.Dispose(disposing);
+                try
+                {
+                    _held?.ReleaseMutex();
+                }
+                catch (ApplicationException)
+                {
+                    // Released already, or owned by another thread. Nothing to do and nothing to report:
+                    // the process is ending and the OS is about to release it regardless.
+                }
+            };
         }
     }
 }

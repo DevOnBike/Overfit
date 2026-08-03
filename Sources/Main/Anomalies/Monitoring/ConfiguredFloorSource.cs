@@ -44,11 +44,30 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
             _calibrator = applyCalibrated ? calibrator : null;
         }
 
-        /// <inheritdoc/>
-        public double MinAbsoluteGap(MetricIndex metric) => Resolve(_gap, metric, trend: false);
+        /// <summary>Which of the three floors a lookup is for. A bool stopped being enough at three.</summary>
+        private enum Kind
+        {
+            Gap,
+            Trend,
+            Step,
+        }
 
         /// <inheritdoc/>
-        public double MinAbsoluteTrendChange(MetricIndex metric) => Resolve(_trend, metric, trend: true);
+        public double MinAbsoluteGap(MetricIndex metric) => Resolve(_gap, metric, Kind.Gap);
+
+        /// <inheritdoc/>
+        public double MinAbsoluteTrendChange(MetricIndex metric) => Resolve(_trend, metric, Kind.Trend);
+
+        /// <inheritdoc/>
+        /// <remarks>
+        /// <b>The configured table is the trend one, deliberately.</b> There is no separate step floor in the
+        /// config file and adding one would make every existing deployment's step gate fall back to the
+        /// calibrator overnight. An operator who wrote a number for a signal meant "do not report movements
+        /// below this on this signal", and that reading still holds. What changes is the fallback: where
+        /// nothing is configured, the learned floor now comes from the step distribution rather than the
+        /// slope distribution, which is the defect being fixed.
+        /// </remarks>
+        public double MinAbsoluteLevelShift(MetricIndex metric) => Resolve(_trend, metric, Kind.Step);
 
         /// <inheritdoc/>
         /// <remarks>
@@ -56,12 +75,26 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
         /// <c>CustomMetricBinding</c>, which the guard holds and applies ahead of asking here. This answers
         /// only the second half of the question - what a healthy period turned out to look like.
         /// </remarks>
-        public double MinAbsoluteGap(string signal) => Learned(signal, trend: false);
+        public double MinAbsoluteGap(string signal) => Learned(signal, Kind.Gap);
 
         /// <inheritdoc cref="MinAbsoluteGap(string)"/>
-        public double MinAbsoluteTrendChange(string signal) => Learned(signal, trend: true);
+        public double MinAbsoluteTrendChange(string signal) => Learned(signal, Kind.Trend);
 
-        private double Learned(string signal, bool trend)
+        /// <inheritdoc cref="MinAbsoluteGap(string)"/>
+        public double MinAbsoluteLevelShift(string signal) => Learned(signal, Kind.Step);
+
+        /// <summary>The proposal's answer for one kind of gate. One place, so the three cannot diverge.</summary>
+        private static double Proposed(in FloorProposal proposal, Kind kind)
+        {
+            return kind switch
+            {
+                Kind.Gap => proposal.ProposedMinAbsoluteGap,
+                Kind.Trend => proposal.ProposedMinAbsoluteTrendChange,
+                _ => proposal.ProposedMinAbsoluteLevelShift,
+            };
+        }
+
+        private double Learned(string signal, Kind kind)
         {
             ArgumentNullException.ThrowIfNull(signal);
 
@@ -77,10 +110,10 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
                 return 0.0;
             }
 
-            return trend ? proposal.ProposedMinAbsoluteTrendChange : proposal.ProposedMinAbsoluteGap;
+            return Proposed(proposal, kind);
         }
 
-        private double Resolve(IReadOnlyList<double>? configured, MetricIndex metric, bool trend)
+        private double Resolve(IReadOnlyList<double>? configured, MetricIndex metric, Kind kind)
         {
             var explicitly = AnomalyGuardOptions.FloorFor(configured, metric);
 
@@ -96,7 +129,7 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
                 return 0.0;
             }
 
-            return trend ? proposal.ProposedMinAbsoluteTrendChange : proposal.ProposedMinAbsoluteGap;
+            return Proposed(proposal, kind);
         }
     }
 }

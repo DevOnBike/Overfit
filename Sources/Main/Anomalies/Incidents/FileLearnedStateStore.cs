@@ -30,6 +30,9 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
         }
 
         /// <inheritdoc/>
+        public string? LastError => _file.LastError;
+
+        /// <inheritdoc/>
         public string? Load() => _file.Load();
 
         /// <inheritdoc/>

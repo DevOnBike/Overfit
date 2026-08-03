@@ -164,6 +164,21 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
         public long NextId => _nextId;
 
         /// <summary>
+        /// Saved incidents that were fresh enough to adopt and were refused because
+        /// <c>MaxOpenIncidents</c> was already reached. Zero when the whole payload fitted; non-zero means
+        /// the caller is running with less identity than it saved.
+        ///
+        /// <para>Counts only capacity refusals. Records dropped for age are not truncation — they were
+        /// deliberately let go, and folding the two together would report a working staleness bound as a
+        /// sizing problem.</para>
+        /// </summary>
+        public int Truncated
+        {
+            get;
+            private set;
+        }
+
+        /// <summary>
         /// Replaces the running state with a saved one.
         /// </summary>
         /// <param name="incidents">What <see cref="Snapshot"/> produced.</param>
@@ -179,16 +194,6 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
         /// opposite sign.</para>
         /// </param>
         /// <returns>How many were adopted.</returns>
-        /// <summary>
-        /// Saved incidents that were not adopted because <c>MaxOpenIncidents</c> was reached. Zero when the
-        /// whole payload fitted; non-zero means the caller is running with less identity than it saved.
-        /// </summary>
-        public int Truncated
-        {
-            get;
-            private set;
-        }
-
         public int Restore(
             IReadOnlyList<PersistedIncident> incidents,
             long nextId,
@@ -201,18 +206,20 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
             _nextId = nextId < 1 ? 1 : nextId;
 
             var adopted = 0;
+            var refused = 0;
 
-            for (var i = 0; i < incidents.Count && _open.Count < _options.MaxOpenIncidents; i++)
+            // Every saved record is visited, and that is the whole point of the loop's shape. It used to stop
+            // as soon as MaxOpenIncidents was reached, so a payload larger than the cap left the highest
+            // saved identifiers unseen — and the next new incident took an identifier a persisted one already
+            // held. A consumer keyed on the identifier then joins two unrelated incidents into one history,
+            // which is the failure the counter exists to prevent, reintroduced by an early exit that looks
+            // like an optimisation. The bound is the saved list, which the guard itself wrote.
+            for (var i = 0; i < incidents.Count; i++)
             {
                 var saved = incidents[i];
 
-                // Advanced before the staleness filter, so a record dropped for age still spends its
-                // identifier.
-                //
-                // INCOMPLETE, and the previous version of this comment said otherwise. The loop above also
-                // ends once MaxOpenIncidents is reached, so saved records beyond the cap are never visited
-                // and never advance the counter — exactly the case this comment used to claim was covered.
-                // See the open-defect entry in ROADMAP.md.
+                // Ahead of every filter below: a record dropped for age, or refused for capacity, has still
+                // spent its identifier and must not have it handed out again.
                 if (saved.Id >= _nextId)
                 {
                     _nextId = saved.Id + 1;
@@ -220,6 +227,13 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
 
                 if (now - saved.LastSeen > maxAge)
                 {
+                    continue;
+                }
+
+                if (_open.Count >= _options.MaxOpenIncidents)
+                {
+                    refused++;
+
                     continue;
                 }
 
@@ -243,11 +257,9 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
                 adopted++;
             }
 
-            // Truncation is reported rather than left to look like "there were only that many". A caller
-            // logging "adopted 5" cannot otherwise tell five saved from fifty saved and forty-five dropped.
-            Truncated = incidents.Count > 0 && _open.Count >= _options.MaxOpenIncidents
-                ? incidents.Count - adopted
-                : 0;
+            // Reported rather than left to look like "there were only that many". A caller logging
+            // "adopted 5" cannot otherwise tell five saved from fifty saved and forty-five dropped.
+            Truncated = refused;
 
             return adopted;
         }

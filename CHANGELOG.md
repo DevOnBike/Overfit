@@ -71,6 +71,43 @@ _2026-08-02 — the six defects a code review found on paths no measurement exer
 five `overfit-find-bugs-game` hunts. Everything below was verified by test; the kernel change was verified
 by parity, benchmark and an end-to-end generation on a real model._
 
+- **The step detector could not report anything, for any fault, once the guard had calibrated itself.**
+  *(2026-08-03. Two defects, stacked, the second hidden by the first.)* The level-shift gate was fed
+  `MinAbsoluteTrendChange`, a floor accumulated from a Theil-Sen slope fitted to each pod **individually**,
+  and applied it to a step in the **cross-pod common component** — a median over twelve replicas, roughly
+  √N less scattered. On CPU that landed near 1.5× the signal's own level. Underneath it, `FloorCalibrator`
+  observed each window at the *top* of the cycle and invalidates its proposal cache, so every gate below
+  read a floor already containing the window it was judging; with the proposal set from the maximum times a
+  1.25 margin, the floor was never below 1.25× the gated quantity and the gate could never fire. The first
+  defect hid the second by making the relationship inexact.
+
+  The gate now has `IAbsoluteFloorSource.MinAbsoluteLevelShift` with its own accumulator, fed by
+  `LevelShiftDetector.StepSize` — the same function the gate compares against — and calibration runs after
+  the detectors. **Measured on one synthetic population, both arms in one script:** detection went from 8
+  of 10 injected faults to **10 of 10**, the cluster-wide leak from 15 minutes to 5, latency 3× from 5
+  minutes to 0, and the no-fault control opened **one** incident before and one after. State files written
+  in the four-column format still load; the new accumulator starts empty and relearns.
+
+- **Restoring more incidents than `MaxOpenIncidents` could hand out an identifier that was still in use.**
+  *(2026-08-03.)* `IncidentTracker.Restore` ended its loop on the capacity bound, so saved records beyond
+  the cap were never read and never advanced the counter — and the incidents holding those identifiers are
+  fresh and still open, so the number is reused while somebody is looking at the original. The loop now
+  visits every record and advances the counter ahead of both filters. `Truncated` counts capacity refusals
+  only; stale records are not truncation, and reporting them as such sent an operator to raise a limit that
+  was not the constraint. The morning of 2026-08-02 fixed the staleness half of this and the entry
+  describing it claimed both.
+
+- **A durable store that could not be written said so to nobody.** *(2026-08-03.)* `FileIncidentStore` had
+  recorded `LastError` since it was written, the guard holds `IIncidentStore`, and the interface had no such
+  member — so the field could not be read and `GuardTelemetry.StateWriteFailed()` was called from nowhere in
+  the tree. Every piece existed and none was connected, while `overfit_guard_state_failures_total` was
+  exported and could never increment: a monitoring series that lies, which is the exact pathology this
+  subsystem exists to remove. `LastError` is now on the interface, `AnomalyGuard.StateError` is set after
+  both loads at construction and both saves each cycle, the counter increments, and the ASP.NET host logs a
+  warning every cycle it persists. **An earlier entry in this file claimed this had shipped when none of it
+  had**; that entry was removed on 2026-08-02 and this one is pinned by `GuardStateFailureTests`, four tests
+  that fail without the wiring.
+
 - **The guard's workload could be empty, and two things failed silently on it.** A maintenance window scoped
   to a named workload could never match — the operator declared a window for their rollout and got paged
   during it anyway — and the incident tracker's subject key collapsed to `"namespace/"`, so a memory

@@ -207,6 +207,48 @@ namespace DevOnBike.Overfit.Statistics
                    + "reporting in this signal's own units.";
         }
 
+        /// <summary>
+        /// How far the level moved across this window, in the signal's own units — the exact quantity
+        /// <see cref="LevelShiftOptions.MinAbsoluteChange"/> is compared against. <see cref="double.NaN"/>
+        /// when there are too few finite samples to split.
+        ///
+        /// <para><b>Public so that whatever sets the floor measures the same thing the gate reads, in the
+        /// same code.</b> This repository has now made the opposite mistake twice on this one family: the
+        /// step gate was first fed the peer-gap floor, which differs by about six times on the same signal,
+        /// and then the trend-change floor, which is fitted to each pod's own slope and is therefore far
+        /// above anything a median across twelve replicas can produce — measured at 0.81 cores against a
+        /// real 0.39-core step, so a genuine cluster-wide CPU rise was never reportable. Both times the
+        /// units matched and the distributions did not, and both times the mistake was invisible because a
+        /// floor that is too high looks exactly like a healthy cluster.</para>
+        ///
+        /// <para>The split is duplicated rather than shared with <see cref="Detect"/>, which needs both
+        /// medians and not only their distance, so the two are pinned together by
+        /// <c>LevelShiftFloorTests.StepSizeMatchesWhatTheGateCompares</c> instead of by construction.</para>
+        /// </summary>
+        public static double StepSize(ReadOnlySpan<double> series)
+        {
+            using var buffer = new PooledBuffer<double>(Math.Max(series.Length, 1), clearMemory: false);
+            var usable = buffer.Span[..series.Length];
+            var written = 0;
+
+            for (var i = 0; i < series.Length; i++)
+            {
+                if (double.IsFinite(series[i]))
+                {
+                    usable[written++] = series[i];
+                }
+            }
+
+            if (written < 4)
+            {
+                return double.NaN;
+            }
+
+            var split = written / 2;
+
+            return Math.Abs(MedianOf(usable[split..written]) - MedianOf(usable[..split]));
+        }
+
         private static double MedianOf(ReadOnlySpan<double> values)
         {
             using var scratch = new PooledBuffer<double>(values.Length, clearMemory: false);

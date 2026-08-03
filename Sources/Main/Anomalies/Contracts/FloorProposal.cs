@@ -35,12 +35,23 @@ namespace DevOnBike.Overfit.Anomalies.Contracts
     /// <c>MinAbsoluteTrendChange</c> gates, in the same units.
     /// </param>
     /// <param name="TrendChangeMax">The largest such change seen.</param>
+    /// <param name="LevelShiftP99">
+    /// The 99th percentile of how far the <b>workload's common level</b> moved across a window — one
+    /// observation per cycle, measured on the median across replicas.
+    ///
+    /// <para><b>A separate figure from <see cref="TrendChangeP99"/>, and expect it to be much smaller.</b> A
+    /// trend change is fitted to one pod's noisy series; a step is measured on a median over all of them,
+    /// which is roughly <c>√N</c> less scattered. Reading one as the other put the CPU step floor at about
+    /// 1.5× the signal's own level and made a real cluster-wide rise unreportable.</para>
+    /// </param>
+    /// <param name="LevelShiftMax">The largest such step seen.</param>
     /// <param name="ProposedMinAbsoluteGap">
     /// <see cref="PeerGapMax"/> with a margin. The maximum rather than the 99th percentile on purpose: a
     /// floor's job here is to suppress what a healthy cluster does, and at a five-minute cadence over a week
     /// the top percentile is still hundreds of findings.
     /// </param>
     /// <param name="ProposedMinAbsoluteTrendChange">The same, for the trend family.</param>
+    /// <param name="ProposedMinAbsoluteLevelShift">The same, for the step family.</param>
     public readonly record struct FloorProposal(
         int Samples,
         double TypicalMagnitude,
@@ -48,8 +59,11 @@ namespace DevOnBike.Overfit.Anomalies.Contracts
         double PeerGapMax,
         double TrendChangeP99,
         double TrendChangeMax,
+        double LevelShiftP99,
+        double LevelShiftMax,
         double ProposedMinAbsoluteGap,
         double ProposedMinAbsoluteTrendChange,
+        double ProposedMinAbsoluteLevelShift,
         bool CappedByOperator = false)
     {
         /// <summary>
