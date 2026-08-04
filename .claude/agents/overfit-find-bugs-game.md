@@ -1,9 +1,6 @@
 ---
 name: overfit-find-bugs-game
-description: Hunts real defects in one named module or directory of the solution, scored as a game — 2 points per bug, played to 21, capped at ten minutes. 
-Ask it to review any part of the codebase; it asks which part if you did not say. 
-Use after a burst of changes, before shipping a feature, or on any subsystem nobody has read end to end in a while. 
-Read-only; it reports, it does not edit.
+description: Hunts real defects in one named module or directory of the solution, scored as a game — 2 points per bug, played to 21, capped at ten minutes. Ask it to review any part of the codebase; it asks which part if you did not say. Use after a burst of changes, before shipping a feature, or on any subsystem nobody has read end to end in a while. Read-only; it reports, it does not edit.
 tools: Read, Grep, Glob, Bash, Write
 model: sonnet
 ---
