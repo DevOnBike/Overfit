@@ -97,6 +97,39 @@
 #    channel was heading back to where it was noisy. Raising it now is extrapolating a measured trend, not
 #    a hunch, but it IS extrapolation: if this channel goes quiet through a real heap problem, start here.
 #
+# 6. RequestsPerSecond raised on both gates — minTrendChange 0.194 -> 0.333, minGap 0.0119 -> 0.0238 —
+#    and this is the one entry whose evidence is partly circular, so the reasoning is written out rather
+#    than the number left to speak for itself.
+#
+#    Two of the five false incidents in the 24-hour run were this signal, and they are the two halves of ONE
+#    phenomenon: +10.6% of typical at 19:03Z (tau +0.57) and -15.2% at 23:43Z (tau -0.53) — the up and down
+#    slopes of the load driver's 1440-minute curve, both correctly described as deployment-wide movement
+#    with no replica implicated.
+#
+#    The old floors were calibrated over 24 windows and are almost exactly the FIRST thing the calibrator
+#    saw: proposal 0.238 early against a configured 0.194. Across the full day the observed maximum among
+#    healthy replicas grew 0.190 -> 0.266 and the proposal with it, 0.238 -> 0.333, because the evening ramp
+#    moves traffic further than anything in the first hours. Same lesson as note 4, different signal.
+#
+#    THE CIRCULARITY, STATED: the calibrator also observes the windows in which those incidents fired, so
+#    0.266 may BE their amplitude, and raising the floor above it suppresses them by construction. That is
+#    the self-reference which once made the level-shift gate unable to fire at all. Here it is sound, and on
+#    one condition only — THE OBSERVATION PERIOD WAS VERIFIED HEALTHY. The 24 hours were a false-positive
+#    measurement on a cluster where nothing was wrong, so 0.266 is literally "this is how far traffic moves
+#    when everything is fine", and the incidents were false precisely because of it. Re-derive these two
+#    numbers from a period containing a real incident and they become a blind spot instead.
+#
+#    THE COST, ALSO STATED: this channel is now blind to a genuine deployment-wide traffic change smaller
+#    than 0.333 — and a real outage that halves traffic on a quiet night is exactly that shape. The right
+#    fix is SeasonalBaseline (compare against the same phase of the previous day, so the diurnal ramp is
+#    expected and a real drop is not), which needs MinimumHistoryDays and therefore a day of history the
+#    guard did not have. The floor is the lever available today, not the correct one.
+#
+# 7. GcPauseRatio.minGap 0.0000082 -> 0.0000209, proposed in every cycle of the same run against one
+#    finding produced. Small, and grouped with the entry above because it is the same edit for the same
+#    reason on a channel that costs almost nothing either way. Its minTrendChange stays UNSET while the run
+#    proposed 0.0000345 — one finding is not evidence enough to arm a gate that has never misbehaved.
+#
 # 5. NOT changed, but recorded: CpuUsageRatio.minTrendChange is 0.000326 while the same run proposed
 #    0.0097 — thirty times higher. It produced no false findings in 292 cycles, so there is nothing
 #    measured to fix, and raising a floor 30x on a gate that is not misbehaving is how a signal goes quiet
@@ -133,8 +166,8 @@ data:
         "CpuUsageRatio":         { "minGap": "0.00041",  "minTrendChange": "0.000326" },
         "MemoryWorkingSetBytes": { "minGap": "9.52MB",   "minTrendChange": "25.85MB" },
         "GcGen2HeapBytes":       { "minGap": "0.93MB",   "minTrendChange": "3.93MB" },
-        "RequestsPerSecond":     { "minGap": "0.0119",   "minTrendChange": "0.194" },
-        "GcPauseRatio":          { "minGap": "0.0000082" },
+        "RequestsPerSecond":     { "minGap": "0.0238",   "minTrendChange": "0.333" },
+        "GcPauseRatio":          { "minGap": "0.0000209" },
         "LatencyP50Ms":          { "minTrendChange": "50" },
         "LatencyP95Ms":          { "minTrendChange": "50" },
         "LatencyP99Ms":          { "minTrendChange": "50" },

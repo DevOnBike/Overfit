@@ -100,7 +100,7 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
         /// "this thing has stopped" visible, and a guard that has stopped is worse than one that never
         /// started, because somebody is relying on it.
         /// </summary>
-        public GuardTelemetry Telemetry { get; } = new();
+        public GuardTelemetry Telemetry { get; }
 
         /// <summary>How many consecutive cycles each known pod has reported nothing.</summary>
         private readonly Dictionary<string, int> _silent = new(StringComparer.Ordinal);
@@ -184,6 +184,11 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
             _store = store;
             _historyStore = historyStore;
             _tracker = new IncidentTracker(tracking);
+
+            // Labelled at construction, because a scope's identity cannot change while it runs and a
+            // telemetry instrument whose label moves is worse than one with none — every alert written
+            // against the old value goes quiet without erroring.
+            Telemetry = new GuardTelemetry(options.Scope);
 
             var learned = LearnedState.Read(historyStore?.Load(), options.Trend);
             var history = learned.History;

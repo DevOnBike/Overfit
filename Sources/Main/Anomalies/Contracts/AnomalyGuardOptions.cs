@@ -169,6 +169,15 @@ namespace DevOnBike.Overfit.Anomalies.Contracts
         public IncidentGroupingOptions Grouping { get; init; } = IncidentGroupingOptions.Balanced;
 
         /// <summary>
+        /// Which population this guard watches, as the <c>scope</c> label its telemetry will carry. Empty in
+        /// a single-scope process, which then exports exactly the series it always did.
+        ///
+        /// <para>Set from <see cref="GuardScope.Name"/> — derived from namespace and pod selector rather than
+        /// configured, so it cannot be edited apart from the thing it identifies.</para>
+        /// </summary>
+        public string Scope { get; init; } = string.Empty;
+
+        /// <summary>
         /// Whether the trend family runs on each pod's <b>residual</b> against the group's common component,
         /// with the common component itself tested once at workload level.
         ///
