@@ -16,6 +16,7 @@
 
 	<ItemGroup>
 		<ProjectReference Include="..\..\Sources\Main\Main.csproj" />
+		<ProjectReference Include="..\..\Sources\Anomalies\Anomalies.csproj" />
 	</ItemGroup>
 
 </Project>

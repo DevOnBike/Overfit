@@ -28,7 +28,10 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring.Abstractions
         /// <para>Empty means "nothing known", never "no pods exist" — the distinction matters because the
         /// second reading would report every pod in the window as unexpected.</para>
         /// </summary>
-        IReadOnlyList<string> KnownPods { get; }
+        IReadOnlyList<string> KnownPods
+        {
+            get;
+        }
 
         /// <summary>
         /// When <see cref="KnownPods"/> was last successfully rebuilt, or <c>null</c> when the implementation

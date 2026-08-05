@@ -344,7 +344,10 @@ namespace DevOnBike.Overfit.Tests.Anomalies
                 saved.Add(Persisted(i, $"pod-{i}"));
             }
 
-            var tracker = new IncidentTracker(IncidentTrackingOptions.Balanced with { MaxOpenIncidents = 3 });
+            var tracker = new IncidentTracker(IncidentTrackingOptions.Balanced with
+            {
+                MaxOpenIncidents = 3
+            });
 
             // Every record is one minute old, so nothing here is refused for age: capacity is the only
             // filter under test.

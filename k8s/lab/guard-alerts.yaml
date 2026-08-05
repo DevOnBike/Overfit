@@ -1,0 +1,98 @@
+# The one alert every deployment of the anomaly guard needs, and the two ways it is usually written wrong.
+#
+#   kubectl apply -f k8s/lab/guard-alerts.yaml
+#
+# A guard that has stopped watching reports no incidents — which is exactly what a healthy cluster reports.
+# Everything else in this subsystem exists to make silence and health distinguishable; this file is that
+# argument applied to the guard itself.
+#
+# ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+# MISTAKE 1 — the obvious expression cannot fire in the only case that matters. MEASURED 2026-08-05.
+#
+#   expr: time() - overfit_guard_last_cycle_timestamp_seconds > 900     # WRONG
+#
+# When the guard's pod goes away its series goes with it. The expression then evaluates over an empty vector
+# and produces no result, so the alert returns to `inactive` — it reports "fine" precisely when it is not.
+# Measured by scaling the guard to zero with that rule installed: `pending` for the first 60 seconds while
+# Prometheus still returned the last sample, then `inactive` for the following six minutes, zero alerts in
+# Alertmanager, zero notifications.
+#
+# The same test with `absent()` added: `firing` after 60 seconds, alert present in Alertmanager, two
+# notifications delivered, none failed. Same cluster, same guard, same receiver — one function's difference.
+#
+# This is worth stating plainly because the wrong version passes review. It reads correctly, it fires in
+# testing whenever the guard is merely SLOW, and it fails only when the guard is GONE, which is the case it
+# was written for.
+#
+# ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+# MISTAKE 2 — the alert is correct and nothing receives it. ALSO MEASURED, and it is not our defect.
+#
+# kube-prometheus-stack ships with `route: { receiver: "null" }`. A client who installs it with defaults and
+# wires this guard in gets a correct rule, a correct alert, and delivery to nowhere. Verify the route before
+# believing any of this works:
+#
+#   kubectl exec -n monitoring alertmanager-<release>-alertmanager-0 -c alertmanager -- \
+#     wget -qO- localhost:9093/api/v2/status | grep -A3 '"route"'
+#
+# An alert routed to "null" is silence that looks like health, moved up one layer into the layer meant to
+# prevent it.
+# ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: overfit-guard
+  namespace: lab
+  labels:
+    app.kubernetes.io/name: anomaly-guard
+spec:
+  groups:
+    - name: overfit-guard
+      rules:
+        - alert: OverfitGuardStopped
+          # `absent()` first, deliberately: it is the half that covers the pod being gone, and it is the
+          # half everybody omits. The second half covers the pod being alive with its loop stuck, which is
+          # rarer and less dangerous — a stuck loop at least leaves evidence to look at.
+          expr: |
+            absent(overfit_guard_last_cycle_timestamp_seconds)
+            or (time() - overfit_guard_last_cycle_timestamp_seconds > 900)
+          # Three missed cycles at the default five-minute cadence. Two would page on a slow scrape; four
+          # means twenty minutes of an unwatched cluster before anybody hears.
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "The Overfit anomaly guard has not completed a cycle in 15 minutes."
+            description: >-
+              It has either stopped or lost its Prometheus route. While this is firing the cluster is NOT
+              being watched, and the absence of anomaly incidents means nothing — that absence is also what
+              a healthy cluster produces. Check the pod, then its logs for `cycle:` lines.
+
+        - alert: OverfitGuardCyclesFailing
+          # Distinct from the above on purpose. A guard whose cycles all throw keeps its timestamp fresh
+          # only if the failure happens after the cycle is recorded — and if it happens before, this fires
+          # while the alert above stays quiet. Both, or neither is reliable.
+          expr: increase(overfit_guard_cycle_failures_total[15m]) > 2
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "The Overfit anomaly guard is failing cycles."
+            description: >-
+              A guard failing every cycle reports no incidents, which is indistinguishable from a healthy
+              cluster. Check the log for the exception behind `cycle failed`.
+
+        - alert: OverfitGuardStateNotDurable
+          # Not about detection at all, and it is here because its symptom appears a week later: without
+          # durable state the learned floors and the seasonal baseline relearn from nothing on every
+          # restart, and a guard that has forgotten its floors is the QUIET one.
+          expr: increase(overfit_guard_state_failures_total[1h]) > 0
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "The Overfit anomaly guard cannot write its durable state."
+            description: >-
+              Incidents will be reopened after the next restart and the learned calibration will be lost.
+              The visible symptom is a burst of duplicate notifications, then a week of a guard that is
+              quieter than it should be.

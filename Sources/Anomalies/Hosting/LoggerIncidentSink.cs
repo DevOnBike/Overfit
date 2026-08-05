@@ -7,7 +7,7 @@ using DevOnBike.Overfit.Anomalies.Contracts;
 using DevOnBike.Overfit.Anomalies.Incidents.Abstractions;
 using Microsoft.Extensions.Logging;
 
-namespace DevOnBike.Overfit.Server.AspNet.Services
+namespace DevOnBike.Overfit.Anomalies.Hosting
 {
     /// <summary>
     /// Writes a detection cycle to <see cref="ILogger"/> as structured events.

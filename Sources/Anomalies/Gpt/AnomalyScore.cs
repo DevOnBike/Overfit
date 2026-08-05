@@ -28,11 +28,14 @@ namespace DevOnBike.Overfit.Anomalies.Gpt
         {
             get; init;
         }
+
         public string WorstMetric { get; init; } = string.Empty;
+
         public float ExpectedValue
         {
             get; init;
         }
+
         public float ActualValue
         {
             get; init;

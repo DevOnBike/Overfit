@@ -499,12 +499,18 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
                 // 999 peers are never available, so every group is undecidable.
                 Peer = peer
                     ? PeerOutlierOptions.Balanced
-                    : PeerOutlierOptions.Balanced with { MinimumPeers = 999 },
+                    : PeerOutlierOptions.Balanced with
+                    {
+                        MinimumPeers = 999
+                    },
 
                 // A window is 80 samples; demanding 100000 makes every verdict InsufficientData.
                 Trend = trend
                     ? TrendOptions.Balanced
-                    : TrendOptions.Balanced with { MinimumSamples = 100_000 },
+                    : TrendOptions.Balanced with
+                    {
+                        MinimumSamples = 100_000
+                    },
 
                 Rules = rules ? AnomalyGuardOptions.DefaultRules : [],
 
@@ -513,7 +519,10 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
                 // the step detector ran in every arm, so every arm appeared to catch what only it caught.
                 LevelShift = shift
                     ? LevelShiftOptions.Balanced
-                    : LevelShiftOptions.Balanced with { MinimumSamples = 100_000 },
+                    : LevelShiftOptions.Balanced with
+                    {
+                        MinimumSamples = 100_000
+                    },
 
                 Grouping = IncidentGroupingOptions.Balanced with { Topology = TopologyWeights.SingleNode },
             };
@@ -698,10 +707,16 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
             }
 
             /// <summary>A row about the right subject, on any channel — the old, loose criterion.</summary>
-            public bool NamedSubject { get; set; }
+            public bool NamedSubject
+            {
+                get; set;
+            }
 
             /// <summary>A row about the right subject on a channel the fault moved.</summary>
-            public bool NamedSignal { get; set; }
+            public bool NamedSignal
+            {
+                get; set;
+            }
 
             public void Report(ReadOnlySpan<IncidentLogRecord> rows)
             {

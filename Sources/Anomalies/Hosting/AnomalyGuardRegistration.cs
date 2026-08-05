@@ -11,7 +11,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
-namespace DevOnBike.Overfit.Server.AspNet.Services
+namespace DevOnBike.Overfit.Anomalies.Hosting
 {
     /// <summary>
     /// Wires the anomaly guard into a host: a Prometheus window source, a sink, and the loop that drives them.

@@ -369,7 +369,10 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
                 _signal = signal;
             }
 
-            public bool Named { get; set; }
+            public bool Named
+            {
+                get; set;
+            }
 
             public void Report(ReadOnlySpan<IncidentLogRecord> rows)
             {

@@ -47,7 +47,10 @@ namespace Benchmarks
         /// win still exists where the census says nothing goes.
         /// </summary>
         [Params(32, 68, 128, 512, 784, 2048, 65_536)]
-        public int Length { get; set; }
+        public int Length
+        {
+            get; set;
+        }
 
         private float[] _a = [];
         private float[] _b = [];

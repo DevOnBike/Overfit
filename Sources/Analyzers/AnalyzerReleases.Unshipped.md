@@ -38,3 +38,5 @@ OVERFIT030 | Reliability | Warning | Awaitable public API with no CancellationTo
 OVERFIT031 | Performance | Warning | async method whose only await is its last statement — return the task and drop the state machine (not reported when a using/try would be torn down early)
 OVERFIT032 | Reliability | Warning | await without ConfigureAwait(false) — a library does not choose its host; a captured context deadlocks a blocking caller under WPF/WinForms/MAUI (Task.Yield exempt)
 OVERFIT900 | Performance | Error | A per-call OVERFIT rule fired inside an [OverfitHotPath] member/type — escalated to a build error
+OVERFIT033 | Performance | Warning | Jagged float[][] type — use a flat float[] Span-sliced per row or an Overfit buffer
+OVERFIT034 | Design | Warning | More than one namespace-level type in a file

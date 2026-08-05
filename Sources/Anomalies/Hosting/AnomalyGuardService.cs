@@ -11,7 +11,7 @@ using DevOnBike.Overfit.Anomalies.Monitoring.Abstractions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
-namespace DevOnBike.Overfit.Server.AspNet.Services
+namespace DevOnBike.Overfit.Anomalies.Hosting
 {
     /// <summary>
     /// The loop: read a window, evaluate it, report what changed, wait, repeat.
@@ -369,47 +369,47 @@ namespace DevOnBike.Overfit.Server.AspNet.Services
 
                 var result = _guard.RunCycle(window, now);
 
-            // Eight fields, and LoggerMessage.Define stops at six. Pre-compiling this would mean dropping
-            // two of them or splitting the line, and neither is worth it for a call that happens once per
-            // cadence — the allocation is nothing against a cycle that has just read a window from
-            // Prometheus. The placeholders still name the properties a structured sink records.
-            _logger.LogInformation(
-                CycleEvent,
-                "cycle: pods={Pods} findings={Findings} incidents={Incidents} opened={Opened} "
-                + "ongoing={Ongoing} resolved={Resolved} blind={Blind} unevaluable={Unevaluable}",
-                window.Pods.Count,
-                result.Findings,
-                result.Incidents,
-                result.Opened,
-                result.Ongoing,
-                result.Resolved,
-                result.BlindMetrics,
-                result.UnevaluableMetrics);
+                // Eight fields, and LoggerMessage.Define stops at six. Pre-compiling this would mean dropping
+                // two of them or splitting the line, and neither is worth it for a call that happens once per
+                // cadence — the allocation is nothing against a cycle that has just read a window from
+                // Prometheus. The placeholders still name the properties a structured sink records.
+                _logger.LogInformation(
+                    CycleEvent,
+                    "cycle: pods={Pods} findings={Findings} incidents={Incidents} opened={Opened} "
+                    + "ongoing={Ongoing} resolved={Resolved} blind={Blind} unevaluable={Unevaluable}",
+                    window.Pods.Count,
+                    result.Findings,
+                    result.Incidents,
+                    result.Opened,
+                    result.Ongoing,
+                    result.Resolved,
+                    result.BlindMetrics,
+                    result.UnevaluableMetrics);
 
-            // Named, not counted. "5 metrics returned nothing" tells an operator that the guard is partly
-            // blind and nothing about which query to go and fix; the names are the whole actionable part,
-            // and they are cheap because the window already knows.
-            //
-            // Only for metrics that HAVE a binding, though. An unbound one is silent by construction, was
-            // named once at startup, and cannot change without a config edit — warning about it every cycle
-            // taught operators here to skip the line that the bound-but-silent case shares.
-            var silentButBound = 0;
+                // Named, not counted. "5 metrics returned nothing" tells an operator that the guard is partly
+                // blind and nothing about which query to go and fix; the names are the whole actionable part,
+                // and they are cheap because the window already knows.
+                //
+                // Only for metrics that HAVE a binding, though. An unbound one is silent by construction, was
+                // named once at startup, and cannot change without a config edit — warning about it every cycle
+                // taught operators here to skip the line that the bound-but-silent case shares.
+                var silentButBound = 0;
 
-            if (result.BlindMetrics > 0)
-            {
-                for (var m = 0; m < (int)MetricIndex.Count; m++)
+                if (result.BlindMetrics > 0)
                 {
-                    var metric = (MetricIndex)m;
-
-                    if (window.PodsReporting(metric) > 0 || _unbound[m])
+                    for (var m = 0; m < (int)MetricIndex.Count; m++)
                     {
-                        continue;
-                    }
+                        var metric = (MetricIndex)m;
 
-                    silentButBound++;
-                    _blindMetric(_logger, metric.ToString(), null);
+                        if (window.PodsReporting(metric) > 0 || _unbound[m])
+                        {
+                            continue;
+                        }
+
+                        silentButBound++;
+                        _blindMetric(_logger, metric.ToString(), null);
+                    }
                 }
-            }
 
                 // Fires on the actionable count, not the total. `blind=N` on the cycle line above still
                 // carries every blind spot including the unbound ones — this warning is about the ones

@@ -4,6 +4,7 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using DevOnBike.Overfit.Anomalies.Contracts;
+using DevOnBike.Overfit.Anomalies.Hosting;
 using DevOnBike.Overfit.Anomalies.Incidents;
 using DevOnBike.Overfit.Anomalies.Incidents.Abstractions;
 using DevOnBike.Overfit.Server.AspNet.Services;
@@ -122,7 +123,10 @@ namespace DevOnBike.Overfit.Tests.Anomalies
 
         private sealed class CountingSink : IIncidentSink
         {
-            public int Opened { get; private set; }
+            public int Opened
+            {
+                get; private set;
+            }
 
             public void Report(ReadOnlySpan<IncidentLogRecord> rows)
             {

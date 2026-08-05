@@ -33,7 +33,10 @@ namespace DevOnBike.Overfit.Analyzers
             description: "Finalizers put objects on the finalization queue at construction and delay reclamation by a GC generation. Prefer deterministic IDisposable cleanup; if a finalizer is a required safety net, suppress it in Dispose with GC.SuppressFinalize.");
 
         /// <inheritdoc cref="RawParallelForAnalyzer.SupportedDiagnostics"/>
-        public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } =
+        public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics
+        {
+            get;
+        } =
             [Rule, OverfitPerfAnalysis.HotPathRule];
 
         public override void Initialize(AnalysisContext context)

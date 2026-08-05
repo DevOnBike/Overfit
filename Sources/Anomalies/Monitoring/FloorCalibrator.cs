@@ -723,7 +723,10 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
             /// <inheritdoc cref="FloorCalibrator._levelShifts"/>
             public BoundedSamples LevelShifts { get; init; } = new();
 
-            public FloorProposal? Cached { get; set; }
+            public FloorProposal? Cached
+            {
+                get; set;
+            }
         }
     }
 }

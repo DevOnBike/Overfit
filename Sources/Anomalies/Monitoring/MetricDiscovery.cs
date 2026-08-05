@@ -75,7 +75,10 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
                     }
 
                     var pods = podsReporting(probe);
-                    var found = candidate with { PodsReporting = pods };
+                    var found = candidate with
+                    {
+                        PodsReporting = pods
+                    };
 
                     matched.Add(found);
 

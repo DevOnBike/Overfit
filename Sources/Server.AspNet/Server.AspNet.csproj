@@ -29,4 +29,8 @@
         <ProjectReference Include="..\Main\Main.csproj" />
     </ItemGroup>
 
+    <ItemGroup>
+      <ProjectReference Include="..\Anomalies\Anomalies.csproj" />
+    </ItemGroup>
+
 </Project>

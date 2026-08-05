@@ -5,7 +5,7 @@
 
 using DevOnBike.Overfit.Anomalies.Contracts;
 
-namespace DevOnBike.Overfit.Server.AspNet.Services
+namespace DevOnBike.Overfit.Anomalies.Hosting
 {
     /// <summary>Scheduling for <see cref="AnomalyGuardService"/>, plus the guard's own options.</summary>
     public sealed class AnomalyGuardServiceOptions

@@ -153,7 +153,10 @@ namespace DevOnBike.Overfit.Anomalies.Contracts
         /// or "never less than fifty milliseconds" — which is the half of the threshold question that belongs
         /// to the customer.</para>
         /// </summary>
-        public IAbsoluteFloorSource? Floors { get; init; }
+        public IAbsoluteFloorSource? Floors
+        {
+            get; init;
+        }
 
         /// <summary>
         /// Which moments were declared abnormal on purpose. Null builds one from
@@ -163,7 +166,10 @@ namespace DevOnBike.Overfit.Anomalies.Contracts
         /// a rollout is happening, and a ConfigMap is a second copy of that truth which somebody has to
         /// remember to update.</para>
         /// </summary>
-        public IMaintenanceCalendar? Calendar { get; init; }
+        public IMaintenanceCalendar? Calendar
+        {
+            get; init;
+        }
 
         /// <summary>How findings become incidents.</summary>
         public IncidentGroupingOptions Grouping { get; init; } = IncidentGroupingOptions.Balanced;

@@ -5,7 +5,7 @@
 
 using Microsoft.Extensions.Logging;
 
-namespace DevOnBike.Overfit.Server.AspNet.Services
+namespace DevOnBike.Overfit.Anomalies.Hosting
 {
     /// <summary>
     /// How <see cref="LoggerIncidentSink"/> routes what it emits.

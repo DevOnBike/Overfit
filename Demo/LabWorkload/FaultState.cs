@@ -48,7 +48,10 @@ namespace DevOnBike.Overfit.LabWorkload
             Role = initial.Role;
         }
 
-        public string Role { get; }
+        public string Role
+        {
+            get;
+        }
 
         public double LatencyMs
         {

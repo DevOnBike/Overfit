@@ -49,7 +49,10 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             for (var i = 0; i < cases.Length; i++)
             {
                 var result = detector.Detect(
-                    cases[i], LevelShiftOptions.Balanced with { MinimumSamples = 4 });
+                    cases[i], LevelShiftOptions.Balanced with
+                    {
+                        MinimumSamples = 4
+                    });
 
                 Assert.Equal(
                     Math.Abs(result.AbsoluteChange),

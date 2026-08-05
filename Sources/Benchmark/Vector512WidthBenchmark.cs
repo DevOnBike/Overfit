@@ -66,7 +66,10 @@ namespace Benchmarks
         /// other does not.
         /// </summary>
         [Params(128, 512, 4096, 65_536)]
-        public int Length { get; set; }
+        public int Length
+        {
+            get; set;
+        }
 
         private float[] _a = [];
         private float[] _b = [];

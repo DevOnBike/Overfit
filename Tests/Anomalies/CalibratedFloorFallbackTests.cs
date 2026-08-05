@@ -179,7 +179,10 @@ namespace DevOnBike.Overfit.Tests.Anomalies
         {
             private readonly List<int> _openedAt = [];
 
-            public int Cycle { get; set; }
+            public int Cycle
+            {
+                get; set;
+            }
 
             public int OpenedBefore(int cycle)
             {

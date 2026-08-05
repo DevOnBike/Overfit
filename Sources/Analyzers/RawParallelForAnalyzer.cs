@@ -43,7 +43,10 @@ namespace DevOnBike.Overfit.Analyzers
         /// escalation never happened for it. A raw <c>Parallel.For</c> added inside a decode-path method
         /// built at warning severity while the attribute above it said that was impossible.
         /// </summary>
-        public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } =
+        public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics
+        {
+            get;
+        } =
             [Rule, OverfitPerfAnalysis.HotPathRule];
 
         public override void Initialize(AnalysisContext context)

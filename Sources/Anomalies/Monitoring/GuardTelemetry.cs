@@ -66,7 +66,10 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
         /// That single alert is the one every deployment of this needs, and losing it would reintroduce the
         /// pathology this class was written to remove, through a change that looks like configuration.</para>
         /// </summary>
-        public string Scope { get; }
+        public string Scope
+        {
+            get;
+        }
 
         /// <summary>Records one completed cycle.</summary>
         public void Cycle(in GuardCycleResult result, int pods, DateTimeOffset at, bool suppressed)

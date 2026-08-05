@@ -90,7 +90,10 @@ namespace DevOnBike.Overfit.Tests.Statistics
         public void TheAbsoluteFloorCanRefuseAProportionallyLargeStep()
         {
             // Two milliwatts of nothing doubling is still nothing, and only the caller knows that.
-            var options = LevelShiftOptions.Balanced with { MinAbsoluteChange = 1000.0 };
+            var options = LevelShiftOptions.Balanced with
+            {
+                MinAbsoluteChange = 1000.0
+            };
             var result = Detector.Detect(Step(from: 100.0, to: 250.0, at: 40), options);
 
             Assert.Equal(DetectionStatus.Healthy, result.Status);

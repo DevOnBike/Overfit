@@ -273,9 +273,15 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
                 _pod = pod;
             }
 
-            public bool NamedThisCycle { get; set; }
+            public bool NamedThisCycle
+            {
+                get; set;
+            }
 
-            public int Cycles { get; set; }
+            public int Cycles
+            {
+                get; set;
+            }
 
             public void Report(ReadOnlySpan<IncidentLogRecord> rows)
             {

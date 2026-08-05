@@ -5,6 +5,7 @@
 
 using System.Text.Json;
 using DevOnBike.Overfit.Anomalies.Contracts;
+using DevOnBike.Overfit.Anomalies.Hosting;
 using DevOnBike.Overfit.Anomalies.Incidents;
 using DevOnBike.Overfit.Anomalies.Incidents.Abstractions;
 using DevOnBike.Overfit.Anomalies.Monitoring;

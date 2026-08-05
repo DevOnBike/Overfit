@@ -13,11 +13,11 @@
 		<!--Thread_UseAllCpuGroups>true</Thread_UseAllCpuGroups-->
 	</PropertyGroup>
 	<ItemGroup>
-		<PackageReference Include="Microsoft.NET.Test.Sdk"/>
-		<PackageReference Include="Microsoft.AspNetCore.TestHost"/>
-		<PackageReference Include="Moq"/>
-		<PackageReference Include="System.Numerics.Tensors"/>
-		<PackageReference Include="xunit"/>
+		<PackageReference Include="Microsoft.NET.Test.Sdk" />
+		<PackageReference Include="Microsoft.AspNetCore.TestHost" />
+		<PackageReference Include="Moq" />
+		<PackageReference Include="System.Numerics.Tensors" />
+		<PackageReference Include="xunit" />
 		<PackageReference Include="xunit.runner.visualstudio">
 			<IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
 			<PrivateAssets>all</PrivateAssets>
@@ -29,11 +29,12 @@
 	</ItemGroup>
 	
 	<ItemGroup>
-		<ProjectReference Include="..\Sources\Main\Main.csproj"/>
-		<ProjectReference Include="..\Sources\Extensions.AI\Extensions.AI.csproj"/>
-		<ProjectReference Include="..\Sources\Mcp\Mcp.csproj"/>
-		<ProjectReference Include="..\Sources\Server\Server.csproj"/>
-		<ProjectReference Include="..\Sources\Server.AspNet\Server.AspNet.csproj"/>
+		<ProjectReference Include="..\Sources\Main\Main.csproj" />
+		<ProjectReference Include="..\Sources\Extensions.AI\Extensions.AI.csproj" />
+		<ProjectReference Include="..\Sources\Mcp\Mcp.csproj" />
+		<ProjectReference Include="..\Sources\Server\Server.csproj" />
+		<ProjectReference Include="..\Sources\Server.AspNet\Server.AspNet.csproj" />
+		<ProjectReference Include="..\Sources\Anomalies\Anomalies.csproj" />
 	</ItemGroup>
 
 	<ItemGroup>
@@ -47,4 +48,15 @@
 		<None Remove="AotSmokeTest\**\*" />
 	</ItemGroup>
 
+
+	<!--
+	  The analyzer project as a LIBRARY reference, not as an analyzer. Directory.Build.props deliberately
+	  excludes Tests from the analyzer wiring (test code is exempt from the style rules), which is exactly
+	  what makes this possible: the assembly can be referenced and its analyzers instantiated by hand, with
+	  no duplicate-item conflict and without OVERFIT rules being enforced on the tests themselves.
+	-->
+	<ItemGroup>
+		<ProjectReference Include="..\Sources\Analyzers\Analyzers.csproj" />
+		<PackageReference Include="Microsoft.CodeAnalysis.CSharp" />
+	</ItemGroup>
 </Project>

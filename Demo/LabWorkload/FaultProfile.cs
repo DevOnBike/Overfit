@@ -51,13 +51,19 @@ namespace DevOnBike.Overfit.LabWorkload
         /// matters downstream — an additive delay moves a p50 by far more, in relative terms, than it moves a
         /// p99, which is the asymmetry a multiplicative fault cannot produce.</para>
         /// </summary>
-        public double StallProbability { get; init; }
+        public double StallProbability
+        {
+            get; init;
+        }
 
         /// <inheritdoc cref="StallProbability"/>
         public double StallSeconds { get; init; } = 5.0;
 
         /// <summary>Share of requests answered 500.</summary>
-        public double ErrorRate { get; init; }
+        public double ErrorRate
+        {
+            get; init;
+        }
 
         /// <summary>
         /// Bytes retained per second, never released — a leak with a rate somebody chose.
@@ -66,10 +72,16 @@ namespace DevOnBike.Overfit.LabWorkload
         /// all. Its absolute rate is what makes a measured floor meaningful: "256 MiB over a window" can be
         /// checked against a leak of a known size rather than against a guess.</para>
         /// </summary>
-        public double MemoryLeakBytesPerSecond { get; init; }
+        public double MemoryLeakBytesPerSecond
+        {
+            get; init;
+        }
 
         /// <summary>Milliseconds of actual CPU burned per request, on top of the sleep.</summary>
-        public double CpuBurnMs { get; init; }
+        public double CpuBurnMs
+        {
+            get; init;
+        }
 
         /// <summary>
         /// Free-form role label, exported as a metric label.

@@ -239,7 +239,10 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             public IReadOnlyList<string> KnownPods => _pods;
 
             /// <summary>Null by default, which the guard reads as "not tracked" and therefore trusts.</summary>
-            public DateTimeOffset? LastRefreshed { get; init; }
+            public DateTimeOffset? LastRefreshed
+            {
+                get; init;
+            }
 
             public bool TryResolve(string pod, out PodPlacement placement)
             {

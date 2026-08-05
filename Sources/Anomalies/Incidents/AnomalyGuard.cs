@@ -100,7 +100,10 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
         /// "this thing has stopped" visible, and a guard that has stopped is worse than one that never
         /// started, because somebody is relying on it.
         /// </summary>
-        public GuardTelemetry Telemetry { get; }
+        public GuardTelemetry Telemetry
+        {
+            get;
+        }
 
         /// <summary>How many consecutive cycles each known pod has reported nothing.</summary>
         private readonly Dictionary<string, int> _silent = new(StringComparer.Ordinal);

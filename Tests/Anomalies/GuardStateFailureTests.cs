@@ -162,9 +162,15 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             }
 
             /// <summary>Flip either way, so a failure and a recovery are both reachable.</summary>
-            public bool Healthy { get; set; }
+            public bool Healthy
+            {
+                get; set;
+            }
 
-            public string? LastError { get; private set; }
+            public string? LastError
+            {
+                get; private set;
+            }
 
             public string? Load()
             {

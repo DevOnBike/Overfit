@@ -400,3 +400,33 @@ dotnet_diagnostic.OVERFIT027.severity = error
 dotnet_diagnostic.OVERFIT022.severity = error
 dotnet_diagnostic.OVERFIT023.severity = error
 dotnet_diagnostic.OVERFIT900.severity = error
+
+# ── OVERFIT033 / OVERFIT034 — the two MSBuild guards, now analyzers ───────────────────────────────────
+#
+# Both replace RoslynCodeTaskFactory tasks that lived as embedded C# inside Main.csproj and Anomalies.csproj
+# and matched with regular expressions over raw text. Moved on 2026-08-05 for three reasons, in order of
+# weight: the regexes were wrong in both directions, embedded C# in XML has no tests and no IDE, and the
+# same 40 lines had just been copy-pasted into a second csproj — which is the moment a copy becomes a
+# maintenance problem rather than a shortcut.
+#
+# Both errors are now pinned by tests, and both are worth naming because they fail in opposite ways:
+#   * the jagged check stripped only `//` comments, so `float[][]` inside a `/* ... */` comment was REPORTED
+#     — an error about code that does not exist, which teaches people the rule is noise;
+#   * the one-type check anchored on exactly four spaces of indentation, so under a file-scoped namespace it
+#     matched nothing and REPORTED NOTHING, silently, for every such file.
+# A guard that cries wolf and a guard that quietly stops are the same defect wearing different clothes.
+#
+# SCOPE IS DELIBERATELY UNCHANGED: error exactly where the MSBuild tasks used to fail the build, silent
+# everywhere else. Making them warnings tree-wide would have turned a mechanical move into a sweep, and a
+# refactor that also changes behaviour cannot be reverted cleanly if it goes wrong.
+[*.cs]
+dotnet_diagnostic.OVERFIT033.severity = none
+dotnet_diagnostic.OVERFIT034.severity = none
+
+[Sources/Main/**.cs]
+dotnet_diagnostic.OVERFIT033.severity = error
+dotnet_diagnostic.OVERFIT034.severity = error
+
+[Sources/Anomalies/**.cs]
+dotnet_diagnostic.OVERFIT033.severity = error
+dotnet_diagnostic.OVERFIT034.severity = error
