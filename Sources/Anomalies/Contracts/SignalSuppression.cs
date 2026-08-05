@@ -83,6 +83,10 @@ namespace DevOnBike.Overfit.Anomalies.Contracts
         /// the deployment, and having to mute twelve pods one at a time is how a feature meant to build trust
         /// becomes the reason somebody mutes the whole tool instead.</para>
         /// </summary>
+        /// <param name="subject">The finding's subject, matched by scope rather than by equality — see the
+        /// summary for why a pod-less suppression covers the replicas too.</param>
+        /// <param name="signal">The channel name, matched exactly: muting one signal must not mute its
+        /// neighbours.</param>
         /// <param name="magnitude">
         /// How large the finding being considered is. A finding <b>larger than</b> <see cref="Ceiling"/> is
         /// not covered: it is a different event on the same signal, and the operator dismissed the smaller

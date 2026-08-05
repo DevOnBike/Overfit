@@ -20,8 +20,8 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
     /// on a lab where nothing was wrong.</para>
     ///
     /// <para><b>It inherits the calibrator's one hazard.</b> A fault inside the observed period raises the
-    /// bar above that fault and blinds the guard to it at that size, quietly. Pass
-    /// <paramref name="applyCalibrated"/> as false where the observation period cannot be trusted.</para>
+    /// bar above that fault and blinds the guard to it at that size, quietly. Construct with
+    /// <c>applyCalibrated: false</c> where the observation period cannot be trusted.</para>
     /// </summary>
     public sealed class ConfiguredFloorSource : IAbsoluteFloorSource
     {

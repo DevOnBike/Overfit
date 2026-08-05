@@ -128,6 +128,22 @@ namespace DevOnBike.Overfit.Anomalies.Hosting
         private int _knownPods;
         private DateTimeOffset _nextProposal;
 
+        /// <param name="options">Cadence, window and the guard's own thresholds; the defaults are the
+        /// measured ones and the window especially should not be widened on intuition — a four-hour window
+        /// sits on the slope of the daily traffic curve and measured 2583 false incidents a day against 234
+        /// at twenty minutes.</param>
+        /// <param name="source">Reads a rolling window of Prometheus. One instance for the process, lending
+        /// its HTTP client to a per-cycle source.</param>
+        /// <param name="sink">Where findings and incidents go. Defaults to the logging sink in shadow mode,
+        /// which counts and explains and wakes nobody.</param>
+        /// <param name="logger">The loop's own voice. Everything an operator learns about coverage — blind
+        /// channels, excluded pods, unwritable state — arrives here rather than as a metric, because names
+        /// are the actionable part and a counter has none.</param>
+        /// <param name="topology">
+        /// Pod ownership, refreshed before each window so grouping relates findings by the cluster as it is
+        /// now. Optional, and its absence is not neutral: without it the grouper falls back to a name
+        /// heuristic and any pod it guesses wrong is merged into the wrong incident.
+        /// </param>
         /// <param name="store">
         /// Optional durable state. <b>Supply one in any deployment that can be restarted</b>, which is all of
         /// them: without it every incident that was running is reopened after a rollout or a crash, and the
@@ -135,6 +151,17 @@ namespace DevOnBike.Overfit.Anomalies.Hosting
         /// contribution undone by the guard's own restart. This was missing here while
         /// <see cref="AnomalyGuard"/> had supported it all along, so the durable path existed and nothing
         /// deployable reached it.
+        /// </param>
+        /// <param name="learnedState">
+        /// Where the seasonal baseline and the calibrated floors live. Separate from <paramref name="store"/>
+        /// because the two fail differently: losing the incidents costs one burst of duplicate notifications,
+        /// losing this costs a week of relearning during which the guard is QUIETER than it should be — the
+        /// failure that looks like success.
+        /// </param>
+        /// <param name="metricMap">
+        /// The configured bindings, used only to tell an unbound channel from a bound one that reported
+        /// nothing. Optional, and omitting it is the conservative choice: every silent metric is then warned
+        /// about every cycle, which says too much rather than too little.
         /// </param>
         public AnomalyGuardService(
             AnomalyGuardServiceOptions options,

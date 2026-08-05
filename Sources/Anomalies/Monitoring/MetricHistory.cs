@@ -63,6 +63,11 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
         /// Records what <paramref name="workload"/> did on <paramref name="metric"/> in the hour containing
         /// <paramref name="at"/>.
         /// </summary>
+        /// <param name="workload">The deployment this level belongs to. The bucket key, so two workloads
+        /// with the same metric never share a baseline.</param>
+        /// <param name="metric">Which channel the value is for.</param>
+        /// <param name="at">When it was observed. Only the hour-of-day is kept — the baseline answers "what
+        /// does this workload normally do at this time", not "what did it do on Tuesday".</param>
         /// <param name="value">
         /// The workload's own level — normally the median across its replicas, so a single odd pod does not
         /// move the baseline the whole deployment is later judged against.

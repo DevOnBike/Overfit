@@ -44,7 +44,6 @@
 		  from their own host; until then `dotnet pack` on the solution should not produce it.
 		-->
 		<IsPackable>false</IsPackable>
-
 		<IsAotCompatible>true</IsAotCompatible>
 		<IsTrimmable>true</IsTrimmable>
 		<OptimizationPreference>Speed</OptimizationPreference>

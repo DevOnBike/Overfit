@@ -1008,8 +1008,14 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
         }
 
         /// <summary>
-        /// The seasonal expectation for this window, or <paramref name="fallback"/> when there is not enough
-        /// history to have one.
+        /// The seasonal expectation for this window, or an EMPTY span when there is not enough history to
+        /// have one — the caller treats empty as "no expectation" and falls back to the cross-peer
+        /// common component.
+        ///
+        /// <para>The previous sentence here named a <c>fallback</c> parameter this method does not take
+        /// and has not taken since it started returning an empty span instead. Recorded rather than
+        /// silently corrected: prose drifting away from a signature is the defect class this codebase
+        /// keeps finding by reading, and the compiler was reporting it as CS1734 the whole time.</para>
         ///
         /// <para><b>Why this beats the cross-peer expectation it replaces.</b> The common component says what
         /// the replicas are doing <i>as a group right now</i>, which removes a difference between replicas and

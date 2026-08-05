@@ -48,6 +48,12 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
         private Dictionary<string, PodPlacement> _snapshot = new(StringComparer.Ordinal);
         private bool _disposed;
 
+        /// <param name="prometheusBaseUrl">HTTP API base URL. The only thing this type needs to reach the
+        /// cluster: topology comes from kube-state-metrics through Prometheus, not from the API server.</param>
+        /// <param name="selector">Supplies the namespace and pod filter, so this type and the metric source
+        /// cannot drift into watching different sets of pods.</param>
+        /// <param name="httpClient">Optional shared client. One is created and owned when omitted; a client
+        /// that is lent is not disposed here.</param>
         /// <param name="peerGroupLabel">
         /// Pod label naming which replicas may be compared against each other — <c>role</c> for most database
         /// and queue operators. Empty means none is declared and every pod compares against every other,

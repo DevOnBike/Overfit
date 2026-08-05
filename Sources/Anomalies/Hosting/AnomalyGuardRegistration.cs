@@ -10,6 +10,7 @@ using DevOnBike.Overfit.Anomalies.Monitoring.Abstractions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using System.Diagnostics.CodeAnalysis;
 
 namespace DevOnBike.Overfit.Anomalies.Hosting
 {
@@ -85,6 +86,20 @@ namespace DevOnBike.Overfit.Anomalies.Hosting
         /// Receives one line per configuration entry that could not be used. Called during registration, so
         /// the operator learns at startup rather than from a cycle that saw nothing.
         /// </param>
+        /// <remarks>
+        /// <b>Annotated rather than left as a bare warning.</b> Binding walks the type with reflection, so
+        /// this overload cannot go into a Native-AOT image. Without the attributes the project carried two
+        /// unaddressed IL warnings and its <c>IsAotCompatible=true</c> was an aspiration; with them the
+        /// obligation moves to the caller, where it belongs — a host that publishes natively gets the
+        /// warning at ITS call site and reaches for the <see cref="AnomalyGuardConfigFile"/> overload
+        /// instead, which is reflection-free and is what the CLI already uses.
+        /// </remarks>
+        [RequiresUnreferencedCode(
+            "Binding an IConfiguration section walks AnomalyGuardConfigFile with reflection. Deserialise the "
+            + "file yourself and call the AnomalyGuardConfigFile overload to stay trim-safe.")]
+        [RequiresDynamicCode(
+            "Binding an IConfiguration section may generate code at runtime. Deserialise the file yourself "
+            + "and call the AnomalyGuardConfigFile overload to stay AOT-safe.")]
         public static IServiceCollection AddOverfitAnomalyGuard(
             this IServiceCollection services,
             IConfiguration section,

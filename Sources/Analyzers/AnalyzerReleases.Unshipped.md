@@ -40,3 +40,5 @@ OVERFIT032 | Reliability | Warning | await without ConfigureAwait(false) — a l
 OVERFIT900 | Performance | Error | A per-call OVERFIT rule fired inside an [OverfitHotPath] member/type — escalated to a build error
 OVERFIT033 | Performance | Warning | Jagged float[][] type — use a flat float[] Span-sliced per row or an Overfit buffer
 OVERFIT034 | Design | Warning | More than one namespace-level type in a file
+OVERFIT035 | Design | Error | Two Schemas/*.json files map to the same generated constant
+OVERFIT036 | Design | Error | Schema file name cannot become a C# identifier

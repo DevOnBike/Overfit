@@ -21,6 +21,11 @@ namespace DevOnBike.Overfit.Anomalies.Contracts
     public interface ISignalSuppressor
     {
         /// <summary>Whether <paramref name="signal"/> on <paramref name="subject"/> is muted at <paramref name="at"/>.</summary>
+        /// <param name="subject">Namespace, workload and pod the finding is about. A pod-scoped mute covers
+        /// that pod; one with no pod covers the workload and its replicas.</param>
+        /// <param name="signal">The channel name as findings carry it, matched exactly.</param>
+        /// <param name="at">When the finding was made, so an expired mute stops applying without anyone
+        /// having to remember to remove it.</param>
         /// <param name="magnitude">
         /// The finding's size in the signal's own units, so a mute opened on a small one does not hide a
         /// large one. See <see cref="SignalSuppression.Magnitude"/> — measured, that omission silenced a whole

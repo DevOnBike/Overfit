@@ -26,6 +26,10 @@ namespace DevOnBike.Overfit.Anomalies.Contracts
         /// <summary>
         /// Whether <paramref name="at"/> falls in a declared window for <paramref name="workload"/>, and why.
         /// </summary>
+        /// <param name="at">The instant being judged — the END of the evaluated window, not the moment of
+        /// the call, so a cycle that runs late still asks about the period it actually looked at.</param>
+        /// <param name="workload">The deployment the finding is about. Empty matches only windows that are
+        /// themselves unscoped; a window naming a workload must not suppress a different one.</param>
         /// <param name="reason">
         /// The operator's words, or a stand-in. Never empty when this returns <c>true</c>: "suppressed" with
         /// no explanation is indistinguishable from a bug six weeks later.

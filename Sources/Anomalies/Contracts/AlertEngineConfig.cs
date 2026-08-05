@@ -24,7 +24,7 @@
 namespace DevOnBike.Overfit.Anomalies.Contracts
 {
     /// <summary>
-    ///     Immutable configuration for <see cref="AlertEngine" />.
+    ///     Immutable configuration for <see cref="Alerting.AlertEngine"/>.
     /// </summary>
     public sealed record AlertEngineConfig
     {

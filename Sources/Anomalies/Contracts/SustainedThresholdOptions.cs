@@ -6,7 +6,7 @@
 namespace DevOnBike.Overfit.Anomalies.Contracts
 {
     /// <summary>
-    /// Thresholds for <see cref="SustainedThresholdRule"/>: how high is too high, and for how much of the
+    /// Thresholds for <see cref="Rules.SustainedThresholdRule"/>: how high is too high, and for how much of the
     /// window it has to stay there.
     /// </summary>
     /// <param name="Threshold">Value at or above which a sample counts as a breach, in the signal's own units.</param>

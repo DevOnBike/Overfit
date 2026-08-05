@@ -52,6 +52,12 @@ namespace DevOnBike.Overfit.Anomalies.Contracts
     /// </param>
     /// <param name="ProposedMinAbsoluteTrendChange">The same, for the trend family.</param>
     /// <param name="ProposedMinAbsoluteLevelShift">The same, for the step family.</param>
+    /// <param name="CappedByOperator">
+    /// Whether an operator's <c>--real</c> label held the proposal below what the data alone suggested.
+    /// <b>Worth surfacing rather than hiding</b>: it is the one direction in which the feedback loop pulls
+    /// against silence, so a proposal that was capped is evidence the loop is working, and a fleet where it
+    /// is never true is a fleet converging on a detector that reports nothing.
+    /// </param>
     public readonly record struct FloorProposal(
         int Samples,
         double TypicalMagnitude,

@@ -6,7 +6,7 @@
 namespace DevOnBike.Overfit.Anomalies.Contracts
 {
     /// <summary>
-    /// Thresholds for <see cref="IncidentGrouper"/>. Every one of them trades the same two failure modes
+    /// Thresholds for <see cref="Incidents.IncidentGrouper"/>. Every one of them trades the same two failure modes
     /// against each other: too loose and the whole cluster collapses into one incident that says nothing, too
     /// tight and the operator gets back the pile of separate alerts they were trying to escape.
     /// </summary>

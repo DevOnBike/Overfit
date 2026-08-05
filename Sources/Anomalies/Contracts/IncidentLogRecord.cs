@@ -26,7 +26,7 @@ namespace DevOnBike.Overfit.Anomalies.Contracts
     /// </summary>
     /// <param name="Narrative">
     /// Multi-line human explanation — what was seen, over which interval, on exactly which objects, what
-    /// moved with it, and what the evidence cannot settle. Built by <see cref="IncidentNarrative"/>.
+    /// moved with it, and what the evidence cannot settle. Built by <see cref="Incidents.IncidentNarrative"/>.
     ///
     /// <para><b>Populated on the incident row only</b>, and empty on every finding row. A finding is one
     /// line of evidence; repeating the group's whole explanation on each would grow a log by the square of
@@ -63,6 +63,11 @@ namespace DevOnBike.Overfit.Anomalies.Contracts
     /// <param name="Subjects">Distinct subjects in the group; 1 for a finding row.</param>
     /// <param name="Signals">Distinct signals in the group; 1 for a finding row.</param>
     /// <param name="Message">The incident summary, or the detector's reason for a finding row.</param>
+    /// <param name="SuppressedBy">
+    /// The operator's reason when a declared maintenance window covered this, empty otherwise. <b>The row
+    /// is still emitted</b> — deleting the evidence to keep the log tidy removes exactly the record somebody
+    /// comes back for after a failed deploy. What this changes is routing: a host must not page on it.
+    /// </param>
     public readonly record struct IncidentLogRecord(
         int IncidentKey,
         long IncidentId,

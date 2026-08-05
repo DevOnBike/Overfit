@@ -30,7 +30,7 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
     /// suggestion for a human to accept, never something applied on its own.</para>
     ///
     /// <para>Accumulates across cycles; call <see cref="Observe"/> once per window and
-    /// <see cref="Propose"/> whenever a report is wanted. Not thread-safe.</para>
+    /// <see cref="Propose()"/> whenever a report is wanted. Not thread-safe.</para>
     /// </summary>
     public sealed class FloorCalibrator
     {
@@ -495,7 +495,7 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
 
             var copy = new FloorProposal[_cached.Length];
 
-            Array.Copy(_cached, copy, _cached.Length);
+            _cached.AsSpan().CopyTo(copy);
 
             return copy;
         }

@@ -36,6 +36,11 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
         /// tracked rather than raw, so the lifecycle state reaches the sink. Reporting raw groups instead
         /// loses the tracker entirely at the last boundary: every cycle looks like a fresh incident.</param>
         /// <param name="sink">Destination.</param>
+        /// <param name="suppressedBy">
+        /// The maintenance reason to stamp on every row, or empty. Passed down rather than decided here:
+        /// whether a cycle fell inside a declared window is the guard's knowledge, and the reporter's job is
+        /// to carry it to the sink so a host can route on it instead of paging.
+        /// </param>
         /// <returns>How many rows were reported.</returns>
         public static int Report(
             IReadOnlyList<TrackedIncident> incidents, IIncidentSink sink, string suppressedBy = "")

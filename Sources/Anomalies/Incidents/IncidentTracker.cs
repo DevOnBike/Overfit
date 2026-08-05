@@ -57,7 +57,7 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
     /// counters on <see cref="TrackedIncident"/> make the choice visible when it happens.</para>
     ///
     /// <para><b>State survives a restart when the caller gives it somewhere to live.</b>
-    /// <see cref="Snapshot"/> and <see cref="Restore"/> carry the open incidents across; without them a
+    /// <see cref="Snapshot()"/> and <see cref="Restore"/> carry the open incidents across; without them a
     /// rolling update of the guard reopens everything that was running, at the worst possible moment —
     /// while somebody is already looking at a change.</para>
     ///
@@ -181,7 +181,7 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
         /// <summary>
         /// Replaces the running state with a saved one.
         /// </summary>
-        /// <param name="incidents">What <see cref="Snapshot"/> produced.</param>
+        /// <param name="incidents">What <see cref="Snapshot()"/> produced.</param>
         /// <param name="nextId">What <see cref="NextId"/> was. Reusing identifiers would let a consumer join
         /// a new incident to a closed one's history.</param>
         /// <param name="now">Current time, for the staleness bound.</param>
