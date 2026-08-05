@@ -48,6 +48,26 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
         private int _blind;
         private int _unevaluable;
 
+        /// <param name="scope">
+        /// Which population this instrument is about. Empty for a single-scope process, which renders exactly
+        /// the series it always did — an upgrade must not silently retarget somebody's alerts.
+        /// </param>
+        public GuardTelemetry(string scope = "")
+        {
+            Scope = scope ?? string.Empty;
+        }
+
+        /// <summary>
+        /// The <c>scope</c> label every series of this instrument carries, or empty for none.
+        ///
+        /// <para><b>Not cosmetic, and the reason is one specific series.</b> With several scopes and no label,
+        /// <c>overfit_guard_last_cycle_timestamp_seconds</c> becomes the MOST RECENT across scopes — so one
+        /// healthy scope keeps it fresh while the rest are stalled and "the guard has stopped" never fires.
+        /// That single alert is the one every deployment of this needs, and losing it would reintroduce the
+        /// pathology this class was written to remove, through a change that looks like configuration.</para>
+        /// </summary>
+        public string Scope { get; }
+
         /// <summary>Records one completed cycle.</summary>
         public void Cycle(in GuardCycleResult result, int pods, DateTimeOffset at, bool suppressed)
         {
@@ -108,81 +128,156 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
             Interlocked.Exchange(ref _realLabels, realLabels);
         }
 
-        /// <summary>Renders the Prometheus text exposition format.</summary>
-        public string ToPrometheusText()
-        {
-            var text = new StringBuilder();
+        /// <summary>One exported series: its name, its documentation, and how to read it off an instrument.</summary>
+        private readonly record struct Series(string Name, string Help, string Type, Func<GuardTelemetry, double> Read);
 
-            Counter(text, "overfit_guard_cycles_total",
-                "Evaluation cycles the guard has completed.", Interlocked.Read(ref _cycles));
+        /// <summary>
+        /// Every series this guard exports, in one table so that a metric cannot be documented in one place
+        /// and rendered in another.
+        ///
+        /// <para>Delegates rather than reflection: this library is Native-AOT compiled in CI and a property
+        /// walk would not survive trimming.</para>
+        /// </summary>
+        private static readonly Series[] Catalog =
+        [
+            new("overfit_guard_cycles_total", "Evaluation cycles the guard has completed.",
+                "counter", t => Interlocked.Read(ref t._cycles)),
 
-            Gauge(text, "overfit_guard_suppressions_active",
+            new("overfit_guard_suppressions_active",
                 "Operator suppressions muting a signal right now. Climbing without bound is a team silencing "
-                + "its way to a green dashboard.", Volatile.Read(ref _activeSuppressions));
+                + "its way to a green dashboard.",
+                "gauge", t => Volatile.Read(ref t._activeSuppressions)),
 
-            Counter(text, "overfit_guard_findings_muted_total",
+            new("overfit_guard_findings_muted_total",
                 "Findings dropped because an operator asked not to hear them.",
-                Interlocked.Read(ref _muted));
+                "counter", t => Interlocked.Read(ref t._muted)),
 
-            Gauge(text, "overfit_guard_labels_total",
-                "Operator judgements recorded about past incidents.", (int)Interlocked.Read(ref _labels));
+            new("overfit_guard_labels_total", "Operator judgements recorded about past incidents.",
+                "gauge", t => Interlocked.Read(ref t._labels)),
 
-            Gauge(text, "overfit_guard_labels_real",
+            new("overfit_guard_labels_real",
                 "Judgements marking a finding as correct. These constrain every future floor proposal; a "
                 + "feedback loop with none of them converges on a detector that reports nothing.",
-                (int)Interlocked.Read(ref _realLabels));
+                "gauge", t => Interlocked.Read(ref t._realLabels)),
 
-            Counter(text, "overfit_guard_state_failures_total",
+            new("overfit_guard_state_failures_total",
                 "Cycles whose durable state could not be read or written. Incidents will not survive the next "
                 + "restart, and the restart is when anyone would otherwise notice.",
-                Interlocked.Read(ref _stateWriteFailures));
+                "counter", t => Interlocked.Read(ref t._stateWriteFailures)),
 
-            Counter(text, "overfit_guard_cycle_failures_total",
+            new("overfit_guard_cycle_failures_total",
                 "Cycles that threw and were skipped. A guard failing every cycle reports no incidents, "
-                + "which is indistinguishable from a healthy cluster.", Interlocked.Read(ref _failedCycles));
+                + "which is indistinguishable from a healthy cluster.",
+                "counter", t => Interlocked.Read(ref t._failedCycles)),
 
-            Counter(text, "overfit_guard_findings_total",
-                "Signals that reached a decided anomaly.", Interlocked.Read(ref _findings));
+            new("overfit_guard_findings_total", "Signals that reached a decided anomaly.",
+                "counter", t => Interlocked.Read(ref t._findings)),
 
-            Counter(text, "overfit_guard_incidents_opened_total",
+            new("overfit_guard_incidents_opened_total",
                 "Incidents seen for the first time — the only count that should page anyone.",
-                Interlocked.Read(ref _opened));
+                "counter", t => Interlocked.Read(ref t._opened)),
 
-            Counter(text, "overfit_guard_incidents_resolved_total",
-                "Incidents that closed.", Interlocked.Read(ref _resolved));
+            new("overfit_guard_incidents_resolved_total", "Incidents that closed.",
+                "counter", t => Interlocked.Read(ref t._resolved)),
 
-            Counter(text, "overfit_guard_suppressed_cycles_total",
-                "Cycles inside a declared maintenance window.", Interlocked.Read(ref _suppressed));
+            new("overfit_guard_suppressed_cycles_total", "Cycles inside a declared maintenance window.",
+                "counter", t => Interlocked.Read(ref t._suppressed)),
 
-            Gauge(text, "overfit_guard_last_cycle_timestamp_seconds",
+            new("overfit_guard_last_cycle_timestamp_seconds",
                 "When the last cycle completed. Alert on this going stale: a guard that has stopped is "
                 + "worse than one that never started, because somebody is relying on it.",
-                Interlocked.Read(ref _lastCycleUnixSeconds));
+                "gauge", t => Interlocked.Read(ref t._lastCycleUnixSeconds)),
 
-            Gauge(text, "overfit_guard_pods", "Pods evaluated in the last cycle.", Volatile.Read(ref _pods));
+            new("overfit_guard_pods", "Pods evaluated in the last cycle.",
+                "gauge", t => Volatile.Read(ref t._pods)),
 
-            Gauge(text, "overfit_guard_blind_metrics",
+            new("overfit_guard_blind_metrics",
                 "Channels no pod reported. Each one produces no findings, which looks exactly like health.",
-                Volatile.Read(ref _blind));
+                "gauge", t => Volatile.Read(ref t._blind)),
 
-            Gauge(text, "overfit_guard_unevaluable_metrics",
+            new("overfit_guard_unevaluable_metrics",
                 "Channels that were reported and still could not be judged.",
-                Volatile.Read(ref _unevaluable));
+                "gauge", t => Volatile.Read(ref t._unevaluable)),
+        ];
+
+        /// <summary>Renders the Prometheus text exposition format for this instrument alone.</summary>
+        public string ToPrometheusText()
+        {
+            return Render([this]);
+        }
+
+        /// <summary>
+        /// Renders several instruments into ONE exposition document.
+        ///
+        /// <para><b>Concatenating per-instrument renderings does not work, and fails in a way that takes the
+        /// whole endpoint down rather than one scope.</b> The text format allows a metric name exactly one
+        /// <c># HELP</c> and one <c># TYPE</c> line per document; a second one makes Prometheus reject the
+        /// entire scrape. So headers are written once per series and one sample line follows per scope.</para>
+        /// </summary>
+        public static string Render(IReadOnlyList<GuardTelemetry> instruments)
+        {
+            ArgumentNullException.ThrowIfNull(instruments);
+
+            var text = new StringBuilder();
+
+            for (var s = 0; s < Catalog.Length; s++)
+            {
+                var series = Catalog[s];
+
+                text.Append("# HELP ").Append(series.Name).Append(' ').Append(series.Help).Append('\n')
+                    .Append("# TYPE ").Append(series.Name).Append(' ').Append(series.Type).Append('\n');
+
+                for (var i = 0; i < instruments.Count; i++)
+                {
+                    var instrument = instruments[i];
+
+                    text.Append(series.Name);
+
+                    if (instrument.Scope.Length > 0)
+                    {
+                        text.Append("{scope=\"");
+                        AppendEscaped(text, instrument.Scope);
+                        text.Append("\"}");
+                    }
+
+                    text.Append(' ')
+                        .Append(series.Read(instrument).ToString("R", CultureInfo.InvariantCulture))
+                        .Append('\n');
+                }
+            }
 
             return text.ToString();
         }
 
-        private static void Counter(StringBuilder text, string name, string help, double value)
-            => Write(text, name, help, "counter", value);
-
-        private static void Gauge(StringBuilder text, string name, string help, double value)
-            => Write(text, name, help, "gauge", value);
-
-        private static void Write(StringBuilder text, string name, string help, string type, double value)
+        /// <summary>
+        /// Escapes a label value per the text format: backslash, double quote and newline.
+        ///
+        /// <para>A scope name is derived from a namespace and a pod regex, and a regex may legitimately
+        /// contain a backslash — <c>api-\d+</c> is an ordinary selector. Unescaped it would terminate the
+        /// label value early and corrupt every series after it in the document.</para>
+        /// </summary>
+        private static void AppendEscaped(StringBuilder text, string value)
         {
-            text.Append("# HELP ").Append(name).Append(' ').Append(help).Append('\n')
-                .Append("# TYPE ").Append(name).Append(' ').Append(type).Append('\n')
-                .Append(name).Append(' ').Append(value.ToString("R", CultureInfo.InvariantCulture)).Append('\n');
+            for (var i = 0; i < value.Length; i++)
+            {
+                var c = value[i];
+
+                if (c == '\\' || c == '"')
+                {
+                    text.Append('\\').Append(c);
+
+                    continue;
+                }
+
+                if (c == '\n')
+                {
+                    text.Append("\\n");
+
+                    continue;
+                }
+
+                text.Append(c);
+            }
         }
     }
 }

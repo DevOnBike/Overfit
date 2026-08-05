@@ -44,6 +44,22 @@ namespace DevOnBike.Overfit.Anomalies.Contracts
         public string PodRegex { get; set; } = string.Empty;
 
         /// <summary>
+        /// Several populations watched by one process, instead of the single <see cref="Namespace"/> /
+        /// <see cref="PodRegex"/> pair above.
+        ///
+        /// <para><b>Empty means single-scope, and that is the migration.</b> A file written before this
+        /// existed resolves to a one-element list built from the top-level fields, so nothing deployed needs
+        /// editing on the day multi-scope ships. Setting both forms is refused rather than merged — see
+        /// <see cref="Monitoring.GuardScopeResolver"/> for why a rule that guessed would be worse than the
+        /// rejection.</para>
+        ///
+        /// <para>Bindings in <see cref="Metrics"/> and gates in <see cref="Thresholds"/> stay at file level
+        /// and are shared: fifty scopes repeating thirteen metric names is a configuration file nobody
+        /// reads.</para>
+        /// </summary>
+        public List<GuardScopeEntry> Scopes { get; set; } = [];
+
+        /// <summary>
         /// The deployment being watched. Used to key the seasonal baseline, to match maintenance windows, and
         /// as the subject of findings that are about the workload rather than any one replica.
         ///

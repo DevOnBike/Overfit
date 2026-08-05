@@ -53,6 +53,37 @@ single pod regex. At a client with fifty namespaces that is fifty Deployments, C
 tracker, calibrator and silent-pod counters, sharing one Prometheus client, one state file and one metrics
 endpoint.
 
+**▶ IN PROGRESS 2026-08-05 — sliced so each step is separately testable, and the first two are deliberately
+behaviour-neutral.** Suite 2138/0/261 after both.
+
+| # | slice | changes behaviour? | state |
+|---|---|---|---|
+| 1 | scope model + config migration | **no** — a single-scope file resolves to a one-element list | ✅ `GuardScope`, `GuardScopeEntry`, `GuardScopeResolver`, 7 tests |
+| 2 | `scope` label on every series | no — absent scope renders exactly the old output | ✅ `GuardTelemetry.Render`, 5 tests |
+| 3 | host running N scopes sequentially, failure isolated per scope | yes | ▶ next |
+| 4 | shared durable state: global id counter, per-scope partitions | yes | |
+| 5 | `--real` labels keyed by scope | yes | |
+
+**Slice 2 before slice 3, and the order is not arbitrary.** The design names
+`overfit_guard_last_cycle_timestamp_seconds` as the series that makes "the guard has stopped" alertable;
+across scopes without a label it becomes the *most recent* of them, so one healthy scope keeps it fresh while
+the rest are stalled. Admitting several scopes before labelling the series would open a window in which that
+alert is silently dead — the exact pathology this subsystem exists to remove.
+
+Two decisions taken in slice 1 that the design left open:
+
+- **The scope name is derived (`namespace/podRegex`), never configured.** A name a client can type is a name
+  a client can change, and changing it would orphan that scope's saved incidents and learned floors while
+  looking like an edit to a label. The namespace alone will not do: two scopes in one namespace is the
+  ordinary case, and a shared name would merge their trackers.
+- **Declaring both the old top-level pair and a `scopes` list is refused, not merged.** Nothing can tell
+  whether the top-level fields are a scope of their own or defaults the list overrides, and either guess
+  watches a different set of pods than the file appears to describe.
+
+One hazard found while writing slice 2, worth carrying into slice 3: the Prometheus text format allows one
+`# HELP`/`# TYPE` per metric name **per document**, and a second makes Prometheus reject the *entire* scrape.
+Concatenating per-scope renderings would therefore have taken the whole endpoint down at the second scope.
+
 Three things that design settles and which are not obvious:
 
 - **Incident ids stay global**, not per scope. A per-scope counter makes an id meaningless without its scope
@@ -167,54 +198,117 @@ flagged for a decision, 1 declared blind.
 
 ---
 
-## 🐞 OPEN DEFECTS — anomaly guard (found 2026-08-02 by `overfit-find-bugs-game`)
+## ✅ CLOSED — the six anomaly-guard defects found 2026-08-02
 
-Run against `Sources/Main/Anomalies` a few hours after most of it was written, and it ended by the ten-minute
-cap rather than by covering the module — `Rules/`, the learned families, `IncidentGrouper`, `IncidentReporter`
-and `MetricHistory` were never opened, so no claim is made about them. Report in
-`docs/bug-hunts/anomalies-2026-08-02-1836-bugs-game-findings.md`.
+All six fixed by 2026-08-03, with tests. Moved to [ROADMAP-COMPLETED.md](ROADMAP-COMPLETED.md) — the section title said OPEN while every row in it was
+struck through, which is the kind of drift this split exists to stop.
 
-**Four of the six are the same shape, and it is not a coding mistake.** They are gaps between what the code
-does and what was written about it — a comment, a changelog entry, and two "fixed" claims that were half or
-wholly untrue. The measurement caught three such gaps earlier the same day; reading caught four more. Whatever
-is producing them is not caught by tests, because the tests agree with the code and it is the prose that is
-wrong.
+### ✅ FINISHED — the 24-hour measurement, 2026-08-04 07:59Z → 2026-08-05 07:59Z
 
-| # | Defect | Why it matters |
-|---|---|---|
-| ~~**1**~~ | ~~**`IncidentTracker.Restore` still allows identifier reuse.**~~ **Fixed 2026-08-03.** The loop visits every saved record and advances `_nextId` ahead of both filters; capacity is now a `continue` rather than a loop condition. `Truncated` counts capacity refusals **only** — folding stale records in reported a working staleness bound as a sizing problem. Tests: `IncidentTrackerTests.RestoreProtectsTheIdentifiersOfIncidentsItHadNoRoomFor` (fails on the old loop) and `StaleRecordsAreNotCountedAsTruncation`. | Reachable in the one situation a client creates on purpose: lowering `MaxOpenIncidents` and restarting with the previous state file present. The identifiers left unread belong to incidents that are **fresh and still open**, so the number is reused while somebody is looking at the original. |
-| ~~**2**~~ | ~~**Store write failures are still silent.**~~ **Fixed 2026-08-03, and verified this time rather than claimed.** `IIncidentStore` gained `LastError` — `FileIncidentStore` had recorded it since it was written, but the guard holds the interface, so nobody could read it. `AnomalyGuard.StateError` is set after both loads at construction and after both saves each cycle, and calls `GuardTelemetry.StateWriteFailed()`. Tests: `GuardStateFailureTests`, four of them — failed save, failed load before the first cycle, recovery clearing the report, and two broken stores counting as one failed cycle. | The previous entry here recorded that **`CHANGELOG.md` claimed this shipped when no part of it had.** The counter is now proven to increment by a test that fails without the wiring, which is the only form of the claim worth making. |
-| ~~**3**~~ | ~~**`OperatorLabelStore.Evict` protects the label kind but not the magnitude.**~~ **Fixed 2026-08-03.** At capacity, once the noise labels are gone, it drops the **largest** real magnitude rather than the oldest. Age is not what makes a real label useful: every one caps future proposals through `SmallestRealMagnitude`, so only the smallest is doing any work and the largest was already dominated. | Dropping by age removed the binding constraint roughly one time in N, and the symptom is a floor drifting up past something an operator explicitly confirmed — the guard going quiet about exactly what it was told to keep reporting. |
-| ~~**4**~~ | ~~**`FloorCalibrator.Write` does not escape custom channel names.**~~ **Fixed 2026-08-03.** Same encoding as `OperatorLabelStore` and `SuppressionStore` — three stores share one file through `LearnedState`, and three escaping schemes in one file is a format nobody can reason about — plus `#`, so a channel name cannot forge a section header. | A name containing `### labels` moved `LearnedState`'s section boundary and silently redistributed the payload between calibration and labels. |
-| ~~**5**~~ | ~~**`AnomalyGuard.FloorProposals` bypasses the `_gate` lock.**~~ **Fixed 2026-08-03.** It takes the lock. `Propose` is not a pure read — it computes and caches, and a concurrent cycle invalidates that cache and refills the accumulators underneath it. | Latent, and that is why it was easy to miss: a property that skips the lock is a trap laid for whoever wires the next reader. |
-| ~~**6**~~ | ~~**`SignalSuppression.Magnitude` has no measurement behind it.**~~ **Answered 2026-08-03, by fixing the experiment rather than the mechanism.** The withdrawn replay could never have measured this: a healthy shadow week followed by a fault exercises the ceiling only if a dismissal happens to land on the same pod and signal as the fault, inside the mute window. The claim is behavioural, not statistical, so it is pinned behaviourally in `SuppressionCeilingTests` — the dismissed event stays muted, 25% larger stays muted, ten times larger reaches the operator, and the guard's own store honours all three. | The number this needed was a boundary, tested, not a rate. Recorded because "measure it" and "measure it with the harness you already have" are not the same instruction, and the second one wasted a day. |
+**5 false incidents per day (95% Poisson 1–9), 292 cycles, 0 cycle failures, 0 cycles overlapping a
+recorded build window.** Full reading — including why the heap channel's 108→0 is NOT clean credit for
+the fix — in [ROADMAP-COMPLETED.md](ROADMAP-COMPLETED.md).
 
-Fix order: 1 and 2 first — both are half-done work that has been described as finished, which is worse than
-work not started. **Both done 2026-08-03**; suite 2002 passing, 0 failing. Then 6 (decide the mechanism's
-fate), then 4, 3, 5.
+### ▶ THE MOMENT THE RUN ENDS — in this order
 
-### ▶ RESUME HERE — 2026-08-04, start of day
+0. ✅ **DONE 2026-08-05.** Guard log saved to `Tests/bin/fp-run.log` — 334 KB, 2328 lines, 297 cycles,
+   complete from the `07:58:52 anomaly guard starting:` line. Do this before anything that takes minutes;
+   `kubectl logs` reads a container ring buffer and a restart empties it.
 
-**The 24-hour measurement has not been started, and starting it is the first action.** Everything it was
-waiting behind is done. Tree is clean, suite **2051 passing / 0 failing**.
+1. ✅ **DONE 2026-08-05 — the `Vector512` width question. NEGATIVE, written up in
+   [ROADMAP-COMPLETED.md](ROADMAP-COMPLETED.md).** Short version: the planned lever does not exist —
+   `DOTNET_PreferredVectorBitWidth=512` is *refused* on this CPU (128 moves the width, so the knob is live),
+   so `Vector<T>` is 256-bit here by runtime policy and no configuration reaches it. Explicit 512-bit does
+   beat 256-bit everywhere (Add 0.74–0.92, MulAdd 0.80–1.01, Dot 0.47–0.90), and the resulting `Simd.Dot`
+   improvement was real (1.79x at 65536) — and was **reverted** because a path census found the kernel is on
+   no forward path at all and 100% of its backward work is below the length where the change pays, while the
+   guard branch cost 9–11% at the two commonest lengths. Kept: `SimdDotTests` (66 cases, the kernel had
+   none), `Vector512WidthBenchmark`, `SimdDotAccumulatorBenchmark`.
 
-**Run it like this**, and the details are load-bearing:
+   ▶ **Still open from it: `Simd.Avx512Threshold = 512` is unmeasured and its comment is false.** At 128
+   floats — a quarter of the threshold, where the comment claims "AVX2 overhead is lower" — 512-bit won
+   every operation. Before moving it, **census the lengths `Simd.Add` and `Simd.MulAdd` actually receive**;
+   moving a threshold on microbenchmark points alone is precisely the mistake the `Dot` change turned out to
+   be.
 
-1. Nothing else may touch this box for the day. The benchmark↔test mutex covers those two; the lab is a
-   third participant and is **not** covered yet (item 9 below), so it is discipline until it is code.
-2. Deploy the current build to the lab first. The 112/day figure was taken on a build whose step gate
-   could not fire and whose calibrated floors contained the window they were gating — **both are now
-   different**, so that number describes software that no longer exists.
-3. Record the clean-start marker (`Tests/bin/fp-run-clean-start.txt`) and the build windows file the
-   analysis reads. `.claude/analyse_run.py` was written and dry-run before the last run ended, and it
-   should be dry-run again before this one ends rather than at the moment its answer is wanted.
-4. **What the run has to answer**: false incidents per day on the fixed build, and whether the two floor
-   repairs bought detection with noise. The synthetic control said one incident before and one after, but
-   that is one seed over 69 cycles and **must not be quoted as a rate**.
+   ▶ **Still open from it: `ElseRefactorBenchmark`.** .NET 10 doubled the inlining budget and stopped
+   `try`/`finally` blocking inlining, and `OVERFIT021`'s guidance rests on a measured 2.25x extraction
+   penalty. If that penalty is gone, the rule is advising about a runtime that no longer exists. It was
+   queued with the width question only because both are benchmarks sharing the machine-exclusion mutex.
 
-Expected shape of the answer, written down first so a surprise is visible as a surprise: the previous run
-gave 112/day of which 96.4% came from one misconfigured `GcGen2HeapBytes` floor. If arming that floor is
-the only change, the non-heap remainder was 4/day.
+2. ✅ **DONE 2026-08-05 — `analyse_run.py`, and the run passed.** 292 cycles in the window, 5 incidents,
+   25 findings, 97% quiet, **0 cycle failures**, 2 recorded machine-load windows and **0 cycles overlapping
+   one**. Rate **5/day (95% Poisson 1–9)** against 112/day on 2026-08-02.
+
+   **Read it as two results, not one.** Non-heap went **4/day → 5/day, i.e. unchanged** (5 is inside the
+   interval for 4) — that was the acceptance question after the floor repairs and it passes. Heap went
+   **108/day → 0**, but that is *not* clean credit: the calibrator proposed a 0.729 MB floor against the
+   0.641 MB configured one, i.e. peer heap gaps peaked at 583 KB and sat *just under* the threshold, where
+   in the 47-hour-old baseline pods they sat well above it. **Do not quote 22x as the effect of the fix.**
+   Of the 5: 2 in the first hour (cold start), 2 are the up and down slopes of the same 1440-minute diurnal
+   curve on `RequestsPerSecond` (+10.6% at 19:03Z, −15.2% at 23:43Z — one phenomenon counted twice, and
+   unavoidable on day one because `SeasonalBaseline` needs a previous day), 1 is `CpuUsageRatio` 9% above
+   peers at an absolute 0.00017 (0.017% of a core).
+
+   ▶ **Still open from it: `MinRelativeGap` on `CpuUsageRatio` passes 9%.** Two of the five incidents were
+   that same signature on different pods. Cliff's delta is scale-free, so a rank-perfect separation at a
+   physically meaningless magnitude is exactly what the gap gate exists to stop — it is set too low on this
+   channel.
+2. **`CheckpointedModule.FindNonDeterministic`** — scheduled explicitly by the user on 2026-08-04. Replace
+   the recursion with an explicit `Stack<IModule>` plus a reference-identity `HashSet<IModule>`, so the
+   traversal terminates on any graph and the `OVERFIT022` exemption disappears instead of being
+   re-justified. `s.Add(s)` is legal today and kills the process with an uncatchable `StackOverflowException`.
+   See the NASA section for why this is worth fixing when `checked` in `TensorShape` was not.
+3. **Fix the `DECAY` line in `.claude/hourly_check.py`.** It currently asserts that a falling rate between
+   halves is "cold heaps settling", which is an interpretation the comparison cannot support: pod warm-up,
+   calibrator warm-up and position on the 1440-minute load curve all push the same way early in a run. The
+   line should report the two halves and say plainly that it cannot attribute the difference, pointing at
+   the per-hour breakdown in `analyse_run.py` — the tool that can. Deferred rather than edited mid-run
+   because changing a reporting instrument while it is reporting makes the series it produced
+   non-uniform, and the fix is a sentence, not a number.
+4. **Audit `Audio/Mp3` end to end** — scheduled by the user on 2026-08-04. It is the last directory in the
+   tree that parses an untrusted file and has never been audited as a whole; `overfit-find-bugs-game` is
+   the right instrument. Two things to carry in rather than rediscover:
+
+   - The defect class to look for is **not** "unchecked product" in general — that sweep returns 71 sites
+     tree-wide and is 93% noise. It is specifically *a value read from the file that sizes an allocation,
+     bounds a loop, or indexes a table*, which is where all five earlier true positives lived.
+   - The file is in better shape than its lack of coverage suggests. A spot-check found `tindex` and
+     `blockClass` bounded by the shape of their own switch, and found `big_values` already clamped —
+     a 9-bit field doubled to 1022 and written into a 576-entry granule, with a comment naming the attack.
+     Somebody has been here with the right instincts, so a hunt that returns nothing is a plausible result
+     rather than a failed one, and should be reported as such instead of being padded.
+
+5. **The eleven dead telemetry instruments — triaged 2026-08-04, execute after the run.** The diagnostics
+   hunt's finding was closed by *deciding* about them, and the decision was recorded as a passing sentence
+   ("the graph and module ones remain wireable"), which is how work disappears. It is now a list.
+
+   **Wire — four instruments, one call site, off every hot path.** `ComputationGraph.Backward` runs once per
+   training step and takes milliseconds; `RecordedOpCount` is already tracked. So `GraphCount`,
+   `TapeOpCount`, `GraphBackwardDurationMs` and `GraphAllocatedBytes` all come from one place, at the cost
+   of one `ValueStopwatch` (never `Stopwatch.StartNew` — banned here) and two
+   `GC.GetAllocatedBytesForCurrentThread()` calls per step. That is nothing against a millisecond backward
+   pass, and it is the pass whose cost dominates training.
+
+   **Wire — one more, once per arena.** `NativeMemoryBytes` from `NativeBufferManaged`'s allocate and
+   dispose. An `UpDownCounter` is exactly the right shape for it.
+
+   **Measure before deciding — three.** `ModuleCount`, `ModuleDurationMs`, `ModuleAllocatedBytes` are
+   per-layer per-forward, not per-step: a twelve-layer network pays twelve clock reads per pass. That is
+   probably fine and "probably" is not the standard here, so it needs a benchmark first — the same test the
+   kernel pair failed.
+
+   **Delete — three, and this is a public API break, so it is a decision rather than a tidy-up.**
+   `KernelCount` and `KernelDurationMs` were decided against on 2026-08-03: timing the zero-allocation hot
+   path costs more than it measures. Keeping public fields for something we have decided never to do is
+   worse than removing them. `AllocationBytes` goes with them — its name says nothing, and
+   `overfit.tensor_storage.bytes.created` already carries that number and *is* fed. Per the versioning
+   policy in `CHANGELOG.md` this is a MINOR bump.
+
+   Net effect: `TelemetryInstrumentWiringTests`'s known-dead list goes from eleven to three, and the ratchet
+   only permits shrinking, so it enforces the plan by construction.
+
+6. The rest of the queue below.
 
 ### Queued behind the 24-hour run (ends 2026-08-03 18:20 UTC)
 
@@ -308,11 +402,29 @@ measurement already restarted three times in one day. In order:
     number from 288, and the two are not interchangeable. **Nothing about noise should be quoted to a client
     from the synthetic run.**
 
-11. **`OVERFIT028` cannot see a product outside `new T[...]`.** *(New, 2026-08-03.)* It scans array-creation
-    syntax, so a property getter, a constructor or a comparison is invisible to it — which is why five
-    unchecked dimension products across four modules sat in directories the analyser reported clean, and why
-    they were found by reading instead. Either widen the rule to multiplications that flow into a size, or
-    stop describing it as covering this class. The second is honest and cheap; the first is the useful one.
+11. ~~**`OVERFIT028` cannot see a product outside `new T[...]`.**~~ **Measured 2026-08-04 — do NOT widen the
+    rule.** It scans array-creation syntax, so a property getter or a constructor is invisible to it, which
+    is why five unchecked dimension products sat in directories the analyser reported clean. The obvious
+    conclusion was to widen it to any multiplication flowing into a size. **The population says otherwise.**
+
+    A tree-wide sweep for "a size-shaped variable assigned from a product" — `size`, `length`, `count`,
+    `total`, `bytes`, `stride`, `offset`, `capacity` — returns **71 sites across 41 files**. All five true
+    positives were in parsers of untrusted files; the rest take their operands from the caller's own code,
+    where guarding buys nothing (the same argument that got `checked` reverted in `TensorShape` the same
+    day). A widened rule would therefore fire ~5 useful times against ~66 benign ones.
+
+    **A rule at a 93% false-positive rate does not make a codebase safer, it makes one more thing people
+    suppress without reading.** That is the failure mode this project's whole analyzer ladder is designed
+    to avoid, and widening OVERFIT028 would walk straight into it.
+
+    **What to do instead: audit parsers by directory, not products by syntax.** The distinction that
+    separated the five real defects from the sixty-six benign ones is *where the operands come from*, and no
+    analyzer can see that. `Audio/Mp3` is the one untrusted-input parser no bug hunt has covered — a
+    spot-check on 2026-08-04 found its two candidate products bounded by construction (`tindex` and
+    `blockClass` are each 0..2 by the shape of their switch) and found it already carrying a fix of exactly
+    this class: `big_values` is a 9-bit field doubled to 1022 and written into a 576-entry granule, clamped
+    with a comment naming the attack. It is in better shape than expected, but it is still the only
+    file-parsing directory never audited end to end.
 
 12. **The suite is not fully deterministic.** *(New, 2026-08-03, observed rather than diagnosed.)* Across
     roughly a dozen full runs today, two failed — `PromptCacheReuseTests.ReusedPrefix_ProducesIdenticalLogits…`
@@ -413,6 +525,68 @@ nothing the day is measuring.
 
 ---
 
+## 📋 SIMD and .NET 10 articles — reviewed 2026-08-04, and what is actually usable
+
+Five links reviewed: the .NET 10 performance post, three SIMD tutorials (xoofx, meriffa, developersvoice)
+and the `CBGonzalez/SIMDPerformance` benchmark repo.
+
+**The four SIMD articles offer this codebase nothing, and the reason is a baseline mismatch rather than a
+quality problem.** Every speedup they quote — 5x, 8x, 10x — is measured against a *scalar* loop. This
+tree's baseline is already `TensorPrimitives` and hand-written intrinsics: 855 SIMD call sites across 73
+files. A multiplier against the starting line says nothing about the distance still ahead.
+
+Technique by technique, against what is already here:
+
+| Article's advice | State here |
+|---|---|
+| Four vector blocks per iteration to amortise loop overhead | `LinearKernels.ForwardInputMajorVector4` already does exactly this, on `Vector<float>`, with a width-based fallback |
+| `Vector<T>` on integers can be **2.8x slower** where instructions are emulated | `Vector<T>` appears in six files, all on `float`. Does not apply |
+| `ref` cursors instead of spans to kill bounds checks | .NET 10 improved bounds-check elimination in four separate ways (Log2 results, length-comparison assertions, `switch` facts, immutable string length). This advice is dated 2023 and is now partly the JIT's job |
+| Tail handling, alignment | Standard practice here |
+
+**And this project has already measured and reverted several of the exact techniques these articles sell:**
+register blocking in direct convolution, K-blocking plus A-packing in the im2col GEMM, Winograd F(2,3)
+(parity-correct at cos 1.0 and **+79% slower**), and the AVX-512 decode port. The headline finding runs
+directly against the tutorials' thesis: **`TensorPrimitives` beat a hand-written micro-kernel here.**
+
+The structural reason is worth restating because it decides which future article is worth reading: **decode
+is DRAM-bandwidth-bound, not FLOP-bound.** Wider registers do not help a loop that is waiting on memory,
+which is why the AVX-512 port was a negative result rather than a disappointing positive one. Any piece
+promising N× from a wider vector is answering a question this hot path does not ask.
+
+### What IS usable — from the .NET 10 post, and it is all automatic
+
+The SDK here is **10.0.110**, so every JIT improvement below is already in effect and needs no source
+change. Two of them touch measurements this repository relies on:
+
+1. **`try`/`finally` no longer blocks inlining** (dotnet/runtime#112968, #113023). This matters more here
+   than almost anywhere: `using` compiles to `try`/`finally`, and nearly every helper touching
+   `PooledBuffer<T>` or `TensorStorage<T>` uses one. Those methods were previously **not inlinable at all**.
+2. **Inlining budget more than doubled** (#114191, #118641). This bears directly on the `OVERFIT021`
+   measurement — *"extracting a method costs 2.25x when the JIT does not inline it"* — which is the number
+   the `else`-ban guidance rests on.
+
+**Action: re-run `ElseRefactorBenchmark` after the 24-hour measurement ends.** If the extraction penalty
+has gone, the rule's advice describes a runtime that no longer exists. Not run now: a benchmark takes the
+machine-measurement mutex and loads this box for minutes, and the lab runs on this box.
+
+Also relevant, lower priority: **escape analysis now stack-allocates arrays, spans and delegates**
+(#104906, #112250, #113977, #116124, #115172). `PooledBuffer<T>` is for large buffers and stays — but some
+small `new T[n]` sites that were "fixed" by pooling may not have needed fixing.
+
+**One open question the articles surfaced indirectly, and it is a question rather than a finding.** This
+tree vectorises at two different widths depending on which file you land in: `Intrinsics/Simd.cs` dispatches
+explicitly to `Vector512` above a length threshold, while `Kernels/LinearKernels.cs` uses width-agnostic
+`Vector<float>`, whose width the runtime chooses. .NET does not give `Vector<T>` 512-bit width by default
+even on capable hardware. If that holds here, the linear forward path runs at half the width the
+hand-written path uses — on the *training* side, which is compute-bound, unlike decode.
+
+**Do not act on that without measuring, and this box has already argued against it twice:** the AVX-512
+decode port was reverted as a regression, and the banded 512 prefill measured 1.15–1.17× on `ffn_gate_up`
+but only on `UseOutputBlocking`, which is off by default. So the honest experiment is one benchmark of
+`LinearKernels` forward with `DOTNET_PreferredVectorBitWidth=512` against the default — an environment
+variable, not a rewrite — and it belongs after the 24-hour run with the rest.
+
 ## 📋 NASA Power of 10 — audited against this codebase (2026-08-02)
 
 Prompted by a day in which four `overfit-find-bugs-game` hunts produced eighteen defects. Mapping them onto
@@ -494,6 +668,42 @@ SentenceEmbedder.cs (2 sites)    4 KB   8x
 None is recursive, so none overflows on its own. The Whisper comment names the real concern: on a pool thread
 with a 1 MB stack, a 32 KB frame deep in a call chain is a different proposition from the same frame on the
 main thread.
+
+### ▶ OPEN — the one assumed bound is worse than "assumed" (read 2026-08-04, not yet fixed)
+
+`CheckpointedModule.FindNonDeterministic` was recorded above as the single exemption whose bound is a hope
+rather than a proof. Reading it settles the question, and the answer is not the one the audit expected:
+**the stated bound describes the wrong quantity.**
+
+The exemption says *"recursion follows Sequential nesting, which a caller builds explicitly and is a handful
+of levels at most"*. But `Sequential.Add(IModule)` is public, mutable after construction, and performs no
+cycle check. So:
+
+```csharp
+var s = new Sequential();
+s.Add(s);                    // legal, no check anywhere
+new CheckpointedModule(s);   // FindNonDeterministic recurses forever
+```
+
+That is **zero levels of nesting and unbounded recursion** — the depth the comment reasons about is not the
+thing that fails. And the failure is the worst kind available: `StackOverflowException` cannot be caught,
+so the process dies rather than reporting anything. A shared sub-module added to two branches is fine (a
+DAG terminates); only a genuine cycle does this.
+
+**Why this is worth fixing even though the input is caller-controlled.** The same argument was used on
+2026-08-04 to *revert* `checked` in `TensorShape` — the dimensions come from the caller's own code, so
+guarding them buys nothing. The difference is the consequence, not the source: an unchecked product yields
+a wrong number that a test can catch, and this yields a process kill that nothing can. Cost asymmetry, not
+input provenance, is what decides.
+
+**The fix is to remove the recursion, not to bound it.** An explicit `Stack<IModule>` plus a
+reference-identity `HashSet<IModule>` of visited modules terminates on *any* graph — cyclic, deep or
+otherwise — so no depth limit has to be chosen and the `#pragma warning disable OVERFIT022` disappears
+rather than being re-justified. That is also what this section already prescribes for an unprovable bound:
+"the depth becomes a `Count` that can be checked and reported".
+
+**Not applied yet, deliberately**: found while a 24-hour measurement was running on this box, and a fix that
+cannot be built and tested is worse than one not written. First thing after the run.
 
 ### `EnsureSufficientExecutionStack()` — and why it is not being added anywhere yet
 

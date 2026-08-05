@@ -56,10 +56,20 @@ using var leakTimer = new Timer(
 
         var chunk = new byte[(int)Math.Clamp(perSecond, 1, 64 * 1024 * 1024)];
 
-        // Touched, or the pages are never faulted in and the working set does not move — the metric the
-        // guard reads would stay flat while the heap grew.
-        chunk[0] = 1;
-        chunk[^1] = 1;
+        // EVERY page, not just the ends. The previous version touched chunk[0] and chunk[^1] and the comment
+        // above it named the exact failure it was trying to prevent — but two writes fault in two 4 KB
+        // pages, so a 2 MB chunk moved the working set by 8 KB. Anything past ~85 KB is a Large Object Heap
+        // allocation served from pre-zeroed OS pages, which the runtime need not write to, so the pages stay
+        // mapped to the shared zero page and never become resident.
+        //
+        // Measured before the fix, at 2 MB/s for four minutes: RSS 39 -> 36 -> 37 -> 24 MiB, i.e. falling,
+        // while dotnet_gc_heap_size_bytes rose 542% of typical and the guard raised a GcGen2HeapBytes
+        // incident. So the leak fault has only ever exercised the HEAP channel, and every statement that it
+        // tests MemoryWorkingSetBytes — including the trend family's headline case — was untested.
+        for (var offset = 0; offset < chunk.Length; offset += 4096)
+        {
+            chunk[offset] = 1;
+        }
 
         lock (leakLock)
         {

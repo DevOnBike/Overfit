@@ -108,6 +108,23 @@ namespace DevOnBike.Overfit.Server.AspNet.Services
         private readonly AnomalyGuard _guard;
         private readonly ILogger<AnomalyGuardService> _logger;
         private readonly FloorCalibrator? _calibrator;
+
+        /// <summary>
+        /// Features this deployment has no binding for, so their per-cycle silence is expected.
+        ///
+        /// <para><b>Two different things were being reported as one, and the harmless one was burying the
+        /// dangerous one.</b> A metric with no binding is a configuration fact: known before the first cycle,
+        /// unchanging, and already stated once at startup. A metric that IS bound and that no pod reported is
+        /// a broken exporter or a severed scrape — the failure this whole subsystem exists to surface, and it
+        /// needs an operator today. Both produced the same warning on every cycle, so on the lab a
+        /// permanently unbound <c>CpuThrottleRatio</c> raised one 292 times in 292 cycles, and any real
+        /// exporter failure would have arrived looking exactly like the noise everybody had learned to
+        /// ignore.</para>
+        ///
+        /// <para>The counted form is unchanged: <c>blind=N</c> on the cycle line still includes these, because
+        /// they are genuinely blind spots. What is reserved for the actionable case is the WARNING.</para>
+        /// </summary>
+        private readonly bool[] _unbound = new bool[(int)MetricIndex.Count];
         private int _knownPods;
         private DateTimeOffset _nextProposal;
 
@@ -126,7 +143,8 @@ namespace DevOnBike.Overfit.Server.AspNet.Services
             ILogger<AnomalyGuardService> logger,
             IRefreshablePodTopology? topology = null,
             IIncidentStore? store = null,
-            ILearnedStateStore? learnedState = null)
+            ILearnedStateStore? learnedState = null,
+            MetricMap? metricMap = null)
         {
             ArgumentNullException.ThrowIfNull(options);
             ArgumentNullException.ThrowIfNull(source);
@@ -137,6 +155,19 @@ namespace DevOnBike.Overfit.Server.AspNet.Services
             _source = source;
             _topology = topology;
             _logger = logger;
+
+            // Optional, and the default is the conservative one: with no map every silent metric is treated
+            // as bound-and-silent, which warns too much rather than too little. A guard that has lost track
+            // of its own configuration should err towards saying something.
+            if (metricMap is not null)
+            {
+                var unmapped = metricMap.Unmapped;
+
+                for (var i = 0; i < unmapped.Count; i++)
+                {
+                    _unbound[(int)unmapped[i]] = true;
+                }
+            }
 
             if (options.FloorProposalInterval > TimeSpan.Zero)
             {
@@ -358,24 +389,53 @@ namespace DevOnBike.Overfit.Server.AspNet.Services
             // Named, not counted. "5 metrics returned nothing" tells an operator that the guard is partly
             // blind and nothing about which query to go and fix; the names are the whole actionable part,
             // and they are cheap because the window already knows.
+            //
+            // Only for metrics that HAVE a binding, though. An unbound one is silent by construction, was
+            // named once at startup, and cannot change without a config edit — warning about it every cycle
+            // taught operators here to skip the line that the bound-but-silent case shares.
+            var silentButBound = 0;
+
             if (result.BlindMetrics > 0)
             {
                 for (var m = 0; m < (int)MetricIndex.Count; m++)
                 {
                     var metric = (MetricIndex)m;
 
-                    if (window.PodsReporting(metric) == 0)
+                    if (window.PodsReporting(metric) > 0 || _unbound[m])
                     {
-                        _blindMetric(_logger, metric.ToString(), null);
+                        continue;
                     }
+
+                    silentButBound++;
+                    _blindMetric(_logger, metric.ToString(), null);
                 }
             }
 
-                if (result.BlindMetrics > 0 || result.PartialMetrics > 0)
+                // Fires on the actionable count, not the total. `blind=N` on the cycle line above still
+                // carries every blind spot including the unbound ones — this warning is about the ones
+                // somebody can do something about today.
+                if (silentButBound > 0 || result.PartialMetrics > 0)
                 {
                     _blind(
-                        _logger, result.BlindMetrics, result.PartialMetrics,
+                        _logger, silentButBound, result.PartialMetrics,
                         window.Pods.Count, result.Incidents, null);
+                }
+
+                // Pods left out of this window because they stopped reporting before it ended. Almost always
+                // a rollout, a scale-down or a delete — and in that case saying so once beats a finding
+                // naming a replica the operator cannot find. But a pod whose scraping broke while it kept
+                // serving looks identical from here and is urgent, so the names go out rather than a count.
+                var stale = _source.StalePodsExcluded;
+
+                if (stale.Count > 0)
+                {
+                    _logger.LogInformation(
+                        CycleEvent,
+                        "{Count} pod(s) stopped reporting before the end of this window and were left out of "
+                        + "it: {Pods}. Expected during a rollout or a scale-down; if one of these is still "
+                        + "serving traffic then its scraping is broken, which looks like health from here.",
+                        stale.Count,
+                        string.Join(", ", stale));
                 }
 
                 // A warning rather than the cycle line, and repeated every cycle it persists. The counter

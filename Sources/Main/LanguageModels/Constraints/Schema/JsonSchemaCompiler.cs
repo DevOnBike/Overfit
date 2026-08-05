@@ -106,6 +106,30 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints.Schema
                     additionalForbidden = true;
                 }
 
+                // Refused here rather than mis-enforced later, and the three failures it prevents are all
+                // silent:
+                //
+                //  * a property past the 64th cannot be GENERATED at all — its reachability bit does not
+                //    exist, so JsonSchemaTracker masks out the very characters that would spell it;
+                //  * a `required` property past the 64th is not ENFORCED — it never reaches
+                //    RequiredBitmask, so the tracker permits closing an object that is missing it, which
+                //    is the one thing this whole feature promises cannot happen;
+                //  * an emitted property past the 64th is not RECORDED, so a duplicate key is not caught.
+                //
+                // Each of those sites already had a `bit < 64` guard, so nothing crashed and nothing was
+                // reported. A schema with this many properties is perfectly legal, so mis-enforcing it
+                // quietly is worse than refusing it loudly — and this fires at compile time, not part-way
+                // through a generation.
+                if (names.Count > JsonStringTrie.MaxTrackedValues)
+                {
+                    throw new OverfitFormatException(
+                        $"An object in this schema declares {names.Count} properties; at most "
+                        + $"{JsonStringTrie.MaxTrackedValues} are supported, because property tracking is a "
+                        + "64-bit mask. Beyond that, properties cannot be generated, `required` is not "
+                        + "enforced and duplicate keys are not detected — so the schema is refused rather "
+                        + "than enforced incorrectly.");
+                }
+
                 if (names.Count > 0)
                 {
                     propertyTrieIndex = tries.Count;

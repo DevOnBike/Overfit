@@ -34,7 +34,20 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
         private readonly int[] _seriesFromLastRead = new int[(int)MetricIndex.Count];
         private readonly KeyValuePair<string, string>[] _customQueries;
         private readonly string[] _customNames;
+        private string[] _stalePods = [];
         private bool _disposed;
+
+        /// <summary>
+        /// How many scrape steps behind the freshest sample in the window a pod may fall before it is treated
+        /// as gone.
+        ///
+        /// <para>Two, so a single missed scrape does not evict a live replica, and a deleted one disappears
+        /// within a step or two of stopping. It is measured against the freshest sample ANY pod produced
+        /// rather than against the end of the window, because the last slot is routinely empty for everyone —
+        /// range expressions are still filling in at the window's edge, and a fixed offset from the end would
+        /// declare the entire deployment gone every cycle.</para>
+        /// </summary>
+        private const int StaleStepTolerance = 2;
 
         /// <param name="template">
         /// Base configuration. Its <c>RangeStart</c>/<c>RangeEnd</c> are replaced per read; everything else —
@@ -82,6 +95,18 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
 
         /// <summary>Custom channels this source fetches, in the order the window carries them.</summary>
         public IReadOnlyList<string> CustomChannels => _customNames;
+
+        /// <summary>
+        /// Pods present in the last window's data that had stopped reporting before it ended, and were
+        /// therefore left out of it.
+        ///
+        /// <para><b>Named rather than merely counted, because dropping a pod silently is the failure this
+        /// subsystem exists to prevent.</b> A replica that vanishes from the data is usually gone — deleted,
+        /// scaled down, rolled over — but it can also be one whose scraping broke while it kept serving, and
+        /// those two look identical from here. The first needs no action and the second needs urgent action,
+        /// so the guard reports the names and lets an operator tell them apart.</para>
+        /// </summary>
+        public IReadOnlyList<string> StalePodsExcluded => _stalePods;
 
         /// <summary>
         /// How many series the last read obtained for one metric. Zero on a cluster known to be running pods
@@ -132,6 +157,10 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
 
             Array.Clear(_seriesFromLastRead);
 
+            // Cleared with the rest of the per-read state, or a read that returns early leaves the previous
+            // read's exclusions on display as though they were this one's.
+            _stalePods = [];
+
             for (var m = 0; m < (int)MetricIndex.Count; m++)
             {
                 _seriesFromLastRead[m] = source.SeriesReturned((MetricIndex)m);
@@ -152,11 +181,44 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
                 grid[batches[i].ScrapeTimestampMs] = i;
             }
 
+            // Last grid slot at which each pod produced anything, and the freshest slot anyone reached.
+            //
+            // A pod deleted part-way through the window keeps its samples in Prometheus for the rest of it, so
+            // it is still in this data and, without this, still gets compared against its living peers and
+            // named in findings. That is not a hypothetical: a rollout of twelve replicas made the guard
+            // report `pods=24` and raise findings on replicas that no longer existed — including one saying a
+            // series had FALLEN, which was the pod being deleted. An operator following that name finds
+            // nothing there.
+            var lastSlot = new Dictionary<string, int>(StringComparer.Ordinal);
+            var freshest = -1;
+
             for (var i = 0; i < series.Count; i++)
             {
-                if (series[i].Pod.PodName.Length > 0)
+                var raw = series[i];
+
+                if (raw.Pod.PodName.Length == 0)
                 {
-                    pods.Add(series[i].Pod.PodName);
+                    continue;
+                }
+
+                pods.Add(raw.Pod.PodName);
+
+                for (var s = 0; s < raw.Samples.Count; s++)
+                {
+                    if (!grid.TryGetValue(raw.Samples[s].Timestamp, out var slot))
+                    {
+                        continue;
+                    }
+
+                    if (!lastSlot.TryGetValue(raw.Pod.PodName, out var seen) || slot > seen)
+                    {
+                        lastSlot[raw.Pod.PodName] = slot;
+                    }
+
+                    if (slot > freshest)
+                    {
+                        freshest = slot;
+                    }
                 }
             }
 
@@ -164,6 +226,31 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
             {
                 return null;
             }
+
+            var stale = new List<string>();
+
+            foreach (var pod in pods)
+            {
+                // No slot at all means every sample fell outside the grid — already the "cannot be evaluated"
+                // case rather than the "no longer exists" one, so it is left in and the detectors refuse it.
+                if (lastSlot.TryGetValue(pod, out var slot) && slot < freshest - StaleStepTolerance)
+                {
+                    stale.Add(pod);
+                }
+            }
+
+            _stalePods = [.. stale];
+
+            for (var i = 0; i < stale.Count; i++)
+            {
+                pods.Remove(stale[i]);
+            }
+
+            // No emptiness check here, and that is a property of the rule rather than an oversight: staleness
+            // is measured against the freshest sample any pod produced, so whichever pod produced it has a
+            // lag of zero and can never be excluded. The set cannot be emptied by this filter, which is what
+            // makes it safe to apply before anything has been evaluated. Pinned by
+            // `ThePodDefiningTheFreshestSampleIsNeverExcluded`.
 
             var podList = new List<string>(pods);
             var index = new Dictionary<string, int>(podList.Count, StringComparer.Ordinal);

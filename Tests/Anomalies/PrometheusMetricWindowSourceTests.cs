@@ -95,6 +95,88 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             Assert.Equal(["pod-a", "pod-b", "pod-c"], window.Pods);
         }
 
+        /// <summary>
+        /// A replica that stopped reporting part-way through the window is left out of it.
+        ///
+        /// <para><b>The defect this pins was seen in the lab, not imagined.</b> Rolling twelve replicas made
+        /// the guard report <c>pods=24</c> for a full window and raise findings naming replicas that had
+        /// already been deleted — including one reporting that a series had FALLEN, which was the pod being
+        /// terminated. Prometheus keeps a deleted pod's samples for the rest of the window, so from inside the
+        /// data a dead replica is indistinguishable from a live one unless recency is checked.</para>
+        /// </summary>
+        [Fact]
+        public async Task APodThatStoppedReportingIsLeftOutOfTheWindow()
+        {
+            using var source = Source(
+                ("pod-live", [1.0, 2.0, 3.0, 4.0, 5.0]),
+                ("pod-deleted", [1.0, 2.0]));
+
+            var window = await source.ReadAsync(End, TimeSpan.FromSeconds(60));
+
+            Assert.NotNull(window);
+            Assert.Equal(["pod-live"], window.Pods);
+            Assert.Equal(["pod-deleted"], source.StalePodsExcluded);
+        }
+
+        /// <summary>
+        /// One missed scrape is not a death. The tolerance exists because evicting a live replica for a gap
+        /// would hide it exactly when it is least healthy, and a hidden pod looks like a healthy cluster.
+        /// </summary>
+        [Fact]
+        public async Task APodThatMissedTheLastScrapeIsKept()
+        {
+            using var source = Source(
+                ("pod-a", [1.0, 2.0, 3.0, 4.0, 5.0]),
+                ("pod-b", [1.0, 2.0, 3.0, 4.0]));
+
+            var window = await source.ReadAsync(End, TimeSpan.FromSeconds(60));
+
+            Assert.NotNull(window);
+            Assert.Equal(["pod-a", "pod-b"], window.Pods);
+            Assert.Empty(source.StalePodsExcluded);
+        }
+
+        /// <summary>
+        /// The invariant that makes the filter safe to apply before anything is evaluated: recency is measured
+        /// against the freshest sample ANY pod produced, so the pod that produced it has zero lag and cannot
+        /// be excluded. The filter therefore cannot empty the deployment, however far behind everything is —
+        /// which matters because the last grid slot is routinely empty for every pod at once, and a rule
+        /// measured from the end of the window instead would declare the whole cluster gone every cycle.
+        /// </summary>
+        [Fact]
+        public async Task ThePodDefiningTheFreshestSampleIsNeverExcluded()
+        {
+            using var source = Source(
+                ("pod-a", [1.0]),
+                ("pod-b", [1.0]),
+                ("pod-c", [1.0]));
+
+            var window = await source.ReadAsync(End, TimeSpan.FromSeconds(60));
+
+            Assert.NotNull(window);
+            Assert.Equal(["pod-a", "pod-b", "pod-c"], window.Pods);
+            Assert.Empty(source.StalePodsExcluded);
+        }
+
+        /// <summary>The exclusion list belongs to the last read, not to every read since the first.</summary>
+        [Fact]
+        public async Task TheExclusionListIsClearedBetweenReads()
+        {
+            using var source = Source(
+                ("pod-live", [1.0, 2.0, 3.0, 4.0, 5.0]),
+                ("pod-deleted", [1.0, 2.0]));
+
+            await source.ReadAsync(End, TimeSpan.FromSeconds(60));
+
+            Assert.NotEmpty(source.StalePodsExcluded);
+
+            using var clean = Source(("pod-live", [1.0, 2.0, 3.0, 4.0, 5.0]));
+
+            await clean.ReadAsync(End, TimeSpan.FromSeconds(60));
+
+            Assert.Empty(clean.StalePodsExcluded);
+        }
+
         /// <summary>A borrowed client must survive the source that used it.</summary>
         [Fact]
         public async Task ASharedHttpClientIsNotDisposedByTheSource()

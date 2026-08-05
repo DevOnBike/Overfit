@@ -12,10 +12,42 @@
 # per metric), not from anybody's judgement — see LabFloorCalibrationDiagnostics. Three things about them
 # are worth knowing before anyone edits one:
 #
-# 1. MemoryWorkingSetBytes.minTrendChange was 256MiB and is now 1.089MB. The old value was measured on the
-#    SYNTHETIC population, whose pods carry a 1.23 GB working set; these pods carry 43 MB. A floor of
-#    268 MB against a 43 MB signal cannot fire at all — the gate meant to catch a memory leak was silently
-#    switched off, and would have stayed off through a real one.
+# 1. MemoryWorkingSetBytes.minTrendChange has now been wrong in BOTH directions, which is the useful part:
+#    256MiB -> 1.089MB -> 25.85MB.
+#
+#    256MiB was measured on the SYNTHETIC population, whose pods carry a 1.23 GB working set; these pods
+#    carry 43 MB. A floor of 268 MB against a 43 MB signal cannot fire at all — the gate meant to catch a
+#    memory leak was silently switched off, and would have stayed off through a real one.
+#
+#    1.089MB then over-corrected, for the reason in note 4: it came from 24 windows. Over the full 24-hour
+#    run this channel was the LARGEST single producer of findings (7 of the run's total, more than any
+#    other signal) while nothing was wrong with the cluster, and the calibrator proposed 25.85MB in every
+#    cycle — healthy replicas move their working set by up to 20.7 MB across a window, so a 1 MB floor has
+#    nothing to distinguish.
+#
+#    VERIFIED BY INJECTION at 0.2 MB/s on one replica, on a window clean of rollout ghosts:
+#
+#      Anomaly finding on lab-workload-...-8k5w4: MemoryWorkingSetBytes [Resource] severity 0.96 —
+#      Series rose by 210.0% of typical across 0:20:00 (tau 0.96, lag-1 autocorrelation 0.89)
+#
+#    Right pod, right family — this is the trend gate whose floor was raised 23.7x — grouped into one
+#    incident with the heap channel (+307% trend, +3,832% peer gap). Raising the floor did not blind it.
+#
+#    That verification was only possible after fixing the instrument: /fault/leak touched chunk[0] and
+#    chunk[^1], which faults in two 4 KB pages of a multi-megabyte LOH allocation, so it moved the working
+#    set by 8 kB/s while claiming 2 MB/s — 240x short. Measured before: RSS 39 -> 36 -> 37 -> 24 MiB while
+#    leaking. After: 29 -> 138 -> 253 -> 368 MiB, against peers flat at 29-33. So every earlier claim that
+#    this fault exercises MemoryWorkingSetBytes was untested, and this is the first time it has been.
+#
+#    CAVEAT that remains: the calibrator's spread is a running MAXIMUM, and this channel's proposal did not
+#    move at all after the first hours (1.00x across the day) while RequestsPerSecond and GcGen2HeapBytes
+#    kept growing. The 20.7 MB may have been set during pod warm-up at the start of the run — note 3's
+#    hazard exactly. What is now verified is that a 0.2 MB/s leak still reports; a leak an order of
+#    magnitude slower has not been tested and is where this floor would fail first.
+#
+#    Operational note, learned the hard way: /fault/clear does NOT release what has already leaked (the
+#    workload retains the list on purpose), so a replica used for a leak test is spent for the rest of its
+#    life and must be deleted, not cleared.
 #
 # 2. The latency floors are NOT the calibrated ones. The calibrator proposed about 0.01 ms, correctly:
 #    latency in this lab is near-constant, so that is genuinely what healthy does. It is also not a
@@ -25,6 +57,50 @@
 #
 # 3. A calibrated floor is only valid if the period it came from was healthy. A fault inside that window
 #    raises the bar above itself and blinds the guard to that fault at that size, permanently.
+#
+# 4. CpuUsageRatio.minGap was 0.000159 and is now 0.00041, because 24 windows was not long enough to
+#    calibrate it. Over the full 24-hour false-positive run (2026-08-04/05, 292 cycles, nothing wrong with
+#    the cluster) the calibrator proposed 0.00041 in EVERY cycle — healthy peers differed by up to
+#    0.000328 — and logged, every five minutes for a day, "the configured floor is under that, which is
+#    why it reports". It was right: two of the five false incidents in that run were this signal, at
+#    absolute gaps of 0.000182 and 0.000171, both just over the old floor and both far under the proposed
+#    one. Neither is a fault: 0.00017 is 0.017% of a core.
+#
+#    The lesson generalises past this one number. A floor calibrated over a window SHORTER THAN THE
+#    WORKLOAD'S PERIOD underestimates the spread, because it never sees the part of the cycle where peers
+#    diverge most — here the evening ramp of the driver's 1440-minute curve. It is the same mistake as a
+#    240-minute detector window sitting on the daily slope, in the opposite direction.
+#
+#    The relative gate was NOT touched and is not the defect. Cliff's delta and MinRelativeGap are
+#    scale-free by construction; 9% of a tiny number is still 9%, and no percentage can express "too small
+#    to matter". That is exactly what the absolute floor is for, and it was set 2.6x too low. Raising the
+#    relative gate instead would have suppressed genuine small regressions on well-scaled signals.
+#
+#    The margin was VERIFIED BY INJECTION, not by arithmetic, because the floor is only safe if a real
+#    fault still reports. POST /fault/cpu?msPerRequest=3 on exactly one replica, guard restarted onto the
+#    new floor first and the ConfigMap read back out of the cluster to confirm it had actually landed:
+#
+#      Anomaly finding on lab-workload-...-45gv7: CpuUsageRatio [Resource] severity 0.636 —
+#      sits above the other 11 peers by 190 % (0.00301): Cliff's delta 0.64, p 2.22E-16
+#
+#    Right pod, and an absolute gap of 0.00301 against the new floor of 0.00041 — 7.3x of headroom. The
+#    other eleven replicas were not accused. Note the honest gap in this evidence: the fault was AIMED at
+#    ~0.0015 (the 2.5x reference the detection matrix uses) and came out at twice that, so what is measured
+#    is that a 2.9x fault reports, not that a 2.5x one does. The arithmetic for the smaller case (0.0015 is
+#    still 3.7x the floor) remains arithmetic.
+#
+# 4b. GcGen2HeapBytes.minGap was 0.641MB and is now 0.93MB — raised BEFORE it cost anything, which is
+#    unusual here and is justified by a trend rather than by a count. This is the channel that produced
+#    108 false incidents a day in the 2026-08-02 baseline and exactly ZERO in this run; the reason is not
+#    a fix, it is that these pods were young, and peer heap gaps sat just under the floor instead of just
+#    over it. The proposal grew through the day as the heaps diverged — 0.729MB -> 0.930MB, 1.27x — so the
+#    channel was heading back to where it was noisy. Raising it now is extrapolating a measured trend, not
+#    a hunch, but it IS extrapolation: if this channel goes quiet through a real heap problem, start here.
+#
+# 5. NOT changed, but recorded: CpuUsageRatio.minTrendChange is 0.000326 while the same run proposed
+#    0.0097 — thirty times higher. It produced no false findings in 292 cycles, so there is nothing
+#    measured to fix, and raising a floor 30x on a gate that is not misbehaving is how a signal goes quiet
+#    without anybody noticing. Left alone deliberately.
 #
 # Note that guard.json is parsed as strict JSON — no comments inside the ConfigMap data.
 apiVersion: v1
@@ -54,9 +130,9 @@ data:
         "ContainerRestarts":     { "source": "kube_pod_container_status_restarts_total", "kind": "EventCount" }
       },
       "thresholds": {
-        "CpuUsageRatio":         { "minGap": "0.000159", "minTrendChange": "0.000326" },
-        "MemoryWorkingSetBytes": { "minGap": "9.52MB",   "minTrendChange": "1.089MB" },
-        "GcGen2HeapBytes":       { "minGap": "0.641MB",  "minTrendChange": "3.93MB" },
+        "CpuUsageRatio":         { "minGap": "0.00041",  "minTrendChange": "0.000326" },
+        "MemoryWorkingSetBytes": { "minGap": "9.52MB",   "minTrendChange": "25.85MB" },
+        "GcGen2HeapBytes":       { "minGap": "0.93MB",   "minTrendChange": "3.93MB" },
         "RequestsPerSecond":     { "minGap": "0.0119",   "minTrendChange": "0.194" },
         "GcPauseRatio":          { "minGap": "0.0000082" },
         "LatencyP50Ms":          { "minTrendChange": "50" },

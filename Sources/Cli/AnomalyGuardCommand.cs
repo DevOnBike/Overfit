@@ -161,7 +161,12 @@ namespace DevOnBike.Overfit.Cli
             for (var i = 0; i < map.Unmapped.Count; i++)
             {
                 logger.LogWarning(
-                    "blind: {Metric} has no binding — no query will be issued and every cycle counts it blind",
+                    "blind: {Metric} has no binding — no query will be issued. Every cycle still COUNTS it "
+                    + "blind, but this line is the only warning you get about it: a missing binding cannot "
+                    + "change without editing this configuration, and repeating it each cycle taught "
+                    + "operators to skip the line that a BOUND metric's silence shares. That case — an "
+                    + "exporter that broke while the workload kept serving — is still warned about by name, "
+                    + "every cycle.",
                     map.Unmapped[i]);
             }
 

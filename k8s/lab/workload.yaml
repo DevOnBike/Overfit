@@ -7,8 +7,16 @@
 # and its latency tracks how busy the machine is, so the operating point drifted between runs and cost three
 # of them. None of that has anything to do with what the guard measures.
 #
-#   docker build -f Demo/LabWorkload/Dockerfile -t lab-workload:latest .
+#   dotnet publish Demo/LabWorkload/LabWorkload.csproj -c Release -o Demo/LabWorkload/publish
+#   docker build -f Demo/LabWorkload/Dockerfile -t lab-workload:latest Demo/LabWorkload
 #   kubectl apply -f k8s/lab/workload.yaml
+#
+# The build context is Demo/LabWorkload, NOT the repository root, and the publish step is not optional —
+# the Dockerfile is runtime-only and does `COPY publish/ .`. This block used to say `docker build ... .`,
+# which fails with "/publish: not found" after the whole repo has been sent to the daemon. The reason the
+# image is not built from source inside a container is in the Dockerfile's own header: this solution's
+# Directory.*.props pull in the analyzer projects and central package management, so a repo-root context
+# drags all of that into an SDK stage that has nothing to do with this app.
 #
 # Every replica starts healthy. Faults are POSTed to a running pod — see Demo/LabWorkload/FaultState.cs for
 # why that matters: injecting a fault by editing this file costs a restart, and a restart is itself a fault

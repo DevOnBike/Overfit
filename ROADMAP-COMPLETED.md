@@ -10,6 +10,247 @@ reverted. A deleted negative result is an experiment somebody repeats.
 
 Sections appear in the order they held in the original file.
 
+## ✅ ANSWERED — "the simulator says 250/day and the lab says 5/day" (2026-08-05)
+
+**They never disagreed. They were two different programs.** `FalsePositiveRateDiagnostics` is 484 lines and
+contains no `AnomalyGuard`, no `RunCycle`, no `ConfiguredFloorSource`, no `FloorCalibrator`, no
+common-mode decomposition, no level-shift gate and no threshold rules — it hand-drives `TrendDetector`,
+`PeerGroupOutlierDetector` and `IncidentPipeline`. Its **250 false incidents a day** was a true statement
+about a subset of the detector stack and never about the product. The two levers it lacks are the two with
+the largest measured effect anywhere in this subsystem: calibrated absolute floors (112/day → 5/day on the
+lab) and common-mode decomposition (ten of eleven healthy-replica findings).
+
+`GuardFalsePositiveRateDiagnostics` runs the same generator through the real `RunCycle` in the deployable
+posture — no configured floors, so the guard builds them from its own calibrator, which is what a client
+gets on day one before anyone tunes anything.
+
+**Same population, same seed, same everything except calling the shipped code: 250 → 15.1 per day, 16.5x.**
+The whole measurement takes 17.8 seconds.
+
+### The ablation refuted the obvious explanation, which is why it was run
+
+`ContainerRestarts` dominated the signal breakdown and the generator injects one restart per pod per day
+while the lab restarted nothing, so restarts looked like the rest of the gap. They are not:
+
+| pods | restarts | seed | rate/day | 95% Poisson | quiet | top signal |
+|---:|---:|---:|---:|---:|---:|---|
+| 20 | 1 | 20260729 | 15.1 | 10.7–19.5 | 84% | ContainerRestarts:62 |
+| 20 | 0 | 20260729 | **15.4** | 10.9–19.8 | 94% | GcGen2HeapBytes:46 |
+| 12 | 0 | 20260729 | 11.7 | 7.8–15.6 | 94% | GcGen2HeapBytes:46 |
+| 12 | 0 | 7 | **4.7** | 2.2–7.1 | 98% | GcGen2HeapBytes:22 |
+| 12 | 0 | 4242 | **5.0** | 2.5–7.6 | 98% | GcGen2HeapBytes:16 |
+| 12 | 1 | 20260729 | 10.7 | 7.0–14.4 | 87% | ContainerRestarts:28 |
+
+**Ablating restarts moved the rate from 15.1 to 15.4 — nothing.** What it moved was the *quiet fraction*,
+84% → 94%: restarts generate many findings that land inside incidents which open regardless. **Findings and
+incidents are different quantities and the breakdown was read as the wrong one.**
+
+**What actually dominates is the population.** At the lab's shape (12 pods, no restarts) three seeds give
+**11.7 / 4.7 / 5.0** — a 2.5x spread between draws of the same generator, with two of three landing exactly
+on the lab's measured 5/day. The old harness reported 250/243/246 across seeds precisely *because* it had no
+floors: without them the population had no room to make a difference.
+
+**The generator is also validated on mechanism, not just on magnitude:** `GcGen2HeapBytes` is now the top
+producer in every configuration (46, 46, 22, 16), which is the same channel that was 96.4% of the lab's
+112/day baseline on 2026-08-02.
+
+**Consequence for the M0 gate:** it was recorded as failed by a 50x margin on a number the product never
+produced. The measurement to quote is 5–15/day depending on population, untuned, against a lab that
+measured 5/day tuned.
+
+## ✅ FIXED — an unbound metric warned every cycle and buried the case that matters (2026-08-05)
+
+**The task was "bind `CpuThrottleRatio`", and it could not be done as stated.**
+`container_cpu_cfs_throttled_periods_total` exists only on containers carrying a CPU limit — the kernel
+keeps no CFS accounting without a quota — and `k8s/lab/workload.yaml` sets none, on purpose and with the
+reason written down: *"CFS throttling is its own fault with its own signal, and mixing it in here would mean
+every CPU measurement carried a second explanation."* Adding limits would also have invalidated the
+`CpuUsageRatio` floor verified by injection the same day. **Left unbound; the lab's inability to exercise
+the throttle channel is recorded as a coverage gap with a clean fix — a separate small deployment that does
+carry a CPU limit, so the main workload keeps one explanation.**
+
+**What was underneath it was a real product defect.** The guard reported two different things as one:
+
+| state | means | operator action |
+|---|---|---|
+| metric has **no binding** | configuration gap, known before the first cycle, cannot change without a config edit | once, at deploy |
+| metric **is bound and nobody reported it** | broken exporter, severed scrape | **now** |
+
+Both raised the same per-cycle warning, so a permanently unbound `CpuThrottleRatio` raised one in **292 of
+292 cycles** — and a genuine exporter failure would have arrived looking exactly like the noise everyone had
+learned to skip. The warning is now reserved for the second case; `AnomalyGuardService` takes an optional
+`MetricMap` and, with none, treats every silent metric as bound — erring towards saying too much, because a
+guard that has lost track of its own configuration should speak up.
+
+**The count was deliberately NOT changed**, and that was the load-bearing decision: `blind=N` on the cycle
+line still includes unbound metrics, because they are genuinely blind spots. It would have been easy to
+"fix" the noise by not counting them and end up with a clean log and a guard claiming thirteen channels
+while watching twelve.
+
+**Verified on the lab**, guard confirmed by image ID rather than by `:latest`:
+
+```text
+cycle: pods=12 ... blind=1        <- count kept
+startup 'has no binding' lines : 1   <- gap still named, once
+per-cycle blindness WARNINGS   : 0   <- was 2 per cycle
+blind= values across cycles    : [1] <- reclassified, not hidden
+```
+
+The startup message was then corrected too: it still claimed "every cycle counts it blind" in a phrasing
+that implied a per-cycle warning. Suite 2126/0/260.
+
+## ✅ FIXED — the guard reported findings on replicas that no longer existed (2026-08-05)
+
+**Found by rolling the lab, not by reading.** A twelve-replica rollout made the guard log `pods=24` for a
+full window and raise findings naming deleted pods — one of them announcing that a series had FALLEN, which
+was the pod being terminated. An operator following that name finds nothing there.
+
+**Cause:** the window's pod list came from the series Prometheus returned, not from the cluster. A deleted
+pod keeps its samples for the remaining 20 minutes of the window, so from inside the data it is
+indistinguishable from a live one unless recency is checked.
+
+**Fix** (`PrometheusMetricWindowSource`): a pod enters the window only if its last sample is within
+`StaleStepTolerance` (2) steps of **the freshest sample any pod produced**. Measured against the freshest
+sample rather than the end of the window on purpose — the final grid slot is routinely empty for everyone
+while range expressions fill in, and a rule anchored to the end would declare the whole deployment gone
+every cycle.
+
+**That anchoring also yields the invariant that makes the filter safe:** the pod owning the freshest sample
+has zero lag and can never be excluded, so the filter cannot empty a deployment. An emptiness check written
+alongside it turned out to be unreachable and was removed rather than left as dead code with a comment
+describing a scenario that cannot occur; the invariant is pinned by
+`ThePodDefiningTheFreshestSampleIsNeverExcluded`.
+
+**Exclusions are NAMED, not counted**, because a replica that vanished and a replica whose scraping broke
+while it kept serving look identical from here — the first needs no action, the second is urgent. Silently
+dropping both would have traded one quiet failure for a worse one.
+
+**Verified on a live rollout**, with the running guard confirmed by image ID rather than by the `:latest`
+tag:
+
+| | before | after |
+|---|---|---|
+| pod count on a 12-replica rollout | **24** | **12** |
+| excluded replicas | silently compared | **13, named** |
+| new findings on non-existent pods | 4 in one cycle | **0** |
+
+The one remaining line naming a dead pod is incident 11 *closing* — correct behaviour, and a limitation of
+the verification script rather than of the guard. Tests: four in
+`PrometheusMetricWindowSourceTests`. Suite 2126/0/260.
+
+## ❌ NEGATIVE — the `Vector512` width question and the `Simd.Dot` second accumulator (2026-08-05)
+
+**Both halves of this were measured, both were real at the kernel, and the code change was reverted.** Box:
+AMD Ryzen 9 9950X3D, 32 logical / 16 physical, .NET 10.0.10, RyuJIT x86-64-v4. Canary
+(`Canary_ScalarSum`, no intrinsics) stable across four runs — 512 floats: 163.0 / 160.1 / 159.9 / 162.1 ns;
+65536: 23780 / 23341 / 23287 / 23343 ns.
+
+### The planned experiment was impossible, and a 20-second probe said so
+
+The queue entry proposed A/B-ing `DOTNET_PreferredVectorBitWidth=512` — an environment variable, not a
+rewrite — to see whether the width-agnostic `Vector<T>` in `Kernels/LinearKernels.cs` would widen to match
+the explicit `Vector512` dispatch in `Intrinsics/Simd.cs`. It does not:
+
+```text
+unset -> Vector<float>.Count = 8  (256 bits)
+128   -> Vector<float>.Count = 4  (128 bits)   <- the knob IS live
+256   -> Vector<float>.Count = 8  (256 bits)
+512   -> Vector<float>.Count = 8  (256 bits)   <- refused
+```
+
+**Checking only 512 would have produced the wrong conclusion** ("the variable does nothing"). 128 moves the
+width, so the knob works and .NET is *declining* 512 for `Vector<T>` on this part; the runtimeconfig
+property is declined identically. `Vector<T>` is therefore 256-bit here as a matter of runtime policy and no
+configuration reaches it — the A/B would have run two identical arms, exactly what the dead
+`OVERFIT_TILED_PREFILL` flag did.
+
+### Explicit 512-bit beats 256-bit everywhere, including below the threshold that forbids it
+
+`Vector512WidthBenchmark`, copies of the `Simd.cs` loops differing only in width:
+
+| Length | Add | MulAdd | Dot |
+|---:|---:|---:|---:|
+| 128 | 0.75 | 0.80 | 0.90 |
+| 512 | 0.82 | 1.01 | 0.51 |
+| 4096 | 0.92 | 0.89 | 0.47 |
+| 65536 | 0.76 | 0.89 | 0.50 |
+
+**`Simd.Avx512Threshold = 512` is unmeasured and its comment ("Below this, AVX2 overhead is lower") is
+false** — at 128 floats, a quarter of the threshold, 512-bit wins every operation. Left in place: `Add` and
+`MulAdd` callers were not censused, and moving a threshold on microbenchmark points alone is the mistake
+the rest of this section is about. **This is an open follow-on, not a closed finding.**
+
+### The 2x on `Dot` was the dependency chain, not the width
+
+`Dot` sat at exactly 0.50 across three sizes, which is the signature of a latency-bound chain rather than of
+throughput. Adding two 256-bit accumulators as a control settled it:
+
+| Length | 256×1 | 512×1 | 256×2 | 512×2 |
+|---:|---:|---:|---:|---:|
+| 512 | 29.11 | 14.73 | 17.70 | 16.02 |
+| 4096 | 341.73 | 161.10 | 177.89 | 116.01 |
+| 65536 | 5835.24 | 2954.07 | **2984.29** | 1901.22 |
+
+At 65536 **two 256-bit accumulators land within 1% of one 512-bit accumulator**. The headline was the second
+chain. Width earns a separate ~1.55x on top, once the chain is broken. Stopping one run earlier would have
+recorded "AVX-512 gives 2x on dot product", which is false.
+
+### The change: correct, 1.79x, and reverted
+
+Two accumulators above a measured threshold of 1024 (crossover between 1024 = tie and 2048 = 0.81) took
+`Simd.Dot` from 2906 to 1626 ns at 65536 and 60.5 to 38.8 ns at 2048. `SimdDotTests` — **66 cases, the first
+this kernel ever had** — stayed green before and after.
+
+**A path census killed it.** `Simd.Dot` has four callers and all four are backward: `MatMulAdd_A_BT_*`, the
+im2col weight-gradient GEMM, RNN backward, depthwise-conv kernel gradient. **No forward/inference path calls
+it at all**, and neither does the Q4_K LLM training path. In backward:
+
+```text
+GPT-1 dModel=128 dFF=512 seq=128 batch=8 — FORWARD ONLY: never called
+GPT-1 — FORWARD + BACKWARD: 9,568,256 calls, 814,219,264 elements
+  32 (head dim)  6,291,456 calls  65.75%   24.73% of elements
+  68 (vocab)       131,072         1.37%    1.09%
+  128 (dModel)   2,621,440        27.40%   41.21%
+  512 (dFF)        524,288         5.48%   32.97%
+  >= 1024: 0 elements (0.00%)
+MNIST CNN — FORWARD + BACKWARD: 78,336 calls, all at 784 (28x28). >= 1024: 0.00%
+```
+
+**100% of the work is below the threshold**, and lowering it gains nothing (512 and 784 both measured as
+ties). Worse, the guarding `if (len >= 1024)` costs **9–11% at lengths 68 and 128 even when not taken** —
+0.42 ns against a ±0.03 ns error at 128 — because the unreached dual loop still perturbs register allocation
+and code layout in a kernel whose body is ~4 ns:
+
+| Length | single | single + untaken branch | ratio |
+|---:|---:|---:|---:|
+| 32 | 0.9682 ns | 0.9817 ns | 1.01 |
+| 68 | 2.5502 ns | 2.7667 ns | **1.09** |
+| 128 | 3.9204 ns | 4.3427 ns | **1.11** |
+| 512 | 13.9148 ns | 14.3620 ns | 1.03 |
+| 784 | 20.9695 ns | 21.6822 ns | 1.03 |
+
+Weighted by the census that is roughly **+6% of the `Dot` time in a GPT-1 training step in exchange for
+nothing**. Reverted; the comment in `Simd.Dot` records it so it is not "fixed" again.
+
+**The revert was confirmed by re-measuring, not by assuming the edit landed.** Against the same
+single-accumulator baseline, `Simd.Dot` moved from 0.55 back to **0.99 at 65536** (the second accumulator is
+genuinely gone) and from 1.16 back to **1.00 at 128** (the untaken-branch cost is gone — that row is the one
+the revert was for). `SimdDotTests` 66/66 green on the shipped shape.
+
+**Kept:** `SimdDotTests` (66), `Vector512WidthBenchmark`, `SimdDotAccumulatorBenchmark`. **Revisit only** for
+models with dModel/dFF >= 2048, and only in the autograd family.
+
+### Method notes worth more than the result
+
+- **A kernel benchmark cannot answer an end-to-end question**; only a census of the lengths the callers pass
+  can. That is a standing rule here and it earned its keep again.
+- **A copy of a method is not that method.** `Shipped_Dot` ran 10% *faster* than a byte-for-byte copy of its
+  own previous body at 256 and 512, where the change is switched off — argument check, inlining and call
+  shape account for it. Any before/after built on a copy carries that offset; the trustworthy A/B was two
+  copies in the same class differing in one `if`.
+- **An instrument that costs a branch must come out.** The census counter was removed from `Simd.Dot` before
+  the branch-cost benchmark, or it would have measured itself.
+
 ## ✅ FIXED — decode runtime (found 2026-08-01 by `overfit-find-bugs-game`, fixed 2026-08-02)
 
 **All three fixed 2026-08-02.** (1) `Cls` pooling now takes the FIRST token in `CachedLlamaSession.Embed`;
@@ -2032,3 +2273,72 @@ Seven files, ended by scope in under five minutes, then followed the callers. Re
 | **1** | **`[OverfitHotPath]` promises more than it enforces.** Verified: its documentation says `OVERFIT001`–`OVERFIT014` escalate to a hard `OVERFIT900` error inside a marked member, but `RawParallelForAnalyzer` (008) and `FinalizerAnalyzer` (012) contain no `HotPathRule` or `OverfitPerfAnalysis` hook at all, where `BoxingAnalyzer` does. | The attribute is on real decode-path members. A raw `Parallel.For` or a finalizer added inside one builds at warning severity while the attribute above it says it cannot. |
 | **2** | **Eleven of forty-two declared telemetry instruments are fed by nothing.** Verified by scanning every call site in `Sources/Main`: `AllocationBytes`, `GraphAllocatedBytes`, `GraphBackwardDurationMs`, `GraphCount`, `KernelCount`, `KernelDurationMs`, `ModuleAllocatedBytes`, `ModuleCount`, `ModuleDurationMs`, `NativeMemoryBytes`, `TapeOpCount`. | Each has a real description and exports a flat zero, which reads as "this never happens". Same shape as `overfit_guard_state_failures_total` found the same afternoon. **Guarded from now on** by `Tests/Diagnostics/TelemetryInstrumentWiringTests.cs`, a ratchet that fails on a new dead instrument and also fails when a listed one is revived, so the list can only shrink. |
 | **3** | **The tensor-storage counter carries one bit where it needs two.** `RecordTensorStorageCreated(int, int, bool borrowed)` — signature verified; the specific miscount of the `Unpooled()` GC-array path was not independently checked. | If it holds, a dashboard watching pool pressure is contaminated by one-time weight-load allocations, which is a metric that misleads rather than one that is merely absent. |
+
+## 🐞 OPEN DEFECTS — anomaly guard (found 2026-08-02 by `overfit-find-bugs-game`)
+
+Run against `Sources/Main/Anomalies` a few hours after most of it was written, and it ended by the ten-minute
+cap rather than by covering the module — `Rules/`, the learned families, `IncidentGrouper`, `IncidentReporter`
+and `MetricHistory` were never opened, so no claim is made about them. Report in
+`docs/bug-hunts/anomalies-2026-08-02-1836-bugs-game-findings.md`.
+
+**Four of the six are the same shape, and it is not a coding mistake.** They are gaps between what the code
+does and what was written about it — a comment, a changelog entry, and two "fixed" claims that were half or
+wholly untrue. The measurement caught three such gaps earlier the same day; reading caught four more. Whatever
+is producing them is not caught by tests, because the tests agree with the code and it is the prose that is
+wrong.
+
+| # | Defect | Why it matters |
+|---|---|---|
+| ~~**1**~~ | ~~**`IncidentTracker.Restore` still allows identifier reuse.**~~ **Fixed 2026-08-03.** The loop visits every saved record and advances `_nextId` ahead of both filters; capacity is now a `continue` rather than a loop condition. `Truncated` counts capacity refusals **only** — folding stale records in reported a working staleness bound as a sizing problem. Tests: `IncidentTrackerTests.RestoreProtectsTheIdentifiersOfIncidentsItHadNoRoomFor` (fails on the old loop) and `StaleRecordsAreNotCountedAsTruncation`. | Reachable in the one situation a client creates on purpose: lowering `MaxOpenIncidents` and restarting with the previous state file present. The identifiers left unread belong to incidents that are **fresh and still open**, so the number is reused while somebody is looking at the original. |
+| ~~**2**~~ | ~~**Store write failures are still silent.**~~ **Fixed 2026-08-03, and verified this time rather than claimed.** `IIncidentStore` gained `LastError` — `FileIncidentStore` had recorded it since it was written, but the guard holds the interface, so nobody could read it. `AnomalyGuard.StateError` is set after both loads at construction and after both saves each cycle, and calls `GuardTelemetry.StateWriteFailed()`. Tests: `GuardStateFailureTests`, four of them — failed save, failed load before the first cycle, recovery clearing the report, and two broken stores counting as one failed cycle. | The previous entry here recorded that **`CHANGELOG.md` claimed this shipped when no part of it had.** The counter is now proven to increment by a test that fails without the wiring, which is the only form of the claim worth making. |
+| ~~**3**~~ | ~~**`OperatorLabelStore.Evict` protects the label kind but not the magnitude.**~~ **Fixed 2026-08-03.** At capacity, once the noise labels are gone, it drops the **largest** real magnitude rather than the oldest. Age is not what makes a real label useful: every one caps future proposals through `SmallestRealMagnitude`, so only the smallest is doing any work and the largest was already dominated. | Dropping by age removed the binding constraint roughly one time in N, and the symptom is a floor drifting up past something an operator explicitly confirmed — the guard going quiet about exactly what it was told to keep reporting. |
+| ~~**4**~~ | ~~**`FloorCalibrator.Write` does not escape custom channel names.**~~ **Fixed 2026-08-03.** Same encoding as `OperatorLabelStore` and `SuppressionStore` — three stores share one file through `LearnedState`, and three escaping schemes in one file is a format nobody can reason about — plus `#`, so a channel name cannot forge a section header. | A name containing `### labels` moved `LearnedState`'s section boundary and silently redistributed the payload between calibration and labels. |
+| ~~**5**~~ | ~~**`AnomalyGuard.FloorProposals` bypasses the `_gate` lock.**~~ **Fixed 2026-08-03.** It takes the lock. `Propose` is not a pure read — it computes and caches, and a concurrent cycle invalidates that cache and refills the accumulators underneath it. | Latent, and that is why it was easy to miss: a property that skips the lock is a trap laid for whoever wires the next reader. |
+| ~~**6**~~ | ~~**`SignalSuppression.Magnitude` has no measurement behind it.**~~ **Answered 2026-08-03, by fixing the experiment rather than the mechanism.** The withdrawn replay could never have measured this: a healthy shadow week followed by a fault exercises the ceiling only if a dismissal happens to land on the same pod and signal as the fault, inside the mute window. The claim is behavioural, not statistical, so it is pinned behaviourally in `SuppressionCeilingTests` — the dismissed event stays muted, 25% larger stays muted, ten times larger reaches the operator, and the guard's own store honours all three. | The number this needed was a boundary, tested, not a rate. Recorded because "measure it" and "measure it with the harness you already have" are not the same instruction, and the second one wasted a day. |
+
+Fix order: 1 and 2 first — both are half-done work that has been described as finished, which is worse than
+work not started. **Both done 2026-08-03**; suite 2002 passing, 0 failing. Then 6 (decide the mechanism's
+fate), then 4, 3, 5.
+
+### ▶ RUNNING — 24-hour measurement, 2026-08-04 07:59Z → 2026-08-05 07:59Z
+
+Started on the post-sweep build. Verified before the marker was written, not assumed: the running pod's
+**image ID** matches the image built from this tree (`:latest` proves nothing), and the log confirms
+`Adopted 0 open incident(s)` — a cold start, matching the previous run's `state wiped`.
+
+**The `GcGen2HeapBytes` floor was deliberately left at `0.641MB`.** Arming it would change two things at
+once; leaving it makes this an A/B against the 2026-08-02 run — same configuration, different code. The
+"what a client sees after arming" number is a separate measurement, taken after this one answers.
+
+**One known non-comparability, flagged at the start and now looking the opposite way round to the
+prediction.** The workload pods restarted minutes before the run, so their heaps are young. The prediction
+was that cold heaps would *inflate* the heap channel; four hours in it has produced **zero** heap incidents
+against a baseline where that one signal was 96.4% of everything. The likely reason is that the gate
+compares *between replicas*, and twelve pods started in the same minute have heaps too similar to separate.
+So heap-channel silence is not yet evidence about the code, and will not be until the pods have run long
+enough to diverge.
+
+**The diurnal curve is the third thing moving, and the first/second-half comparison cannot separate it.**
+`Demo/LabLoadDriver` drives a real, uncompressed **1440-minute** cycle, so the two halves of a 24-hour run
+sit on different parts of it by construction. `hourly_check.py` prints a `DECAY` line comparing halves, and
+that line conflates three effects which happen to point the same way early on:
+
+1. pod warm-up — heaps and working sets climbing to their working level after the restart;
+2. calibrator warm-up — floors unusable until enough windows are accumulated;
+3. position on the load curve — traffic itself rising or falling.
+
+A falling rate between halves is therefore **not** evidence that the guard settled. The instrument that can
+separate them is the per-hour breakdown in `analyse_run.py`, which the previous run used to establish that
+the rate did *not* track the load curve. Read that, not the halves.
+
+**What the full 24 hours buys is exactly this**: a whole period of the curve, so the comparison against the
+2026-08-02 baseline covers the same ground rather than a favourable slice of it. A six-hour run would have
+been cheaper and would have measured whichever part of the day it happened to land on — which is the same
+mistake as the 240-minute detector window that once sat on the daily slope and reported 2551 incidents a
+day.
+
+Status is reported every 30 minutes by `.claude/hourly_check.py` (also reports the guard's own RSS, which
+no instrument exports — its fifteen series are all about detection, none about itself).
+
+Builds during the run are recorded in `Tests/bin/build-windows.txt` so `analyse_run.py` can test for
+contamination rather than anybody asserting there was none.
