@@ -17,7 +17,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
     /// scale-up, a freshly created replica's working set climbed <b>13–17% of typical over its first 10–20
     /// minutes</b> at a Kendall tau of 0.70–0.94. The scale-up phases ran <b>zero quiet cycles out of
     /// seven</b>; the opposite transition ran four of six. The whole asymmetry was new pods being judged for
-    /// getting warm. See <c>docs/aiops-day-one-events.md</c>.</para>
+    /// getting warm. See <c>docs/aiops/aiops-day-one-events.md</c>.</para>
     ///
     /// <para>The last two tests are the ones that matter, because a grace is a licence to stay silent and
     /// every silence has to be justified: an unknown age must not buy an exemption, and the peer family must

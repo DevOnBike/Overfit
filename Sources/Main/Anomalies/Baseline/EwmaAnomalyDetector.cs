@@ -12,7 +12,7 @@ namespace DevOnBike.Overfit.Anomalies.Baseline
     /// Classical statistical anomaly baseline — an exponentially-weighted moving average
     /// (EWMA) z-score detector — used to benchmark <see cref="GptAnomalyDetector"/> with
     /// rigor ("the transformer beats a tuned classical baseline by X", or it doesn't).
-    /// See <c>docs/gp-anomaly-baseline.md</c>: the cheap O(n) floor to clear before any GP.
+    /// See <c>docs/aiops/gp-anomaly-baseline.md</c>: the cheap O(n) floor to clear before any GP.
     ///
     /// Per metric it tracks an EWMA mean μ and EWMA variance σ² (RiskMetrics form). A
     /// snapshot's surprise is the mean over metrics of the Gaussian neg-log-density's

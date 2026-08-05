@@ -1791,7 +1791,7 @@ llama.cpp on decode; embeddability / training / product moat. See [[project-load
 - **EWMA classical baseline** (`EwmaAnomalyDetector`) + head-to-head: the un-adapted GPT base does NOT
   beat a trivial EWMA floor (base normal 6.45 vs EWMA 0.00) — **the per-pod LoRA adaptation is the edge**,
   not the raw transformer. Demo shows it three-way (EWMA / GPT base / GPT+LoRA). Verdict in
-  `docs/gp-anomaly-baseline.md`; GP escalation NOT warranted.
+  `docs/aiops/gp-anomaly-baseline.md`; GP escalation NOT warranted.
 - Production base regenerated at `D:\k8s_anomaly_production.bin` (20.8 MB, out of repo).
 
 **Continued 2026-05-23 — family-generic tokenizer/chat, llama3 RoPE scaling, GPT-2 bit-parity:**

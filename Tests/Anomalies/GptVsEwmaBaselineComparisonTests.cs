@@ -15,7 +15,7 @@ using Xunit.Abstractions;
 namespace DevOnBike.Overfit.Tests.Anomalies
 {
     /// <summary>
-    /// Rigorous "transformer vs classical baseline" benchmark (docs/gp-anomaly-baseline.md):
+    /// Rigorous "transformer vs classical baseline" benchmark (docs/aiops/gp-anomaly-baseline.md):
     /// trains a Quick GPT base on the fixture CSV, then scores ONE pod's real normal stream
     /// + three injected anomalies (OOM / latency / CPU) with BOTH the
     /// <see cref="GptAnomalyDetector"/> and the EWMA <see cref="EwmaAnomalyDetector"/> floor,

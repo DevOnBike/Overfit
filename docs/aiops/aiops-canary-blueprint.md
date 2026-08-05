@@ -428,5 +428,5 @@ question is focus, and §11.1 is the cheapest way to answer it.
 
 ---
 
-*Related: `docs/gp-anomaly-baseline.md` (a different, model-based anomaly track). The two share the "anomaly"
+*Related: `docs/aiops/gp-anomaly-baseline.md` (a different, model-based anomaly track). The two share the "anomaly"
 word but nothing else — this one is a statistical canary analyser, that one is ML.*

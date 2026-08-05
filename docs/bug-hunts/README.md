@@ -26,5 +26,5 @@ reviewer repeating the work, and it is the only honest way to interpret a short 
 
 - `docs/silence-review.md` — the method behind the silent-failure half of the checklist, and the evidence
   that produced it.
-- `docs/aiops-repair-plan.md` — the shape a findings file takes once the caller decides to schedule the
+- `docs/aiops/aiops-repair-plan.md` — the shape a findings file takes once the caller decides to schedule the
   work: what breaks, where, how to fix it, and what test would have caught it.

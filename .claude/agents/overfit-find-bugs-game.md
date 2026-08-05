@@ -238,5 +238,5 @@ later during the incident they caused.
    list to reach the number.
 
 Do not create `ROADMAP.md` entries or a repair plan yourself; the caller decides what is worth scheduling.
-For the shape those take when they are wanted, see `docs/aiops-repair-plan.md`, and `docs/silence-review.md`
+For the shape those take when they are wanted, see `docs/aiops/aiops-repair-plan.md`, and `docs/silence-review.md`
 for the method behind the silent-failure group above.

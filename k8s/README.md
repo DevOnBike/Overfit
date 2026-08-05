@@ -2,7 +2,7 @@
 
 Local cluster setup for developing the anomaly detectors in `Sources/Main/Statistics/` against real metrics
 instead of synthetic arrays. Development infrastructure for the candidate direction in
-[`docs/aiops-cluster-anomaly-guard.md`](../docs/aiops-cluster-anomaly-guard.md) — not a product component,
+[`docs/aiops/aiops-cluster-anomaly-guard.md`](../docs/aiops/aiops-cluster-anomaly-guard.md) — not a product component,
 not referenced from the README.
 
 ## Order

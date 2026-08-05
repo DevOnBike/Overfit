@@ -2,7 +2,7 @@
 
 Queries to paste into <http://127.0.0.1:9090/graph> (run `monitoring\forward.cmd` first). Grouped by which
 decision each one serves, because that is the distinction the whole
-[blueprint](../docs/aiops-cluster-anomaly-guard.md) turns on — a statistic answers *"is this difference
+[blueprint](../docs/aiops/aiops-cluster-anomaly-guard.md) turns on — a statistic answers *"is this difference
 real?"*, and that is the wrong question when the service is already on fire.
 
 Every query below was run against the live lab before being written down.

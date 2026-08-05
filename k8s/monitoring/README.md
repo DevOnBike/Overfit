@@ -4,7 +4,7 @@ A local Prometheus + Grafana + kube-state-metrics install, so the detectors in
 `Sources/Main/Statistics/` can be developed against real cluster metrics instead of synthetic arrays.
 
 > **Not a product component and not linked from the README.** This is development infrastructure for the
-> candidate direction described in [`docs/aiops-cluster-anomaly-guard.md`](../../docs/aiops-cluster-anomaly-guard.md).
+> candidate direction described in [`docs/aiops/aiops-cluster-anomaly-guard.md`](../../docs/aiops/aiops-cluster-anomaly-guard.md).
 
 ## Use
 

@@ -49,4 +49,4 @@ beat the hand-reasoned floors — 29 false incidents a day against 44 — at ide
 failure mode is stated in its own docs and is not hypothetical: a signal whose *unit* is already the
 thing you care about, such as a restart count, must never be fitted from data.
 
-`docs/aiops-detection-pipeline.md` walks the whole pipeline end to end.
+`docs/aiops/aiops-detection-pipeline.md` walks the whole pipeline end to end.

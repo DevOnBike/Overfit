@@ -27,7 +27,7 @@ how interesting the work is.
 
 All six are fixed, with tests, and the suite is green. They came out of a code review after the day's work
 had passed 1959 tests and four hours on a live cluster; **none would have been found by running anything**,
-which is the argument for the review. Analysis kept in `docs/aiops-repair-plan.md`.
+which is the argument for the review. Analysis kept in `docs/aiops/aiops-repair-plan.md`.
 
 | # | Defect | Fix |
 |---|---|---|
@@ -49,7 +49,7 @@ label values are escaped in `PromqlCatalog` and `overfit anomaly-discover`.
 
 Still open, and larger than a fix: **one guard instance watches one scope** — a single namespace and a
 single pod regex. At a client with fifty namespaces that is fifty Deployments, ConfigMaps and volumes.
-**Designed 2026-08-03: `docs/aiops-multi-scope-design.md`.** Several scopes in one process, each with its own
+**Designed 2026-08-03: `docs/aiops/aiops-multi-scope-design.md`.** Several scopes in one process, each with its own
 tracker, calibrator and silent-pod counters, sharing one Prometheus client, one state file and one metrics
 endpoint.
 
@@ -106,7 +106,7 @@ plans around blockers that are not there. Corrected 2026-08-02 against the code.
 
 | # | Item | Why it blocks |
 |---|---|---|
-| — | ~~**Operator feedback**~~ | **Done 2026-08-02.** Labels with the finding's magnitude in the signal's own units, a `--real` cap so no proposed floor can silence a confirmed finding, subject-scoped suppressions with a mandatory expiry, four telemetry series, an HTTP endpoint and `overfit anomaly-ack` / `anomaly-suppressions`. Replayed against the fault panel in three arms — clean, calibration only, calibration plus 23 dismissals — with **identical detection latency in all three**. Design in `docs/aiops-operator-feedback.md`; the replay in `OperatorFeedbackRegressionDiagnostics`. |
+| — | ~~**Operator feedback**~~ | **Done 2026-08-02.** Labels with the finding's magnitude in the signal's own units, a `--real` cap so no proposed floor can silence a confirmed finding, subject-scoped suppressions with a mandatory expiry, four telemetry series, an HTTP endpoint and `overfit anomaly-ack` / `anomaly-suppressions`. Replayed against the fault panel in three arms — clean, calibration only, calibration plus 23 dismissals — with **identical detection latency in all three**. Design in `docs/aiops/aiops-operator-feedback.md`; the replay in `OperatorFeedbackRegressionDiagnostics`. |
 | 8 | **One 24 h measurement on a frozen configuration** | ▶ **Ready to start.** Stopped deliberately at 2026-08-02 08:37 UTC to run #7, which cannot be done without changing the namespace the run counts. Both of its blockers are now cleared: the warm-up grace shipped, and the learned-state volume was wiped at 14:15 UTC — the calibrator had observed the scaling experiment and folded it in as healthy, moving the `RequestsPerSecond` peer-gap proposal from 0.0119 to **1.242**, which would have started the frozen run with a floor above the events it is meant to catch. The guard restarted with `Adopted 0 open incident(s)`, so it begins the day with no history and no calibration — the same state a client's first day has, which makes the number it produces the right one to quote. The per-day false-positive figure quoted to a client has to come from an observed day. Iteration runs are 4 h — precision goes as √events, so 6× the wall-clock buys only ~2.4× precision, which is not worth it while the code is still changing. A 4 h run must sit on the **same clock hours** each time, because the load driver runs a real 1440-minute diurnal curve. |
 
 **Done, moved out of this table 2026-08-02** (each verified against the code, not from memory):
@@ -117,7 +117,7 @@ plans around blockers that are not there. Corrected 2026-08-02 against the code.
 | 3 | Maintenance / deploy suppression | `Contracts/MaintenanceWindow.cs` + `IMaintenanceCalendar` + `StaticMaintenanceCalendar`, configured from the ConfigMap. A covered cycle is reported, flagged, and **not learned from**. The workload it is scoped to is now derived from topology when unconfigured — see the A defect above, which had this feature shipped and unmatchable. |
 | 4 | Guard self-monitoring | `Monitoring/GuardTelemetry.cs`, 11 Prometheus series behind `--metrics-port 9469` with a Service and ServiceMonitor in `k8s/lab/anomaly-guard.yaml`. The one to alert on is `overfit_guard_last_cycle_timestamp_seconds` going stale. |
 | 5 | Operational floor beside the calibrated one | `Monitoring/ConfiguredFloorSource.cs` — an explicitly configured floor **always wins**, even a lower one, and the calibrated value is the fallback. A calibrated floor is a *noise* floor: it says what to ignore, never what is worth waking for. |
-| 7 | Rollout / scale-up / scale-down / HPA validated on the lab | **Done 2026-08-02** — five phases on the live cluster, each with its expectation written before the action. Full write-up in `docs/aiops-day-one-events.md`. Headline: **no pod was ever accused of silence**, including two scale-downs removing eight replicas each, one of them driven by an HPA with nobody pressing anything — that was the risk worth running it for. Grouping held the operator-facing count between 1 and 4 incidents per phase against bursts of up to 36 findings. Two findings came out of it: the warm-up defect (2b above) and the fact that **"the step detector never fired" was an artefact of the harness** counting log lines — the step did fire on both scale-downs, and `IncidentReporter` prints only the primary finding's reason, so a non-primary one is invisible in the row. |
+| 7 | Rollout / scale-up / scale-down / HPA validated on the lab | **Done 2026-08-02** — five phases on the live cluster, each with its expectation written before the action. Full write-up in `docs/aiops/aiops-day-one-events.md`. Headline: **no pod was ever accused of silence**, including two scale-downs removing eight replicas each, one of them driven by an HPA with nobody pressing anything — that was the risk worth running it for. Grouping held the operator-facing count between 1 and 4 incidents per phase against bursts of up to 36 findings. Two findings came out of it: the warm-up defect (2b above) and the fact that **"the step detector never fired" was an artefact of the harness** counting log lines — the step did fire on both scale-downs, and `IncidentReporter` prints only the primary finding's reason, so a non-primary one is invisible in the row. |
 | 2b | Warm-up grace for pods with no history | **Done 2026-08-02.** `AnomalyGuardOptions.WarmUpGrace` (15 min), with the pod's age taken from `kube_pod_created` through `PodPlacement.CreatedAt` rather than counted in the guard — a cycle counter would reset on every guard restart and silence the trend family on every pod at once, which is the failure shape this subsystem exists to remove. The gate fails closed three ways: no grace configured, no topology, or an **unknown** creation time all mean "judge as before". Trend family only; peer keeps judging young pods, because during a rollout every pod is young and a peer-wide grace would blind the guard exactly while a bad version goes out. `WarmUpGraceTests`. |
 | 6 | Durable incident state on a PVC + a restart experiment | `PersistentVolumeClaim/anomaly-guard-state` (128 Mi) replaced the `emptyDir`. Verified on the 2026-08-02 redeploy: the new pod logged *"Adopted 1 open incident(s) from durable state"*. |
 
@@ -1523,7 +1523,7 @@ value was validation/guidance, not drop-in algorithms.
 - **MASCOTS'16 — *Gaussian Process for Urban Environmental Sensor Networks***.
   Correlated, diurnally-periodic multi-sensor data = our K8s metrics. **Used:**
   motivates a **GP (or cheaper EWMA/z-score) baseline** to rigorously benchmark the
-  GPT anomaly detector — design sketch in `docs/gp-anomaly-baseline.md`. Deferred
+  GPT anomaly detector — design sketch in `docs/aiops/gp-anomaly-baseline.md`. Deferred
   (separate experiment, not a product feature).
 - **LinkedIn PDF — *Maximum Accuracy Computing* (Fourier, self-published)**. Claims
   "40× more accurate than deep learning"; grandiose framing, no peer review, demo on

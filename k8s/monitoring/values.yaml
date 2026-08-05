@@ -1,7 +1,7 @@
 # kube-prometheus-stack values for the Overfit AIOps development lab.
 #
 # Purpose: a local Prometheus + Grafana + kube-state-metrics that the anomaly detectors in
-# Sources/Main/Statistics can be developed against. See docs/aiops-cluster-anomaly-guard.md — the MVP reads
+# Sources/Main/Statistics can be developed against. See docs/aiops/aiops-cluster-anomaly-guard.md — the MVP reads
 # topology from kube-state-metrics labels (kube_pod_owner, kube_replicaset_owner) rather than the Kubernetes
 # API, so kube-state-metrics is not optional here: it is the component the design depends on.
 #

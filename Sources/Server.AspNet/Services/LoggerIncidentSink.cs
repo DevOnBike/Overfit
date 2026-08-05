@@ -29,7 +29,7 @@ namespace DevOnBike.Overfit.Server.AspNet.Services
     /// produces false findings on healthy replicas in a twelve-minute window. Emitting those at Warning would
     /// train the first operator who sees them to filter the channel out, and that is not recoverable. Raise
     /// <see cref="IncidentLogOptions.Level"/> when the false-positive rate has been measured on the cluster
-    /// it will run against — see the shadow-mode note in <c>docs/aiops-detection-pipeline.md</c>.</para>
+    /// it will run against — see the shadow-mode note in <c>docs/aiops/aiops-detection-pipeline.md</c>.</para>
     ///
     /// <para><b>Findings are separated from incidents deliberately.</b> An incident is what somebody might
     /// act on; a finding is evidence. Counting the wrong one has already produced a wrong conclusion in this
