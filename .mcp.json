@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "overfit-navigator": {
+      "command": "dotnet",
+      "args": [
+        "Tools/SemanticNavigator/bin/Release/net10.0/overfit-navigator.dll",
+        "serve"
+      ]
+    }
+  }
+}

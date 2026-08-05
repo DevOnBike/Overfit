@@ -21,6 +21,28 @@
          rules silently off). Expect this package to show as permanently "outdated"; that is INTENTIONAL, not
          debt. Bump it only when the SDK's own Roslyn version moves up. -->
     <PackageVersion Include="Microsoft.CodeAnalysis.CSharp" Version="5.0.0" />
+    <!-- Tools/SemanticNavigator only. Held at the SAME 5.0.0 as Microsoft.CodeAnalysis.CSharp above, and for a
+         different reason than that package's own pin: MSBuildWorkspace loads the OVERFIT analyzers out of each
+         project it opens, so the navigator is an analyzer HOST. A host older than the analyzers cannot load
+         them; a host newer than the SDK's Roslyn diverges from what `dotnet build` actually ran. Matching the
+         analyzers' own compile-time version is the only value that is right on both counts.
+         Newer exist (5.3.0, 5.6.0) and are deliberately not taken — see the note above. -->
+    <PackageVersion Include="Microsoft.CodeAnalysis.Workspaces.MSBuild" Version="5.0.0" />
+    <!-- Registers the C# language service into the workspace's MEF composition. Without it MSBuildWorkspace
+         opens the solution, reports zero projects, and raises "the language 'C#' is not supported" as a
+         non-fatal diagnostic per project — so every query answers "no results" instead of failing. -->
+    <PackageVersion Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="5.0.0" />
+    <!-- Discovers the installed .NET SDK's MSBuild at runtime. Not bound to Roslyn's version. -->
+    <PackageVersion Include="Microsoft.Build.Locator" Version="1.11.2" />
+    <!-- Compile-time only (ExcludeAssets="runtime" at the reference site — see SemanticNavigator.csproj). The
+         version therefore sets which MSBuild API the navigator COMPILES against, while the one it RUNS against
+         is whatever the installed SDK ships. It must be AT OR BELOW the SDK's MSBuild, or the tool compiles
+         against API the runtime does not have and fails with a MissingMethodException at the first call.
+         Measured, not assumed: `dotnet msbuild -version` on SDK 10.0.110 reports 18.0.11, so 18.0.2 is the
+         highest published version that satisfies the constraint. Re-check after an SDK bump.
+         NOT 17.11.31 (what Workspaces.MSBuild 5.0.0 resolves transitively): that version carries
+         GHSA-w3q9-fxm7-j8fq and NuGetAudit fails the build on it, correctly. -->
+    <PackageVersion Include="Microsoft.Build.Framework" Version="18.0.2" />
     <PackageVersion Include="Microsoft.Agents.AI" Version="1.17.0" />
     <PackageVersion Include="Microsoft.AspNetCore.TestHost" Version="10.0.10" />
     <PackageVersion Include="Microsoft.Extensions.AI.Abstractions" Version="10.8.3" />

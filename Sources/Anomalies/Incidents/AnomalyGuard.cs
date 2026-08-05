@@ -96,9 +96,11 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
 
         /// <summary>
         /// The guard's own counters, for a host to expose. <b>Alert on
-        /// <c>overfit_guard_last_cycle_timestamp_seconds</c> going stale</b> — it is the one series that makes
-        /// "this thing has stopped" visible, and a guard that has stopped is worse than one that never
-        /// started, because somebody is relying on it.
+        /// <c>overfit_guard_last_cycle_timestamp_seconds</c> with <c>absent()</c> as well as a staleness
+        /// comparison</b> — the comparison alone goes <c>inactive</c> when the pod disappears, because the
+        /// series disappears with it. Measured 2026-08-05; see <c>k8s/lab/guard-alerts.yaml</c> for the rule
+        /// and the evidence. A guard that has stopped is worse than one that never started, because somebody
+        /// is relying on it.
         /// </summary>
         public GuardTelemetry Telemetry
         {

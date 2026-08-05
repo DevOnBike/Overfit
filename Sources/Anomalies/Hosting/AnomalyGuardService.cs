@@ -225,9 +225,10 @@ namespace DevOnBike.Overfit.Anomalies.Hosting
 
         /// <summary>
         /// The guard's own counters, for a host to expose to Prometheus. <b>Alert on
-        /// <c>overfit_guard_last_cycle_timestamp_seconds</c> going stale</b>: it is the only series that makes
-        /// "this has stopped" visible from outside, and a stopped guard is worse than an absent one because
-        /// somebody is relying on it.
+        /// <c>overfit_guard_last_cycle_timestamp_seconds</c> with <c>absent()</c> as well as a staleness
+        /// comparison</b>: the comparison alone cannot fire once the pod is gone, since the series is gone
+        /// too. Measured 2026-08-05; <c>k8s/lab/guard-alerts.yaml</c> carries the working rule. A stopped
+        /// guard is worse than an absent one because somebody is relying on it.
         /// </summary>
         public GuardTelemetry Telemetry => _guard.Telemetry;
 

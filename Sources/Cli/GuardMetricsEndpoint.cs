@@ -18,9 +18,15 @@ namespace DevOnBike.Overfit.Cli
     ///
     /// <para><b>Without this the telemetry is a property nobody reads.</b> The counters existed, and the one
     /// consumer that mattered — a scrape, and therefore an alert on
-    /// <c>overfit_guard_last_cycle_timestamp_seconds</c> going stale — had no way to reach them. A guard that
-    /// has stopped is worse than one that never started, because somebody is relying on it, and until it is
-    /// scrapeable that condition is undetectable from outside.</para>
+    /// <c>overfit_guard_last_cycle_timestamp_seconds</c> — had no way to reach them. A guard that has stopped
+    /// is worse than one that never started, because somebody is relying on it, and until it is scrapeable
+    /// that condition is undetectable from outside.</para>
+    ///
+    /// <para><b>Scrapeable is necessary and not sufficient.</b> The rule written against this series must use
+    /// <c>absent()</c> as well as a staleness comparison: when the pod goes, the series goes with it, and a
+    /// <c>time()</c> comparison alone then evaluates over an empty vector and reports healthy. Measured
+    /// 2026-08-05 — six minutes of <c>inactive</c> with the guard scaled to zero. The working rule is in
+    /// <c>k8s/lab/guard-alerts.yaml</c>.</para>
     ///
     /// <para><b>A bare <see cref="HttpListener"/> rather than a web framework.</b> This process exists to
     /// watch a cluster; giving it a dependency injection container, routing and middleware to serve two

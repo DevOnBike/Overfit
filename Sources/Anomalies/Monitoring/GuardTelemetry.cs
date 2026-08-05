@@ -18,10 +18,21 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
     /// document in this subsystem argues that silence and health must be distinguishable; the component
     /// making that argument could not be distinguished from a healthy cluster itself.</para>
     ///
-    /// <para><b>The load-bearing series is <c>overfit_guard_last_cycle_timestamp_seconds</c>.</b> Counters
-    /// tell you what happened; only that one makes "the guard has not completed a cycle in fifteen minutes"
-    /// expressible as an alert, and that is the single alert every deployment of this needs. A guard that has
-    /// stopped is worse than one that never started, because somebody is relying on it.</para>
+    /// <para><b>The load-bearing series is <c>overfit_guard_last_cycle_timestamp_seconds</c>, and the alert
+    /// on it has to be written a specific way.</b> Counters tell you what happened; only that one can express
+    /// "the guard has not completed a cycle in fifteen minutes", and that is the single alert every
+    /// deployment of this needs. A guard that has stopped is worse than one that never started, because
+    /// somebody is relying on it.</para>
+    ///
+    /// <para><b>The obvious expression cannot fire in the case that matters, and this was measured rather
+    /// than reasoned.</b> <c>time() - overfit_guard_last_cycle_timestamp_seconds &gt; 900</c> evaluates over
+    /// an empty vector once the guard's pod is gone — the series goes with it — so the alert returns to
+    /// <c>inactive</c> and reports "fine" precisely when the cluster has stopped being watched. Measured
+    /// 2026-08-05 by scaling the guard to zero: <c>pending</c> for 60 seconds while the last sample was still
+    /// returned, then <c>inactive</c> for six minutes, no alert in Alertmanager, no notification. The same
+    /// test with <c>absent(...) or (time() - ... &gt; 900)</c>: firing after 60 seconds, two notifications
+    /// delivered, none failed. Ship <c>k8s/lab/guard-alerts.yaml</c> rather than writing the rule from
+    /// memory.</para>
     ///
     /// <para><b>Blind channels are exported as a number, not just logged.</b> "How much of what I asked for
     /// can this thing actually see" is a question an operator should be able to graph over a month, not
@@ -186,9 +197,13 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
             new("overfit_guard_suppressed_cycles_total", "Cycles inside a declared maintenance window.",
                 "counter", t => Interlocked.Read(ref t._suppressed)),
 
+            // The HELP text an operator reads in their OWN Prometheus, which is the only documentation most
+            // of them will ever see for this series — so the trap goes here rather than only in the source.
             new("overfit_guard_last_cycle_timestamp_seconds",
-                "When the last cycle completed. Alert on this going stale: a guard that has stopped is "
-                + "worse than one that never started, because somebody is relying on it.",
+                "When the last cycle completed. Alert with absent() OR a staleness comparison, never the "
+                + "comparison alone: this series disappears with the pod, so a time()-based rule goes "
+                + "inactive exactly when the guard is gone. A guard that has stopped is worse than one that "
+                + "never started, because somebody is relying on it.",
                 "gauge", t => Interlocked.Read(ref t._lastCycleUnixSeconds)),
 
             new("overfit_guard_pods", "Pods evaluated in the last cycle.",

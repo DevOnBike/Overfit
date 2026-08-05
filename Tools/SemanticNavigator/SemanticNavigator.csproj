@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <OutputType>Exe</OutputType>
+        <TargetFramework>net10.0</TargetFramework>
+        <LangVersion>latest</LangVersion>
+        <Nullable>enable</Nullable>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <RootNamespace>DevOnBike.Overfit.Navigator</RootNamespace>
+        <AssemblyName>overfit-navigator</AssemblyName>
+
+        <!-- DEVELOPER TOOLING, NOT PRODUCT. This never ships and must never be referenced by anything under
+             Sources/. MSBuildWorkspace resolves and loads the MSBuild engine, project SDKs and every analyzer
+             in the tree BY REFLECTION at runtime — the exact mechanism Sources/Main bans (RS0030 on
+             System.Reflection) and the exact reason it cannot be Native-AOT compiled. Keeping it outside
+             Sources/ is the boundary: an AOT-hostile dependency graph is fine here and fatal there. -->
+        <IsPackable>false</IsPackable>
+        <PublishAot>false</PublishAot>
+        <IsAotCompatible>false</IsAotCompatible>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <!-- Do NOT add ExcludeAssets="runtime" to the two Roslyn references below. That advice belongs to the
+             Microsoft.Build.* references further down, not to these: applied here it strips
+             Microsoft.CodeAnalysis.Workspaces out of the output and the process dies at startup with a
+             FileNotFoundException naming an assembly nobody removed on purpose. -->
+        <PackageReference Include="Microsoft.Build.Locator" />
+        <PackageReference Include="Microsoft.CodeAnalysis.Workspaces.MSBuild" />
+        <PackageReference Include="Microsoft.CodeAnalysis.CSharp" />
+        <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" />
+
+        <!-- Microsoft.CodeAnalysis.Workspaces.MSBuild drags the MSBuild API in transitively. Its assemblies
+             must NOT be copied next to the exe: Microsoft.Build.Locator resolves the SDK's own MSBuild at
+             startup, and a second copy in the output directory wins assembly resolution, giving two MSBuild
+             type identities in one process. Locator ships a build-time check for exactly this (MSBL001) and
+             names the required incantation, which is what these lines are. Compile-time only, runtime from
+             the SDK — that is the whole point of the Locator. -->
+        <PackageReference Include="Microsoft.Build.Framework" ExcludeAssets="runtime" PrivateAssets="all" />
+    </ItemGroup>
+
+</Project>

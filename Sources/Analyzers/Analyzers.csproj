@@ -22,9 +22,11 @@
         <PackageReference Include="Microsoft.CodeAnalysis.Analyzers" PrivateAssets="all" />
     </ItemGroup>
 
-    <ItemGroup>
-        <AdditionalFiles Include="AnalyzerReleases.Shipped.md" />
-        <AdditionalFiles Include="AnalyzerReleases.Unshipped.md" />
-    </ItemGroup>
+    <!-- AnalyzerReleases.{Shipped,Unshipped}.md are NOT listed here on purpose. Microsoft.CodeAnalysis.Analyzers
+         adds them as AdditionalFiles itself, so an explicit include registers each file twice. `dotnet build`
+         tolerates the duplicate silently; Roslyn's own workspace does not, and rejects the whole project with
+         "duplicate source file" — which means every IDE-style or tooling query over this project returns
+         nothing rather than an error. Found by Tools/SemanticNavigator on 2026-08-06. -->
+
 
 </Project>

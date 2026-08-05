@@ -27,7 +27,7 @@ data nobody has on day one at a customer site, which is why the deployed guard r
 `Incidents/AnomalyGuard` is the entry point: one `RunCycle(window, now)` per cadence, and everything
 above happens inside it. Around it, `Monitoring` fetches the window from Prometheus and resolves pod
 topology from kube-state-metrics; `Contracts` holds every option and result type; the host loop lives
-in `Sources/Server.AspNet/Services/AnomalyGuardService.cs`.
+in `Sources/Anomalies/Hosting/AnomalyGuardService.cs`.
 
 ## Every threshold here came from a measurement
 
