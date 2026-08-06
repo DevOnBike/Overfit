@@ -176,6 +176,14 @@ abstraction), `find_callers` (what reaches it). **If those tools are not availab
 — say so, fall back to `Grep`/`Glob`, and note in your plan that the inventory was textual rather than
 semantic, because that changes how much it can be trusted.
 
+
+**Read the backlogs, and read them before the roadmaps.** `docs/aiops/aiops-backlog.md` and any other
+`*-backlog.md` are where work that was *considered and deliberately deferred* is written down **with its
+reason** — which is the single most valuable thing you can find in round one. A request that matches a
+deferred item does not need re-analysing; it needs the reason re-examined, and that is a much shorter
+conversation. Backlog entries here also carry a diagnosis, sometimes with measurements, so an item marked
+"diagnosed" may already answer the client's question outright.
+
 Also read: `README.md`, `ROADMAP.md`, `ROADMAP-COMPLETED.md`, `CHANGELOG.md`, and `docs/`. A surprising amount
 of "new" work is a row already marked done, or one already scoped and deliberately deferred — and *deliberately
 deferred* is the most important thing you can find, because it usually comes with the reason.
@@ -538,9 +546,11 @@ Seed these, and only these:
 1. **The capability map** — which subsystem covers which capability, with file paths: loaders by format and
    architecture, chat/RAG/embeddings, audio, training and fine-tuning, the anomaly guard, the servers. Round
    one of every future request starts from this instead of from nothing.
-2. **What `ROADMAP-COMPLETED.md` says is already done**, condensed — because half of what clients ask for is
+2. **The backlog index** — every `*-backlog.md`, condensed to: item, status, and whether it carries a
+   diagnosis. Deferred-with-a-reason is the most reusable thing in the repository.
+3. **What `ROADMAP-COMPLETED.md` says is already done**, condensed — because half of what clients ask for is
    on it.
-3. **What `ROADMAP.md` records as deliberately deferred, and the reason.** A deferral with a reason is the
+4. **What `ROADMAP.md` records as deliberately deferred, and the reason.** A deferral with a reason is the
    most useful thing you can hand a client who asks for it again.
 
 ### What is worth remembering here

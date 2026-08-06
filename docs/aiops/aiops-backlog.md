@@ -76,6 +76,42 @@ a 40 MB baseline, which is exactly what the channel exists to catch. A parameter
 buying silence at the price of detection is the signature of a degree of freedom that is absent, the same
 diagnosis pattern recorded in `CLAUDE.md` for the synthetic generator's queueing term.
 
+
+#### Confirmed live during the 2026-08-06 run — and it costs more than the rate suggests
+
+The measurement above was historical: 24 hours of `container_memory_working_set_bytes` read back from
+Prometheus. The 24-hour false-positive run that started 2026-08-06 07:59:19Z produced the same pattern **as
+it happened**, which settles it.
+
+`lab-workload-7765564ff6-pj7r8`, `MemoryWorkingSetBytes`, peer family:
+
+> sits above the other 11 peers by **21% (9.99 MB)**: **Cliff's delta 1.0**
+
+Cliff's delta of 1.0 is perfect separation — that pod is above every one of the other eleven in every sample.
+The incident **opened at 08:29Z, closed at 08:59Z, reopened at 09:29Z and was still open at 11:14Z**, one
+finding per cycle re-confirming it for an hour and three quarters.
+
+**Note which pod.** The historical scan found generation `7765564ff6`'s gap sitting at a median of 5.9 MB and
+never clearing the 9.52 MB floor in 108 samples, with `f7lrt` and `9nds7` as the persistent heavy pair. Those
+samples predate the container restart at the run's start. After the restart the heavy role was **reassigned
+to a different pod**, and its gap grew past the floor. That is the mechanism this section describes —
+"assigned when the pods start and different from rollout to rollout" — playing out inside a single generation,
+which is stronger than the between-generation evidence it was originally based on.
+
+#### A second problem the historical scan could not see: the rate under-counts this
+
+The run's false-positive figure counts **incidents opened per day**. An incident that opens once and stays
+open for twenty hours is **one** by that measure, and a **permanently red entry on the operator's screen** in
+reality. Those are different costs and only the first is being measured.
+
+So the 24-hour report needs a second number beside the rate: **for how long was any incident open at all.**
+On this run one incident looks likely to cover most of the day while contributing a single unit to the count
+that everyone will quote.
+
+This is a measurement gap, not a detection gap, and it is cheap to close — the guard already logs
+`opened`/`ongoing`/`resolved` every cycle, so open-time is a sum over existing data rather than new
+instrumentation.
+
 The mechanism the family needs is a **per-pod offset learned over the pod's own history**: judge a replica
 against its peers *after* subtracting the gap it has held since it started, so that a stable difference is
 learned once and only a *change* in that difference reports. That is a design task, not a tuning task, and it

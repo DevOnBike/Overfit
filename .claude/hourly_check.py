@@ -7,7 +7,10 @@ Answers three questions in this order, because the third is worthless without th
      exists to remove. Silence is only good news once it is verified silence.
   2. Is anything contaminating the count? Cycle failures, blind metrics beyond the expected one, an
      unevaluable count that is climbing.
-  3. Only then: the rate, its Poisson interval, and where it comes from.
+  3. Only then: the rate, its Poisson interval, and where it comes from — and beside it, **how long anything
+     was open at all**. The rate counts openings, which under-reports the one shape an operator feels most:
+     an incident that opens once and never closes is a single unit in the rate and a permanently red screen
+     in the room. Both numbers, or neither is honest.
 
 Also tracks the one known non-comparability with the 2026-08-02 baseline: the workload pods restarted
 minutes before this run began, so their heaps started cold. If GcGen2HeapBytes is inflated by that rather
@@ -165,6 +168,32 @@ def main():
           f"-> {per_day:.0f}/day   95% Poisson {lo / len(cycles) * 288:.0f}-{hi / len(cycles) * 288:.0f}")
     print(f"       findings {findings}   quiet cycles {quiet} ({quiet / len(cycles):.0%})   "
           f"baseline 2026-08-02 was {BASELINE_PER_DAY}/day on the SAME config, older build")
+
+    # ---- 3b. how long was anything open at all ----
+    # The rate above counts OPENINGS, and that under-reports the case an operator feels most. Measured
+    # 2026-08-06: one MemoryWorkingSetBytes incident on a single pod (peer gap 9.99 MB, Cliff's delta 1.0)
+    # opened once and stayed open for hours while `opened` sat at zero every cycle. In the rate that is one
+    # unit; on the operator's screen it is a permanently red entry. Those are different costs and only the
+    # first was being reported, so the rate alone would have called that run quiet.
+    open_cycles = sum(1 for c in cycles if c["incidents"] > 0)
+    open_hours = open_cycles * 5 / 60.0
+
+    longest = 0
+    current = 0
+
+    for c in cycles:
+        current = current + 1 if c["incidents"] > 0 else 0
+        longest = max(longest, current)
+
+    still_open = cycles[-1]["incidents"]
+    tail = (f"   {still_open} open NOW, for {current * 5} min" if still_open
+            else "   nothing open right now")
+
+    print(f"OPEN   something was open in {open_cycles}/{len(cycles)} cycles "
+          f"({open_cycles / len(cycles):.0%}) = {open_hours:.1f} h of {elapsed:.1f} h elapsed   "
+          f"longest streak {longest * 5} min{tail}")
+    print("       the rate counts OPENINGS, this counts TIME — an incident that never closes is 1 there "
+          "and a permanent alarm here")
 
     # NOT max(1, ...). The first version divided by a floored denominator, so zero incidents reported
     # "1 of 1 non-heap -> 288/day" — an invented incident and a rate three hundred times the baseline,
