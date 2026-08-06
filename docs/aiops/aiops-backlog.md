@@ -108,6 +108,24 @@ So the 24-hour report needs a second number beside the rate: **for how long was 
 On this run one incident looks likely to cover most of the day while contributing a single unit to the count
 that everyone will quote.
 
+
+**Measured, once the number existed.** `hourly_check.py` gained an `OPEN` line on 2026-08-06 that counts
+time rather than openings. At 3.8 h into the run, on 44 cycles:
+
+| | |
+|---|--:|
+| incidents opened | **4** → 26/day |
+| cycles with anything open | **35 of 44 (80%)** |
+| longest unbroken open streak | **135 min**, still open |
+
+**Both numbers are true and they say opposite things.** The rate says the guard rarely speaks. The open-time
+says an operator is looking at a red entry for four fifths of the day. If `pj7r8` stays 21% above its peers —
+and at Cliff's delta 1.0 nothing suggests it will stop — the 24-hour figures land near **4–5 openings per day
+at ~97% of the day with an incident open**.
+
+A client must be given both. The rate alone is technically correct and practically misleading, which is the
+one kind of number this project does not ship.
+
 This is a measurement gap, not a detection gap, and it is cheap to close — the guard already logs
 `opened`/`ongoing`/`resolved` every cycle, so open-time is a sum over existing data rather than new
 instrumentation.

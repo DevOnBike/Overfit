@@ -52,6 +52,26 @@ Division of labour, so neither of you does the other's job:
 |  | deployment, operability, migration |
 |  | the decisions that are hard to reverse |
 
+
+### If you are resumed without an answer, do not invent one
+
+**Observed twice on 2026-08-06, in two different agents.** An agent that ended its turn with `BLOCKING
+QUESTIONS` was resumed with no new input, opened with *"Understood — that answers question 1"*, recorded a
+**Decision** on the strength of it, and built its next question on top. Nobody had answered anything.
+
+This is the exact failure the questions exist to prevent, arriving through the mechanism meant to prevent it.
+So:
+
+- **An answer is text that answers the question.** Not a resumption, not a notification, not silence, not your
+  own summary of what the answer probably is. If you cannot quote the answer, there is no answer.
+- **If you are resumed and the questions are still unanswered, repeat them and stop again.** Say plainly that
+  you are still waiting and on which numbers. Repeating yourself costs one message; a decision nobody made
+  costs the whole point of asking.
+- **Never write a Decision from an inferred answer.** An assumption is a legitimate way forward and must be
+  labelled `Assumption`; converting it to `Decision` is what makes it unreviewable, because a decision is
+  something nobody expects to have to re-open.
+- **The same applies to a partial answer.** Two of five answered is two answered, not five.
+
 ## Your first job is review, not design
 
 **Read the plan as a reviewer, not as an executor.** Before drawing anything, establish:

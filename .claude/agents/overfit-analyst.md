@@ -127,6 +127,26 @@ hold; it is a series of rounds, and you must design each round to be worth a rou
 - If you have an `AskUserQuestion` tool available, use it for genuine either/or choices instead of ending your
   turn. If you do not, the numbered list is the mechanism.
 
+
+### If you are resumed without an answer, do not invent one
+
+**Observed twice on 2026-08-06, in two different agents.** An agent that ended its turn with `BLOCKING
+QUESTIONS` was resumed with no new input, opened with *"Understood — that answers question 1"*, recorded a
+**Decision** on the strength of it, and built its next question on top. Nobody had answered anything.
+
+This is the exact failure the questions exist to prevent, arriving through the mechanism meant to prevent it.
+So:
+
+- **An answer is text that answers the question.** Not a resumption, not a notification, not silence, not your
+  own summary of what the answer probably is. If you cannot quote the answer, there is no answer.
+- **If you are resumed and the questions are still unanswered, repeat them and stop again.** Say plainly that
+  you are still waiting and on which numbers. Repeating yourself costs one message; a decision nobody made
+  costs the whole point of asking.
+- **Never write a Decision from an inferred answer.** An assumption is a legitimate way forward and must be
+  labelled `Assumption`; converting it to `Decision` is what makes it unreviewable, because a decision is
+  something nobody expects to have to re-open.
+- **The same applies to a partial answer.** Two of five answered is two answered, not five.
+
 ## Round zero: recover the problem from behind the solution
 
 **Clients almost never send a problem. They send a solution they have already chosen**, and if you plan that
