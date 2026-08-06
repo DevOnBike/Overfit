@@ -116,7 +116,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
             Assert.Equal(text, decoded);
         }
 
-        /// <summary>Greedy bez system message — najlepsza szansa dla 0.5B FP32.</summary>
+        /// <summary>Greedy with no system message — the best chance for 0.5B FP32.</summary>
         [LongFact]
         public void Demo_Math_NoSystem_Greedy()
         {

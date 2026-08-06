@@ -131,6 +131,23 @@ place because Y". That is **not** drift — it is the negative result this repo 
 it is how an experiment gets repeated. Read for tense and intent before reporting. If a comment describes
 the past AS the past, it is doing its job.
 
+
+## A secondary check while you read: is the prose in English?
+
+Comments here are published with the library and carry measurements, rejected designs and the reason a thing
+is shaped as it is. **A comment in another language hides evidence rather than prose.**
+
+`OVERFIT037` catches this at build time, so **do not sweep for it** — the analyzer runs on every file on every
+build and you would be re-doing a machine's work. Raise it only when you happen to read one the rule cannot
+see: Polish written without diacritics and without two words from its narrow list, a translated identifier, or
+a commit message. Report it as a one-line note, not as a finding with a paragraph.
+
+Worth knowing about that rule's shape, because it explains why gaps exist. A first attempt at measuring this
+by hand used a word list containing `pod`, `to` and `test`; in a Kubernetes anomaly-detection codebase "pod"
+appears in most English comments, and the scan reported **154** violations where there were **4**. The rule
+was therefore built narrow on purpose and will miss things. **Missing a few is the correct trade** — a rule
+that fires on correct code gets suppressed, and then it protects nothing.
+
 ## Before you finish — one honest look at your own instructions
 
 Close your report with a short section headed **`SUGGESTED IMPROVEMENTS TO MY ROLE`** — but only when this run

@@ -51,7 +51,7 @@ namespace DevOnBike.Overfit.Intrinsics
 
         public static readonly bool HasVector512 = Vector512.IsHardwareAccelerated;
 
-        // to zawsze na koncu - bo zalezy od HasFma i HasAvx2 (pola sa inicjowane od gory do dolu)
+        // This one stays last: it depends on HasFma and HasAvx2, and fields initialise top to bottom.
         public static readonly bool HasAvx2Fma = HasAvx2 && HasFma;
     }
 }

@@ -141,6 +141,26 @@ Update it as each stage completes. **Never advance it past a stage that did not 
 advance it for a check that could not run — an unrun check recorded as a pass is the failure mode this
 repository cares about most.
 
+
+## The pipeline does not end at the merge
+
+`PR_READY` is not `DONE`. The plan carries a **success metric** — the thing the change was supposed to
+achieve — and every gate before this point checked *correctness*, not *outcome*. A change can be correct,
+reviewed, verified, shippable, and useless.
+
+So the status line has one more state, and you must not skip it:
+
+`STATUS: ANALYSIS_READY → APPROVED → IMPLEMENTED → VERIFIED → REVIEWED → PR_READY → MERGED → OUTCOME_MEASURED`
+
+**When you report at the PR gate, say the outcome is not yet known.** Name the success metric, name what
+would measure it, and say when that becomes possible — after a deploy, after a day of data, after a
+benchmark run on a quiet box. A report that ends at `PR_READY` and reads as "finished" is how a metric that
+never moved goes unnoticed.
+
+Closing it is `overfit-analyst`'s job, because it owns the success metric; a performance outcome goes to
+`overfit-perf-claim-auditor`, which owns that verdict. Neither happens automatically — **surface it as an
+open item rather than letting the plan quietly go stale at `PR_READY`.**
+
 ## What you report at the end
 
 - The classification and why.

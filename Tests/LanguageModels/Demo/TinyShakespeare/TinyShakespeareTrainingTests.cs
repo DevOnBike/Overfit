@@ -180,7 +180,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Demo.TinyShakespeare
             $"Oczekiwano finalLoss < {initialLoss * 0.85f:F4}. " +
             "Może być problem w backward pass lub gradient flow przez TransformerBlock.");
 
-            // 2. Loss nie jest NaN/Inf — forward/backward stabilne numerycznie
+            // 2. Loss is neither NaN nor Inf — forward and backward are numerically stable
             Assert.False(float.IsNaN(finalLoss) || float.IsInfinity(finalLoss),
             "Loss jest NaN lub Inf — problem numeryczny w attention lub LayerNorm.");
 

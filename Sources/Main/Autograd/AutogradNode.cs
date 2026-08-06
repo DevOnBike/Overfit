@@ -186,7 +186,7 @@ namespace DevOnBike.Overfit.Autograd
         /// <summary>
         /// Tworzy view-node na tym samym data storage.
         /// Data storage pozostaje wÅ‚asnoÅ›ciÄ… source.
-        /// Grad storage jest osobny, bo backward zapisuje gradient w ksztaÅ‚cie view.
+        /// Grad storage is separate because backward writes the gradient in the view's shape.
         /// </summary>
         internal static AutogradNode ViewOf(AutogradNode source, TensorShape shape, bool requiresGrad)
         {

@@ -450,6 +450,34 @@ Adopting these would produce ceremony rather than clarity. Do not spend the clie
 Estimating in hours or days. Choosing between two designs that are both acceptable — present both and let the
 developer pick. Writing the code. Committing anything.
 
+
+## Closing the loop — did it achieve what it was for?
+
+**You wrote the success metric, so you are the one who comes back and checks it.** Nothing else in this
+pipeline does. `overfit-verifier` asks whether the tests prove the claim, `overfit-reviewer` whether the diff
+matches the plan, `overfit-perf-claim-auditor` whether a benchmark supports a ratio — **all three check
+correctness. None of them checks whether the change was worth making.**
+
+That gap has a shape: a change can pass every gate, ship, and move nothing. Without this step nobody ever
+finds out, and the next request in the same area is planned as if the last one worked.
+
+When you are asked to close a plan out, or when you pick one up again:
+
+1. **Read the success metric you wrote** in round zero — the number, and what it was measured against.
+2. **Measure it now**, or say precisely why it cannot be measured yet and what would have to happen first.
+   Some outcomes need a day of production data, a full benchmark, or a user actually using the thing.
+3. **Write the result into the plan under `## Outcome`**, with the date and what it was measured on. Not a
+   feeling — the same number, taken again.
+4. **Say plainly if it did not move.**
+
+**A change that shipped, passed everything and achieved nothing is the single most valuable entry you can
+write**, and it is the one that never gets written, because by then everybody has moved on and the diff
+looks fine. This repository already keeps a graveyard of measured negatives for performance work in
+`docs/measured-baselines.md` — that discipline exists here; it has simply never been applied to features.
+
+If the outcome is a performance number, hand the measurement to `overfit-perf-claim-auditor`: it owns that
+verdict and you should not issue a second one. Record what it returns.
+
 ## Before you finish — one honest look at your own instructions
 
 Close your report with a short section headed **`SUGGESTED IMPROVEMENTS TO MY ROLE`** — but only when this run

@@ -42,3 +42,4 @@ OVERFIT033 | Performance | Warning | Jagged float[][] type — use a flat float[
 OVERFIT034 | Design | Warning | More than one namespace-level type in a file
 OVERFIT035 | Design | Error | Two Schemas/*.json files map to the same generated constant
 OVERFIT036 | Design | Error | Schema file name cannot become a C# identifier
+OVERFIT037 | Design | Warning | Comment is not in English — comments here carry measurements and rejected designs, not only description

@@ -41,6 +41,30 @@ Small changes are exempt by their nature — a comment fix, a rename, a test-onl
 `Sources/Main`, crossing an assembly boundary, changing public API, touching a hot path or a file parser, or
 adding a dependency is **not** small, however few lines it takes.
 
+
+## The plan is not finished when the work merges
+
+Every gate in this repository checks whether a change is *correct*. None checks whether it *worked*. The plan
+carries a **success metric** from the analyst's round zero, and that number is the only thing that says the
+change was worth making.
+
+So a plan gains one more section, written after the work is live:
+
+```markdown
+## Outcome
+
+Measured <date>, on <model / box / population>.
+
+- Success metric: <what was promised>
+- Measured: <what actually happened>
+- Verdict: achieved | partially achieved | not achieved | not yet measurable, because <reason>
+```
+
+**Record a failure as carefully as a success.** A change that passed every gate and moved nothing is the most
+useful entry in the file, and the one least likely to be written — by then the diff looks fine and everyone
+has moved on. Performance outcomes belong in `docs/measured-baselines.md` too, next to the other measured
+negatives.
+
 ## Why one file and not two
 
 A plan and a separate architecture note that disagree are worse than either alone, and nothing makes them
