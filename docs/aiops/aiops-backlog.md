@@ -42,6 +42,7 @@ silence, and silence is what this subsystem exists to distinguish from health.
 | D2 | **Peer is structurally blind to a single OOMKill** | Measured. One replica dying is invisible to a family that compares replicas against each other, and OOM is among the most common real failures. Needs a mechanism, not a threshold. | medium | high | medium |
 | D3 | **A CPU rise on every replica at once is invisible to all four families** | Measured 2026-08-01 and never diagnosed to the end: peer is blind by construction, no threshold rule covers CPU, and a step that has finished has no slope left to fit. | medium | high | medium |
 | D4 | **The heap oscillates with a period near the evaluation window** | Measured 2026-08-05: gen2 swings 3.31 MB inside a 20-minute window while replicas differ by 0.29 MB, and all twelve oscillate **in phase**, so the trend family sees a 1.2–1.5 MB alternation that is window alignment, not the cluster. Same class of error as the 240-minute window sitting on the daily slope, in the opposite direction. **No cost paid today — the channel produced zero incidents in the 24-hour run**, so this is a latent defect, not a live one. | low **now** | high | medium |
+| D5 | **The `incidents=` cycle counter disagrees with the `opened`/`resolved` events** | Measured 2026-08-06: 3 of 74 cycles. An incident went open → absent from the count → `ongoing=1` again with **no `resolved` and no `opened`** in between. **Cost paid today:** every metric built on that field under-reports how long anything was open — the run's own open-time figure read 86% instead of 91% and split one 285-minute incident into "255 min, now 25 min", until it was caught by accident. | **high** — it corrupts a headline number | low — read the code that emits the field | low |
 
 ### D1, diagnosed 2026-08-06 — a persistent outlier is not an anomaly
 
@@ -134,6 +135,45 @@ The mechanism the family needs is a **per-pod offset learned over the pod's own 
 against its peers *after* subtracting the gap it has held since it started, so that a stable difference is
 learned once and only a *change* in that difference reports. That is a design task, not a tuning task, and it
 is shared with D2 and D3 — all three are the peer family lacking a notion the threshold cannot express.
+
+
+### D5, measured 2026-08-06 — an incident that is open, absent, then ongoing again
+
+The guard logs one line per cycle:
+
+```
+cycle: pods=12 findings=1 incidents=1 opened=0 ongoing=1 resolved=0
+```
+
+At **13:44:18**, mid-run, one cycle read:
+
+```
+cycle: pods=12 findings=0 incidents=0 opened=0 ongoing=0 resolved=0
+```
+
+and five minutes later the incident was back as `ongoing=1`, `opened=0`. **No `resolved` before it, no
+`opened` after it.** Three cycles out of seventy-four behaved this way.
+
+**Two readings, and only the code settles which:**
+
+1. **`incidents=` means "incidents that produced a finding this cycle"**, not "incidents that are open". The
+   field is then correct and its *name* is the defect — which is still worth fixing, because everything
+   downstream reads it as a state.
+2. **The incident state machine has a hole**: an incident can stop being counted without resolving. That
+   would matter more, because incident lifetime is what an operator's screen shows.
+
+**This already cost something, which is why it is not a curiosity.** `hourly_check.py`'s `OPEN` line — added
+the same day precisely because the opened-per-day rate under-reports a permanently open incident — was itself
+built on `incidents=` and inherited the flaw. It reported **86% of cycles with something open when the true
+figure was 91%**, and cut a single continuous 285-minute incident into "longest 255 min, open now 25 min".
+The number added to stop under-reporting was under-reporting.
+
+Fixed in the script by latching on the **events** (`opened` minus `resolved`) instead of the snapshot, and it
+now prints the disagreement count every run so this cannot go unnoticed again. **The guard-side question is
+untouched by that** — the script only stopped trusting the field.
+
+Cheapest thing that settles it: read the code that emits `incidents=` and say which of the two readings holds.
+If it is the first, rename the field; if the second, the state machine needs the fix.
 
 ## E. Deferred by decision
 

@@ -52,6 +52,86 @@ irrelevant reasons is a gate people learn to skip. **Ask which mode, or infer it
 - release integrity: SourceLink, determinism, signing, provenance;
 - container base images and the security posture.
 
+
+### Benchmarks before a release — a COLLAPSE detector, not a regression detector
+
+Asked for on 2026-08-06. It is worth having, but only in a shape this box can actually support, and the
+naive shape is documented in `CLAUDE.md` as not working:
+
+> **Cross-process before/after does not work here.** A prefill change read as **+5%** while the *untouched*
+> decode path in the same run moved **+32%**.
+
+So **never build this as "run the benchmarks and compare against the last run."** That method has already
+produced a confident wrong answer in this repository. Two halves, and only one of them is trustworthy:
+
+**The half that works: allocation.** `MemoryDiagnoser` reports bytes per operation, which is **deterministic
+and not timing-dependent**, so it compares cleanly across processes and across days. 46 benchmark classes
+carry it. A zero-allocation contract that starts allocating is an exact, reproducible finding — this is the
+part of the gate that catches real regressions, and it is the part to build first.
+
+**The half that does not: timing.** On this box a cross-process timing comparison cannot resolve anything
+smaller than the drift itself. So do not set delta thresholds. Set **absolute floors with a wide margin** —
+"decode must exceed X tok/s", where X sits well below the measured value. That detects a *collapse*: a kernel
+dispatch broken, a fast path silently falling back, a `Parallel.For` reintroduced on a per-token path. It
+does **not** detect a 5% regression, and nothing on this machine does. **Say that when you report, so nobody
+reads a pass as proof there was no regression.**
+
+**A canary in the same run.** Include one benchmark on a path the change cannot have touched. If the canary
+moved, the box moved — discard the sample rather than believing it.
+
+**Scope: `RELEASE_GATE` only, never `PR_GATE`.** There are **345 `[Benchmark]` methods across 94 classes**
+and `Sources/Benchmark/run.cmd` runs `--filter *`. A gate needs a **named short list**, agreed in advance,
+not "the benchmarks". It also takes the machine-wide mutex, so it **serialises with the `[LongFact]` gate and
+with everything else** — run them in sequence and say which ran.
+
+**Three preconditions, none met as of 2026-08-06 — do not report this gate as run until all three are:**
+
+1. **The named list.** Which benchmarks matter is a judgement nobody has written down. Candidates: decode
+   throughput on a real model, the Q4_K GEMV kernel, single-call inference, and every class whose contract is
+   0 B/op.
+2. **A measured runtime for that list**, for the same reason as the `[LongFact]` gate: a cost nobody knows is
+   a gate that gets skipped.
+3. **Floors set from measured values with margin**, recorded in `docs/measured-baselines.md` with what each
+   was measured on. A floor invented rather than measured is the exact defect this repository spends its time
+   removing.
+
+### The `[LongFact]` suite — 358 tests that otherwise never run
+
+**Measured 2026-08-06: the repository has 1733 `[Fact]` and 358 `[LongFact]`.** The long ones are skipped by
+default, **277 of them in `LanguageModels`** — the model loaders and the runtime, which is the highest-value
+end-to-end surface there is. Nothing runs them on a schedule; the only cron in the repository is a security
+scanner. **A test that never runs is worse than no test, because it looks like coverage.**
+
+So they belong to you, split by mode:
+
+- **`RELEASE_GATE`: run all of them.** A release is rare and the cost is justified. This is the only point at
+  which the whole end-to-end surface is exercised.
+- **`PR_GATE`: run only the areas the diff touches.** A change under `Sources/Main/LanguageModels/Runtime`
+  gets `Tests/LanguageModels`; a change to a loader gets the loader's tests. Running all 358 on every pull
+  request would make the gate unusable, and an unusable gate gets skipped.
+
+Two constraints that are facts, not preferences:
+
+- **This cannot run in CI.** The model fixtures live on the developer's machine (`C:\qwen3b`, `C:\gpt2`,
+  `C:\gemma`); CI is Linux and carries none of them. It is a **local** gate, so say plainly when you could not
+  run it rather than reporting a pass you did not earn.
+- **The suite takes the machine-wide measurement mutex** (`MeasurementExclusion`). It cannot run during a
+  benchmark or an anomaly-guard measurement, and those take hours. Check first and defer rather than fight it.
+
+**Two preconditions, neither of which is met yet as of 2026-08-06 — do not report this gate as run until both
+are:**
+
+1. **A switch to run them without editing source.** `LongFact` currently sets `Skip` unconditionally and its
+   own message says "Remove the Skip property to run it". Editing an attribute to take a measurement has
+   already gone wrong here once and had to be undone by hand. The fix is the pattern this repo already uses
+   in `MeasurementExclusion` and `SmallModelFact`: an environment variable, e.g. `OVERFIT_RUN_LONG=1`.
+2. **A measured runtime for the suite.** Nobody has timed it. "Run it before every release" means something
+   very different at eight minutes than at six hours, and a gate whose cost is unknown is a gate that will be
+   skipped the first time it is inconvenient. Time it once, write the number down, then decide whether the
+   PR-gate subset needs to be narrower still.
+
+
+
 **Verdicts are unchanged and apply to both modes** — `SHIPPABLE`, `BLOCKED`, `CANNOT TELL`. Always name the
 mode you ran in, because "shippable" means two different things.
 ## Order of work — cheapest first, so a blocker is found in seconds rather than after a twenty-minute build

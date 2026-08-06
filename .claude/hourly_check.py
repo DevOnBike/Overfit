@@ -175,18 +175,36 @@ def main():
     # opened once and stayed open for hours while `opened` sat at zero every cycle. In the rate that is one
     # unit; on the operator's screen it is a permanently red entry. Those are different costs and only the
     # first was being reported, so the rate alone would have called that run quiet.
-    open_cycles = sum(1 for c in cycles if c["incidents"] > 0)
-    open_hours = open_cycles * 5 / 60.0
-
+    # Latched on the EVENTS (opened/resolved), not on the `incidents` snapshot — and the difference is not
+    # academic. Measured 2026-08-06 at 13:44:18: one cycle read `findings=0 incidents=0 opened=0 ongoing=0
+    # resolved=0`, with the incident back as `ongoing=1` five minutes later and NO resolve in between. The
+    # snapshot field evidently means "incidents that produced a finding this cycle", not "incidents that are
+    # open". Counting on it split a single 5-hour incident into "longest 255 min, now 25 min" — under-reporting
+    # exactly the number this line exists to stop anyone under-reporting.
+    live = 0
+    open_cycles = 0
+    snapshot_cycles = 0
+    disagreements = 0
     longest = 0
     current = 0
 
     for c in cycles:
-        current = current + 1 if c["incidents"] > 0 else 0
-        longest = max(longest, current)
+        live = max(0, live + c["opened"] - c["resolved"])
+        snapshot_cycles += 1 if c["incidents"] > 0 else 0
 
-    still_open = cycles[-1]["incidents"]
-    tail = (f"   {still_open} open NOW, for {current * 5} min" if still_open
+        if (live > 0) != (c["incidents"] > 0):
+            disagreements += 1
+
+        if live > 0:
+            open_cycles += 1
+            current += 1
+            longest = max(longest, current)
+            continue
+
+        current = 0
+
+    open_hours = open_cycles * 5 / 60.0
+    tail = (f"   {live} open NOW, for {current * 5} min" if live
             else "   nothing open right now")
 
     print(f"OPEN   something was open in {open_cycles}/{len(cycles)} cycles "
@@ -194,6 +212,15 @@ def main():
           f"longest streak {longest * 5} min{tail}")
     print("       the rate counts OPENINGS, this counts TIME — an incident that never closes is 1 there "
           "and a permanent alarm here")
+
+    # Surfaced every run rather than left for somebody to notice again. Either `incidents` means something
+    # narrower than its name suggests, or the guard's own incident bookkeeping has a hole; only the code
+    # settles which, and a silent divergence between an event log and a snapshot is worth knowing about
+    # either way.
+    if disagreements:
+        print(f"       NOTE: the guard's `incidents=` snapshot disagreed with the opened/resolved events in "
+              f"{disagreements} of {len(cycles)} cycles (snapshot said open in {snapshot_cycles}). "
+              f"This line trusts the events.")
 
     # NOT max(1, ...). The first version divided by a floored denominator, so zero incidents reported
     # "1 of 1 non-heap -> 288/day" — an invented incident and a rate three hundred times the baseline,
