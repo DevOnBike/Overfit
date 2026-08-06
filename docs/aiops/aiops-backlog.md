@@ -172,8 +172,36 @@ Fixed in the script by latching on the **events** (`opened` minus `resolved`) in
 now prints the disagreement count every run so this cannot go unnoticed again. **The guard-side question is
 untouched by that** — the script only stopped trusting the field.
 
-Cheapest thing that settles it: read the code that emits `incidents=` and say which of the two readings holds.
-If it is the first, rename the field; if the second, the state machine needs the fix.
+**Settled 2026-08-06 by reading the code — it is the first reading, and it is worse than it looked.**
+
+`AnomalyGuard.RunCycleCore` builds the result as:
+
+```csharp
+var result = new GuardCycleResult(
+    pipeline.Count, incidents.Count, opened, ongoing, resolved, blind, partial, unevaluable);
+```
+
+`Incidents` is `incidents.Count` — **the groups formed from THIS cycle's findings**, exactly as
+`GuardCycleResult`'s own XML doc says ("Groups they formed"). `opened`/`ongoing`/`resolved` are counted by
+walking `tracked`, the incidents touched this cycle. So when a window produces no finding, `tracked` is empty
+and **`ongoing` is zero too**, while the incident is still open.
+
+**So none of the five fields reports how many incidents are currently open.** They are all per-cycle activity
+counters. The state machine is not broken — **the observable is missing**, and the field named `incidents`
+invites precisely the misreading that cost a day's headline number here.
+
+Two things follow:
+
+1. **The guard should expose an open-incident count** (or an oldest-open-incident age) in the cycle line and
+   in `GuardTelemetry`. An operator's real question is "is anything open right now, and for how long", and
+   today it can only be answered by replaying the whole log and latching on `opened` minus `resolved` — which
+   is what `hourly_check.py` now does.
+2. **`Incidents` should be renamed** to something that cannot be read as state — `Groups`, or
+   `GroupsThisCycle`. It is a `record struct` positional parameter, so this is a rename plus its call sites,
+   not a design change.
+
+Neither is urgent: nothing detects worse because of it. Both are cheap, and the second one prevents the next
+reader repeating the mistake.
 
 ## E. Deferred by decision
 
