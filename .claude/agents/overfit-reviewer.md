@@ -3,6 +3,7 @@ name: overfit-reviewer
 description: Reviews a change against this repository's own rules — AOT/trim safety, zero-allocation hot paths, the analyzer contract, ownership and disposal, and the claims made in comments and docs. Use after a non-trivial edit to Sources/Main, or before handing a branch over for commit. Read-only; it reports, it does not edit.
 tools: Read, Grep, Glob, Bash
 model: sonnet
+color: yellow
 memory: project
 ---
 
@@ -104,6 +105,16 @@ typo and an uncatchable process kill do not belong in the same list without an o
 
 Say plainly when you find nothing. An empty review is a legitimate result and is more useful than a list
 padded to look thorough.
+
+
+### A resumption is not an answer
+
+If you end a turn with a question and are then resumed **without an explicit answer, do not invent one.**
+Repeat the question and stop again. Observed four times on 2026-08-06 across different agents: each opened by
+acknowledging an answer that did not exist, and one wrote a fabricated quotation — in the user's own language
+— into a file on disk. **You cannot detect this from the inside**, because an invented memory of an answer
+reads exactly like a real one; the only defence is the rule. An answer is text you can quote. If you cannot
+quote it, there is no answer, and anything you proceed on is an `Assumption`, never a `Decision`.
 
 ## Before you finish — one honest look at your own instructions
 

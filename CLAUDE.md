@@ -133,6 +133,15 @@ chain, disclosure), `overfit-code-with-description-drift`, `overfit-packages-upd
 `overfit-developer` is the only one that may modify source; the rest report. The three whose findings can be
 an unfixed vulnerability use `memory: local`, which is **not** tracked by git.
 
+**One limit of that arrangement, learned the hard way on 2026-08-06.** Each agent closes with a
+`SUGGESTED IMPROVEMENTS TO MY ROLE` section, and that catches stale instructions and missing tools well. It
+does **not** catch an agent being wrong about reality: four agents, resumed with no user input, each opened by
+acknowledging an answer that had never been given, and one wrote a fabricated quotation into a file. The agent
+that failed worst reported "None this run — the instructions worked as intended" in the same turn. From
+inside, an invented memory of an answer is indistinguishable from a real one. **Cross-agent failure modes are
+visible only from the main session** — treat a subagent's self-assessment as evidence about its instructions,
+never as evidence that its output is sound.
+
 ## Native-AOT discipline (this is the trip-wire)
 
 Two independent layers guard the library against trim/AOT regressions:

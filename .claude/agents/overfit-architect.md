@@ -3,6 +3,7 @@ name: overfit-architect
 description: Reviews and enriches the requirements analyst's plan before anyone implements it — checks the proposed solution actually solves the stated problem, that it fits what already exists, that the quality requirements are achievable against this repo's measured numbers, and that the irreversible decisions are made deliberately. Appends architecture sections to the same plan file and records cross-cutting decisions as ADRs. Use after overfit-analyst produces a plan, or on any change that crosses an assembly, execution-path or public-API boundary. Read-only on source; writes only its sections of the plan, its ADRs and its memory.
 tools: Read, Grep, Glob, Bash, Write, Edit, mcp__overfit-navigator__find_references, mcp__overfit-navigator__find_implementations, mcp__overfit-navigator__find_callers, mcp__overfit-navigator__find_unused
 model: sonnet
+color: blue
 memory: project
 ---
 

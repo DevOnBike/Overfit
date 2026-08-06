@@ -1,0 +1,57 @@
+<Project>
+
+    <!--
+      Prerelease packages must be accepted deliberately, not inherited.
+
+      NuGetAudit already fails the build on a KNOWN VULNERABILITY. Nothing warns about a package that is
+      simply not finished. That gap is not theoretical here: `OpenTelemetry.Exporter.Prometheus.AspNetCore`
+      was pinned at a beta and stayed pinned, and it took a deliberate check of the NuGet feed on 2026-08-06
+      to discover it has been in prerelease for FOUR YEARS — 33 versions, not one stable, since 2022-08-18 —
+      while every other package in the same OpenTelemetry suite shipped stable 1.17.0 on the same day.
+
+      A pin nobody re-examines becomes a decision nobody made. So: every prerelease version in
+      Directory.Packages.props raises OVERFITPRERELEASE at build time, unless it is listed below with a
+      reason and a date. Accepting one is then an explicit, reviewable act rather than silence.
+
+      Warning, never error, and on purpose. A prerelease dependency is a judgement call about support and
+      risk, not a rule violation — promoting it to an error would only teach people to add entries to the
+      accept-list without reading them.
+
+      Emitted once, from Main, rather than once per project: twenty-five copies of the same warning is how a
+      warning becomes wallpaper.
+
+      Turn it off for one build with -p:OverfitPrereleaseCheck=false. If this file itself misbehaves, deleting
+      it restores the previous behaviour exactly — it adds nothing else.
+    -->
+
+    <ItemGroup>
+        <!--
+          Accepted prereleases. One entry per package, each with WHY and WHEN, so the next reader can judge
+          whether the reason still holds instead of assuming somebody thought about it.
+
+          Nothing is accepted at the moment. `OpenTelemetry.Exporter.Prometheus.AspNetCore` is deliberately
+          NOT listed: it reaches only Demo/LocalAgentAspNetDemo, and the 2026-08-06 investigation concluded
+          the product does not need it at all — the stable OTLP exporter covers the same need off the same
+          Meter. See docs/specs/guard-telemetry-meter-plan.md, section "C0 resolved".
+        -->
+        <!-- <OverfitAcceptedPrerelease Include="Some.Package" Reason="why" Since="yyyy-mm-dd" /> -->
+    </ItemGroup>
+
+    <Target Name="OverfitPrereleaseCheck"
+            BeforeTargets="CoreCompile"
+            Condition="'$(OverfitPrereleaseCheck)' != 'false' AND '$(MSBuildProjectName)' == 'Main'">
+
+        <ItemGroup>
+            <_OverfitPrerelease Include="@(PackageVersion)"
+                                Condition="$([System.String]::Copy('%(PackageVersion.Version)').Contains('-'))" />
+            <_OverfitPrereleaseUnaccepted Include="@(_OverfitPrerelease)"
+                                          Exclude="@(OverfitAcceptedPrerelease)" />
+        </ItemGroup>
+
+        <Warning Code="OVERFITPRERELEASE"
+                 File="$(MSBuildThisFileDirectory)Directory.Packages.props"
+                 Text="%(_OverfitPrereleaseUnaccepted.Identity) is pinned at a PRERELEASE version (%(_OverfitPrereleaseUnaccepted.Version)) and is not on the accepted list. Check whether a stable release exists before keeping it: a package can sit in prerelease for years while the rest of its suite ships stable. Accept it deliberately by adding an OverfitAcceptedPrerelease entry with a reason and a date in Directory.Build.targets, or move off it." />
+
+    </Target>
+
+</Project>

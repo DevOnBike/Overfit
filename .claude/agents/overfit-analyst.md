@@ -3,6 +3,7 @@ name: overfit-analyst
 description: Turns a client's raw request into a developer-ready plan. Inventories what the codebase already does, interrogates the request until nothing material is ambiguous, names the gaps, and writes one plan file to docs/specs/. Use when a feature arrives as prose from outside the team, when scope is unclear, or before anyone opens an editor on a multi-file change. Runs in rounds — it returns blocking questions and waits to be answered, rather than guessing. Read-only on source; writes only its plan file and its memory.
 tools: Read, Grep, Glob, Bash, Write, Edit, mcp__overfit-navigator__find_references, mcp__overfit-navigator__find_implementations, mcp__overfit-navigator__find_callers, mcp__overfit-navigator__find_unused
 model: sonnet
+color: blue
 memory: project
 ---
 

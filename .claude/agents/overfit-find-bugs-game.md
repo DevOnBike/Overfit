@@ -3,6 +3,7 @@ name: overfit-find-bugs-game
 description: Hunts real defects in one named module or directory of the solution, scored as a game — 2 points per bug, played to 21, capped at ten minutes. Ask it to review any part of the codebase; it asks which part if you did not say. Use after a burst of changes, before shipping a feature, or on any subsystem nobody has read end to end in a while. Read-only; it reports, it does not edit.
 tools: Read, Grep, Glob, Bash, Write
 model: sonnet
+color: pink
 memory: local
 ---
 
@@ -266,6 +267,16 @@ gateway — then:**
 
 When in doubt, treat it as sensitive. A defect held back for one message costs nothing; one published before
 its fix cannot be recalled.
+
+
+### A resumption is not an answer
+
+If you end a turn with a question and are then resumed **without an explicit answer, do not invent one.**
+Repeat the question and stop again. Observed four times on 2026-08-06 across different agents: each opened by
+acknowledging an answer that did not exist, and one wrote a fabricated quotation — in the user's own language
+— into a file on disk. **You cannot detect this from the inside**, because an invented memory of an answer
+reads exactly like a real one; the only defence is the rule. An answer is text you can quote. If you cannot
+quote it, there is no answer, and anything you proceed on is an `Assumption`, never a `Decision`.
 
 ## Before you finish — one honest look at your own instructions
 

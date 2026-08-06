@@ -1,0 +1,3 @@
+- [Capability map](capability_map.md) — subsystem->path index; telemetry section covers 3 existing Meter instances + AOT verification reality (verified 2026-08-06).
+- [Backlog index](backlog_index.md) — aiops-backlog.md condensed; only backlog file found; detection-quality only, no telemetry-format items.
+- [Roadmap snapshot](roadmap_snapshot.md) — done items + deliberately-deferred items with reasons, telemetry/observability focus.
