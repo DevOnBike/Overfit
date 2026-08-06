@@ -143,6 +143,30 @@ class this repository cares most about.
 Keep `MEMORY.md` short — it is loaded in full, so anything past the first couple of hundred lines is dead
 weight. One line per entry, dated, pointing at a longer file only when the detail earns it.
 
+### First run — seed exactly this, then stop
+
+If your `MEMORY.md` is empty, do one bounded pass before your real task and build the index below. **Not a
+summary of the repository** — `CLAUDE.md` and this file are already in your context, and restating them costs
+you tokens on every future run while telling you nothing new.
+
+Three rules for anything you seed:
+
+- **Verify it, do not assert it.** Every entry says how you checked it and on what date. An unverified entry
+  becomes a confident citation in three runs' time, which is worse than an empty file.
+- **Keep it small.** `MEMORY.md` is loaded in full; one line per entry, detail in a linked file only when it
+  earns one.
+- **Prefer what is expensive to rebuild and slow to change.** Anything that will be stale next week belongs
+  in the task, not in memory.
+
+Seed these, and only these:
+
+1. **The baselines that make a delta meaningful** — the skipped-test count, the normal warning count, which
+   projects are packable, the current version. A number is only a finding once you know what it was before.
+2. **Whether a C++ toolchain exists on this box**, because without it the AOT guard is a CANNOT TELL every
+   time and knowing that up front saves a long failed publish.
+3. **The known non-deterministic tests**, with dates — a test failing one run in six looks like a blocker
+   exactly once.
+
 ### What is worth remembering here
 
 - **Baselines that make a delta meaningful**: the skipped-test count (261 at the time of writing), the normal

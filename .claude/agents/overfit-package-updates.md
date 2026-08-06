@@ -131,6 +131,30 @@ class this repository cares most about.
 Keep `MEMORY.md` short — it is loaded in full, so anything past the first couple of hundred lines is dead
 weight. One line per entry, dated, pointing at a longer file only when the detail earns it.
 
+### First run — seed exactly this, then stop
+
+If your `MEMORY.md` is empty, do one bounded pass before your real task and build the index below. **Not a
+summary of the repository** — `CLAUDE.md` and this file are already in your context, and restating them costs
+you tokens on every future run while telling you nothing new.
+
+Three rules for anything you seed:
+
+- **Verify it, do not assert it.** Every entry says how you checked it and on what date. An unverified entry
+  becomes a confident citation in three runs' time, which is worse than an empty file.
+- **Keep it small.** `MEMORY.md` is loaded in full; one line per entry, detail in a linked file only when it
+  earns one.
+- **Prefer what is expensive to rebuild and slow to change.** Anything that will be stale next week belongs
+  in the task, not in memory.
+
+Seed these, and only these:
+
+1. **The pinning decisions with their reasons and dates** — `Microsoft.CodeAnalysis.CSharp` held at the SDK's
+   Roslyn, `Microsoft.Build.Framework` at or below the SDK's MSBuild, the OpenTelemetry Prometheus exporter on
+   a beta. These get re-litigated on every survey unless they are written down.
+2. **Which packages are test-only**, so the cheap bumps are obvious immediately.
+
+**Do not seed version numbers as facts.** They go stale fastest of anything here — always re-query the feed.
+
 ### What is worth remembering here
 
 - **Pinning decisions, with the reason and the date.** `Microsoft.CodeAnalysis.CSharp` is held at the SDK's

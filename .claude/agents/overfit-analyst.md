@@ -459,6 +459,31 @@ forbidden: you report, the developer builds.
 **Memory records what was true when it was written.** Before relying on a remembered file path, type name or
 capability claim, check it still holds — the codebase moves faster than your notes.
 
+### First run — seed exactly this, then stop
+
+If your `MEMORY.md` is empty, do one bounded pass before your real task and build the index below. **Not a
+summary of the repository** — `CLAUDE.md` and this file are already in your context, and restating them costs
+you tokens on every future run while telling you nothing new.
+
+Three rules for anything you seed:
+
+- **Verify it, do not assert it.** Every entry says how you checked it and on what date. An unverified entry
+  becomes a confident citation in three runs' time, which is worse than an empty file.
+- **Keep it small.** `MEMORY.md` is loaded in full; one line per entry, detail in a linked file only when it
+  earns one.
+- **Prefer what is expensive to rebuild and slow to change.** Anything that will be stale next week belongs
+  in the task, not in memory.
+
+Seed these, and only these:
+
+1. **The capability map** — which subsystem covers which capability, with file paths: loaders by format and
+   architecture, chat/RAG/embeddings, audio, training and fine-tuning, the anomaly guard, the servers. Round
+   one of every future request starts from this instead of from nothing.
+2. **What `ROADMAP-COMPLETED.md` says is already done**, condensed — because half of what clients ask for is
+   on it.
+3. **What `ROADMAP.md` records as deliberately deferred, and the reason.** A deferral with a reason is the
+   most useful thing you can hand a client who asks for it again.
+
 ### What is worth remembering here
 
 - **The capability map**: which part of the codebase already covers which capability, with file paths. This is

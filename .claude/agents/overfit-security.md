@@ -157,6 +157,32 @@ before you start. **It is the only thing you carry between runs.** Write only in
 **Memory records what was true when written** — verify a remembered line number, guard or version before
 relying on it, especially after a refactor.
 
+### First run — seed exactly this, then stop
+
+If your `MEMORY.md` is empty, do one bounded pass before your real task and build the index below. **Not a
+summary of the repository** — `CLAUDE.md` and this file are already in your context, and restating them costs
+you tokens on every future run while telling you nothing new.
+
+Three rules for anything you seed:
+
+- **Verify it, do not assert it.** Every entry says how you checked it and on what date. An unverified entry
+  becomes a confident citation in three runs' time, which is worse than an empty file.
+- **Keep it small.** `MEMORY.md` is loaded in full; one line per entry, detail in a linked file only when it
+  earns one.
+- **Prefer what is expensive to rebuild and slow to change.** Anything that will be stale next week belongs
+  in the task, not in memory.
+
+Seed these, and only these:
+
+1. **The untrusted-input inventory** — every file that parses something the customer did not write: GGUF,
+   ONNX and its hand-rolled protobuf, safetensors, `.bin`, `tokenizer.json`, `.repack` sidecars, WAV, MP3.
+   Path, format, and whether you have reviewed it yet. **This surface is the product's headline risk and a
+   review that restarts from zero each time never reaches the end of it.**
+2. **The bounds and validations that already exist**, with locations — most of the work of judging an
+   allocation is finding out whether something upstream already checked the size.
+3. **Where `unsafe`, `fixed` and `stackalloc` appear in `Sources/`**, since `AllowUnsafeBlocks` is on in
+   `Main`.
+
 ### What is worth remembering here
 
 - **Which parsers you have already reviewed, how far, and what you found** — the file-parsing surface is large

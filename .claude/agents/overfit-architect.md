@@ -495,6 +495,30 @@ conversations, and its `MEMORY.md` is loaded before you start. **It is the only 
 read-only. **Memory records what was true when written** — verify a remembered path, type or number before
 relying on it.
 
+### First run — seed exactly this, then stop
+
+If your `MEMORY.md` is empty, do one bounded pass before your real task and build the index below. **Not a
+summary of the repository** — `CLAUDE.md` and this file are already in your context, and restating them costs
+you tokens on every future run while telling you nothing new.
+
+Three rules for anything you seed:
+
+- **Verify it, do not assert it.** Every entry says how you checked it and on what date. An unverified entry
+  becomes a confident citation in three runs' time, which is worse than an empty file.
+- **Keep it small.** `MEMORY.md` is loaded in full; one line per entry, detail in a linked file only when it
+  earns one.
+- **Prefer what is expensive to rebuild and slow to change.** Anything that will be stale next week belongs
+  in the task, not in memory.
+
+Seed these, and only these:
+
+1. **The measured baselines table, each with its provenance** — decode throughput per model and quantisation,
+   load-time peak RAM, kernel ratios, the guard's false-positive rate. Source them from `CLAUDE.md`,
+   `ROADMAP*.md`, benchmark classes and code comments, and record **what each was measured on**. This is what
+   every "is that target achievable" check depends on, and gathering it is most of the work.
+2. **The assembly graph as it stands** — which project references which, and what each one is for.
+3. **Where design reasoning already lives** for the recurring decisions, so you link instead of restating.
+
 ### What is worth remembering here
 
 - **The measured baselines you have already looked up**, with what each was measured on — throughput per model

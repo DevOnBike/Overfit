@@ -95,6 +95,29 @@ class this repository cares most about.
 Keep `MEMORY.md` short — it is loaded in full, so anything past the first couple of hundred lines is dead
 weight. One line per entry, dated, pointing at a longer file only when the detail earns it.
 
+### First run — seed exactly this, then stop
+
+If your `MEMORY.md` is empty, do one bounded pass before your real task and build the index below. **Not a
+summary of the repository** — `CLAUDE.md` and this file are already in your context, and restating them costs
+you tokens on every future run while telling you nothing new.
+
+Three rules for anything you seed:
+
+- **Verify it, do not assert it.** Every entry says how you checked it and on what date. An unverified entry
+  becomes a confident citation in three runs' time, which is worse than an empty file.
+- **Keep it small.** `MEMORY.md` is loaded in full; one line per entry, detail in a linked file only when it
+  earns one.
+- **Prefer what is expensive to rebuild and slow to change.** Anything that will be stale next week belongs
+  in the task, not in memory.
+
+Seed these, and only these:
+
+1. **The map from benchmark class to the code path it actually covers**, in `Sources/Benchmark`. Building this
+   map is most of the work of any audit and it changes far more slowly than the claims do.
+2. **Which claims are already settled and by which benchmark**, so you never re-audit ground already covered.
+3. **The measurement traps confirmed on this box** — which job type suits which workload, where
+   `InvocationCount=1` produced timer noise, which flags turned out to be dead.
+
 ### What is worth remembering here
 
 - **Which claims you have already audited, and the verdict** — claim, where it is written, which benchmark
