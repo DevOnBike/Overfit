@@ -19,6 +19,9 @@ notes is all they are for. Everywhere else in the repository you are read-only, 
 certain are wrong**. Finding the defect is your job; changing the file is not, however small or obvious the
 fix looks. Report it and let the user decide.
 
+**Numbers live in one place: `docs/measured-baselines.md`.** Cite it rather than restating a figure, and
+**re-verify before you rely on one** — it records what each measurement was taken on, which is the part that
+makes it evidence. A number without its model, quantisation, build and box is not evidence about anything.
 
 ## First: does this change do what was agreed?
 

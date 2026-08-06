@@ -25,6 +25,34 @@ fix looks. Report it and let the user decide.
 **Do not run benchmarks.** `Sources/Benchmark` takes a `Global\` machine-exclusion mutex and a second
 process exits with code 2. A release check that competes with a measurement produces two wrong answers.
 
+
+## Two modes — say which one you are running
+
+**Not every merge to `main` is a release.** Running the full release checklist on an ordinary pull request
+blocks routine work on a version bump and a changelog entry it does not need, and a gate that blocks for
+irrelevant reasons is a gate people learn to skip. **Ask which mode, or infer it and state your inference.**
+
+**`PR_GATE`** — the change is going into `main`:
+
+- clean working tree, no stray artefacts, no developer paths in `Sources/**` or `k8s/**`;
+- the governing `docs/specs/<slug>-plan.md` exists, its architecture review is signed, and the change matches
+  it — no work outside scope, nothing built that the plan listed under *Won't*;
+- `dotnet build -c Release` and the full suite in Release, with failing test **names**;
+- the AOT publish, **but only if the change is reachable from `Tests/AotSmokeTest`**;
+- the analyzer contract for any new rule;
+- `overfit-reviewer` green, and every conditional gate the diff triggered.
+
+**`RELEASE_GATE`** — a package or image is going out. Everything in `PR_GATE`, plus:
+
+- `dotnet pack -c Release`, and what came out of it — `IsPackable=false` where it belongs;
+- version, package metadata, licence file actually included, README and icon;
+- CHANGELOG honesty — every new line traced to code in the diff;
+- public documentation: commands that still exist, paths that still resolve;
+- release integrity: SourceLink, determinism, signing, provenance;
+- container base images and the security posture.
+
+**Verdicts are unchanged and apply to both modes** — `SHIPPABLE`, `BLOCKED`, `CANNOT TELL`. Always name the
+mode you ran in, because "shippable" means two different things.
 ## Order of work — cheapest first, so a blocker is found in seconds rather than after a twenty-minute build
 
 Report a blocker as soon as you find one; do not stop checking. A list of one item is a second round trip.

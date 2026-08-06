@@ -27,6 +27,30 @@ references, and "commit the spec / test before commit" advice that violates Over
 **When NOT to use:** a one-line fix, a doc typo, a rename, or a self-contained change with obvious
 acceptance. A two-line spec (objective + acceptance) is still fine for small things.
 
+
+## Who owns what — read this before using the workflow below
+
+**This skill is the shared FORMAT and CHECKLIST for a plan. It does not drive the change.** The phases below
+describe the shape of the work; each one is owned by an agent, and the transitions between them are owned by
+`/overfit-delivery`:
+
+| phase | owner |
+|---|---|
+| SPECIFY | `overfit-analyst` — problem, goal, users, success metric, scope, acceptance criteria |
+| DESIGN | `overfit-architect` — boundaries, execution path, allocation policy, AOT reach, quality parameters |
+| TASKS / IMPLEMENT | `overfit-developer` — one task at a time, correctness pass then a separate measured pass |
+| VERIFY | `overfit-verifier` then `overfit-reviewer` — does the evidence prove it, and does the diff match the plan |
+| STAGE | the user. Never an agent. |
+
+**Use this skill for its section templates, its gate questions and its Overfit-specific checks** — the
+execution path, the verification oracle, the AOT reach, the allocation policy. Do not use it as a second
+process that advances phases on its own: if this skill and the agent chain both think they are driving,
+neither gate means anything.
+
+There is also a generic `spec-driven-development` skill in this repository whose scope overlaps this one.
+**Inside Overfit, this file wins** — the generic one carries web examples and advice that violates the git
+boundary here.
+
 ## The gated workflow
 
 ```

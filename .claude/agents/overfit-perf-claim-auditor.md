@@ -22,6 +22,10 @@ Start from the claim. Locate the benchmark class in `Sources/Benchmark` that pro
 find one, stop and report that — an unmeasured performance claim is the finding, and no further analysis
 is needed.
 
+**Numbers live in one place: `docs/measured-baselines.md`.** Cite it rather than restating a figure, and
+**re-verify before you rely on one** — it records what each measurement was taken on, which is the part that
+makes it evidence. A number without its model, quantisation, build and box is not evidence about anything.
+
 ## The seven ways a benchmark in this repo has already lied
 
 Check each. Every one has a real incident behind it, so none of them is theoretical:

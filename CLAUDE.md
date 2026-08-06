@@ -119,13 +119,15 @@ Repeatable versions of the three most common cycles live in `.claude/commands/` 
 suite), `/bench <filter>` (benchmark + the measurement traps to check before believing the number), and
 `/sweep <OVERFIT0xx>` (inventory every site an analyzer rule flags).
 
-`.claude/agents/` holds **eleven** specialised agents, each with its own context and a `memory:` directory
+`.claude/agents/` holds **twelve** specialised agents, each with its own context and a `memory:` directory
 that persists across sessions. The delivery chain is `overfit-analyst` → `overfit-architect` →
-`overfit-developer` → `overfit-reviewer`, and it is gated: the analyst and architect write **one** plan file
-in `docs/specs/`, and the developer refuses to write source until the architect has signed it. Conditional
+`overfit-developer` → `overfit-verifier` → `overfit-reviewer`, and it is gated: the analyst and architect
+write **one** plan file in `docs/specs/`, and the developer refuses to write source until the architect has
+signed it. `/overfit-delivery` (a skill, because only the main session can dispatch agents and ask the user
+questions) runs that chain and enforces the gates. Conditional
 specialists: `overfit-perf-claim-auditor` (**sole owner of the verdict on any performance claim** — others
 detect and defer), `overfit-security` (parsers, endpoints, gateway), `overfit-ciso` (threat model, supply
-chain, disclosure), `overfit-code-with-description-drift`, `overfit-package-updates`,
+chain, disclosure), `overfit-code-with-description-drift`, `overfit-packages-update`,
 `overfit-release-readiness`, `overfit-find-bugs-game` (exploratory, not a gate).
 
 `overfit-developer` is the only one that may modify source; the rest report. The three whose findings can be

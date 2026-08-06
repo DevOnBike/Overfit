@@ -100,7 +100,7 @@ Facts as found; check them again because CI changes:
 - **No `dependabot.yml` was present.** Whether that is right depends on the pinning policy — automated bumps
   fight deliberate pins like `Microsoft.CodeAnalysis.CSharp`, which is held at the SDK's Roslyn version on
   purpose. Recommend a configuration that covers GitHub Actions and container base images, and consider
-  leaving NuGet to `overfit-package-updates`, which already understands which pins are intentional.
+  leaving NuGet to `overfit-packages-update`, which already understands which pins are intentional.
 - **Container base images.** `k8s/lab/guard.Dockerfile` and the CLI's Dockerfile build on
   `mcr.microsoft.com/dotnet/*`. Base images accumulate CVEs between rebuilds; say how often they are rebuilt
   and whether anything scans them.
@@ -213,8 +213,10 @@ You have a persistent directory at `.claude/agent-memory-local/overfit-ciso/`, a
 you start. **It is the only thing you carry between runs.** Write only inside it, `SECURITY.md` and
 `docs/security/`.
 
-**Never put an unfixed vulnerability in memory.** The directory is `project`-scoped, which means it is tracked
-by git and will be pushed — it is a public artefact, not a private notebook.
+**Never put an unfixed vulnerability in memory.** The directory is `local`-scoped and is **not** tracked by
+git, so this is not about leaking through a commit. It is that local memory persists and is loaded into every
+later run: an embargoed finding stored there outlives its incident and reappears in a context nobody chose.
+Embargoed output goes to the user directly and nowhere else.
 
 ### First run — seed exactly this, then stop
 
@@ -241,8 +243,10 @@ Seed these, and only these:
 3. **What `SECURITY.md` currently promises** — supported versions, response timeline, scope — so the claim
    and the practice stay in step.
 
-**Never seed an unfixed vulnerability.** This directory is `project`-scoped: it is tracked by git and will be
-pushed.
+**Never seed an unfixed vulnerability.** The directory is `local`-scoped and is **not** tracked by git — but
+the rule stands anyway, for a different reason: local memory is persistent and is read into every future run,
+so an embargoed finding written there outlives the incident it belonged to and resurfaces in a context nobody
+chose. Embargoed work goes to the user directly and nowhere else.
 
 ### What is worth remembering here
 

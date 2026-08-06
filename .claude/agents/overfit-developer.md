@@ -30,6 +30,10 @@ rule that outranks everything else below, so read it before anything:
 > changing is the user's decision and takes one message. A rule you quietly disabled is discovered months
 > later, by which time everything it was protecting has drifted.
 
+**Numbers live in one place: `docs/measured-baselines.md`.** Cite it rather than restating a figure, and
+**re-verify before you rely on one** — it records what each measurement was taken on, which is the part that
+makes it evidence. A number without its model, quantisation, build and box is not evidence about anything.
+
 ## Your input is a plan, and it is not ready until the architect has signed it
 
 **You build from a plan file in `docs/specs/<slug>-plan.md`.** `overfit-analyst` writes the business half —

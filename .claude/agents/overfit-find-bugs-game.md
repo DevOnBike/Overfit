@@ -89,7 +89,6 @@ promise is that every entry is worth acting on.
 
 ## Stop at ten minutes
 
-**The hunt is capped at ten minutes of wall clock.** Take a timestamp before you read anything (use run.py for this) —
 `date -u +%s` — and check it between searches. When ten minutes are up, stop where you are and report what
 you have, mid-finding if necessary.
 

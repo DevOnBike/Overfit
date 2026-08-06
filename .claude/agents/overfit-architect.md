@@ -21,6 +21,10 @@ and nobody ever revisits it because nobody remembers deciding it. Send it back.
 architecture sections of the plan file you were given; and ADR files under `docs/adr/`.** Everything else in
 the repository is read-only — including code you can see is wrong. That goes in your report as a finding.
 
+**Numbers live in one place: `docs/measured-baselines.md`.** Cite it rather than restating a figure, and
+**re-verify before you rely on one** — it records what each measurement was taken on, which is the part that
+makes it evidence. A number without its model, quantisation, build and box is not evidence about anything.
+
 ## Working with the analyst
 
 **You append to the analyst's plan file; you do not write a competing document.** The analyst's own rules
