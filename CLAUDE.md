@@ -89,9 +89,17 @@ python Scripts/convert_gguf.py ...
 The commands above are what a **human** types. Claude does not type them directly — **every shell command
 goes into `.claude/run.py` and is executed as the single invocation `python D:/Overfit/.claude/run.py`.**
 
-This is a friction rule, not a style preference. `.claude/settings.json` allow-lists exactly that one
-command plus `Write`/`Edit` on `run.py`, so a whole build-test-measure cycle costs zero permission
-prompts. Ad-hoc shell commands re-prompt every time and turn a ten-step task into ten interruptions.
+**This applies to the main session, not to subagents.** `.claude/agents/**` each get their own shell and must
+invoke `dotnet` directly — `run.py` is a single scratch file, so two agents sharing it overwrite each other
+mid-task. The rule below is about discipline in this session; it is not a permission boundary.
+
+It is a discipline rule, and the discipline is what pays — not the permissions. (`settings.json` in fact
+allow-lists `Bash(dotnet *)` and `Bash(python *)` broadly, so the original "zero prompts" justification is no
+longer why this exists.) What it buys is: the command lives in a file that can be re-read and corrected rather
+than retyped; output is filtered in Python instead of by `grep`, so a failing test name survives; environment
+variables go through `env=` in `subprocess.run` where they actually take effect; and long scripts avoid the
+shell quoting that eats backticks, `$` and regex classes on the way in. Every one of those has gone wrong here
+at least once.
 
 Practical consequences, each of which has already gone wrong at least once:
 
@@ -109,8 +117,19 @@ Practical consequences, each of which has already gone wrong at least once:
 
 Repeatable versions of the three most common cycles live in `.claude/commands/` — `/check` (build + full
 suite), `/bench <filter>` (benchmark + the measurement traps to check before believing the number), and
-`/sweep <OVERFIT0xx>` (inventory every site an analyzer rule flags). `.claude/agents/` holds two
-read-only reviewers with their own context: `overfit-reviewer` and `overfit-perf-claim-auditor`.
+`/sweep <OVERFIT0xx>` (inventory every site an analyzer rule flags).
+
+`.claude/agents/` holds **eleven** specialised agents, each with its own context and a `memory:` directory
+that persists across sessions. The delivery chain is `overfit-analyst` → `overfit-architect` →
+`overfit-developer` → `overfit-reviewer`, and it is gated: the analyst and architect write **one** plan file
+in `docs/specs/`, and the developer refuses to write source until the architect has signed it. Conditional
+specialists: `overfit-perf-claim-auditor` (**sole owner of the verdict on any performance claim** — others
+detect and defer), `overfit-security` (parsers, endpoints, gateway), `overfit-ciso` (threat model, supply
+chain, disclosure), `overfit-code-with-description-drift`, `overfit-package-updates`,
+`overfit-release-readiness`, `overfit-find-bugs-game` (exploratory, not a gate).
+
+`overfit-developer` is the only one that may modify source; the rest report. The three whose findings can be
+an unfixed vulnerability use `memory: local`, which is **not** tracked by git.
 
 ## Native-AOT discipline (this is the trip-wire)
 

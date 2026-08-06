@@ -48,8 +48,13 @@ ASSUMPTIONS:
 
 ### Phase 1 — SPECIFY
 
-Write the spec to a file (e.g. `docs/<feature>-spec.md`). Reframe vague asks as **testable success
-criteria**: not "make decode faster" but "Qwen-3B Q4_K decode ≥ X tok/s best-of-5 on the dev box,
+Write the spec into **`docs/specs/<slug>-plan.md`** — the same single file `overfit-analyst` and
+`overfit-architect` use, never a second document beside it. There is exactly one plan per change; a spec and
+a plan that disagree are worse than either alone, and nothing reconciles them once they have separate authors.
+If a plan already exists for this change, **add to it** rather than starting one. See `docs/specs/README.md`
+for who owns which sections.
+
+Reframe vague asks as **testable success criteria**: not "make decode faster" but "Qwen-3B Q4_K decode ≥ X tok/s best-of-5 on the dev box,
 bit-identical output (or cosine ≥ 0.9999 if reassociated), suite still green."
 
 Spec template (keep it short):

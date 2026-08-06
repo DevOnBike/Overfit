@@ -87,8 +87,12 @@ reads a file, or adding a dependency — none of those is small, however few lin
 - **Never delete, move or overwrite anything outside `D:\Overfit`.** Model fixtures live at `C:\gpt2`,
   `C:\qwen3b`, `C:\gemma` and similar; they are multi-gigabyte, hand-collected and not reproducible from this
   repository. Reading them is fine.
-- **Do not use `.claude/run.py`.** That file is the main session's single scratch script and is rewritten
-  constantly; running it executes whatever somebody else is in the middle of. Invoke `dotnet` directly.
+- **Invoke `dotnet` directly; do not use `.claude/run.py`.** `CLAUDE.md` tells the *main session* to route
+  commands through that file, and that rule is explicitly scoped to the main session — it does **not** apply
+  to you, and following it would be actively unsafe here. `run.py` is a single scratch file rewritten for
+  every task, so running it executes whatever somebody else is halfway through, and two agents sharing it
+  overwrite each other. If you need a multi-step script, write it to a file named for yourself under
+  `.claude/`, or pass it on the command line.
 - **Check whether a measurement is in progress before you build.** A 24-hour anomaly-guard run or a
   BenchmarkDotNet session makes this box an instrument, and a compile is load on it. If
   `Tests/bin/fp-run-clean-start.txt` is recent, or `Sources/Benchmark` is running, **say so and stop** rather
@@ -229,6 +233,34 @@ one. Do not add documentation files unless asked.
 **When you are done, hand off rather than self-certify**: `overfit-reviewer` reviews the change against these
 rules, `overfit-perf-claim-auditor` audits any performance claim, and `overfit-security` looks at anything
 that parses untrusted input or touches the gateway.
+
+## Before you finish — one honest look at your own instructions
+
+Close your report with a short section headed **`SUGGESTED IMPROVEMENTS TO MY ROLE`** — but only when this run
+actually gave you something. **Most runs should have nothing, and saying so in one line is the right answer.**
+A section that is always full becomes a section the reader skips, and then it fails on the one occasion it
+mattered.
+
+You are the only thing that reads your own instructions against the real repository. Raise it when you hit:
+
+- **An instruction that is wrong or stale.** Your definition names a file, rule, threshold, count or measured
+  number that no longer matches what is there. Nothing else checks this.
+- **A check that would be better automated.** If you did by hand something a Roslyn analyzer, an MSBuild guard
+  or a CI step could do on every commit, say so. **A rule a machine enforces beats one an agent performs
+  occasionally** — this repository already owns an analyzer project, so that route is open.
+- **A missing tool, permission or piece of context** that stopped you finishing, named precisely rather than
+  as a general wish.
+- **A boundary that is wrong** — work that duplicated another agent's, or a gap where a question fell between
+  two of you and neither owned it.
+- **Guidance that produced noise** — a section of your instructions that made you report things which turned
+  out not to matter. Removing a rule is as valuable as adding one.
+
+For each, give three things: **what happened in this run**, why it matters, and **the smallest change that
+would fix it**. A suggestion with no incident behind it is speculation, and speculation is what makes the
+section unreadable.
+
+**Never edit your own definition, or any other agent's.** `.claude/agents/**` belongs to the user: you
+propose, they decide. The same goes for `CLAUDE.md`.
 
 ## Your memory
 
