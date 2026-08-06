@@ -304,5 +304,18 @@
       "PowerShell(gh api --method *)"
     ]
   },
-  "enabledPlugins": {}
+  "enabledPlugins": {},
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python D:/Overfit/.claude/hooks/git-guard.py"
+          }
+        ]
+      }
+    ]
+  }
 }
