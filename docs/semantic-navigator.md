@@ -24,13 +24,35 @@ derived class. Every finding below came from the semantic answer differing from 
 | open solution (MSBuild evaluation + parse), 25 projects | 3.2 s |
 | build semantic model, 1587 documents | 3.9 s |
 | **CLI, per invocation** (loads every time) | **~9 s** |
-| **MCP server, startup** (once) | **7.7 s** |
-| **MCP server, warm query** | **3–23 ms** |
+| **MCP server, startup** (once) | **7.0–7.7 s** |
+| **MCP server, warm symbol query** (`refs` / `impls` / `callers`) | **3–23 ms** |
+| **MCP server, warm `find_unused`** | **0.1–6 s — see below** |
 
 This is the whole argument for running it as a server rather than as a CLI, and it is also a warning about
-how to measure it. **Each query was run twice.** The first pass costs 140–1990 ms because per-document
+how to measure it. **Each query was run twice.** The first pass costs 100–1990 ms because per-document
 semantic state is still being faulted in; the second costs 3–23 ms. A single sample would have reported a
 number up to two orders of magnitude too high and made the tool look unusable.
+
+### `find_unused` is a different order of cost, and the table above does not cover it
+
+The first version of this document quoted the 3–23 ms figure as *the* warm query cost, with no per-verb
+caveat. That was false, and it was false in the direction that matters: it understated the one verb somebody
+would actually leave running. **The atomic query really is 3–23 ms — but `find_unused` issues one
+solution-wide reference search per candidate symbol**, so a single tool call costs that figure multiplied by
+the number of candidates in the project.
+
+Measured on the same box, warm, second pass:
+
+| project | default | `--public` | candidates (`--public`) |
+|---|--:|--:|--:|
+| `Cli` | 0.09 s | 0.09 s | 16 |
+| `Anomalies` | 0.31 s | 2.75 s | 62 |
+| `Main` | 1.24 s | **6.02 s** | 694 |
+
+Per candidate that is 9–45 ms, not a constant: a symbol referenced from many projects costs more to resolve
+than one used in a single file. **`find_unused Main --public` is the realistic worst case and also the most
+useful invocation** — a dead-code sweep of the published library — so budget seconds for it, not
+milliseconds. Everything else in this document's cost table is about the symbol queries.
 
 The per-project breakdown printed by `measure` needs one caveat: **a project's compilation cost is charged to
 whichever project pulled it in first**, so `Main` does not appear in the list — its cost sits inside `Tests`.
@@ -74,8 +96,12 @@ Deliberately excluded, because a zero reference count does **not** mean unused f
 - **anything carrying an attribute** — xUnit facts, JSON-serialized members and DI-registered types are all
   invoked by a framework that no call site mentions;
 - **entry points** and implicitly declared symbols;
-- **`public` symbols by default.** `DevOnBike.Overfit` is a published library: its public callers live outside
-  this repository, so "nothing here calls it" is not evidence of anything. `--public` opts in.
+- **Externally visible symbols by default.** `DevOnBike.Overfit` is a published library: its public callers
+  live outside this repository, so "nothing here calls it" is not evidence of anything. `--public` opts in.
+  Note that the test is *effective* visibility, not declared accessibility — a `public` method on an
+  `internal` class cannot be called from outside the assembly, so the exemption does not apply to it and it
+  **is** scanned by default. Using declared accessibility alone silently hid that whole category of real dead
+  code.
 
 Even so, treat output as **candidates**. The tool is exactly as blind as Roslyn is — a symbol reached only
 through reflection, a source generator or a config string looks dead to it and is not.
@@ -109,6 +135,16 @@ through reflection, a source generator or a config string looks dead to it and i
   `dotnet msbuild -version`: SDK 10.0.110 ships 18.0.11, so 18.0.2 is the highest usable published version.
   The 17.11.31 that `Workspaces.MSBuild` resolves transitively carries GHSA-w3q9-fxm7-j8fq and `NuGetAudit`
   fails the build on it, correctly.
+- **Registered as an MCP server, the navigator locks its own binary and cannot rebuild itself.** Once
+  `.mcp.json` is live, Claude Code keeps `overfit-navigator.dll` open for the whole session and
+  `dotnet build` fails with `MSB3021`/`MSB3027`. Build to a separate output directory to iterate
+  (`dotnet build … -o Tools/SemanticNavigator/bin/measure`), and remember that `bin/Release` — the path
+  `.mcp.json` points at — keeps the **old** binary until the server is stopped and the project rebuilt. A fix
+  that appears to be deployed and is not is the failure mode to watch for here.
+- **One malformed request used to kill the server.** Only the `tools/call` dispatch was wrapped in a
+  try/catch, so a request that was valid JSON-RPC framing but wrong-shaped inside — `{"method": 123}` is
+  enough, because `GetValue<string>()` on a number throws — propagated through the serve loop into `Main` and
+  terminated the process, costing a ~7 s reload. Every request is now isolated; the malformed one fails alone.
 - **`Microsoft.CodeAnalysis.Workspaces.MSBuild` is pinned to 5.0.0** to match the analyzers' own Roslyn. The
   navigator is an analyzer *host*: older than the analyzers cannot load them, newer than the SDK's Roslyn
   diverges from what `dotnet build` actually ran.

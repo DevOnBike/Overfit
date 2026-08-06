@@ -318,7 +318,7 @@ namespace DevOnBike.Overfit.Navigator
                 return false;
             }
 
-            if (symbol.DeclaredAccessibility == Accessibility.Public && !includePublic)
+            if (!includePublic && IsExternallyVisible(symbol))
             {
                 return false;
             }
@@ -339,6 +339,35 @@ namespace DevOnBike.Overfit.Navigator
                 {
                     return false;
                 }
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// True when a symbol can actually be reached from outside the assembly.
+        /// </summary>
+        /// <remarks>
+        /// The symbol's own accessibility is not sufficient and using it alone under-reports: a <c>public</c>
+        /// method on an <c>internal</c> class cannot be called from outside the assembly, so the "its callers
+        /// live outside this repository" exemption does not apply to it — yet declared accessibility says
+        /// <c>Public</c> and excludes it from the default scan. Visibility is the accessibility of the symbol
+        /// <i>and of every type containing it</i>.
+        /// </remarks>
+        private static bool IsExternallyVisible(ISymbol symbol)
+        {
+            var current = symbol;
+
+            while (current is not null and not INamespaceSymbol)
+            {
+                if (current.DeclaredAccessibility is not (Accessibility.Public
+                    or Accessibility.Protected
+                    or Accessibility.ProtectedOrInternal))
+                {
+                    return false;
+                }
+
+                current = current.ContainingSymbol;
             }
 
             return true;

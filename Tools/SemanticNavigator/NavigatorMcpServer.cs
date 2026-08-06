@@ -101,7 +101,6 @@ namespace DevOnBike.Overfit.Navigator
                 return null;
             }
 
-            var method = request["method"]?.GetValue<string>();
             var id = request["id"];
 
             // A notification has no id and must never be answered — replying to one is a protocol violation
@@ -110,6 +109,32 @@ namespace DevOnBike.Overfit.Navigator
             {
                 return null;
             }
+
+            try
+            {
+                return await DispatchAsync(request, id, loader, queries, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                // Per-request fault isolation, and it is not optional. Only the tools/call dispatch used to be
+                // guarded, so a request that was valid JSON-RPC framing but wrong-shaped inside — `"method": 123`
+                // is enough, because GetValue<string>() on a number throws — propagated through RunAsync's loop
+                // into Main and TERMINATED THE SERVER. One malformed line cost a full ~7 s reload of the
+                // solution. The whole request now fails alone.
+                Console.Error.WriteLine($"[navigator] request failed: {ex.Message}");
+                return Error(id, -32603, ex.Message);
+            }
+        }
+
+        /// <summary>Routes one well-formed request. Every throw from here is caught by the caller.</summary>
+        private static async Task<JsonNode?> DispatchAsync(
+            JsonNode request,
+            JsonNode id,
+            WorkspaceLoader loader,
+            NavigatorQueries queries,
+            CancellationToken cancellationToken)
+        {
+            var method = request["method"]?.GetValue<string>();
 
             if (method == "initialize")
             {
