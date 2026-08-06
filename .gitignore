@@ -283,6 +283,11 @@ out_temp/
 .claude/run*.ps1
 .claude/*.log
 
+# Native-AOT publish output kept next to the helper that produces it (aot.bat). 80+ MB of exe and pdb —
+# build artefacts, regenerable, and exactly the kind of thing that is committed once by accident and then
+# lives in the history for ever.
+.claude/aot-cli/
+
 # models
 *.bin
 
