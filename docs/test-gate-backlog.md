@@ -35,7 +35,7 @@ warm file cache is faster and this is not an average of anything.
 | T1 | ⏳ **65 of 72 converted 2026-08-07; 7 left, each with a stated reason.** Silent passes now skip. Three mechanisms: `ModelFact` (28) for a `const` path, `FixtureFact` + `TestFixture` (31) for a path resolved at runtime, `ProductionAnomalyBaseFact` (2). See the section below for the seven that remain and why. | **highest** — it is the credibility of the gate itself | the remaining 7 need a judgement each, not a sweep | low; the change can only turn silent passes into visible skips |
 | T2 | **Weight initialisation is not seedable, and two tests assert through it** | `MathUtils.Rng` seeds from `Guid.NewGuid().GetHashCode()`, `LSTMCell` and `FastTensorExtensions` draw from `Random.Shared`. Neither `GPT1Model` nor `Crnn` takes a seed, so every run starts from a different network. Two failures below are consequences. | high | medium — touches `Sources/Main`, so it goes through the delivery chain | medium — a seed parameter changes behaviour for every caller that omits it |
 | T3 | ✅ **RESOLVED 2026-08-07 by experiment — and it split in two.** Both parity tests pass once the kernel layout is held constant, so they are test bugs (see the section below). The half that did not dissolve is now **T8**. | — | — | — |
-| T8 | **NOT reproduced in 36 runs, and my diagnosis of it was wrong twice.** The tiled/weight-stationary A/B is **partially live**, not dead: the sidecar indexes whole tensors by name, so per-head attention weights — which are unnamed slices — keep `IsPrepacked == false` and the flag really does pick their kernel. See the section below. The one failure remains unexplained. | **high** — it decides what a coherence assertion can mean anywhere in the repo | medium | low to investigate |
+| T8 | 🟡 **Mechanism resolved, one failure still open.** The two kernels differ by a **deterministic** `max|Δlogit| = 0.770661` after prefill (four runs, six decimals, identical) — reassociation, not a defect. The test asserted token equality across that, which was the wrong premise; it now asserts the logits. The single `matched 0/24` of 2026-08-07 has not reproduced in 40+ runs and determinism rules out both explanations offered for it. | medium — the test is fixed; what is left is one unexplained event | low | low |
 | T9 | **`GgufLlamaLoaderIntegrationTests` compares two different files** | `Max diff 7.83`, **mean diff 1.387** over 151936 logits, and a completely different top-1 (22043 vs 40) — orders past numerical noise, when the repo's own threshold for "enough to flip an argmax" is 0.44. The arithmetic says why: `qwen.gguf` is 6.18 GB (÷2 B = 3.09 B params) and `qwen.bin` is 13.59 GB (÷4 B = 3.40 B), a gap of 0.31 B — which is exactly `151936 × 2048`, one language-model head. The test's comment claims "Both go through identical FP32 kernels — only loader differs"; the file sizes contradict it. Same class as the already-resolved Q4_K_M parity bug, which was **a test-premise bug, not code**. | medium | low — read both headers and diff the tensor lists | low |
 | T10 | ✅ **RESOLVED 2026-08-07 — a real defect in the shipped converters, not in a test.** Both Python converters wrote Q/K in HuggingFace layout into a format whose contract is adjacent-pair, so every `.bin` produced from a Qwen-family model was read with the wrong RoPE convention. See the section below. | — | — | — |
 | T4 | **`BatchedQuantProjection.UseTiledPrefillQ4K` is left mutated** | `TinyBlasTiledPrefillE2EPhase3Tests` sets the static flag and never restores it, so it stays `true` for every test that follows in the same process. Masked today only because each chunk is its own process. | medium | trivial (`try/finally`) | none |
@@ -363,3 +363,39 @@ tokens. If they differ, this is a correctness question about one kernel and not 
 running the scenario. Simplifying is how a cause is isolated; it is also how the cause gets deleted before
 anyone looks at it. **Reproduce first, simplify second.** And a measurement that answers the question you
 asked can still be the wrong question — mine compared outputs when the evidence was in the timing.
+
+### T8 addendum, 2026-08-07 evening — measured to the bottom, and the leftover named
+
+**The measurement that ended the guessing.** `PerHeadTiledVsWeightStationaryDiagnostics` calls
+`BatchedQuantProjection.Dispatch` twice on the SAME per-head weight with the SAME input — no 36-layer
+stack in between, nothing to attribute a difference to except the kernels:
+
+| | |
+|---|--:|
+| max abs difference, one projection | 1.15e-5 |
+| mean abs difference | 1.65e-6 |
+| relative to output magnitude | 2.26e-6 |
+| max\|Δlogit\| after full prefill | **0.770661** |
+| spread across four consecutive runs | **0.000000** |
+
+That is reassociation and nothing more: the repacked GEMM sums in a different order, and floating-point
+addition is not associative. It is also **completely deterministic** — four runs agreed to six decimals.
+
+**A third correction to my own account.** I predicted `FfnGate` would report `IsPrepacked == true` and it
+reports **false**, like the per-head weights. The sidecar is not attached at all in this load path:
+`GgufLlamaLoader` only reaches `TryOpenSidecar` when `mmap && quantize && FileHasVerbatimKQuant`, and that
+did not hold here. So the flag selects the kernel for the **whole model**, not merely for attention — which
+is why the TTFT ratio sits at 2.4–3.1x rather than the 1.04x that started this whole misreading. Over one
+day I claimed the A/B was dead, then partly live, and both were wrong.
+
+**What the test asserts now.** `max|Δlogit| < 2.0` on the post-prefill logits, replacing token equality.
+The tokens are a step function of the logits, so asserting them asserts which side of a threshold a fixed
+difference happens to land on. The margin is ~2.6x over the measured 0.770661 and exists for machines whose
+parallel split differs — not for run-to-run drift, of which there is none. The earlier "1.0 with 0.44
+behind it" was a real number carried in from a **different comparison** (batched versus single-token),
+leaving 1.3x rather than the 2x it claimed.
+
+**What is still open, and stays open.** The single `matched 0/24` inside the chunked gate run. It has not
+reproduced in 40+ runs, including 12 under 30 CPU burners on 32 cores. Determinism kills both candidate
+explanations: there is no run-to-run noise, and a fixed difference crosses a threshold always or never.
+Something about that process differed and nothing since has revealed what. **Recorded as unexplained.**
