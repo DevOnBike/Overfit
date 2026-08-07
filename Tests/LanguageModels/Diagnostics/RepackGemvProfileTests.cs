@@ -22,14 +22,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
 
         public RepackGemvProfileTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact("5s")]
+        [ModelFact(Path, "5s")]
         public void Profile_Decode_PerComponent()
         {
-            if (!File.Exists(Path))
-            {
-                _out.WriteLine("missing gguf");
-                return;
-            }
 
             using var engine = CachedLlamaInferenceEngine.LoadGguf(Path);
             var tok = GgufTokenizer.Load(Path);

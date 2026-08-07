@@ -38,14 +38,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
 
         public TinyBlasPrefillPhase0Tests(ITestOutputHelper output) => _out = output;
 
-        [LongFact("1min2s")]
+        [ModelFact(Path, "1min2s")]
         public void Phase0_PrefillHeadroom_AndSplit()
         {
-            if (!File.Exists(Path))
-            {
-                _out.WriteLine("missing gguf — skipping");
-                return;
-            }
 
             using var engine = CachedLlamaInferenceEngine.LoadGguf(Path);
             var sampling = SamplingOptions.Greedy;

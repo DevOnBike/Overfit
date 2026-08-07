@@ -26,14 +26,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
 
         public GemmaPerfTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact("47s")]
+        [ModelFact(Path, "47s")]
         public void Gemma2_DecodeThroughput_BestOfN()
         {
-            if (!File.Exists(Path))
-            {
-                _out.WriteLine("missing Gemma-2-2B gguf");
-                return;
-            }
 
             using var engine = CachedLlamaInferenceEngine.LoadGguf(Path);
             var tok = GgufTokenizer.Load(Path);

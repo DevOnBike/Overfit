@@ -27,14 +27,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
 
         public TypicalPRealModelDecodeTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact("38s")]
+        [ModelFact(Path, "38s")]
         public void SamplerOverhead_InRealDecode()
         {
-            if (!File.Exists(Path))
-            {
-                _out.WriteLine("missing gguf — skipping");
-                return;
-            }
 
             using var engine = CachedLlamaInferenceEngine.LoadGguf(Path);
             var tok = GgufTokenizer.Load(Path);

@@ -31,14 +31,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
 
         public TinyBlasTiledPrefillE2EPhase3Tests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]  // runtime unmeasured — the test failed after 17s (2026-08-07)
+        [ModelFact(Path)]  // runtime unmeasured — the test failed after 17s (2026-08-07)
         public void Phase3_Ttft_And_Coherence_RealModel()
         {
-            if (!File.Exists(Path))
-            {
-                _out.WriteLine("missing gguf — skipping");
-                return;
-            }
 
             using var engine = CachedLlamaInferenceEngine.LoadGguf(Path);
             var tok = GgufTokenizer.Load(Path);
@@ -55,6 +50,13 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
             }
             var prompt = tok.Encode(sb.ToString());
             _out.WriteLine($"prompt tokens: {prompt.Length}");
+
+            // RESTORE THE FLAG. It is process-global and this test used to leave it wherever the last arm
+            // put it — `true` — for every test that ran afterwards in the same process. Masked today only
+            // because the gate runs one chunk per process; in an ordinary `dotnet test` it would silently
+            // change the kernel every later prefill test dispatches to, and those tests would then be
+            // measuring something nobody chose.
+            using var flag = new TiledPrefillFlagScope();
 
             var (ttftOff, textOff, idsOff) = RunOnce(engine, tok, prompt, tiled: false);
             var (ttftOn, textOn, idsOn) = RunOnce(engine, tok, prompt, tiled: true);
@@ -78,6 +80,22 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
             }
             _out.WriteLine($"greedy tokens matched: {matched}/{idsOff.Count}");
             Assert.Equal(idsOff, idsOn);
+        }
+
+        /// <summary>
+        /// Saves <see cref="BatchedQuantProjection.UseTiledPrefillQ4K"/> and puts it back on dispose.
+        ///
+        /// <para>Saves rather than forces <c>false</c>: the field's default comes from the
+        /// <c>OVERFIT_TILED_PREFILL</c> environment flag, so restoring a hardcoded value would quietly
+        /// override whatever the box was configured with.</para>
+        /// </summary>
+        private readonly struct TiledPrefillFlagScope : IDisposable
+        {
+            private readonly bool _original;
+
+            public TiledPrefillFlagScope() => _original = BatchedQuantProjection.UseTiledPrefillQ4K;
+
+            public void Dispose() => BatchedQuantProjection.UseTiledPrefillQ4K = _original;
         }
 
         private static (double ttftMs, string text, List<int> ids) RunOnce(

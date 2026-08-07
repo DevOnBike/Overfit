@@ -19,14 +19,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
         private readonly ITestOutputHelper _out;
         public GemmaGgufInspectTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact("46ms")]
+        [ModelFact(Path, "46ms")]
         public void Dump_Gemma_Metadata_And_Tensors()
         {
-            if (!File.Exists(Path))
-            {
-                _out.WriteLine("missing C:\\gemma gguf");
-                return;
-            }
 
             using var reader = new GgufReader(Path);
 

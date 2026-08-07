@@ -24,14 +24,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
         private readonly ITestOutputHelper _out;
         public DecodePoolIdleBurnTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact("4s")]
+        [ModelFact(Path, "4s")]
         public void Pool_Parks_WhenIdle()
         {
-            if (!File.Exists(Path))
-            {
-                _out.WriteLine("missing gguf");
-                return;
-            }
 
             using var engine = CachedLlamaInferenceEngine.LoadGguf(Path);
             var tok = GgufTokenizer.Load(Path);

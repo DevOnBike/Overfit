@@ -25,14 +25,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
         private readonly ITestOutputHelper _out;
         public BielikPrefillTtftBench(ITestOutputHelper output) => _out = output;
 
-        [LongFact]  // heavy group, never measured — see Scripts/longfact_heavy.txt
+        [ModelFact(TargetGguf)]  // heavy group, never measured — see Scripts/longfact_heavy.txt
         public void Bielik_Prefill_Ttft_WeightStationary_vs_Original()
         {
-            if (!File.Exists(TargetGguf))
-            {
-                _out.WriteLine("missing target gguf");
-                return;
-            }
 
             using var engine = CachedLlamaInferenceEngine.LoadGguf(TargetGguf);
             var tok = GgufTokenizer.Load(TargetGguf);

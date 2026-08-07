@@ -19,14 +19,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
         private readonly ITestOutputHelper _out;
         public PhiGgufInspectTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact("12ms")]
+        [ModelFact(Path, "12ms")]
         public void Dump_Phi_Metadata_And_Tensors()
         {
-            if (!File.Exists(Path))
-            {
-                _out.WriteLine("missing C:\\phi gguf");
-                return;
-            }
 
             using var reader = new GgufReader(Path);
 

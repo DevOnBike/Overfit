@@ -24,14 +24,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
         private readonly ITestOutputHelper _out;
         public GemmaSmokeTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact("3s")]
+        [ModelFact(Path, "3s")]
         public void Gemma2_Loads_And_Generates_Coherent_English()
         {
-            if (!File.Exists(Path))
-            {
-                _out.WriteLine("missing Gemma-2 gguf");
-                return;
-            }
 
             using (var reader = new GgufReader(Path))
             {

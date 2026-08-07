@@ -28,14 +28,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
 
         public RepackedSidecarEngineE2ETests(ITestOutputHelper output) => _out = output;
 
-        [LongFact("7s")]
+        [ModelFact(Gguf, "7s")]
         public void Sidecar_ConsumedByLoader_BitExactToRuntimeRepack()
         {
-            if (!File.Exists(Gguf))
-            {
-                _out.WriteLine("missing gguf — skipping");
-                return;
-            }
 
             var sidecar = Gguf + ".repack";
             var preexisting = File.Exists(sidecar);

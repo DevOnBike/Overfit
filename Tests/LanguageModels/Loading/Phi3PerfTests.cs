@@ -26,14 +26,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
 
         public Phi3PerfTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact("41s")]
+        [ModelFact(Path, "41s")]
         public void Phi3_DecodeThroughput_BestOfN()
         {
-            if (!File.Exists(Path))
-            {
-                _out.WriteLine("missing Phi-3.5-mini gguf");
-                return;
-            }
 
             using var engine = CachedLlamaInferenceEngine.LoadGguf(Path);
             var tok = GgufTokenizer.Load(Path);

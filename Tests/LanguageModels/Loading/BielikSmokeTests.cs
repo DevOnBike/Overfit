@@ -20,14 +20,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
         private readonly ITestOutputHelper _out;
         public BielikSmokeTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact("5s")]
+        [ModelFact(Path, "5s")]
         public void Bielik_Loads_And_Generates_Polish()
         {
-            if (!File.Exists(Path))
-            {
-                _out.WriteLine("missing Bielik gguf");
-                return;
-            }
 
             using (var reader = new GgufReader(Path))
             {

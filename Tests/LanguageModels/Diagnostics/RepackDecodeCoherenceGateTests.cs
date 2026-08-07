@@ -32,14 +32,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
 
         public RepackDecodeCoherenceGateTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact("4s")]
+        [ModelFact(Path, "4s")]
         public void Decode_Fingerprint_ForCurrentRepackEnv()
         {
-            if (!File.Exists(Path))
-            {
-                _out.WriteLine("missing gguf — skipping");
-                return;
-            }
 
             using var engine = CachedLlamaInferenceEngine.LoadGguf(Path);
             var tok = GgufTokenizer.Load(Path);

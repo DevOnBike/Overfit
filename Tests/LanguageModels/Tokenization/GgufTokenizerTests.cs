@@ -193,13 +193,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Tokenization
 
         private const string QwenMoeGguf = @"C:\qwen-moe\Qwen1.5-MoE-A2.7B-Chat.Q8_0.gguf";
 
-        [LongFact("123ms")]
+        [ModelFact(QwenMoeGguf, "123ms")]
         public void RealQwenVocab_BpeRoundTrips()
         {
-            if (!File.Exists(QwenMoeGguf))
-            {
-                return;
-            }
 
             var tok = GgufTokenizer.Load(QwenMoeGguf);
             Assert.True(tok.IsByteLevelBpe);

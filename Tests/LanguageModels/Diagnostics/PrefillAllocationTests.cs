@@ -24,14 +24,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
         private readonly ITestOutputHelper _out;
         public PrefillAllocationTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact("5s")]
+        [ModelFact(Path, "5s")]
         public void Prefill_AllocationsPerRequest_AndGreedyPin()
         {
-            if (!File.Exists(Path))
-            {
-                _out.WriteLine("missing gguf");
-                return;
-            }
 
             using var engine = CachedLlamaInferenceEngine.LoadGguf(Path);
             var tok = GgufTokenizer.Load(Path);

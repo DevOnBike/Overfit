@@ -17,15 +17,23 @@ namespace DevOnBike.Overfit.Tests.Diagnostics
     /// mid-run and leaving a replica idle inside a peer group, and this being an xUnit test whose
     /// output is buffered until after the run it would have explained. Four lab runs were lost to
     /// those before the driver moved into the cluster, where no forward exists to go stale.
-    /// </summary>
-    /// <summary>
+    ///
+    /// <para><b>Its failure mode on a box with no forwards is <i>"no request succeeded — the lab is
+    /// reachable but not serving"</i></b>, measured 2026-08-07 in the first release-gate run. That message
+    /// names a symptom and not the cause, and the cause is almost always that
+    /// <c>k8s\overfit\forward-replicas.cmd</c> is not running. Note this is a <b>different</b> route from
+    /// the Prometheus forward in <c>k8s\monitoring\forward.cmd</c>: this test talks to the replicas, not
+    /// to Prometheus, so having one up says nothing about the other.</para>
+    ///
     /// Drives traffic at the Overfit replicas running in the local Kubernetes lab (<c>k8s/</c>), so the
     /// anomaly detectors have something other than flat lines to look at.
     ///
     /// <para><b>Why a test and not a console app.</b> It needs the solution's HTTP shapes, it belongs next to
     /// the code it exercises, and xUnit already provides the runner, the output plumbing and the skip
-    /// mechanism. It is <c>[Fact]</c>, so <c>dotnet test</c> never runs it by accident — flip it to
-    /// <c>[Fact]</c> temporarily, exactly as with the other diagnostics here.</para>
+    /// mechanism. It is <c>[LongFact]</c>, so <c>dotnet test</c> never runs it by accident; set
+    /// <c>OVERFIT_RUN_LONG=1</c> to run it. (This paragraph used to say it was <c>[Fact]</c> and that you
+    /// should "flip it to <c>[Fact]</c>" — advice that contradicted itself and predated the environment
+    /// switch added on 2026-08-06.)</para>
     ///
     /// <para><b>Why the skew knob is the point.</b> Even load across identical replicas produces a peer group
     /// with nothing to find, which proves only that the detector does not hallucinate. The interesting case

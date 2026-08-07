@@ -21,6 +21,23 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
     {
         private const string ModelPath = @"C:\qwen3b\qwen.q4km.gguf";
 
+        /// <summary>
+        /// Forces the non-repacked kernels for the scope, so a parity assertion compares two runs of one
+        /// kernel rather than two different ones.
+        ///
+        /// <para>A near-twin of the private <c>NonRepackedScope</c> in <c>BatchedPrefillParityTests</c>.
+        /// Duplicated rather than shared on purpose <b>for now</b>: that one guards a passing test, and
+        /// promoting it to a common helper is an edit to working code that should happen deliberately
+        /// rather than as a side effect of fixing this one. If a third parity test needs it, move it into
+        /// <c>TestSupport</c> and delete both.</para>
+        /// </summary>
+        private readonly struct NonRepackedScope : IDisposable
+        {
+            public NonRepackedScope() => BatchedQuantProjection.DisableRepackedKernelsForParity = true;
+
+            public void Dispose() => BatchedQuantProjection.DisableRepackedKernelsForParity = false;
+        }
+
         private readonly ITestOutputHelper _out;
         public PrefixKvCacheParityTests(ITestOutputHelper output) => _out = output;
 
@@ -33,6 +50,20 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
                 return;
             }
 
+            // HOLD THE KERNEL LAYOUT CONSTANT, or this test silently stops testing what it claims.
+            //
+            // It compares prefilling 32 tokens in one go against 24 + 8 in two, and asserts the generated
+            // tokens match. Those two shapes can dispatch to different kernels, and the repacked
+            // `block_q*_Kx8` GEMMs associate their reduction differently from the per-row ones — measured
+            // elsewhere in this repository at `maxAbsLogitDiff ~ 0.44`, which is enough to flip an argmax.
+            // A `*.gguf.repack` sidecar sets `IsPrepacked` and switches the repacked path on regardless of
+            // any env flag, so on a box with a sidecar both halves ran repacked and disagreed.
+            //
+            // Measured 2026-08-07: without this scope the very first generated token differed (expected 34,
+            // got 322); with it, the test passes. The failure was never about prefix reuse — the thing this
+            // test exists to verify — and it took the first-ever [LongFact] run to surface it at all.
+            // `BatchedPrefillParityTests` learned the same lesson two days earlier and carries the same scope.
+            using var layout = new NonRepackedScope();
             using var engine = CachedLlamaInferenceEngine.LoadGguf(ModelPath);
 
             var prefix = new int[24];   // "system prompt"
