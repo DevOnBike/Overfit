@@ -30,7 +30,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
         private readonly ITestOutputHelper _out;
         public QwenGgufQLoraE2ETests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact]  // heavy group, never measured — see Scripts/longfact_heavy.txt
         public void RealQwenQ4KM_Layer0_TrainableBlock_DifferentiableAndFrozenBase()
         {
             var path = TestModelPaths.Qwen3B.RequireQ4KmGgufPath();

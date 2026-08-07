@@ -28,7 +28,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             _output = output;
         }
 
-        [LongFact]
+        [LongFact]  // heavy group, never measured — see Scripts/longfact_heavy.txt
         public async Task TrainOnCsv_LossDecreases_CheckpointWritten()
         {
             if (!File.Exists(CsvPath))
@@ -91,7 +91,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
         /// Medium training — 128d, 4 layers, 2K steps.
         /// Time: ~5-10 min. Validates the pipeline before Production.
         /// </summary>
-        [LongFact]
+        [LongFact]  // heavy group, never measured — see Scripts/longfact_heavy.txt
         public async Task TrainMedium_LossDecreases_2000Steps()
         {
             if (!File.Exists(CsvPath))
@@ -125,7 +125,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
         /// Run overnight:
         ///   dotnet test --filter "TrainProduction" --timeout 14400000
         /// </summary>
-        [LongFact]
+        [LongFact]  // heavy group, never measured — see Scripts/longfact_heavy.txt
         public async Task TrainProduction_LossBelow280()
         {
             if (!File.Exists(CsvPath))

@@ -34,7 +34,7 @@ namespace DevOnBike.Overfit.Tests.DeepLearning.Diagnostics
             _output = output;
         }
 
-        [LongFact]
+        [LongFact("216ms")]
         [Trait("Category", "Diagnostics")]
         public void Profile_CifarCnnTrainingStep_BackwardOps()
         {

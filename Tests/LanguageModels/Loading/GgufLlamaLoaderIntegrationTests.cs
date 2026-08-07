@@ -34,7 +34,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             _output = output;
         }
 
-        [LongFact]
+        [LongFact]  // runtime unmeasured — the test failed after 21s (2026-08-07)
         public void LoadGguf_ProducesSameLogitsAsBinaryLoader_For3B()
         {
             TestModelPaths.Qwen3B.RequireGgufPath();

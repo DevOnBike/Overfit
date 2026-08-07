@@ -37,7 +37,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
         /// asserts the engine now generates coherent, correctly-spaced text. [LongFact] — needs the real
         /// model. The fast, model-free convention guards live in <c>RopeConventionTests</c>.
         /// </summary>
-        [LongFact]
+        [LongFact("2s")]
         public void Engine_GeneratesCoherentText_ForLongSystemPrompt()
         {
             if (!File.Exists(ModelPath))
@@ -125,7 +125,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
             Assert.Equal(whole, sb.ToString());
         }
 
-        [LongFact]
+        [LongFact("4s")]
         public void BatchedPrefill_MatchesSingleToken_OnRealQwen()
         {
             if (!File.Exists(ModelPath))
@@ -199,7 +199,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
         /// generated token for real text. Argmax stability is only a meaningful assertion where the model is
         /// actually confident.</para>
         /// </summary>
-        [LongFact]
+        [LongFact("2s")]
         public void RepackedPrefill_AgreesWithNonRepacked_OnArgmax()
         {
             if (!File.Exists(ModelPath))
@@ -249,7 +249,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
             Assert.Equal(argReference, argFast);
         }
 
-        [LongFact]
+        [LongFact("12s")]
         public void BatchedPrefill_MatchesSingleToken_OnRealQwenMoE()
         {
             const string moePath = @"C:\qwen-moe\Qwen1.5-MoE-A2.7B-Chat.Q8_0.gguf";
@@ -299,7 +299,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
             Assert.True(moeMaxDiff < 1e-3f, $"MoE batched vs single logit divergence {moeMaxDiff:G4} (> 1e-3).");
         }
 
-        [LongFact]
+        [LongFact("39s")]
         public void BatchedPrefill_TtftSpeedup_OnRealQwen()
         {
             if (!File.Exists(ModelPath))

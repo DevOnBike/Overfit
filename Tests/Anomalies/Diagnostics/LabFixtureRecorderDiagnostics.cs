@@ -32,10 +32,24 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
     /// recorder refuses to write a fixture whose request-rate channel is empty rather than producing a file
     /// that would silently misrepresent the cluster.</para>
     ///
-    /// <para>Requires a port-forward to Prometheus (<c>k8s/monitoring/forward.cmd</c>) and is
-    /// <c>[LongFact]</c>, so it never runs in an ordinary <c>dotnet test</c>. Knobs:
-    /// <c>OVERFIT_LAB_PROM</c>, <c>OVERFIT_LAB_MINUTES</c>, <c>OVERFIT_LAB_STEP_SECONDS</c>,
-    /// <c>OVERFIT_LAB_FIXTURE</c>, <c>OVERFIT_LAB_FAULT_PODS</c> (comma-separated, annotated in the header).</para>
+    /// <para><b>REQUIRES A PORT-FORWARD TO PROMETHEUS ON :9090.</b> Without it this fails with a bare
+    /// <c>HttpRequestException: connection refused (127.0.0.1:9090)</c>, which names no cause and reads
+    /// like a defect in the recorder. It is not one — measured 2026-08-07, five of these lab diagnostics
+    /// failed that way in the first release-gate run purely because nothing was forwarding.</para>
+    /// <code>
+    ///   k8s\monitoring\forward.cmd                                            (all three ports at once)
+    ///   kubectl port-forward -n monitoring svc/overfit-lab-prometheus 9090:9090   (this one only)
+    /// </code>
+    /// <para>Verify it before believing a red result:
+    /// <c>curl "http://127.0.0.1:9090/api/v1/query?query=up"</c>.</para>
+    ///
+    /// <para>It is <c>[LongFact]</c>, so it never runs in an ordinary <c>dotnet test</c>. Knobs, read from
+    /// the code rather than from memory: <c>OVERFIT_LAB_PROM</c> — <b>not</b>
+    /// <c>OVERFIT_LAB_PROMETHEUS</c>, which is what every other diagnostic in this directory uses —
+    /// <c>OVERFIT_LAB_CONFIG</c>, <c>OVERFIT_LAB_FIXTURE</c>, and <c>OVERFIT_LAB_FAULT_PODS</c>
+    /// (comma-separated, annotated in the header). An earlier version of this list also named
+    /// <c>OVERFIT_LAB_MINUTES</c> and <c>OVERFIT_LAB_STEP_SECONDS</c>; neither is read anywhere in this
+    /// file, so setting them did nothing.</para>
     /// </summary>
     public sealed class LabFixtureRecorderDiagnostics
     {
@@ -61,7 +75,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
             _output = output;
         }
 
-        [LongFact]
+        [LongFact]  // runtime unmeasured — the test failed after 2s (2026-08-07)
         public async Task RecordsAWindowOfTheLabIntoAFixture()
         {
             var minutes = Setting("OVERFIT_LAB_MINUTES", 20);

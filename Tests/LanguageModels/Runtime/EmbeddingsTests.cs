@@ -22,7 +22,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
         private readonly ITestOutputHelper _out;
         public EmbeddingsTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("3s")]
         public void Embed_RealQwen_Normalized_Deterministic_SemanticallyOrdered()
         {
             if (!File.Exists(TestModelPaths.Qwen3B.Q4KmGgufPath))

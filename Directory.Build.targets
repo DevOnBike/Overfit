@@ -48,7 +48,19 @@
                                           Exclude="@(OverfitAcceptedPrerelease)" />
         </ItemGroup>
 
-        <Warning Code="OVERFITPRERELEASE"
+        <!--
+          The Condition is load-bearing, not defensive. Measured 2026-08-07: with the only prerelease
+          package added to the accept-list above, `_OverfitPrereleaseUnaccepted` is correctly empty — and
+          the Warning task STILL ran once, batching over the empty list and producing
+
+              " is pinned at a PRERELEASE version () and is not on the accepted list."
+
+          with no package name and no version. That is worse than having no accept-list at all: accepting
+          a package deliberately left the build shouting about nothing in particular. An empty item list
+          must skip the task, and only an explicit emptiness check makes it do so.
+        -->
+        <Warning Condition="'@(_OverfitPrereleaseUnaccepted)' != ''"
+                 Code="OVERFITPRERELEASE"
                  File="$(MSBuildThisFileDirectory)Directory.Packages.props"
                  Text="%(_OverfitPrereleaseUnaccepted.Identity) is pinned at a PRERELEASE version (%(_OverfitPrereleaseUnaccepted.Version)) and is not on the accepted list. Check whether a stable release exists before keeping it: a package can sit in prerelease for years while the rest of its suite ships stable. Accept it deliberately by adding an OverfitAcceptedPrerelease entry with a reason and a date in Directory.Build.targets, or move off it." />
 

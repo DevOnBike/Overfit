@@ -37,7 +37,7 @@ namespace DevOnBike.Overfit.Tests.Examples
         private readonly ITestOutputHelper _out;
         public CtcOcrDemoTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("982ms")]
         [Trait("Category", "Demo")]
         public void TrainsAndRecognizesSyntheticDigitStrings()
         {

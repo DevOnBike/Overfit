@@ -32,7 +32,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
 
         public RepackDecodeCoherenceGateTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("4s")]
         public void Decode_Fingerprint_ForCurrentRepackEnv()
         {
             if (!File.Exists(Path))

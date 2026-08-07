@@ -47,7 +47,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
             _output = output;
         }
 
-        [LongFact]
+        [LongFact("149ms")]
         public void ComparesRawDividedAndAffineOnRecordedClusterData()
         {
             var name = Environment.GetEnvironmentVariable("OVERFIT_AFFINE_FIXTURE")

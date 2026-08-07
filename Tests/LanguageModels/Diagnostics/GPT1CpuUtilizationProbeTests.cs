@@ -46,7 +46,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
             _output = output;
         }
 
-        [LongFact]
+        [LongFact("7s")]
         [Trait("Category", "Diagnostics")]
         public void GPT1_TrainingStep_CpuUtilization_BatchSweep()
         {

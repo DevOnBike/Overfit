@@ -34,7 +34,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
             _output = output;
         }
 
-        [LongFact]
+        [LongFact("16s")]
         public void Diagnose_GgufLoader_3B_RamFootprint()
         {
             TestModelPaths.Qwen3B.RequireGgufPath();
@@ -78,7 +78,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
             PrintCheckpoint("08. After engine disposed + GC");
         }
 
-        [LongFact]
+        [LongFact("6s")]
         public void Diagnose_BinaryLoader_3B_RamFootprint()
         {
             TestModelPaths.Qwen3B.RequireBinaryPath();

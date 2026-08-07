@@ -26,7 +26,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
 
         public Phi3PerfTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("41s")]
         public void Phi3_DecodeThroughput_BestOfN()
         {
             if (!File.Exists(Path))

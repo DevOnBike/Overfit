@@ -43,7 +43,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
         private readonly ITestOutputHelper _out;
         public BielikDraftSpeculativeBench(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact]  // heavy group, never measured — see Scripts/longfact_heavy.txt
         public void Bielik_DraftModel_Speculative_BitIdentical_AndSpeedup()
         {
             if (!File.Exists(TargetGguf) || !File.Exists(DraftGguf))

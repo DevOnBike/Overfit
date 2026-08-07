@@ -23,12 +23,21 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
     /// all. The answer is allowed to be unflattering; the false-positive count on the three healthy replicas
     /// is the number the blueprint's M0 gate turns on and it has never been measured.</para>
     ///
-    /// <para>Requires the lab from <c>k8s/</c>, the fault from <c>k8s/overfit/fault-cpu-throttle.yaml</c>, a
-    /// port-forward to Prometheus, and — this matters — <b>traffic</b>. The CPU-throttle fault does not
-    /// manifest on an idle pod: it was measured at 2.74x on p95 under load and invisible without it.</para>
+    /// <para><b>REQUIRES A PORT-FORWARD TO PROMETHEUS ON :9099.</b> Without it this fails with a bare
+    /// <c>HttpRequestException: connection refused (127.0.0.1:9099)</c>, which names no cause and reads
+    /// like a defect in the guard. It is not one — measured 2026-08-07, five of these lab diagnostics
+    /// failed that way in the first release-gate run purely because nothing was forwarding.</para>
     /// <code>
-    ///   kubectl port-forward -n monitoring svc/overfit-lab-prometheus 9099:9090
+    ///   k8s\monitoring\forward.cmd                                            (all three ports at once)
+    ///   kubectl port-forward -n monitoring svc/overfit-lab-prometheus 9099:9090   (this one only)
     /// </code>
+    /// <para>Override the endpoint with <c>OVERFIT_LAB_PROMETHEUS</c>. Verify the forward before believing
+    /// a red result: <c>curl "http://127.0.0.1:9099/api/v1/query?query=up"</c>.</para>
+    ///
+    /// <para>Also requires the lab from <c>k8s/</c>, the fault from
+    /// <c>k8s/overfit/fault-cpu-throttle.yaml</c>, and — this matters — <b>traffic</b>. The CPU-throttle
+    /// fault does not manifest on an idle pod: it was measured at 2.74x on p95 under load and invisible
+    /// without it.</para>
     /// </summary>
     public sealed class AnomalyGuardEndToEndDiagnostics
     {
@@ -42,7 +51,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
             _output = output;
         }
 
-        [LongFact]
+        [LongFact]  // runtime unmeasured — the test failed after 2s (2026-08-07)
         public async Task DetectsTheDegradedReplicaAndGroupsTheFindings()
         {
             var baseUrl = Environment.GetEnvironmentVariable("OVERFIT_LAB_PROMETHEUS")

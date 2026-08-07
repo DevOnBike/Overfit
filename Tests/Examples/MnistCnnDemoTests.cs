@@ -32,7 +32,7 @@ namespace DevOnBike.Overfit.Tests.Examples
         private readonly ITestOutputHelper _out;
         public MnistCnnDemoTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("5s")]
         [Trait("Category", "Demo")]
         public void TrainsCnn_OnRealMnist_ToHighAccuracy()
         {

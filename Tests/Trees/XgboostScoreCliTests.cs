@@ -17,7 +17,7 @@ namespace DevOnBike.Overfit.Tests.Trees
     /// </summary>
     public sealed class XgboostScoreCliTests
     {
-        [LongFact]
+        [LongFact("71ms")]
         public void ScoreCommand_MatchesInProcessPredictor()
         {
             var exe = LocateOverfitExe();

@@ -26,7 +26,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Tools
         private readonly ITestOutputHelper _out;
         public ToolCallingChatTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("4s")]
         public void Send_WithToolConstraint_ProducesDispatchableToolCall()
         {
             TestModelPaths.Qwen3B.RequireQ4KmGgufPath();

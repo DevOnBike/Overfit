@@ -89,7 +89,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
             _output = output;
         }
 
-        [LongFact]
+        [LongFact("5s")]
         public void MeasuresTheFalsePositiveRateOnAHealthyPopulation()
         {
             var pods = Env("OVERFIT_FP_PODS", 20);

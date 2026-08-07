@@ -26,7 +26,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
         /// Current fixture: Qwen2.5-3B-Instruct FP16 (36 layers, head_dim=128).
         /// Python TEST 1 → top-1 = [33975] 15.5608.
         /// </summary>
-        [LongFact]
+        [LongFact("5s")]
         public void L0_LogitsAfterReset_NotAfterGenerate()
         {
             TestModelPaths.Qwen3B.RequireBinaryPath();
@@ -65,7 +65,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
         ///   hidden[:4] = [0.14059, 0.84549, 1.01591, -1.83366]
         ///   logit[198] = 12.3511
         /// </summary>
-        [LongFact]
+        [LongFact("7s")]
         public void L0_TwoToken_HiddenStateVsPython()
         {
             TestModelPaths.Qwen3B.RequireBinaryPath();
@@ -121,7 +121,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
         /// Full chat prompt (36 tokens with a correct system message).
         /// C# and Python agree: top-1 = [36366] ≈ 11.9
         /// </summary>
-        [LongFact]
+        [LongFact("10s")]
         public void L0_ChatPromptLogits()
         {
             TestModelPaths.Qwen3B.RequireBinaryPath();
@@ -156,7 +156,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
         /// <summary>
         /// Progressive prefix: when does the token '4' appear as top-1.
         /// </summary>
-        [LongFact]
+        [LongFact("1min33s")]
         public void Multitoken_ProgressivePrefixTest()
         {
             TestModelPaths.Qwen3B.RequireBinaryPath();

@@ -113,7 +113,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Retrieval
             new("who is allowed to drive the vehicles", "drivers"),
         ];
 
-        [LongFact]
+        [LongFact("2s")]
         public void Hybrid_VsDense_RecallByQueryKind()
         {
             if (!File.Exists(TestModelPaths.MiniLm.SafetensorsPath))

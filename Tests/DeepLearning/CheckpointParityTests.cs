@@ -250,7 +250,7 @@ namespace DevOnBike.Overfit.Tests.DeepLearning
             return (outValues, grads);
         }
 
-        [LongFact]
+        [LongFact("3s")]
         public void Checkpoint_Gpt1_MemorySavings_LargerModel()
         {
             // A larger GPT-1 (≈ GPT-2-small-ish dims, modest batch/seq) where activations dominate.

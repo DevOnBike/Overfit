@@ -26,7 +26,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
         private readonly ITestOutputHelper _out;
         public QwenGgufKnowledgeInjectionDemoTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("27min26s")]
         public void FineTune_TeachesNovelFact_ModelRecitesItAfterwards()
         {
             var ggufPath = TestModelPaths.Qwen3B.RequireQ4KmGgufPath();

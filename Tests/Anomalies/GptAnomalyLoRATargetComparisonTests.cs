@@ -34,7 +34,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
         private readonly ITestOutputHelper _out;
         public GptAnomalyLoRATargetComparisonTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact]  // runtime unmeasured — the test failed after 1s (2026-08-07)
         public void LoRATargetStages_OnAnomalyTask_AllFlattenBenign_AndKeepDetection()
         {
             var tps = MetricTokenizer.TokensPerSnapshot;

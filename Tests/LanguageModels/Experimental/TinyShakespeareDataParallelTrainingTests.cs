@@ -53,7 +53,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Experimental
             _output = output;
         }
 
-        [LongFact]
+        [LongFact("1min45s")]
         [Trait("Category", "Demo")]
         [Trait("Category", "LongRunning")]
         [Trait("Category", "Experimental")]

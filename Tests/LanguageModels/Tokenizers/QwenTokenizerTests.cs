@@ -30,7 +30,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Tokenizers
             return QwenTokenizer.Load(TestModelPaths.Qwen3B.RequireTokenizerJsonPath());
         }
 
-        [LongFact]
+        [LongFact("87ms")]
         public void Load_ValidFile_Succeeds()
         {
             var tok = TryLoad();
@@ -43,7 +43,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Tokenizers
             Console.WriteLine($"Vocab size: {tok.VocabSize}");
         }
 
-        [LongFact]
+        [LongFact("107ms")]
         public void Encode_Hello_ReturnsNonEmptyTokens()
         {
             var tok = TryLoad();
@@ -58,7 +58,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Tokenizers
             Console.WriteLine($"'Hello' → [{string.Join(", ", tokens)}]");
         }
 
-        [LongFact]
+        [LongFact("85ms")]
         public void Encode_Decode_RoundTrip_SimpleAscii()
         {
             var tok = TryLoad();
@@ -75,7 +75,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Tokenizers
             Console.WriteLine($"'{input}' → {tokens.Length} tokens → '{decoded}'");
         }
 
-        [LongFact]
+        [LongFact("135ms")]
         public void Encode_Decode_RoundTrip_Polish()
         {
             var tok = TryLoad();
@@ -92,7 +92,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Tokenizers
             Console.WriteLine($"'{input}' → {tokens.Length} tokens → '{decoded}'");
         }
 
-        [LongFact]
+        [LongFact("72ms")]
         public void Encode_SpecialTokens_Recognised()
         {
             var tok = TryLoad();
@@ -107,7 +107,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Tokenizers
             Console.WriteLine($"Special tokens: [{string.Join(", ", tokens)}]");
         }
 
-        [LongFact]
+        [LongFact("82ms")]
         public void BosTokenId_Is151643()
         {
             var tok = TryLoad();
@@ -120,7 +120,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Tokenizers
             Assert.True(tok.IsSpecialToken(QwenTokenizer.EndOfText));
         }
 
-        [LongFact]
+        [LongFact("74ms")]
         public void BuildChatPrompt_ContainsSystemAndUser()
         {
             var tok = TryLoad();
@@ -140,7 +140,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Tokenizers
             Console.WriteLine(decoded);
         }
 
-        [LongFact]
+        [LongFact("73ms")]
         public void DecodeToken_SingleToken_ReturnsString()
         {
             var tok = TryLoad();

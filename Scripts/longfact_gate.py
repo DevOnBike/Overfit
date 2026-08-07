@@ -1,10 +1,15 @@
 """Runs the [LongFact] suite as a gate — all of it before a release, the touched areas before a merge.
 
 WHY THIS EXISTS
-    Measured 2026-08-06: 1733 `[Fact]` against **358 `[LongFact]`**, 277 of them under `LanguageModels` —
-    the model loaders and the runtime, which is the highest-value end-to-end surface in the repository.
-    Nothing ran them on any schedule, and until the same day there was no way to run them at all except by
-    editing the attribute in source. A test that never runs is worse than no test: it looks like coverage.
+    Counted from the runner's own results 2026-08-07: 1715 `[Fact]` against **256 `[LongFact]`**, 195 of
+    them under `LanguageModels` — the model loaders and the runtime, which is the highest-value end-to-end
+    surface in the repository. Nothing ran them on any schedule, and until 2026-08-06 there was no way to
+    run them at all except by editing the attribute in source. A test that never runs is worse than no
+    test: it looks like coverage.
+
+    (The first version of this note said 358, from counting occurrences of the text `[LongFact` — which
+    also counts every mention in a comment or doc block, 103 of them. 256 skipped plus 5 deliberate
+    `[Fact(Skip=...)]` is exactly the 261 the runner reports. Count what executes.)
 
 WHAT IT REFUSES TO DO
     It will not start while this box is an instrument. A 24-hour anomaly-guard measurement or a
@@ -18,9 +23,9 @@ WHAT IT RECORDS
     very different at eight minutes than at six hours, and nobody had the number.
 
 USAGE
-    python .claude/longfact.py                 # RELEASE gate — everything
-    python .claude/longfact.py --changed       # PR gate — only areas the diff touches
-    python .claude/longfact.py --area LanguageModels Anomalies
+    python Scripts/longfact_gate.py                 # RELEASE gate — everything
+    python Scripts/longfact_gate.py --changed       # PR gate — only areas the diff touches
+    python Scripts/longfact_gate.py --area LanguageModels Anomalies
 """
 import argparse
 import datetime
@@ -32,7 +37,9 @@ import time
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-ROOT = pathlib.Path(r"D:\Overfit")
+# Repo root from this file's own location, NOT a hardcoded path: a developer's absolute
+# path in a public repository is a leak, and it also means the script only runs on one box.
+ROOT = pathlib.Path(__file__).resolve().parents[1]
 TESTS = ROOT / "Tests"
 NAMESPACE = "DevOnBike.Overfit.Tests"
 TIMINGS = ROOT / "Tests" / "bin" / "longfact-timings.log"
@@ -103,6 +110,13 @@ def changed_areas():
     return sorted(a for a in areas if (TESTS / a).is_dir())
 
 
+# An attribute followed by a method signature, NOT a bare text match. `[LongFact` also appears in
+# comments and doc blocks — 103 times on 2026-08-07 — and counting those inflated the scope figure this
+# script prints from 256 to 359. A gate that misreports its own scope is a gate nobody can size.
+LONGFACT_METHOD = re.compile(
+    r"\[LongFact[^\]]*\]\s*(?:\[[^\]]*\]\s*)*public\s+(?:async\s+)?[\w<>\[\]\.,\s]+?\s+\w+\s*\(")
+
+
 def count_longfacts(areas):
     total = 0
 
@@ -115,7 +129,7 @@ def count_longfacts(areas):
         if areas and (not rel or rel[0] not in areas):
             continue
 
-        total += len(re.findall(r"\[LongFact", p.read_text(encoding="utf-8", errors="replace")))
+        total += len(LONGFACT_METHOD.findall(p.read_text(encoding="utf-8", errors="replace")))
 
     return total
 
@@ -140,7 +154,9 @@ def main():
               "script before concluding the change is untested.")
         sys.exit(0)
 
-    cmd = ["dotnet", "test", "./Tests/Tests.csproj", "-c", "Release"]
+    trx = ROOT / "Tests" / "bin" / "longfact.trx"
+    cmd = ["dotnet", "test", "./Tests/Tests.csproj", "-c", "Release",
+           "--logger", f"trx;LogFileName={trx}"]
 
     if areas:
         # One filter, OR-ed. `~` is "contains" in VSTest's expression language.
@@ -149,8 +165,16 @@ def main():
     print(f"\n$ OVERFIT_RUN_LONG=1 {' '.join(cmd)}\n", flush=True)
 
     started = time.time()
+    # DOTNET_CLI_UI_LANGUAGE is not cosmetic here. Measured 2026-08-07 on this box: the SDK is
+    # Polish-localised, so a passing run prints `Powodzenie! — niepowodzenie: 0, powodzenie: 8` and a
+    # failing one prints `Niepowodzenie`, neither of which the English patterns below match. The effect
+    # is not a missing pretty summary — it is that the FAILING TEST NAMES come back empty from a run
+    # that failed, which is the exact way this repository has already lost a real failure twice. Pin the
+    # language for machine reading, and take the counts from the TRX the runner writes rather than from
+    # console text in any language.
     r = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, encoding="utf-8",
-                       errors="replace", env={**__import__("os").environ, "OVERFIT_RUN_LONG": "1"})
+                       errors="replace", env={**__import__("os").environ, "OVERFIT_RUN_LONG": "1",
+                                              "DOTNET_CLI_UI_LANGUAGE": "en"})
     elapsed = time.time() - started
 
     out = r.stdout + "\n" + r.stderr
@@ -161,14 +185,37 @@ def main():
         print("REFUSED by MeasurementExclusion: a benchmark holds the machine mutex. Not a test failure.")
         sys.exit(3)
 
-    failed = sorted(set(re.findall(r"(?:Failed|Nie powiodło się)\s+([\w\.]+\.\w+)", out)))
-    summary = [l.strip() for l in out.splitlines()
-               if re.search(r"(Passed!|Failed!|Przeszły|Nie powiodły)", l)]
+    # The TRX is the authority: it is written by the runner as structured data, so it does not move when
+    # the console language does, and it distinguishes "0 failed" from "nothing ran" — which an exit code
+    # of 0 does not. A filter that matches no test also exits 0.
+    counters, failed = {}, []
+
+    if trx.exists():
+        text = trx.read_text(encoding="utf-8", errors="replace")
+        found = re.search(r"<Counters\b([^>]*)/>", text)
+
+        if found:
+            counters = dict(re.findall(r'(\w+)="(\d+)"', found.group(1)))
+
+        failed = sorted(set(
+            m.group(1) for m in re.finditer(
+                r'<UnitTestResult[^>]*testName="([^"]+)"[^>]*outcome="(?!Passed)(\w+)"', text)))
+
+    if not failed:
+        failed = sorted(set(re.findall(r"(?:Failed|Nie powiodło się)\s+([\w\.]+\.\w+)", out)))
 
     print(f"\nELAPSED  {elapsed/60:.1f} min   exit {r.returncode}")
 
-    for l in summary[:4]:
-        print("        ", l[:160])
+    if counters:
+        print(f"         TRX: total {counters.get('total', '?')}   passed {counters.get('passed', '?')}"
+              f"   failed {counters.get('failed', '?')}   "
+              f"not executed {counters.get('notExecuted', '?')}")
+
+        if counters.get("executed") == "0":
+            print("         !! NOTHING RAN. Exit 0 with an empty run is not a pass — check the filter.")
+    else:
+        print("         !! no TRX produced — counts below are scraped from console text and may be "
+              "language-dependent")
 
     if failed:
         print(f"\nFAILING TESTS ({len(failed)}) — names, because a count is not actionable:")

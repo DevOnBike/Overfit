@@ -23,7 +23,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
         private readonly ITestOutputHelper _out;
         public AttentionWholeMatrixM2PlumbingTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("862ms")]
         public void Qwen3B_Q4KM_Mmap_BuildsWholeAttnHandles()
         {
             if (!File.Exists(Model))

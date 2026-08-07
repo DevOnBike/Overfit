@@ -25,7 +25,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Whisper
         private readonly ITestOutputHelper _out;
         public WhisperPerfTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("3s")]
         public void DecodeCached_FasterThanRecompute_AndStepIsZeroAlloc()
         {
             var model = WhisperGgmlLoader.Load(TestModelPaths.Whisper.RequireTinyGgmlPath());

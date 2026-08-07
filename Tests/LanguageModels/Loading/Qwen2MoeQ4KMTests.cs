@@ -27,7 +27,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
         private readonly ITestOutputHelper _out;
         public Qwen2MoeQ4KMTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("9s")]
         public void LoadsMixedQuantQ4KM_AndDecodesCoherently()
         {
             if (!File.Exists(Q4KmPath))

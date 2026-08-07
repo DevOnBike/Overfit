@@ -108,7 +108,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             }
         }
 
-        [LongFact]
+        [LongFact("9s")]
         public void Load_RealGpt2Safetensors_BitParity_WithBinFixture()
         {
             var safe = ResolveFirst(

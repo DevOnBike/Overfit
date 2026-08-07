@@ -22,7 +22,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Constraints
         private readonly ITestOutputHelper _out;
         public JsonSchemaConstraintEndToEndTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("3s")]
         public void RealQwen_EmitsSchemaConformingJson()
         {
             if (!File.Exists(Gguf))

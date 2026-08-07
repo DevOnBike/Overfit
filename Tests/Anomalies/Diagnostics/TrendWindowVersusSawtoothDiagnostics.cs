@@ -47,7 +47,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
             _output = output;
         }
 
-        [LongFact]
+        [LongFact("207ms")]
         public void MeasuresFalsePositivesAndLeakDetectionAgainstWindowLength()
         {
             var report = new StringBuilder();

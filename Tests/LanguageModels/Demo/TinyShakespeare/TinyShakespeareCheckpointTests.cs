@@ -53,7 +53,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Demo.TinyShakespeare
             _output = output;
         }
 
-        [LongFact]
+        [LongFact]  // heavy group, never measured — see Scripts/longfact_heavy.txt
         public void Shakespeare_12Layer_Checkpointed_SeqLen256_LossBelow200()
         {
             SkipIfMissing(FixturePath);
@@ -314,7 +314,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Demo.TinyShakespeare
         /// Verifies: no OOM, no NaN, loss decreases.
         /// Time: ~2 min. Run this BEFORE the full test (5K steps).
         /// </summary>
-        [LongFact]
+        [LongFact]  // heavy group, never measured — see Scripts/longfact_heavy.txt
         public void Shakespeare_Batch8_SeqLen256_SmokeTest_50Steps()
         {
             SkipIfMissing(FixturePath);
@@ -407,7 +407,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Demo.TinyShakespeare
         /// Goal: confirm batch=8 convergence in ~5 minutes.
         /// If green → run the full 5K test overnight.
         /// </summary>
-        [LongFact]
+        [LongFact]  // heavy group, never measured — see Scripts/longfact_heavy.txt
         public void Shakespeare_Batch8_SmallModel_500Steps_Convergence()
         {
             SkipIfMissing(FixturePath);
@@ -711,7 +711,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Demo.TinyShakespeare
         ///
         /// Time: ~30 seconds.
         /// </summary>
-        [LongFact]
+        [LongFact]  // heavy group, never measured — see Scripts/longfact_heavy.txt
         public void GPT1_EndToEnd_100Steps_GeneratesEnglishWords()
         {
             SkipIfMissing(FixturePath);

@@ -31,7 +31,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             _out = output;
         }
 
-        [LongFact]
+        [LongFact("2s")]
         public void MmapPath_ProducesBitIdenticalLogits_ToCopyPath()
         {
             TestModelPaths.Qwen3B.RequireQ4KmGgufPath();
@@ -75,14 +75,14 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
         //    map entirely when the file has no Q4_K/Q6_K tensors (pure-Q8_0 / pure-FP16),
         //    so mmap:true must be byte-for-byte identical to mmap:false there too.
 
-        [LongFact]
+        [LongFact("5s")]
         public void Q8_0Model_DefaultMmap_IdenticalToCopyPath()
         {
             TestModelPaths.Qwen3B.RequireQ8GgufPath();
             AssertBitIdentical(TestModelPaths.Qwen3B.Q8GgufPath);
         }
 
-        [LongFact]
+        [LongFact("24s")]
         public void Fp16Model_DefaultMmap_IdenticalToCopyPath()
         {
             TestModelPaths.Qwen3B.RequireGgufPath();
@@ -110,7 +110,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             Assert.Equal(0f, maxDiff);
         }
 
-        [LongFact]
+        [LongFact("4s")]
         public void Mmap_MeasuredResidentManagedHeap()
         {
             TestModelPaths.Qwen3B.RequireQ4KmGgufPath();

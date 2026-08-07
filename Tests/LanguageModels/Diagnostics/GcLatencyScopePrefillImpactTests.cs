@@ -29,7 +29,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
         private readonly ITestOutputHelper _out;
         public GcLatencyScopePrefillImpactTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("4min8s")]
         public void SustainedLowLatency_GenerationCycle_GcDelta()
         {
             var model = TestModelPaths.Qwen3B.Q4KmGgufPath;

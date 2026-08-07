@@ -26,7 +26,7 @@ namespace DevOnBike.Overfit.Tests.Redaction
             _output = output;
         }
 
-        [LongFact]
+        [LongFact("655ms")]
         public void Gateway_RedactsOutbound_ForwardsRestores_Audits()
         {
             var exe = LocateOverfitExe();

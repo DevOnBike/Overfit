@@ -107,7 +107,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Retrieval
             new("mixed", "how do I evaluate prompts locally for free?", "skill-eval.md"),
         ];
 
-        [LongFact]
+        [LongFact("1min17s")]
         public void Hybrid_VsDense_OnRealDocsCorpus()
         {
             var indexed = BuildIndex();
@@ -200,7 +200,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Retrieval
         /// found by ONE arm at rank 1 (1/61 ≈ 0.016) loses to a document found by BOTH arms at ranks 5 and 3
         /// (1/65 + 1/63 ≈ 0.031). k is exactly the knob that sets that balance.
         /// </summary>
-        [LongFact]
+        [LongFact]  // heavy group, never measured — see Scripts/longfact_heavy.txt
         public void Fusion_KSweep_OnRealDocsCorpus()
         {
             var indexed = BuildIndex();

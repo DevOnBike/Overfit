@@ -15,7 +15,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels
     /// </summary>
     public sealed class OverfitClientTests
     {
-        [LongFact]
+        [LongFact("4s")]
         [Trait("Category", "Qwen")]
         public void LoadGguf_Send_RoundTripsOnRealQwen()
         {

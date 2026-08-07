@@ -22,7 +22,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
 
         public RepackGemvProfileTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("5s")]
         public void Profile_Decode_PerComponent()
         {
             if (!File.Exists(Path))

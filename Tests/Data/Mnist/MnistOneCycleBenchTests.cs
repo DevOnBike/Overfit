@@ -32,7 +32,7 @@ namespace DevOnBike.Overfit.Tests.Data.Mnist
         private readonly ITestOutputHelper _output;
         public MnistOneCycleBenchTests(ITestOutputHelper output) => _output = output;
 
-        [LongFact]
+        [LongFact("7s")]
         public void OneCycle_FewerEpochs_VsConstantLrBaseline()
         {
             var imgs = TestModelPaths.Mnist.TrainImagesPath;

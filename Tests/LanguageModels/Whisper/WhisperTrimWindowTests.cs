@@ -27,7 +27,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Whisper
         private readonly ITestOutputHelper _out;
         public WhisperTrimWindowTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("3s")]
         public void Trim_MatchesFullWindowText_AndIsFasterOnShortClips()
         {
             var ggml = TestModelPaths.Whisper.RequireTinyGgmlPath();

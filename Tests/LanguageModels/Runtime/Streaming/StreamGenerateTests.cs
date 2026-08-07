@@ -29,7 +29,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Streaming
             _output = output;
         }
 
-        [LongFact]
+        [LongFact("7s")]
         public async Task StreamGenerateAsync_YieldsMaxTokensWhenNoStopHit()
         {
             TestModelPaths.Qwen3B.RequireGgufPath();
@@ -53,7 +53,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Streaming
             _output.WriteLine($"Generated tokens: [{string.Join(", ", tokens)}]");
         }
 
-        [LongFact]
+        [LongFact("10s")]
         public async Task StreamGenerateAsync_TerminatesOnStopToken()
         {
             TestModelPaths.Qwen3B.RequireGgufPath();
@@ -97,7 +97,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Streaming
             }
         }
 
-        [LongFact]
+        [LongFact("6s")]
         public async Task StreamGenerateAsync_RespectsCancellation()
         {
             TestModelPaths.Qwen3B.RequireGgufPath();
@@ -131,7 +131,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Streaming
             _output.WriteLine($"Cancellation honored after {produced} tokens.");
         }
 
-        [LongFact]
+        [LongFact("6s")]
         public async Task StreamGenerateAsync_ThrowsWhenSessionEmpty()
         {
             TestModelPaths.Qwen3B.RequireGgufPath();
@@ -151,7 +151,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Streaming
             });
         }
 
-        [LongFact]
+        [LongFact("7s")]
         public async Task StreamGenerateAsync_MatchesGenerateNextTokenForSamePrompt()
         {
             TestModelPaths.Qwen3B.RequireGgufPath();
@@ -186,7 +186,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Streaming
             _output.WriteLine($"Both paths produced: [{string.Join(", ", viaStream)}]");
         }
 
-        [LongFact]
+        [LongFact("16s")]
         public async Task StreamGenerateAsync_WithFactoryStopTokens_QwenChatTerminators()
         {
             TestModelPaths.Qwen3B.RequireGgufPath();

@@ -26,7 +26,19 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
     /// the trend family, whose gate is <c>MinAbsoluteTrendChange</c>; the peer gate governs a smaller share.
     /// Both are printed, in the units the guard reads them in.</para>
     ///
-    /// <para>Needs a route to the lab's Prometheus. Knobs: <c>OVERFIT_LAB_PROMETHEUS</c>,
+    /// <para><b>REQUIRES A PORT-FORWARD TO PROMETHEUS ON :9098</b> — note the port: this one does not use
+    /// 9090. Without the forward it fails with a bare <c>HttpRequestException: connection refused
+    /// (127.0.0.1:9098)</c>, which names no cause and reads like a defect in <see cref="FloorCalibrator"/>.
+    /// It is not one — measured 2026-08-07, five of these lab diagnostics failed that way in the first
+    /// release-gate run purely because nothing was forwarding, and two of them, this one included, were
+    /// unreachable even after following the documented <c>forward.cmd</c>, because that script forwarded
+    /// only 9090. It now forwards all three.</para>
+    /// <code>
+    ///   k8s\monitoring\forward.cmd                                            (all three ports at once)
+    ///   kubectl port-forward -n monitoring svc/overfit-lab-prometheus 9098:9090   (this one only)
+    /// </code>
+    /// <para>Verify it before believing a red result:
+    /// <c>curl "http://127.0.0.1:9098/api/v1/query?query=up"</c>. Knobs: <c>OVERFIT_LAB_PROMETHEUS</c>,
     /// <c>OVERFIT_LAB_CONFIG</c> (path to the same guard.json the cluster runs),
     /// <c>OVERFIT_LAB_WINDOWS</c>, <c>OVERFIT_LAB_WINDOW_MINUTES</c>, <c>OVERFIT_LAB_STEP_MINUTES</c>.</para>
     /// </summary>
@@ -39,7 +51,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
             _output = output;
         }
 
-        [LongFact]
+        [LongFact]  // runtime unmeasured — the test failed after 2s (2026-08-07)
         public async Task ProposesFloorsFromTheLiveLab()
         {
             var prometheus = Environment.GetEnvironmentVariable("OVERFIT_LAB_PROMETHEUS")

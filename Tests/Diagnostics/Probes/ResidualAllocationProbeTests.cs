@@ -53,7 +53,7 @@ namespace DevOnBike.Overfit.Tests.Diagnostics.Probes
         // the MNIST number in isolation and can trust all the finer-grained numbers.
         // ==============================================================================
 
-        [LongFact]
+        [LongFact("273ms")]
         public void ResidualBlock_Forward_AllocationPerCall()
         {
             using var block = new ResidualBlock(Hidden);
@@ -86,7 +86,7 @@ namespace DevOnBike.Overfit.Tests.Diagnostics.Probes
         // exactly that class of allocation.
         // ==============================================================================
 
-        [LongFact]
+        [LongFact("105ms")]
         public void LinearLayer_Forward_AllocationPerCall()
         {
             using var linear = new LinearLayer(Hidden, Hidden);
@@ -111,7 +111,7 @@ namespace DevOnBike.Overfit.Tests.Diagnostics.Probes
         ///     <see cref="Parallel.For"/> infrastructure (Task / RangeWorker / TaskReplicator
         ///     internals + closure capture) from the rest of the Linear op's allocations.
         /// </summary>
-        [LongFact]
+        [LongFact("7ms")]
         public void LinearLayer_Forward_SmallMatrix_AllocationPerCall()
         {
             const int smallBatch = 4;
@@ -133,7 +133,7 @@ namespace DevOnBike.Overfit.Tests.Diagnostics.Probes
             _output.WriteLine($"=== LinearLayer.Forward ({smallSize}→{smallSize}, N={smallBatch}, sequential path): {bytesPerCall:F0} B/call ===");
         }
 
-        [LongFact]
+        [LongFact("40ms")]
         public void BatchNorm1D_Forward_AllocationPerCall()
         {
             using var bn = new BatchNorm1D(Hidden);
@@ -151,7 +151,7 @@ namespace DevOnBike.Overfit.Tests.Diagnostics.Probes
             _output.WriteLine($"=== BatchNorm1D.Forward (C={Hidden}): {bytesPerCall:F0} B/call ===");
         }
 
-        [LongFact]
+        [LongFact("12ms")]
         public void ReLU_Forward_AllocationPerCall()
         {
             using var graph = new ComputationGraph();

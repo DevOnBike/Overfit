@@ -24,7 +24,7 @@ namespace DevOnBike.Overfit.Tests.DeepLearning.Cnn
         private readonly ITestOutputHelper _out;
         public CnnTrainingMemoryDiagnostics(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("162ms")]
         public void Report_TrainingStepMemory_MnistVsWideConv()
         {
             Measure("MNIST  ", batch: 32, inC: 1, hw: 28, outC: 8, k: 3);

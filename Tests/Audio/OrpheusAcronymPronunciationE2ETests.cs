@@ -29,7 +29,7 @@ namespace DevOnBike.Overfit.Tests.Audio
             _out = output;
         }
 
-        [LongFact]
+        [LongFact("1min25s")]
         public void Acronyms_SpelledConvention_HeardBackByWhisper()
         {
             TestModelPaths.Orpheus.RequireGgufPath();

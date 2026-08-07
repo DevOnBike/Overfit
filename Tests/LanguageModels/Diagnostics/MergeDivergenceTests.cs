@@ -24,7 +24,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
         private readonly ITestOutputHelper _out;
         public MergeDivergenceTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("22s")]
         public void Merged_Vs_Trainable_FinalHidden_Diff()
         {
             if (!File.Exists(Orpheus) || !File.Exists(Adapter))

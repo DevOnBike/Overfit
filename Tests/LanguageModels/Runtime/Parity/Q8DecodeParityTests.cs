@@ -59,7 +59,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
         /// both from the same FP16 qwen.gguf. Measured (Qwen2.5-3B, 32 steps):
         /// 28/32 top-1 match, worst swing 1.39 — all flips at genuine near-ties.
         /// </summary>
-        [LongFact]
+        [LongFact("43s")]
         public void Q8DecodePath_TopTokenMatches_F32Baseline_TeacherForced()
         {
             var path = TestModelPaths.Qwen3B.GgufPath;
@@ -105,7 +105,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
         /// track even closer than the F32-vs-Q8 test above. Measured on the dev
         /// box (Qwen2.5-3B, 32 steps): 32/32 top-1 match, worst swing 0.00.
         /// </summary>
-        [LongFact]
+        [LongFact("17s")]
         public void Q8_0NativeFile_DecodesLike_Fp16QuantizedOnLoad_TeacherForced()
         {
             TestModelPaths.Qwen3B.RequireGgufPath();

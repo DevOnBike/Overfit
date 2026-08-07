@@ -34,7 +34,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
 
         public TinyBlasTiledGemmBenchPhase2Tests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("236ms")]
         public void Phase2_TiledVsPerColumnGemv_SingleThread()
         {
             if (!Avx2.IsSupported || !Fma.IsSupported)

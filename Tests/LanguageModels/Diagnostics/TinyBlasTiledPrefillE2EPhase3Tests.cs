@@ -31,7 +31,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
 
         public TinyBlasTiledPrefillE2EPhase3Tests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact]  // runtime unmeasured — the test failed after 17s (2026-08-07)
         public void Phase3_Ttft_And_Coherence_RealModel()
         {
             if (!File.Exists(Path))

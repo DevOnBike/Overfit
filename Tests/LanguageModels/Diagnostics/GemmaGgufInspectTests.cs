@@ -19,7 +19,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
         private readonly ITestOutputHelper _out;
         public GemmaGgufInspectTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("46ms")]
         public void Dump_Gemma_Metadata_And_Tensors()
         {
             if (!File.Exists(Path))

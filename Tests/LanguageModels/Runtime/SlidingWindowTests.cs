@@ -30,7 +30,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
 
         private static readonly SamplingOptions Greedy = SamplingOptions.GreedyWithPenalty(1.0f);
 
-        [LongFact]
+        [LongFact("3s")]
         public void BeforeCacheFills_EnablingSliding_IsBitIdenticalNoOp()
         {
             using var engine = LoadEngine();
@@ -61,7 +61,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
             }
         }
 
-        [LongFact]
+        [LongFact("4s")]
         public void GeneratesPastContext_BoundedCache_WhileNonSlidingThrows()
         {
             using var engine = LoadEngine();

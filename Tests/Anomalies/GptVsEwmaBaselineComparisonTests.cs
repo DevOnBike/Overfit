@@ -34,7 +34,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
         private static string CsvPath => Path.Combine(
             AppContext.BaseDirectory, "test_fixtures", "k8s_metrics.csv");
 
-        [LongFact]
+        [LongFact("21s")]
         public async Task GptDetector_VsEwmaFloor_BothSeparate_OnSamePodStream()
         {
             if (!File.Exists(CsvPath))

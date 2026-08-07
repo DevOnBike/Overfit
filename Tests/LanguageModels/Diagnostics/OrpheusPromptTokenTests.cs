@@ -20,7 +20,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
         private readonly ITestOutputHelper _out;
         public OrpheusPromptTokenTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("147ms")]
         public void Dump_Control_Token_Ids()
         {
             if (!File.Exists(Path))

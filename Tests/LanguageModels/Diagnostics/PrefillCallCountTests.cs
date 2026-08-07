@@ -41,7 +41,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
 
         public PrefillCallCountTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("7s")]
         public void Prefill_ComponentCallCounts_AreOncePerLayer_NotOncePerHead()
         {
             var path = TestModelPaths.Qwen3B.Q4KmGgufPath;

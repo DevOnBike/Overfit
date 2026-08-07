@@ -24,7 +24,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
         private readonly ITestOutputHelper _out;
         public DecodePoolIdleBurnTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("4s")]
         public void Pool_Parks_WhenIdle()
         {
             if (!File.Exists(Path))

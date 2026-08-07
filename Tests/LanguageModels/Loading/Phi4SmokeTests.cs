@@ -26,7 +26,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
 
         public Phi4SmokeTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("25s")]
         public void Phi4_Loads_And_Generates_Coherent_English()
         {
             if (!File.Exists(Path))

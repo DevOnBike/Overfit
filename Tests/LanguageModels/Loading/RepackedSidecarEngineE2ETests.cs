@@ -28,7 +28,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
 
         public RepackedSidecarEngineE2ETests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("7s")]
         public void Sidecar_ConsumedByLoader_BitExactToRuntimeRepack()
         {
             if (!File.Exists(Gguf))

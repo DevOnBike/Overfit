@@ -26,7 +26,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
 
         public Qwen3PerfTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("8s")]
         public void Qwen3_DecodeThroughput_BestOfN()
         {
             if (!File.Exists(Path))

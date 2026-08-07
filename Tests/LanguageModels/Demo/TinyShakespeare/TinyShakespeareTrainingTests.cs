@@ -71,7 +71,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Demo.TinyShakespeare
         /// Karpathy reaches ~1.47 on this dataset after full training (5000 steps).
         /// We expect ~2.5-3.5 after 300 steps — clear learning, not overfitting.
         /// </summary>
-        [LongFact]
+        [LongFact("3s")]
         public void TinyShakespeare_LossDecreases_After300Steps()
         {
             SkipIfMissing(FixturePath);

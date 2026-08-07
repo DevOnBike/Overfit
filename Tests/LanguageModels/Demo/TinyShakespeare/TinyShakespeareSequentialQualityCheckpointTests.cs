@@ -76,7 +76,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Demo.TinyShakespeare
             _output = output;
         }
 
-        [LongFact]
+        [LongFact("9min38s")]
         [Trait("Category", "Demo")]
         [Trait("Category", "LongRunning")]
         public void Demo_Train_TinyShakespeare_SequentialQuality_AndWriteCheckpointBin()

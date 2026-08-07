@@ -85,7 +85,7 @@ namespace DevOnBike.Overfit.Tests.Data.Mnist
             }
         }
 
-        [LongFact]
+        [LongFact("4s")]
         public void SingleReplica_vs_DataParallel()
         {
             var imgs = TestSupport.TestModelPaths.Mnist.TrainImagesPath;

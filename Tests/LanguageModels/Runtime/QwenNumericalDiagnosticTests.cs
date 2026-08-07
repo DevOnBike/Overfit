@@ -21,7 +21,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
         private static string ModelPath => TestModelPaths.Qwen3B.BinaryPath;
         private static string TokenizerDir => TestModelPaths.Qwen3B.Dir;
 
-        [LongFact]
+        [LongFact("8s")]
         public void NumDiag_BosToken_Top20_Logits()
         {
             TestModelPaths.Qwen3B.RequireBinaryPath();
@@ -51,7 +51,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
             }
         }
 
-        [LongFact]
+        [LongFact("12s")]
         public void NumDiag_AssistantPrompt_Top20_Logits()
         {
             TestModelPaths.Qwen3B.RequireBinaryPath();

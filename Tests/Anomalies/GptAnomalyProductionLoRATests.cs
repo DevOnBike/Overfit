@@ -42,7 +42,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             _output = output;
         }
 
-        [LongFact]
+        [LongFact("3ms")]
         public void ProductionBase_PerPodLoRA_FlattensBenignRegime_StillFlagsIncident()
         {
             var path = ResolveProductionBase();

@@ -24,7 +24,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
         private readonly ITestOutputHelper _out;
         public PrefixKvCacheParityTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact]  // runtime unmeasured — the test failed after 4s (2026-08-07)
         public void RestoredPrefix_MatchesFullPrefill_AndReusesAcrossRequests()
         {
             if (!File.Exists(ModelPath))

@@ -43,7 +43,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
                 ]),
         ];
 
-        [LongFact]
+        [LongFact("20s")]
         public void Bielik_ToolCalling_And_Json_Work_OnSpm()
         {
             if (!File.Exists(Path))

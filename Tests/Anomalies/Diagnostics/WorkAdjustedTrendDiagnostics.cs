@@ -49,7 +49,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
             _output = output;
         }
 
-        [LongFact]
+        [LongFact("1s")]
         public void ComparesRawDividedAndAffineAdjustedTrends()
         {
             var pods = Env("OVERFIT_ADJ_PODS", 12);

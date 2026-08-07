@@ -44,7 +44,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
 
         public PrefillLatencyByPromptLengthTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("22s")]
         public void Prefill_CostPerPromptToken_AcrossLengths()
         {
             var path = TestModelPaths.Qwen3B.Q4KmGgufPath;

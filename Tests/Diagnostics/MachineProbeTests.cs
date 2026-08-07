@@ -59,7 +59,7 @@ namespace DevOnBike.Overfit.Tests.Diagnostics
 
         public MachineProbeTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("7s")]
         public void Probe_HardwareCeilings()
         {
             var cores = Environment.ProcessorCount;

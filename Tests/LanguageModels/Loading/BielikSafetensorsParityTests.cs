@@ -28,7 +28,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
         private readonly ITestOutputHelper _out;
         public BielikSafetensorsParityTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("3ms")]
         public void Bielik_Safetensors_GreedyParity_vs_HF()
         {
             if (!Directory.Exists(Dir) || !File.Exists(RefJson))

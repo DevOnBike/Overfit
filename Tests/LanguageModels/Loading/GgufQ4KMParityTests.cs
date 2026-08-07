@@ -55,7 +55,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             _out = output;
         }
 
-        [LongFact]
+        [LongFact("22s")]
         public void Q4KM_TopTokenMatches_F32DequantBaseline_OnCanonicalPrompt()
         {
             TestModelPaths.Qwen3B.RequireQ4KmGgufPath();

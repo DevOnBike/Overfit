@@ -26,7 +26,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
         private readonly ITestOutputHelper _out;
         public SpeculativeDecodeParityTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact]  // heavy group, never measured — see Scripts/longfact_heavy.txt
         public void Speculative_ProducesIdenticalSequence_ToGreedy()
         {
             if (!File.Exists(ModelPath))
@@ -91,7 +91,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
             Assert.True(anyMultiCommit, "speculative never committed >1 token — drafter/verify not exercised.");
         }
 
-        [LongFact]
+        [LongFact]  // heavy group, never measured — see Scripts/longfact_heavy.txt
         public void Speculative_DecodeSpeedup_OnRepetitiveText()
         {
             if (!File.Exists(ModelPath))
@@ -184,7 +184,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
         /// (CanSpeculate false → single-token). The generation is short enough that the window never
         /// evicts, so the maths is identical — any text difference is a speculative-wiring bug. [LongFact].
         /// </summary>
-        [LongFact]
+        [LongFact]  // heavy group, never measured — see Scripts/longfact_heavy.txt
         public void ChatSession_SpeculativePath_MatchesSingleToken_Greedy()
         {
             if (!File.Exists(ModelPath))

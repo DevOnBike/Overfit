@@ -43,7 +43,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
             _output = output;
         }
 
-        [LongFact]
+        [LongFact("10ms")]
         public void ShowsThatAStepIsNotATrend()
         {
             var report = new StringBuilder();

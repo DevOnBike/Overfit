@@ -72,7 +72,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
         /// F32 reference loaded from the same Q4_K_M file. Isolates the
         /// Q4_K+Q6_K decode noise from any file-vs-file dequantization difference.
         /// </summary>
-        [LongFact]
+        [LongFact("29s")]
         public void Q4KMDecodePath_TopTokenMatches_F32Baseline_TeacherForced()
         {
             var path = TestModelPaths.Qwen3B.Q4KmGgufPath;

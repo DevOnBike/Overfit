@@ -36,7 +36,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
 
         // ── Tests ──────────────────────────────────────────────────────────
 
-        [LongFact]
+        [LongFact]  // heavy group, never measured — see Scripts/longfact_heavy.txt
         public void Load_ValidCheckpoint_DoesNotThrow()
         {
             var path = RequireCheckpoint();
@@ -56,7 +56,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
                 $"vocab={engine.Config.VocabSize} ctx={engine.Config.ContextLength}");
         }
 
-        [LongFact]
+        [LongFact("6s")]
         public void GenerateNextToken_SingleStep_ReturnsValidTokenId()
         {
             var path = RequireCheckpoint();
@@ -76,7 +76,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
             Console.WriteLine($"First generated token: {token}");
         }
 
-        [LongFact]
+        [LongFact("10s")]
         public void GenerateNextToken_TenSteps_AllTokensValid()
         {
             var path = RequireCheckpoint();
@@ -99,7 +99,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
             Console.WriteLine($"Generated 10 tokens: [{string.Join(", ", tokens)}]");
         }
 
-        [LongFact]
+        [LongFact("8s")]
         public void Logits_AreAllFinite_AfterGeneration()
         {
             var path = RequireCheckpoint();
@@ -146,7 +146,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
             Console.WriteLine($"Logits OK. Max logit={maxLogit:F3} at token={maxIdx}");
         }
 
-        [LongFact]
+        [LongFact("7s")]
         public void MultipleSessionsFromSameEngine_Independenet()
         {
             var path = RequireCheckpoint();
@@ -169,7 +169,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
             Console.WriteLine($"Session 1: {t1}, Session 2: {t2} — match: {t1 == t2}");
         }
 
-        [LongFact]
+        [LongFact("8s")]
         public void Session_Reset_ClearsState()
         {
             var path = RequireCheckpoint();

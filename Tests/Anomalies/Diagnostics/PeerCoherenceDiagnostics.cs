@@ -39,7 +39,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
             _output = output;
         }
 
-        [LongFact]
+        [LongFact("23ms")]
         public void ShowsWhyTheGroupHasNoNorm()
         {
             var pods = Env("OVERFIT_COHERENCE_PODS", 12);

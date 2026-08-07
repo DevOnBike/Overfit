@@ -61,7 +61,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
             _output = output;
         }
 
-        [LongFact]
+        [LongFact("7s")]
         public void FitsTheGeneratorToTheRecordedLabWindow()
         {
             var (lab, healthy) = Reference();
@@ -117,7 +117,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
         /// cannot identify, which no search of any kind can fix, and which is worth knowing before anyone
         /// reads meaning into its fitted value.</para>
         /// </summary>
-        [LongFact]
+        [LongFact("4min7s")]
         public void MultiStartDescentShowsWhetherTheLandscapeNeedsAPopulation()
         {
             const int Restarts = 10;

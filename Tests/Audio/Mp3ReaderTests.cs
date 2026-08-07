@@ -19,7 +19,7 @@ namespace DevOnBike.Overfit.Tests.Audio
         private readonly ITestOutputHelper _out;
         public Mp3ReaderTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("46ms")]
         public void Decode_RealMp3_Stats()
         {
             var samples = Mp3Reader.ReadMono(TestModelPaths.Whisper.RequireSampleMp3Path(), out var sr);
@@ -50,7 +50,7 @@ namespace DevOnBike.Overfit.Tests.Audio
             Assert.True(max <= 1.5 && min >= -1.5, "output grossly out of range");
         }
 
-        [LongFact]
+        [LongFact("59ms")]
         public void Decode_PerFrame_ZeroAlloc()
         {
             var bytes = File.ReadAllBytes(TestModelPaths.Whisper.RequireSampleMp3Path());
@@ -70,7 +70,7 @@ namespace DevOnBike.Overfit.Tests.Audio
             Assert.True(overhead < 4096, $"decode allocates beyond the output buffer ({overhead} B over {samples.Length} samples)");
         }
 
-        [LongFact]
+        [LongFact("1ms")]
         public void Probe_RealMp3_ReportsConsistentContainerMetadata()
         {
             var bytes = File.ReadAllBytes(TestModelPaths.Whisper.RequireSampleMp3Path());

@@ -29,7 +29,7 @@ namespace DevOnBike.Overfit.Tests.Data.Mnist
         private readonly ITestOutputHelper _out;
         public MnistAllocBreakdownTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("1s")]
         public void Epoch_Allocation_Breakdown()
         {
             const int batchSize = 128;

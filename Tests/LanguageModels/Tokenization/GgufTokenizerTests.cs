@@ -164,7 +164,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Tokenization
 
         // ── Real GGUF vocab (Mixtral SPM) ────────────────────────────────────
 
-        [LongFact]
+        [LongFact("12ms")]
         public void RealMixtralVocab_RoundTrips()
         {
             const string path = @"C:\mixtral\mixtral-8x7b-instruct-v0.1.Q4_K_M.gguf";
@@ -193,7 +193,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Tokenization
 
         private const string QwenMoeGguf = @"C:\qwen-moe\Qwen1.5-MoE-A2.7B-Chat.Q8_0.gguf";
 
-        [LongFact]
+        [LongFact("123ms")]
         public void RealQwenVocab_BpeRoundTrips()
         {
             if (!File.Exists(QwenMoeGguf))
@@ -217,7 +217,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Tokenization
             }
         }
 
-        [LongFact]
+        [LongFact("184ms")]
         public void RealQwenVocab_MatchesQwenTokenizer()
         {
             // Gold cross-check: the GGUF-embedded vocab must tokenise identically to the validated

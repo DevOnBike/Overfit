@@ -23,7 +23,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
             _output = output;
         }
 
-        [LongFact]
+        [LongFact("8s")]
         public void SiLU_Simd_BeatsScalar()
         {
             const int dff = 11008; // Qwen2.5-3B intermediate size

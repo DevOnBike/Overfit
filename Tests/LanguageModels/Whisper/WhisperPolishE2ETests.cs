@@ -20,7 +20,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Whisper
         private readonly ITestOutputHelper _out;
         public WhisperPolishE2ETests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("888ms")]
         public void Transcribe_Polish_Recording()
         {
             var ggml = TestModelPaths.Whisper.RequireTinyGgmlPath();

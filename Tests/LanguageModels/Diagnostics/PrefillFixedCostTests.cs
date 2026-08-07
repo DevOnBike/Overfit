@@ -41,7 +41,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
 
         public PrefillFixedCostTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("5s")]
         public unsafe void Prefill_FixedCost_DispatchesVersusWeightWalk()
         {
             var path = TestModelPaths.Qwen3B.Q4KmGgufPath;

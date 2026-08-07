@@ -29,7 +29,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
 
         private static string SafetensorsPath => Path.Combine(TestModelPaths.Qwen3B.Dir, "model.safetensors");
 
-        [LongFact]
+        [LongFact("4ms")]
         public void LoadConfig_RealQwen05B_MatchesArchitecture()
         {
             if (!File.Exists(SafetensorsPath))
@@ -51,7 +51,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             Assert.True(cfg.TieWeights);
         }
 
-        [LongFact]
+        [LongFact("5s")]
         public void Generate_RealQwen05B_FromSafetensors_CompletesCoherently()
         {
             if (!File.Exists(SafetensorsPath))

@@ -30,7 +30,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
 
         public AttentionQ4KRepackHypothesisTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("871ms")]
         public unsafe void Whole_Q4K_Gemv_vs_PerHead_Q8_Projection()
         {
             if (!CpuFeatures.HasAvx2)

@@ -14,7 +14,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
         private readonly ITestOutputHelper _out;
         public QwenMaxDraftSweep(ITestOutputHelper o) => _out = o;
 
-        [LongFact]
+        [LongFact]  // heavy group, never measured — see Scripts/longfact_heavy.txt
         public void Sweep_MaxDraft_OnEchoText()
         {
             if (!File.Exists(ModelPath))

@@ -16,7 +16,7 @@ namespace DevOnBike.Overfit.Tests.Audio
     /// [LongFact].</summary>
     public sealed class VoiceCloneDatasetTests
     {
-        [LongFact]
+        [LongFact("653ms")]
         public void BuildExample_AudioTokens_RoundTripToEncodedCodes()
         {
             TestModelPaths.Orpheus.RequireGgufPath();

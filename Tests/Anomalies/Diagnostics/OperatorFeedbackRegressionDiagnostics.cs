@@ -46,7 +46,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
             _output = output;
         }
 
-        [LongFact]
+        [LongFact("10s")]
         public void DetectionSurvivesAWeekOfDismissals()
         {
             var report = new StringBuilder();

@@ -26,7 +26,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
 
         public GemmaPerfTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("47s")]
         public void Gemma2_DecodeThroughput_BestOfN()
         {
             if (!File.Exists(Path))

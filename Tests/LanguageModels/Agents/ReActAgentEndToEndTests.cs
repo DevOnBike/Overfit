@@ -33,7 +33,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Agents
         private readonly ITestOutputHelper _out;
         public ReActAgentEndToEndTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("6s")]
         public void Run_OnQwen_DispatchesToolThenFinishes()
         {
             TestModelPaths.Qwen3B.RequireQ4KmGgufPath();

@@ -25,7 +25,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
         private readonly ITestOutputHelper _out;
         public Qwen2MoeLoaderTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("307ms")]
         public void Layer0_LoadsAndDecodes_ThroughQwen2MoeBlock()
         {
             if (!File.Exists(MoePath))

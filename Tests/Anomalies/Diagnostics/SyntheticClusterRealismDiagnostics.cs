@@ -60,7 +60,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
             _output = output;
         }
 
-        [LongFact]
+        [LongFact("120ms")]
         public void ComparesTheGeneratorsSpreadAgainstTheLab()
         {
             Assert.True(

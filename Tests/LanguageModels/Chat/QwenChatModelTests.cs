@@ -26,7 +26,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Chat
 
         private static string SafetensorsPath => Path.Combine(TestModelPaths.Qwen3B.Dir, "model.safetensors");
 
-        [LongFact]
+        [LongFact("3s")]
         public void Chat_RealQwen05B_FromDirectory_ZeroPython_Responds()
         {
             if (!File.Exists(SafetensorsPath))

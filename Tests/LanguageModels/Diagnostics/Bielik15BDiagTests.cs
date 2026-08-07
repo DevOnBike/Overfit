@@ -23,7 +23,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
 
         public Bielik15BDiagTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("3s")]
         public void RawCompletion_PolishPrefix()
         {
             if (!File.Exists(Path))

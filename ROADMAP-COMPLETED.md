@@ -2337,7 +2337,7 @@ been cheaper and would have measured whichever part of the day it happened to la
 mistake as the 240-minute detector window that once sat on the daily slope and reported 2551 incidents a
 day.
 
-Status is reported every 30 minutes by `.claude/hourly_check.py` (also reports the guard's own RSS, which
+Status is reported every 30 minutes by `.claude/hourly_check.py` (removed 2026-08-07 with the run it watched) (also reports the guard's own RSS, which
 no instrument exports — its fifteen series are all about detection, none about itself).
 
 Builds during the run are recorded in `Tests/bin/build-windows.txt` so `analyse_run.py` can test for

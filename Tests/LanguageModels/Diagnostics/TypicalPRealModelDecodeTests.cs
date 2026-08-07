@@ -27,7 +27,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
 
         public TypicalPRealModelDecodeTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("38s")]
         public void SamplerOverhead_InRealDecode()
         {
             if (!File.Exists(Path))

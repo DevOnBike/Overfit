@@ -27,7 +27,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
         private readonly ITestOutputHelper _out;
         public SmallModelAgenticProbeTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("8s")]
         public void Qwen05B_Agentic_Probe()
         {
             if (!File.Exists(Path.Combine(Dir, "model.safetensors")))

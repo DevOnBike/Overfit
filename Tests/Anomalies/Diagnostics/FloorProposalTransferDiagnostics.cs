@@ -49,7 +49,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
             _output = output;
         }
 
-        [LongFact]
+        [LongFact("33s")]
         public void ProposedFloorsTransferToAPopulationTheyWereNotFittedOn()
         {
             var pods = Env("OVERFIT_FLOOR_PODS", 20);

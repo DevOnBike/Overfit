@@ -259,7 +259,7 @@ the fix — in [ROADMAP-COMPLETED.md](ROADMAP-COMPLETED.md).
    traversal terminates on any graph and the `OVERFIT022` exemption disappears instead of being
    re-justified. `s.Add(s)` is legal today and kills the process with an uncatchable `StackOverflowException`.
    See the NASA section for why this is worth fixing when `checked` in `TensorShape` was not.
-3. **Fix the `DECAY` line in `.claude/hourly_check.py`.** It currently asserts that a falling rate between
+3. **Fix the `DECAY` line in `.claude/hourly_check.py` (removed 2026-08-07 with the run it watched).** It currently asserts that a falling rate between
    halves is "cold heaps settling", which is an interpretation the comparison cannot support: pod warm-up,
    calibrator warm-up and position on the 1440-minute load curve all push the same way early in a run. The
    line should report the two halves and say plainly that it cannot attribute the difference, pointing at

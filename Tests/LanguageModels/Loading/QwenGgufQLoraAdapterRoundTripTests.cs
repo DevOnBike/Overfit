@@ -24,7 +24,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
         private readonly ITestOutputHelper _out;
         public QwenGgufQLoraAdapterRoundTripTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact]  // heavy group, never measured — see Scripts/longfact_heavy.txt
         public void FineTune_SaveAdapter_FreshModelLoadsIt_AndRecitesFact()
         {
             var ggufPath = TestModelPaths.Qwen3B.RequireQ4KmGgufPath();

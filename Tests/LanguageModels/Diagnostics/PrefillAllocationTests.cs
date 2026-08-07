@@ -24,7 +24,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
         private readonly ITestOutputHelper _out;
         public PrefillAllocationTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("5s")]
         public void Prefill_AllocationsPerRequest_AndGreedyPin()
         {
             if (!File.Exists(Path))

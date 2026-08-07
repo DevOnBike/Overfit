@@ -21,7 +21,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
         private readonly ITestOutputHelper _out;
         public NonUniformQuantGgufLoadTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("2s")]
         public void OfficialQwen05B_NonUniformQuant_LoadsAndGenerates()
         {
             var path = Path.Combine(

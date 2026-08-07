@@ -15,7 +15,7 @@ namespace DevOnBike.Overfit.Tests.Audio
     /// comes out. Needs <c>c:\orpheus</c> + <c>c:\snac</c>; [LongFact].</summary>
     public sealed class OrpheusVoiceEngineE2ETests
     {
-        [LongFact]
+        [LongFact("26s")]
         public void Synthesize_RealModel_ProducesAudio()
         {
             TestModelPaths.Orpheus.RequireGgufPath();

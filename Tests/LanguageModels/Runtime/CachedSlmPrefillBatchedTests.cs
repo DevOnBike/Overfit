@@ -65,7 +65,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
             }
         }
 
-        [LongFact]
+        [LongFact("9s")]
         public void Ttft_BatchedVsSingleToken_Gpt2SmallDims()
         {
             // GPT-2-Small dimensions, random weights (timing doesn't need real weights).

@@ -19,7 +19,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
         private readonly ITestOutputHelper _out;
         public PhiGgufInspectTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("12ms")]
         public void Dump_Phi_Metadata_And_Tensors()
         {
             if (!File.Exists(Path))

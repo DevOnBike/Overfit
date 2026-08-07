@@ -36,7 +36,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
 
         public DecodeCostAblationTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("16s")]
         public void DecodeCost_ByEarlyEmitAndLogitsCache()
         {
             var path = TestModelPaths.Qwen3B.Q4KmGgufPath;

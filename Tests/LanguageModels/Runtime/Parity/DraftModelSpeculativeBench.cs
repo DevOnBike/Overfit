@@ -39,7 +39,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
         private readonly ITestOutputHelper _out;
         public DraftModelSpeculativeBench(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact]  // heavy group, never measured — see Scripts/longfact_heavy.txt
         public void DraftModel_Speculative_BitIdentical_AndSpeedup_OnNovelText()
         {
             if (!File.Exists(TargetGguf) || !File.Exists(Path.Combine(DraftDir, "model.safetensors")))

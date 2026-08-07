@@ -28,7 +28,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
         private readonly ITestOutputHelper _out;
         public MixtralEndToEndTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("19s")]
         public void LoadsRoutedOnlyMoE_AndDecodesCoherently()
         {
             if (!File.Exists(MixtralPath))

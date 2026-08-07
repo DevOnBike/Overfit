@@ -38,7 +38,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
 
         public TinyBlasProjectionHeadroomPhase05Tests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("1s")]
         public void Phase05_ProjectionGflops_VsCeiling()
         {
             if (!Avx2.IsSupported || !Fma.IsSupported)

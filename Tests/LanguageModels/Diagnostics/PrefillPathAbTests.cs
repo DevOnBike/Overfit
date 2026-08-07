@@ -41,7 +41,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
 
         public PrefillPathAbTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("41s")]
         public void Prefill_WeightStationaryVsReDecode()
         {
             var path = TestModelPaths.Qwen3B.Q4KmGgufPath;

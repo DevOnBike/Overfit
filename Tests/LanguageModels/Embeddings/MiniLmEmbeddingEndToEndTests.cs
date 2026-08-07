@@ -31,7 +31,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Embeddings
             return dot; // both are L2-normalized
         }
 
-        [LongFact]
+        [LongFact("1s")]
         public void RealMiniLm_ParaphrasesScoreHigherThanUnrelated()
         {
             var dir = TestModelPaths.MiniLm.Dir;
@@ -55,7 +55,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Embeddings
                 $"paraphrase cosine {simParaphrase:F3} should clearly exceed unrelated {simUnrelated:F3}");
         }
 
-        [LongFact]
+        [LongFact("973ms")]
         public void RealMiniLm_DrivesVectorStoreRetrieval()
         {
             var dir = TestModelPaths.MiniLm.Dir;
@@ -78,7 +78,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Embeddings
             Assert.Equal("guitar", top[0].Id);
         }
 
-        [LongFact]
+        [LongFact("837ms")]
         public void RealMiniLm_MatchesReferenceVectorWhenAvailable()
         {
             var dir = TestModelPaths.MiniLm.Dir;

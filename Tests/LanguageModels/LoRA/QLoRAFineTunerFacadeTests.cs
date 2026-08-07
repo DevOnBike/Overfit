@@ -19,7 +19,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.LoRA
         private readonly ITestOutputHelper _out;
         public QLoRAFineTunerFacadeTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("15min50s")]
         public void Facade_TeachesFact_AndAnswers()
         {
             var ggufPath = TestModelPaths.Qwen3B.RequireQ4KmGgufPath();

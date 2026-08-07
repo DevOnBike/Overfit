@@ -14,7 +14,7 @@ namespace DevOnBike.Overfit.Tests.Audio
     /// nearest-codebook assignment, residual subtraction. Needs <c>c:\snac</c> (Scripts/convert_snac.py); [LongFact].</summary>
     public sealed class SnacEncoderParityTests
     {
-        [LongFact]
+        [LongFact("305ms")]
         public void Encode_RealAudio_ReproducesReferenceCodes()
         {
             TestModelPaths.Snac.RequireSafetensorsPath();

@@ -29,7 +29,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Embeddings
 
         // ──────────────── BGE-small-en-v1.5 ────────────────
 
-        [LongFact]
+        [LongFact("2s")]
         public void RealBge_QueryFindsRelevantPassage()
         {
             TestModelPaths.Bge.RequireConfigJsonPath();
@@ -54,7 +54,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Embeddings
             Assert.Equal("guitar", top[0].Id);
         }
 
-        [LongFact]
+        [LongFact("1s")]
         public void RealBge_MatchesReferenceVectorWhenAvailable()
         {
             var refPath = Path.Combine(TestModelPaths.Bge.Dir, "bge_reference_embeddings.json");
@@ -75,7 +75,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Embeddings
 
         // ──────────────── E5-small-v2 ────────────────
 
-        [LongFact]
+        [LongFact("1s")]
         public void RealE5_QueryPassagePrefixingDrivesRetrieval()
         {
             TestModelPaths.E5.RequireConfigJsonPath();
@@ -100,7 +100,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Embeddings
             Assert.Equal("guitar", top[0].Id);
         }
 
-        [LongFact]
+        [LongFact("1s")]
         public void RealE5_MatchesReferenceVectorWhenAvailable()
         {
             var refPath = Path.Combine(TestModelPaths.E5.Dir, "e5_reference_embeddings.json");

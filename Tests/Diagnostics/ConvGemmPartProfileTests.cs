@@ -40,7 +40,7 @@ namespace DevOnBike.Overfit.Tests.Diagnostics
 
         public ConvGemmPartProfileTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("3s")]
         public void Conv_Im2ColVersusGemm_Split()
         {
             var path = Environment.GetEnvironmentVariable(OverfitEnvironment.CnnOnnx)
@@ -126,7 +126,7 @@ namespace DevOnBike.Overfit.Tests.Diagnostics
         /// by construction — this measures cost, never correctness. Read the two as upper bounds: removing one
         /// side also frees the other's cache pressure.</para>
         /// </summary>
-        [LongFact]
+        [LongFact("3s")]
         public void ConvGemm_PackVersusMicroKernel_Split()
         {
             var path = Environment.GetEnvironmentVariable(OverfitEnvironment.CnnOnnx)

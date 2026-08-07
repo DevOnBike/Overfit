@@ -110,7 +110,7 @@ On this run one incident looks likely to cover most of the day while contributin
 that everyone will quote.
 
 
-**Measured, once the number existed.** `hourly_check.py` gained an `OPEN` line on 2026-08-06 that counts
+**Measured, once the number existed.** `hourly_check.py` (the watcher for the 24-hour run; removed from the repository 2026-08-07 together with the run it served — the observations below stand, the script does not) gained an `OPEN` line on 2026-08-06 that counts
 time rather than openings. At 3.8 h into the run, on 44 cycles:
 
 | | |
@@ -212,6 +212,21 @@ reader repeating the mistake.
 | E3 | **Rebuild the guard image for the corrected startup message and the scope plumbing** | Cosmetic and already in the tree; ships free with the next deploy that has another reason to happen. | low | trivial | low |
 
 ---
+
+## Elsewhere: the test gate that covers this subsystem
+
+`docs/test-gate-backlog.md`, opened 2026-08-07 from the first execution the `[LongFact]` suite has ever had.
+It is a separate file because most of what it holds is test infrastructure rather than detection, but two
+items land squarely on this subsystem and are tracked there, not here:
+
+- **Five `Anomalies/Diagnostics` lab tests** — `AnomalyGuardEndToEndDiagnostics`,
+  `AnomalyGuardShadowRunDiagnostics`, `LabFixtureRecorderDiagnostics`, `LabFloorCalibrationDiagnostics`,
+  `PrometheusMetricSourceLabDiagnostics` — all failed on a missing port-forward, and the documented
+  `forward.cmd` did not fix it because it forwarded one of the three ports they use. Fixed 2026-08-07.
+- **`GptAnomalyLoRATargetComparisonTests` is flaky by construction** (unseeded weight init), and its
+  production counterpart **passed in under a second without loading the model** — the test whose purpose is
+  to confirm the LoRA recommendation on the real trained artifact. That is one instance of a pattern
+  affecting **62 of 256** `[LongFact]`, which is the highest-ranked item in that file.
 
 ## Order
 

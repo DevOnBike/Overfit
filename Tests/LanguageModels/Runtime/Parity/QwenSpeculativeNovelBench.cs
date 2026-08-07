@@ -17,7 +17,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
         private readonly ITestOutputHelper _out;
         public QwenSpeculativeNovelBench(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact]  // heavy group, never measured — see Scripts/longfact_heavy.txt
         public void Speculative_OnNovelPrompt_RealisticCase()
         {
             if (!File.Exists(ModelPath) || !File.Exists(@"C:\qwen3b\tokenizer.json"))

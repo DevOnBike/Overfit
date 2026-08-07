@@ -22,7 +22,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
         private readonly ITestOutputHelper _out;
         public Qwen3SmokeTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("3s")]
         public void Qwen3_Loads_And_Generates_Coherent_English()
         {
             if (!File.Exists(Path))

@@ -39,7 +39,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
 
         public PrefillAxisSweepTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("24s")]
         public void Prefill_AxisAndTileWidth_AtChatPromptLengths()
         {
             var path = TestModelPaths.Qwen3B.Q4KmGgufPath;

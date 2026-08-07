@@ -25,7 +25,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
 
         public MyVoiceSilenceDiagnosticTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("246ms")]
         public void Report_LeadingSilence_PerClip()
         {
             if (!Directory.Exists(Dir))

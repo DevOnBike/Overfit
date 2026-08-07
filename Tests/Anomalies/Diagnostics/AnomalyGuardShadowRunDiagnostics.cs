@@ -30,9 +30,20 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
     /// with zero incidents means the guard saw nothing because it was looking at nothing, which is the
     /// failure mode that looks exactly like health.</para>
     ///
-    /// <para>Needs the lab from <c>k8s/</c>, a port-forward to Prometheus, and <b>traffic</b> — the RED
-    /// signals sit at zero until something drives the server, and a degraded replica is invisible on an idle
-    /// one. Knobs: <c>OVERFIT_LAB_PROMETHEUS</c>, <c>OVERFIT_SHADOW_CYCLES</c>,
+    /// <para><b>REQUIRES A PORT-FORWARD TO PROMETHEUS ON :9090.</b> Without it this fails with a bare
+    /// <c>HttpRequestException: connection refused (127.0.0.1:9090)</c>, which names no cause and reads
+    /// like a defect in the guard. It is not one — measured 2026-08-07, five of these lab diagnostics
+    /// failed that way in the first release-gate run purely because nothing was forwarding.</para>
+    /// <code>
+    ///   k8s\monitoring\forward.cmd                                            (all three ports at once)
+    ///   kubectl port-forward -n monitoring svc/overfit-lab-prometheus 9090:9090   (this one only)
+    /// </code>
+    /// <para>Verify it before believing a red result:
+    /// <c>curl "http://127.0.0.1:9090/api/v1/query?query=up"</c>.</para>
+    ///
+    /// <para>Also needs the lab from <c>k8s/</c> and <b>traffic</b> — the RED signals sit at zero until
+    /// something drives the server, and a degraded replica is invisible on an idle one. Knobs:
+    /// <c>OVERFIT_LAB_PROMETHEUS</c>, <c>OVERFIT_SHADOW_CYCLES</c>,
     /// <c>OVERFIT_SHADOW_CADENCE_SECONDS</c>, <c>OVERFIT_SHADOW_WINDOW_MINUTES</c>.</para>
     /// </summary>
     public sealed class AnomalyGuardShadowRunDiagnostics
@@ -44,7 +55,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
             _output = output;
         }
 
-        [LongFact]
+        [LongFact]  // runtime unmeasured — the test failed after 4s (2026-08-07)
         public async Task RunsInShadowAgainstTheLab()
         {
             var prometheus = Environment.GetEnvironmentVariable("OVERFIT_LAB_PROMETHEUS")

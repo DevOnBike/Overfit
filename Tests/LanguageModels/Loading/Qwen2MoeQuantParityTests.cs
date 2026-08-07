@@ -32,7 +32,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
         private readonly ITestOutputHelper _out;
         public Qwen2MoeQuantParityTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("3s")]
         public void QuantizedBlock_MatchesF32Dequant_Layer0()
         {
             var path = MoePath();

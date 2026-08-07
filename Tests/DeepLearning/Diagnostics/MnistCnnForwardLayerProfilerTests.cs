@@ -34,7 +34,7 @@ namespace DevOnBike.Overfit.Tests.DeepLearning.Diagnostics
             _output = output;
         }
 
-        [LongFact]
+        [LongFact("91ms")]
         [Trait("Category", "Diagnostics")]
         public void Profile_MnistCnnForward_PerLayer()
         {

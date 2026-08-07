@@ -56,7 +56,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
             _output = output;
         }
 
-        [LongFact]
+        [LongFact("17s")]
         public void MeasuresWhatTheShippedGuardInventsOnAHealthyPopulation()
         {
             var pods = Env("OVERFIT_GFP_PODS", 20);

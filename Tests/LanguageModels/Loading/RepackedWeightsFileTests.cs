@@ -68,7 +68,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             }
         }
 
-        [LongFact]
+        [LongFact("1s")]
         public void BuildFromGguf_RealQwen3B_ProducesOpenableSidecar()
         {
             const string gguf = @"C:\qwen3b\qwen.q4km.gguf";

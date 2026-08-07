@@ -26,7 +26,7 @@ namespace DevOnBike.Overfit.Tests.Adapters
         private readonly ITestOutputHelper _out;
         public MeaiAdapterEndToEndTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("3s")]
         public async Task IChatClient_OnRealQwen_AnswersCoherently_AndStreams()
         {
             if (!File.Exists(Gguf))
@@ -60,7 +60,7 @@ namespace DevOnBike.Overfit.Tests.Adapters
             Assert.Contains("Paris", sb.ToString(), StringComparison.OrdinalIgnoreCase);
         }
 
-        [LongFact]
+        [LongFact("938ms")]
         public async Task IEmbeddingGenerator_OnRealMiniLm_Produces384DimVectors()
         {
             if (!Directory.Exists(MiniLm))

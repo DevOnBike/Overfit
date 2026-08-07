@@ -46,7 +46,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
         /// Broken model: top tokens are high-ID garbage (>100000).
         /// Working model: top tokens are low-ID common tokens (<5000).
         /// </summary>
-        [LongFact]
+        [LongFact("7s")]
         public void Diag_BosOnly_TopLogits()
         {
             if (!TryLoad(out var engine, out var tok))
@@ -92,7 +92,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
         /// BOS-only logits vs full-chat-prompt logits should differ.
         /// If model ignores context, both will be identical (avg diff ≈ 0).
         /// </summary>
-        [LongFact]
+        [LongFact("11s")]
         public void Diag_ContextChangesLogits()
         {
             if (!TryLoad(out var engine, out var tok))
@@ -136,7 +136,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
         }
 
         /// <summary>Binary file date/size — confirms re-conversion actually happened.</summary>
-        [LongFact]
+        [LongFact]  // runtime unmeasured — the test failed after 4ms (2026-08-07)
         public void Diag_ModelFileInfo()
         {
             var info = new FileInfo(ModelPath);

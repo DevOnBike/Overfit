@@ -21,7 +21,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Whisper
         private readonly ITestOutputHelper _out;
         public WhisperE2ETests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("347ms")]
         public void Dump_RealTinyModel_TensorNames()
         {
             var ggml = TestModelPaths.Whisper.RequireTinyGgmlPath();
@@ -39,7 +39,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Whisper
             }
         }
 
-        [LongFact]
+        [LongFact("1s")]
         public void Transcribe_RealTinyModel_JfkSample()
         {
             var ggml = TestModelPaths.Whisper.RequireTinyGgmlPath();

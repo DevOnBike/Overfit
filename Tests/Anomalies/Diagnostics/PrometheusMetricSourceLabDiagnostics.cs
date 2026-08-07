@@ -14,11 +14,17 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
     /// Points <see cref="PrometheusMetricSource"/> at the cluster lab and reports what each of the twelve
     /// features actually resolves to.
     ///
-    /// <para>Requires the lab from <c>k8s/</c> and a port-forward to Prometheus:</para>
+    /// <para><b>REQUIRES A PORT-FORWARD TO PROMETHEUS ON :9099</b>, plus the lab from <c>k8s/</c>. Without
+    /// the forward this fails with a bare <c>HttpRequestException: connection refused (127.0.0.1:9099)</c>
+    /// — a message that names no cause and reads like a defect in the source under test. It is not one:
+    /// measured 2026-08-07, five lab diagnostics failed exactly that way in the first release-gate run,
+    /// solely because nothing was forwarding.</para>
     /// <code>
-    ///   kubectl port-forward -n monitoring svc/overfit-lab-prometheus 9099:9090
+    ///   k8s\monitoring\forward.cmd                                            (all three ports at once)
+    ///   kubectl port-forward -n monitoring svc/overfit-lab-prometheus 9099:9090   (this one only)
     /// </code>
-    /// <para>Override the endpoint with <c>OVERFIT_LAB_PROMETHEUS</c>.</para>
+    /// <para>Override the endpoint with <c>OVERFIT_LAB_PROMETHEUS</c>. Verify the forward before believing
+    /// a red result: <c>curl "http://127.0.0.1:9099/api/v1/query?query=up"</c>.</para>
     ///
     /// <para><b>What this is for.</b> Feature assembly cannot tell a query that matched nothing from a metric
     /// that reads zero, so a wrong metric name produces a flat, plausible, entirely fictional column. The only
@@ -33,7 +39,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
             _output = output;
         }
 
-        [LongFact]
+        [LongFact]  // runtime unmeasured — the test failed after 2s (2026-08-07)
         public async Task ReportsCoverageAgainstTheLab()
         {
             var baseUrl = Environment.GetEnvironmentVariable("OVERFIT_LAB_PROMETHEUS")

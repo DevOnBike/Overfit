@@ -82,7 +82,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
             _output = output;
         }
 
-        [LongFact]
+        [LongFact("16s")]
         public void MeasuresWhatEachFamilyCatches()
         {
             var pods = Env("OVERFIT_MATRIX_PODS", 12);

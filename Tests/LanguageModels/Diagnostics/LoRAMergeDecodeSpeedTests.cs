@@ -39,7 +39,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
         private readonly ITestOutputHelper _out;
         public LoRAMergeDecodeSpeedTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("1min54s")]
         public void Merged_Vs_Preset_DecodeTokensPerSecond()
         {
             if (!File.Exists(Orpheus) || !File.Exists(Adapter))
