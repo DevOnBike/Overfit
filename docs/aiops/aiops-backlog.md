@@ -19,7 +19,7 @@ silence, and silence is what this subsystem exists to distinguish from health.
 | A2 | ✅ **DONE 2026-08-05 — and it found two defects, one of them ours.** (1) The stack's default route is `receiver: "null"`: a correct alert delivered nowhere. (2) **`time() - overfit_guard_last_cycle_timestamp_seconds > 900` cannot fire when the guard is gone** — the series vanishes with the pod, the expression evaluates over an empty vector, and the alert returns to `inactive`. Measured: `pending` for 60 s, then `inactive` for six minutes, zero notifications. With `absent()` added: **`firing` after 60 s, alert in Alertmanager, two notifications delivered, none failed.** Shipped as `k8s/lab/guard-alerts.yaml`. | **highest** | low | low |
 | A3 | ✅ **DONE 2026-08-05.** Second instance: **42 Mi, 1m CPU**, Prometheus +12 Mi and no CPU change. But 42 Mi is a guard eleven minutes old — the steady-state figure measured over the 24-hour run is **130 Mi, peak 146**. **Quote 146, not 42**: fifty namespaces is **7.3 GB**, not 2.1. The script's own arithmetic multiplied the fresh number and was wrong by 3.5x. Prometheus at 50x is extrapolation (≈2.8 queries/s), not measurement. | high | trivial | none |
 | A4 | **Evening diurnal check** | Closes the last two unverified floors (`RequestsPerSecond` gap and trend), raised 2026-08-05 and verifiable only by waiting — the fault panel cannot move deployment-wide traffic. Already scheduled. | medium | zero (scheduled) | none |
-| A5 | **Behaviour on StatefulSets and under HPA** | The lab is twelve identical stateless replicas. Peer comparison is structurally weakest exactly where a client is not: members with their own volumes and shards are not interchangeable, and HPA leaves ghost series and dilutes groups. Documented, never measured. | medium | medium | none |
+| A5 | 🟡 **HPA half MEASURED 2026-08-07 — both claims confirmed, plus one nobody predicted.** Dilution and ghost series are real, and **scaling DOWN disturbs as much as scaling up, with an after-effect that outlives the change**: 0 incidents opened in 11 baseline cycles against **5 in the 7 cycles spanning a 12 -> 15 -> 12 round trip**. The StatefulSet half is NOT done. See the section below. | | The lab is twelve identical stateless replicas. Peer comparison is structurally weakest exactly where a client is not: members with their own volumes and shards are not interchangeable, and HPA leaves ghost series and dilutes groups. Documented, never measured. | medium | medium | none |
 
 ## B. Client readiness — documentation, not code
 
@@ -298,3 +298,206 @@ guards. A guard that only covers one of two entrances is worth naming as such ra
 **Fix, when A1 is re-run:** put the marker check where the *test process* starts rather than where one
 convenience script does — an xUnit assembly fixture that refuses to run the long suite while the marker is
 fresh would cover every entrance, including a developer pressing Run in an IDE.
+
+
+---
+
+## Decision 2026-08-07 — replay and simulator first, the live day only when unavoidable
+
+**What was decided.** Wire `AnomalyGuardService` to `IMetricSource` so a recorded or historical window can
+drive it, then run everything that can be run off the simulator. A live 24-hour run happens only when
+nothing else will answer the question.
+
+**Why, and it is not impatience.** The A1 run produced **11 incidents**. For a counting process that is a
+95% interval of roughly **5.5 to 19 per day** — and the pass criterion is "inside 1-9". The interval spans
+both verdicts, so **one day at this rate cannot decide the criterion at all**. A second day gives about 22
+events and an interval that still crosses the boundary. The limit is the event count, not the clock, which
+is why repeating the day was the wrong instinct and why three levers beat it:
+
+1. **Replay.** `PrometheusHistoricalSource` and `PrometheusHistoricalSourceConfig` already exist, as do
+   `IMetricSource` / `IRawMetricSource`. What blocks replay is one seam: `AnomalyGuardService` holds a
+   concrete `PrometheusMetricWindowSource`. Give it the interface and a virtual clock and a day of history
+   evaluates in seconds — against data Prometheus already retains. Three wins at once: no waiting, a week
+   of events instead of eleven, and **repeatability** — the same day can be re-run after every threshold
+   change and the results compared, which a live run can never offer.
+2. **Population.** The rate scales with pod count; 36 pods yield in eight hours what 12 yield in a day.
+   Costs cluster resources rather than clock.
+3. **Simulator.** `Tests/TestSupport/SyntheticCluster.cs` plus `SyntheticClusterCalibrationSearch`.
+
+### What this decision puts on the critical path
+
+Driving the work from the simulator makes the simulator's fidelity **the** question rather than a footnote.
+The last recorded figure is ~250 false positives/day on 20 synthetic pods against **10.63/day on 12 real
+ones** — roughly a 25x discrepancy per pod. That number is from 2026-07-30 and **has not been re-checked
+since the threshold changes**; re-measuring it is step one, before any conclusion is drawn from a synthetic
+run.
+
+Two constraints carry over unchanged:
+
+- **Calibrate only against a clean recording.** `LabWindowValidator` exists to reject a contaminated one,
+  and the 2026-08-06/07 window is contaminated at the tail (Prometheus evicted at 08:29). Fitting a
+  generator to a broken reference is worse than not fitting it: fast, repeatable and wrong.
+- **A search fits a mechanism, it cannot invent one.** If the 25x gap is a missing degree of freedom in the
+  generator, it will show up as a bad TRADE under fitting — one statistic bought at another's expense — not
+  as a number that refuses to converge.
+
+### Revised order
+
+1. The `IMetricSource` seam in `AnomalyGuardService` (the enabler for everything below).
+2. Re-measure the simulator's false-positive rate on the current thresholds — is 250/day still true?
+3. Explain the simulator-versus-lab gap. Until it is explained, a synthetic run proposes hypotheses; it
+   does not deliver verdicts.
+4. Replay the week Prometheus already holds, and decide the 1-9 band on hundreds of events.
+5. A live day only if 1-4 leave something genuinely unanswerable.
+
+Also carried forward from A1: move the measurement-in-progress check from `Scripts/longfact_gate.py` to
+where the **test process** starts, so no entrance bypasses it. Today's contamination came in through
+`dotnet test` run directly, which the script's own guard never sees.
+
+
+---
+
+## Enriching the generator from data already on disk (2026-08-07)
+
+The point of this section is that **another 24-hour run is not needed to improve the generator**. The run
+that already happened left more behind than its headline rate, and none of it has been used yet. Source:
+`Tests/bin/fp-run-guard-log-FINAL.txt`, 298 cycles, 2026-08-06 08:04 -> 2026-08-07 08:54.
+
+### 1. The findings-per-cycle distribution, which is the most valuable thing in the file
+
+| findings in a cycle | cycles |
+|---|---|
+| 0 | 18 |
+| **1** | **272** |
+| 2 | 4 |
+| 3 | 1 |
+| 5 | 2 |
+| 8 | 1 |
+
+**This is not noise, and the arithmetic says so.** A random process averaging one event per cycle would
+put roughly 37% of cycles at zero, 37% at one and 18% at two. The observed shape is 6% / 91% / 1.3% —
+nearly degenerate. Something **persistent** produces exactly one finding in almost every cycle; the eleven
+incidents are not eleven independent events scattered through a day.
+
+That independently corroborates **D1** — "the peer family reports a fixed pod property as a recurring
+anomaly" — from a completely different reading of the same run. A standing outlier is exactly what
+produces one finding per cycle, forever.
+
+**What it means for the simulator, and it is not a small thing.** A generator that models false positives
+as random draws cannot produce this shape at any parameter setting. If it currently reports ~250/day
+against the lab's 10.63, the two numbers may not be measuring the same phenomenon at all — one a standing
+outlier counted repeatedly, the other a stream of independent events. **Fitting the rate would then be
+fitting the wrong quantity.** This is the "missing degree of freedom shows up as a bad trade, not a bad
+number" rule from `docs/autoresearch-program.md`, arriving early enough to act on.
+
+### 2. Real per-channel peer dispersion, twelve pods, twenty-four hours
+
+Harvested from the guard's own floor proposals, which print the measured spread every time they fire.
+These are parameters the generator currently has to guess.
+
+| channel | peer gap (min..max) | typical magnitude | samples |
+|---|---|---|---|
+| `CpuUsageRatio` | 0.00051 .. 0.0043 | 0.00099 .. 0.0017 | 23 |
+| `MemoryWorkingSetBytes` | 1.03e7 .. 1.08e7 | 4.39e7 .. 4.66e7 | 23 |
+| `GcGen2HeapBytes` | 7.83e5 .. 1.04e6 | 3.47e6 .. 3.50e6 | 15 |
+| `LatencyP50Ms` | 0.139 .. 0.476 | 37.5 (constant) | 20 |
+| `LatencyP95Ms` | 0.264 .. 7.03 | 48.75 (constant) | 20 |
+| `LatencyP99Ms` | 4.75 .. 24.25 | 49.75 (constant) | 20 |
+| `GcPauseRatio` | 2.13e-5 | 0 .. 4.96e-6 | 23 |
+
+Trend-change variants exist for the same channels and are in the log alongside these.
+
+**The latency rows deserve a second look before use.** Typical magnitudes of 37.5 / 48.75 / 49.75 are
+**constant across the whole day** while the peer gaps move by two orders of magnitude between p50 and p99.
+That is the same arithmetically-suspicious shape which, at the previous calibration, revealed that the
+latency quantiles were one series scaled by a constant. Whether that is the generator's artefact or the
+lab workload's is unresolved — and it is a mechanism question, so no search will answer it.
+
+### 3. What is NOT usable yet
+
+A per-channel attribution of which channel produced which finding. A first pass counted channel names
+across the whole log and was **contaminated by the floor-proposal lines themselves** (the proposals name
+the same channels, 23 times each), so the counts described the proposals rather than the findings. It
+needs a proper parse of the finding lines before any number from it is quoted.
+
+### 4. Order for this material
+
+1. Reproduce the findings-per-cycle **shape** before touching any rate. If the generator cannot produce a
+   91%-exactly-one distribution, the rate discrepancy is a symptom and tuning it is wasted work.
+2. Feed the measured per-channel dispersions in as starting values — `LabWindowValidator` gates the
+   recording they came from, so run that check first.
+3. Parse finding attribution properly, then compare per-channel false-positive shares against the lab's.
+
+
+---
+
+## A5, HPA half measured 2026-08-07 — and the lab cannot produce this failure at all
+
+The row said "documented, never measured". Both claims in it are now measured. A third effect, not in the
+row, turned out to be the largest.
+
+**Method.** Manual `kubectl scale` on `lab-workload`, 12 -> 15 -> 12, rather than a real HPA. The guard
+cannot tell what moved the replica count, only that it moved, so for dilution and ghost series the two are
+the same event; an HPA would add a control loop whose timing is its own experiment. **What this substitution
+does NOT cover** is HPA's own metric traffic and its scale-down stabilisation window.
+
+| cycle (UTC) | pods | findings | opened |
+|---|---|---|---|
+| 20:34 – 21:24 | 12 | 1–3 | **0** across 11 cycles |
+| 21:29 | 12 | 2 | 1 — scale-up command issued at 21:29:04 |
+| 21:34 | **15** | 5 | 0 |
+| 21:39 | **15** | **11** | 1 |
+| 21:44 | **15** | 2 | 0 |
+| 21:49 | **15** | 3 | 1 — *four minutes after the scale-DOWN* |
+| 21:54 | 12 | 6 | 1 |
+| 21:59 | 12 | 8 | 1 |
+
+### Dilution — confirmed
+
+Baseline holds a 1–3 band across eleven cycles. Two cycles after three replicas join: **5, then 11**
+findings, over triple the previous maximum. New pods enter the peer group with young heaps and a different
+profile from pods running for days — the same mechanism C1 describes for the heap floor, arriving as an
+event rather than as drift.
+
+### Ghost series — confirmed, and bounded
+
+Scale-down at 21:45:04. The 21:49 cycle still counts **15 pods**, four minutes after three of them ceased
+to exist; pods terminate in seconds, so this is Prometheus's lookback window, not slow deletion. By 21:54
+it is 12 again. **One cycle of ghost, bounded between 4m08s and 9m08s** — which at a five-minute cycle is
+one full evaluation window in which the guard compares live replicas against dead ones whose metrics are
+frozen.
+
+### The effect nobody predicted: scaling DOWN costs as much, and the tail outlives the change
+
+Returning to exactly twelve replicas did not return the guard to baseline. Findings were **6 and 8** two
+cycles later — still double to triple the band — and **two more incidents opened**. Fourteen minutes after
+the scaling finished, the guard had not settled.
+
+**Aggregate: 0 incidents in 11 static cycles, 5 in the 7 cycles spanning the change.**
+
+### Why this matters more than the A5 row implied
+
+A client running HPA scales several times a day. If every scaling event opens an incident and leaves a tail
+of elevated findings behind it, that is **a false-positive source the lab structurally cannot contain** —
+`lab-workload` has held twelve replicas for six days. It follows that the **10.63/day measured in A1 is a
+floor for such a client, not a representative figure**, and no amount of re-running a static lab will
+discover the difference.
+
+It also names something the simulator must learn before it can stand in for the lab: it models a population
+of **fixed size**. Without membership-change events it cannot reproduce what is plausibly the largest source
+of false positives in a real deployment.
+
+### Not done
+
+The StatefulSet half. Members with their own volumes and shards are not interchangeable, so peer comparison
+is structurally questionable there in a way scaling does not test. It rewrites the workload and is a
+separate experiment.
+
+### A note on the measurement itself
+
+The first run of this experiment reported **empty result sections** while executing both scale operations
+correctly. The parser required a timestamp on the guard's `cycle:` line; that line is an indented
+continuation and carries none — the timestamp sits on the header line above it. Nothing failed loudly; the
+report simply read as "no events". Fixed with `kubectl logs --timestamps`, which prefixes continuation lines
+too, and the window was recovered from the logs without re-running anything. Third instance in one day of a
+reporting bug that reads as good news.
