@@ -38,6 +38,7 @@ warm file cache is faster and this is not an average of anything.
 | T8 | 🟡 **Mechanism resolved, one failure still open.** The two kernels differ by a **deterministic** `max|Δlogit| = 0.770661` after prefill (four runs, six decimals, identical) — reassociation, not a defect. The test asserted token equality across that, which was the wrong premise; it now asserts the logits. The single `matched 0/24` of 2026-08-07 has not reproduced in 40+ runs and determinism rules out both explanations offered for it. | medium — the test is fixed; what is left is one unexplained event | low | low |
 | T9 | **`GgufLlamaLoaderIntegrationTests` compares two different files** | `Max diff 7.83`, **mean diff 1.387** over 151936 logits, and a completely different top-1 (22043 vs 40) — orders past numerical noise, when the repo's own threshold for "enough to flip an argmax" is 0.44. The arithmetic says why: `qwen.gguf` is 6.18 GB (÷2 B = 3.09 B params) and `qwen.bin` is 13.59 GB (÷4 B = 3.40 B), a gap of 0.31 B — which is exactly `151936 × 2048`, one language-model head. The test's comment claims "Both go through identical FP32 kernels — only loader differs"; the file sizes contradict it. Same class as the already-resolved Q4_K_M parity bug, which was **a test-premise bug, not code**. | medium | low — read both headers and diff the tensor lists | low |
 | T10 | ✅ **RESOLVED 2026-08-07 — a real defect in the shipped converters, not in a test.** Both Python converters wrote Q/K in HuggingFace layout into a format whose contract is adjacent-pair, so every `.bin` produced from a Qwen-family model was read with the wrong RoPE convention. See the section below. | — | — | — |
+| T11 | 🟡 **Greedy speculative decoding is NOT bit-identical to greedy single-token — diagnosed, tests fixed, product limitation open.** Three tests asserted an identical sequence and all three failed on first execution (2026-08-07); a fourth passed vacuously. Cause is measured, not argued: the batched verify and the single-token decode differ by 0.44–1.37 in logits on an identical context, which exceeds the top-2 gap, so near-ties flip. Eight divergences across two models and two drafters: seven at **rank 2**, one at rank 3, every deficit far inside the measured budget. Tests now assert what holds. **What stays open is the shipped behaviour**, not the tests — see the section below. | high — `ChatSession` dispatches to this path in production | tests done; the product decision is not | medium — `SamplingOptions.Greedy` implies determinism it does not have |
 | T4 | **`BatchedQuantProjection.UseTiledPrefillQ4K` is left mutated** | `TinyBlasTiledPrefillE2EPhase3Tests` sets the static flag and never restores it, so it stays `true` for every test that follows in the same process. Masked today only because each chunk is its own process. | medium | trivial (`try/finally`) | none |
 | T5 | **`AnomalyLabLoadGeneratorTests` needs a second forward nobody documented** | Fails with *"no request succeeded — the lab is reachable but not serving"*. It needs the workload replicas forwarded (`k8s/overfit/forward-replicas.cmd`), which is a different route from the Prometheus one fixed in A4. | medium | trivial | none |
 | T6 | ⏳ **Light half measured, heavy half deferred.** 245 test results, **101 minutes** of measured runtime. The distribution is why the gate had to split: median chunk 5 s, but **one test takes 27.4 min** (`QwenGgufKnowledgeInjectionDemoTests`), the next 15.8 and the next 9.6. The 34-test heavy group has not been run and 29 of its entries are still name-guesses. | medium | hours of clock for the heavy half | none |
@@ -464,3 +465,105 @@ the same each time: **a reporting bug does not announce itself, it just reads as
 
 A fifth was self-inflicted and belongs here anyway: `longfact_split.py` called `main()` unguarded, so
 importing it to inspect one regex **started a test run**. Both scripts now guard with `__main__`.
+
+
+---
+
+## T11, diagnosed 2026-08-07 — speculative decoding is exact in theory and not in this arithmetic
+
+Three tests asserted that greedy speculative decoding emits the same token sequence as greedy
+single-token decoding. All three had never been executed. All three failed the first time they were:
+
+| test | model / drafter | expected | got |
+|---|---|---|---|
+| `BielikDraftSpeculativeBench` | Bielik 1.5B -> 4.5B, draft model | 17258 | 31940 |
+| `DraftModelSpeculativeBench` | Qwen 0.5B -> 3B, draft model | 23327 | 279 |
+| `SpeculativeDecodeParityTests.Speculative_Produces...` | Qwen 3B, prompt-lookup | 16 | 11930 |
+
+### Ruling things out, in order
+
+**Not flaky.** Three consecutive runs of the Bielik case produced the identical failure — same expected
+token, same actual token, same 3.38 accepted tokens per step.
+
+**Not the sampler's randomness**, which was the obvious suspect: `SpeculativeSampler.AcceptOrResample`
+takes a `Random` and looks stochastic. Under greedy it is not.
+`TokenSampler.ComputeProbabilities` writes a point mass on the argmax, so acceptance reduces to
+`draft[j] == argmax` and `Sample` returns that argmax. The `_random` threaded through both is inert on
+this path.
+
+**Not Bielik.** Two models, two drafters, three failures.
+
+### What it is, measured
+
+The verify runs `PrefillBatchedQuantAllRows` + `ProjectLogitsBatched`; the reference decodes one token at
+a time. Different summation order, and floating-point addition is not associative. Reaching an identical
+context both ways and diffing the logits:
+
+| after N decoded tokens | max abs delta logit | top-2 gap |
+|---|---|---|
+| 1 | **0.537422** | 0.429039 |
+| 4 | 0.467148 | 0.991644 |
+| 12 | 1.017578 | 5.621731 |
+
+**After a single token the kernel difference already exceeds the margin between the top two tokens.** A
+flip is not a possibility to be argued about, it is arithmetically licensed from the first step; over a
+long generation it eventually happens, and from there the sequences are unrelated.
+
+The eight divergences the fixed tests now report say the same thing from the other side:
+
+| case | rank of the speculative choice | deficit | budget (2x measured) |
+|---|---|---|---|
+| Qwen, prompt-lookup | 2 | 0.1299 | 0.887 |
+| Qwen, maxDraft 2 | 2 | 0.0982 | 2.690 |
+| Qwen, maxDraft 4 | 2 | 0.5223 | 2.308 |
+| Qwen, maxDraft 6 | 3 | 0.2842 | 2.138 |
+| Bielik, maxDraft 2 | 2 | 0.5692 | 1.748 |
+| Bielik, maxDraft 4 | 2 | 0.0457 | 2.604 |
+| Bielik, maxDraft 6 | 2 | 0.2377 | 2.743 |
+| Bielik, maxDraft 8 | 2 | 0.2377 | 2.743 |
+
+Seven of eight land on **rank 2** and the eighth on rank 3; the largest deficit (0.569) is smaller than
+the smallest budget (0.887). A defect in the commit logic has no reason to select the immediate
+runner-up every single time. This is reassociation.
+
+### The fourth test was worse than the three that failed
+
+`ChatSession_SpeculativePath_MatchesSingleToken_Greedy` passed — and passing was the problem. Nothing in
+it verified that speculation ENGAGED. With no explicit drafter, `GenerateSpeculativeCore` drafts only when
+the adaptive gate is open AND `PromptLookupDrafter` finds an n-gram match, which a short novel answer
+rarely offers; when it does not draft, the step is a plain single-token step and equality is a tautology.
+Its "speculative" arm measured SLOWER than its single-token control (21.96 against 23.03 tok/s), which is
+the signature of exactly that. Same class as T1: a test that cannot fail.
+
+### What the tests assert now
+
+`Tests/TestSupport/SpeculativeDivergence.cs`. At the first divergence it replays the reference to that
+position, reaches the same context by one batched prefill, and **measures the kernel difference there, on
+the model under test**. It then requires the flip to fit inside twice that. There is no threshold constant
+in the file, deliberately: a bound guessed for one model is a bound wrong for the next, and this
+repository has already paid for carrying a measured number into a comparison it did not belong to. What
+it rejects is a divergence too large for arithmetic to explain — the shape a real commit-logic defect
+would have.
+
+### What is still open, and it is not a test problem
+
+`ChatSession` dispatches to speculative decoding in production, and `SamplingOptions.Greedy` implies a
+determinism this path does not provide: the same prompt yields different text depending on whether
+speculation engaged, which depends on an adaptive gate and on whether the drafter found a match. The
+textbook guarantee that speculative decoding preserves the target model's distribution assumes the verify
+computes the same distribution as the decode. At a ~0.5 logit difference it does not.
+
+Three options, none of them free, and the third needs measuring before anyone builds it:
+
+1. **Document it.** Say plainly that greedy + speculation is not bit-identical to greedy single-token.
+   Cheapest, and honest, but it leaves a surprising behaviour in a shipped API.
+2. **Do not dispatch to speculation under greedy** unless the caller opts in. Costs the speedup — which,
+   note, measured **0.64–0.89x on every configuration here**, i.e. a net LOSS on this CPU stack already.
+3. **Gate acceptance on the margin.** Accept from the batched row only when top-1 minus top-2 exceeds the
+   known kernel error (measured 0.44–1.37, so a threshold near 1.5), and fall back to a single-token step
+   at a near-tie. That restores bit-identity exactly where it is currently lost. It is a **hypothesis about
+   cost**, not a plan: it must be benchmarked before implementation, because it spends speedup at the
+   near-ties that are also where drafts are most likely to be accepted.
+
+Also open, smaller: verifying that speculation engaged is impossible from outside — `ChatSession.LastStats`
+exposes no commit count. Until it does, the ChatSession test reports rather than gates.

@@ -25,7 +25,38 @@ All four verified directly against `Directory.Packages.props` comments + live ch
   nothing currently fills.
 - **`OpenTelemetry.Exporter.Prometheus.AspNetCore` @ 1.15.3-beta.1** — no stable release has ever been published for
   this package (confirmed via its own CHANGELOG.md, 2026-08-06); every version on NuGet, including the current latest
-  (1.17.0-beta.1 as of 2026-08-06), is alpha/beta. This is [[opentelemetry-prometheus-beta-status]] — treat the version
+  (1.17.0-beta.1 as of 2026-08-06/07). This is [[opentelemetry-prometheus-beta-status]] — treat the version
   number as a hint to re-check, not the answer.
+
+**This one is no longer a "decide deliberately, from scratch" item — it already has a deep, dated investigation.**
+`docs/specs/guard-telemetry-meter-plan.md`, section "C0 resolved — no new library is needed" (coordinator,
+2026-08-06): 33 published versions, 0 stable, prerelease since 2022-08-18 (1449 days at time of writing),
+while the rest of the OTel suite shipped stable 1.17.0 the same day (verified independently 2026-08-07: `OpenTelemetry`,
+`OpenTelemetry.Api`, `.Exporter.OpenTelemetryProtocol`, `.Exporter.Console/.InMemory/.Zipkin`, `.Extensions.Hosting/.Propagators`
+all hit stable 1.17.0 on 2026-07-16, same day as Prometheus's 1.17.0-beta.1). The doc's conclusion: **the product does
+not need this package at all** — `/metrics` scrape is already served by this repo's own hand-rolled, tested,
+dependency-free Prometheus renderer (`Sources/Anomalies/Monitoring/GuardTelemetry.cs`), and if a customer ever wants
+to push to their own OTel collector, the stable `OpenTelemetry.Exporter.OpenTelemetryProtocol` (stable since
+2021-02-10) reads off the same `Meter` with no Prometheus-specific reflection.
+**Sole current consumer is `Demo/LocalAgentAspNetDemo` (non-AOT demo, not the shipped `overfit` CLI)** — confirmed
+by grep 2026-08-07, only file referencing the package. `Directory.Build.targets`'s `OVERFITPRERELEASE` guard is
+now live (added since the 2026-08-06 investigation) and its accept-list is deliberately empty — **the guard
+currently fires a warning on every `Sources/Main` build** (verified by building Main 2026-08-07), because nobody
+has yet either accepted this pin with a reason/date or migrated the demo off it. This is not a stale warning to
+silence; it is the guard doing exactly what it was built for. Three live choices for the user, unchanged since
+2026-08-06: accept it explicitly (add an `OverfitAcceptedPrerelease` entry — hard to justify given the C0
+finding), migrate `Demo/LocalAgentAspNetDemo` onto the stable OTLP exporter, or drop Prometheus-export from the
+demo entirely. Don't re-run the C0 investigation from scratch — it's already done; only check whether anything
+has changed (a stable release appearing, or the demo already migrated).
+
+Also noticed 2026-08-07: **`TorchSharp-cpu` is centrally pinned in `Directory.Packages.props` (0.106.0) but has
+zero `<PackageReference>` consumers anywhere in the solution** (grepped every `.csproj`, case-insensitive — only
+hits are the pin itself and doc mentions). `dotnet list package --outdated` never surfaces it for any project,
+which is consistent with "nothing restores it," not with "it's already at latest." This contradicts this agent's
+own role definition, which lists `TorchSharp-cpu` alongside `MathNet.Numerics`/`Accord.Neuro`/`Microsoft.ML.OnnxRuntime`
+as backing cross-checks/parity tests — those three ARE referenced (`Sources/Benchmark/Benchmarks.csproj`),
+`TorchSharp-cpu` is not. Worth a one-line flag to the user each survey until it's either wired up or removed
+from the central pin file — an orphaned pin isn't a security or build risk, but it's dead weight nobody will
+notice going stale.
 
 See also [[test-only-packages]] for the cheap-bump bucket.
