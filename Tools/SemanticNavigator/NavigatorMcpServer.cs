@@ -35,7 +35,21 @@ namespace DevOnBike.Overfit.Navigator
         /// <summary>Loads the solution once, then serves requests until stdin closes.</summary>
         public static async Task<int> RunAsync(string solutionPath, CancellationToken cancellationToken)
         {
-            var started = Stopwatch.StartNew();
+            // A timestamp, not a Stopwatch instance. Two reasons, and the second is not stylistic:
+            //
+            // 1. `Stopwatch.StartNew()` allocates; `GetTimestamp()` is a bare read of the performance
+            //    counter. This repository bans the allocating form in Sources/Main and keeps the static
+            //    `GetTimestamp`/`GetElapsedTime` pair explicitly allowed — this is that pair.
+            // 2. The previous line paired `StartNew()` with `Stopwatch.GetElapsedTime(started)`, which
+            //    takes a `long` and cannot take a `Stopwatch` — it did not compile. Nobody noticed because
+            //    this project is skipped by every build here: the running MCP server holds its own DLL
+            //    open, so `dotnet build` fails on MSB3021 before reaching the compiler.
+            //
+            // ValueStopwatch would be the idiomatic choice, but it lives in Sources/Main and this tool
+            // deliberately does not reference the library — it hosts MSBuild and analyzers through
+            // reflection, which is the opposite of what Main allows. Pulling Main in for a timing helper
+            // would invert that separation.
+            var started = Stopwatch.GetTimestamp();
 
             using var loader = await WorkspaceLoader.OpenAsync(solutionPath, cancellationToken).ConfigureAwait(false);
 

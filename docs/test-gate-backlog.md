@@ -35,7 +35,7 @@ warm file cache is faster and this is not an average of anything.
 | T1 | ⏳ **65 of 72 converted 2026-08-07; 7 left, each with a stated reason.** Silent passes now skip. Three mechanisms: `ModelFact` (28) for a `const` path, `FixtureFact` + `TestFixture` (31) for a path resolved at runtime, `ProductionAnomalyBaseFact` (2). See the section below for the seven that remain and why. | **highest** — it is the credibility of the gate itself | the remaining 7 need a judgement each, not a sweep | low; the change can only turn silent passes into visible skips |
 | T2 | **Weight initialisation is not seedable, and two tests assert through it** | `MathUtils.Rng` seeds from `Guid.NewGuid().GetHashCode()`, `LSTMCell` and `FastTensorExtensions` draw from `Random.Shared`. Neither `GPT1Model` nor `Crnn` takes a seed, so every run starts from a different network. Two failures below are consequences. | high | medium — touches `Sources/Main`, so it goes through the delivery chain | medium — a seed parameter changes behaviour for every caller that omits it |
 | T3 | ✅ **RESOLVED 2026-08-07 by experiment — and it split in two.** Both parity tests pass once the kernel layout is held constant, so they are test bugs (see the section below). The half that did not dissolve is now **T8**. | — | — | — |
-| T8 | **The repacked/tiled Q4_K GEMM does not reproduce run to run** | Measured 2026-08-07 and the contrast is the evidence: two invocations of the **per-row** kernel in one process produced identical greedy output; two invocations of the **repacked** kernel produced output diverging from token 0 (`matched 0/24`). Most likely a reduction order that follows the parallel work split. **This is not an exotic path** — `IsPrepacked` makes it the default wherever a `*.gguf.repack` sidecar sits next to the model, which is ordinary usage here. | **high** — it decides what a coherence assertion can mean anywhere in the repo | medium — needs a look at how `GemmTiled` accumulates | low to investigate |
+| T8 | **NOT reproduced in 36 runs, and my diagnosis of it was wrong twice.** The tiled/weight-stationary A/B is **partially live**, not dead: the sidecar indexes whole tensors by name, so per-head attention weights — which are unnamed slices — keep `IsPrepacked == false` and the flag really does pick their kernel. See the section below. The one failure remains unexplained. | **high** — it decides what a coherence assertion can mean anywhere in the repo | medium | low to investigate |
 | T9 | **`GgufLlamaLoaderIntegrationTests` compares two different files** | `Max diff 7.83`, **mean diff 1.387** over 151936 logits, and a completely different top-1 (22043 vs 40) — orders past numerical noise, when the repo's own threshold for "enough to flip an argmax" is 0.44. The arithmetic says why: `qwen.gguf` is 6.18 GB (÷2 B = 3.09 B params) and `qwen.bin` is 13.59 GB (÷4 B = 3.40 B), a gap of 0.31 B — which is exactly `151936 × 2048`, one language-model head. The test's comment claims "Both go through identical FP32 kernels — only loader differs"; the file sizes contradict it. Same class as the already-resolved Q4_K_M parity bug, which was **a test-premise bug, not code**. | medium | low — read both headers and diff the tensor lists | low |
 | T10 | ✅ **RESOLVED 2026-08-07 — a real defect in the shipped converters, not in a test.** Both Python converters wrote Q/K in HuggingFace layout into a format whose contract is adjacent-pair, so every `.bin` produced from a Qwen-family model was read with the wrong RoPE convention. See the section below. | — | — | — |
 | T4 | **`BatchedQuantProjection.UseTiledPrefillQ4K` is left mutated** | `TinyBlasTiledPrefillE2EPhase3Tests` sets the static flag and never restores it, so it stays `true` for every test that follows in the same process. Masked today only because each chunk is its own process. | medium | trivial (`try/finally`) | none |
@@ -306,3 +306,60 @@ Both converters died on their own progress line (`... -> f32 ...`) whenever stdo
 a console — Python then picks the system code page, cp1252 here, which has no arrow. They now force UTF-8.
 Nothing had been written when it crashed, so the failure was harmless; it was also invisible until output
 was captured.
+
+---
+
+## T8, corrected 2026-08-07 — the A/B is partly live, and I twice said otherwise
+
+**What I claimed, and why it was wrong.** Reading
+`var tiled = (w.IsPrepacked || UseTiledPrefillQ4K) && ...` next to a `*.gguf.repack` sidecar on disk, I
+concluded the flag was inert and `TinyBlasTiledPrefillE2EPhase3Tests` was comparing two identical arms. Two
+things seemed to confirm it: the test's own **1.04x** timing, and a diagnostic of mine that flipped the flag
+and saw **no change in output**.
+
+Both were real observations and neither supported the conclusion.
+
+| | measured |
+|---|--:|
+| TTFT ratio, morning, inside the chunked gate | 1.04x |
+| TTFT ratio, six consecutive runs, idle box | **2.66 / 2.51 / 2.39 / 2.50 / 2.44 / 2.57** |
+
+A 2.5x difference, six times, with a spread of 0.27, is not two runs of one kernel. My flag diagnostic
+compared **output** and answered its question correctly — the two kernels agree token-for-token on this
+input. It never compared **time**, so it could not have caught this.
+
+**Why the flag is not inert.** `AttachPrepacked` matches the sidecar **by tensor name**:
+
+```csharp
+if (repacked.TryGet(tensorName, out var inputSize, out var outputSize, out var bytes)
+    && inputSize == weight.InputSize && outputSize == weight.OutputSize) { weight.SetPrepacked(bytes); }
+```
+
+`CachedMultiHeadAttention` states the consequence outright: *"WqWhole is covered by the `*.gguf.repack`
+sidecar (**per-head weights are slices, which the sidecar cannot match by name**), so IsPrepacked is
+true"*. So:
+
+| weight | `IsPrepacked` | what selects the kernel |
+|---|---|---|
+| FFN gate/up/down, whole-matrix Q/O | true | always tiled; the flag is genuinely inert |
+| per-head Q/K/V/O | **false** | **the flag** |
+
+The A/B is dead for one half of the work and live for the other.
+
+**What that does to the original failure.** `matched 0/24` may not be flakiness at all: it may be a real,
+reproducible disagreement between the tiled and weight-stationary kernels **on the per-head attention
+path**. That was among the first hypotheses and I discarded it on the strength of a single timing reading
+taken while the box was loading models back to back.
+
+**What is still true.** The fault has not reproduced: 18 idle runs of a diagnostic, 12 under 30 CPU burners
+on 32 cores (2.7x slower wall-clock, so the load was real), and 6 runs of the actual test. Thirty-six clean
+runs bound the rate; they do not explain the one failure, and the failure happened.
+
+**Next, and this time in the right order.** Compare the per-head attention output directly between the two
+kernels — tiled versus weight-stationary, same weights, same input — rather than inferring from end-to-end
+tokens. If they differ, this is a correctness question about one kernel and not a flaky test.
+
+**The reusable mistake.** I built an abstraction of the failing scenario and ran it thirty times instead of
+running the scenario. Simplifying is how a cause is isolated; it is also how the cause gets deleted before
+anyone looks at it. **Reproduce first, simplify second.** And a measurement that answers the question you
+asked can still be the wrong question — mine compared outputs when the evidence was in the timing.
