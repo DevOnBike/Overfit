@@ -37,6 +37,7 @@ warm file cache is faster and this is not an average of anything.
 | T3 | ✅ **RESOLVED 2026-08-07 by experiment — and it split in two.** Both parity tests pass once the kernel layout is held constant, so they are test bugs (see the section below). The half that did not dissolve is now **T8**. | — | — | — |
 | T8 | **The repacked/tiled Q4_K GEMM does not reproduce run to run** | Measured 2026-08-07 and the contrast is the evidence: two invocations of the **per-row** kernel in one process produced identical greedy output; two invocations of the **repacked** kernel produced output diverging from token 0 (`matched 0/24`). Most likely a reduction order that follows the parallel work split. **This is not an exotic path** — `IsPrepacked` makes it the default wherever a `*.gguf.repack` sidecar sits next to the model, which is ordinary usage here. | **high** — it decides what a coherence assertion can mean anywhere in the repo | medium — needs a look at how `GemmTiled` accumulates | low to investigate |
 | T9 | **`GgufLlamaLoaderIntegrationTests` compares two different files** | `Max diff 7.83`, **mean diff 1.387** over 151936 logits, and a completely different top-1 (22043 vs 40) — orders past numerical noise, when the repo's own threshold for "enough to flip an argmax" is 0.44. The arithmetic says why: `qwen.gguf` is 6.18 GB (÷2 B = 3.09 B params) and `qwen.bin` is 13.59 GB (÷4 B = 3.40 B), a gap of 0.31 B — which is exactly `151936 × 2048`, one language-model head. The test's comment claims "Both go through identical FP32 kernels — only loader differs"; the file sizes contradict it. Same class as the already-resolved Q4_K_M parity bug, which was **a test-premise bug, not code**. | medium | low — read both headers and diff the tensor lists | low |
+| T10 | ✅ **RESOLVED 2026-08-07 — a real defect in the shipped converters, not in a test.** Both Python converters wrote Q/K in HuggingFace layout into a format whose contract is adjacent-pair, so every `.bin` produced from a Qwen-family model was read with the wrong RoPE convention. See the section below. | — | — | — |
 | T4 | **`BatchedQuantProjection.UseTiledPrefillQ4K` is left mutated** | `TinyBlasTiledPrefillE2EPhase3Tests` sets the static flag and never restores it, so it stays `true` for every test that follows in the same process. Masked today only because each chunk is its own process. | medium | trivial (`try/finally`) | none |
 | T5 | **`AnomalyLabLoadGeneratorTests` needs a second forward nobody documented** | Fails with *"no request succeeded — the lab is reachable but not serving"*. It needs the workload replicas forwarded (`k8s/overfit/forward-replicas.cmd`), which is a different route from the Prometheus one fixed in A4. | medium | trivial | none |
 | T6 | ⏳ **Light half measured, heavy half deferred.** 245 test results, **101 minutes** of measured runtime. The distribution is why the gate had to split: median chunk 5 s, but **one test takes 27.4 min** (`QwenGgufKnowledgeInjectionDemoTests`), the next 15.8 and the next 9.6. The 34-test heavy group has not been run and 29 of its entries are still name-guesses. | medium | hours of clock for the heavy half | none |
@@ -235,3 +236,73 @@ because it is one run of an existing test and its answer decides whether every c
 repository is sound. Then **T2**, which unblocks two failures and needs the delivery chain because it changes
 `Sources/Main`. **T4 and T5** are minutes each and can go with anything. **T7 last**, because T1 supplies the
 mechanism it needs.
+
+---
+
+## T10, resolved 2026-08-07 — the converters wrote the wrong RoPE layout, and it took four hypotheses
+
+`GgufLlamaLoaderIntegrationTests` had failed since the first `[LongFact]` run of the morning with
+`max diff 7.83, mean diff 1.387` and a completely different top-1. It now passes at **max diff 0.000053**,
+which is floating-point noise — five orders of magnitude, and what the test had always asked for.
+
+### The defect
+
+`Scripts/convert_gguf.py` and `Scripts/convert_llama.py` sliced Q/K per head and transposed them, and did
+nothing else. The `.bin` format's contract is the **adjacent-pair** RoPE layout — stated three independent
+times on the C# side: `SafetensorsLlamaLoader` permutes on load, the fixture in
+`SafetensorsLlamaLoaderTests` writes pre-permuted weights, and a passing `[Fact]` asserts the two paths
+agree. The converters were the only writers not honouring it, so **every `.bin` produced from a
+Qwen-family model was read with the wrong rotary convention**.
+
+`GPT1Config.RopeSplitHalf`'s own documentation describes the symptom exactly: *"Getting it wrong leaves
+position 0 correct (identity rotation) but corrupts every later position."* That is the worst shape a bug
+can take — the model answers short prompts correctly and degrades as context grows, so nothing looks
+broken until somebody measures it. Nobody had, because these tests never ran.
+
+Fixed by permuting Q/K (and their biases; not V, not O) in both converters, mirroring the two C#
+implementations, which agree: `out[2i] = in[i]`, `out[2i+1] = in[i + headDim/2]`.
+
+### The four hypotheses, two of them wrong
+
+| # | explanation | verdict | what settled it |
+|--:|---|---|---|
+| 1 | the kernels disagree | **wrong** | the two files turned out to differ structurally |
+| 2 | tied versus separate LM head | **wrong** | the divergence starts at **layer 0**, before any head runs |
+| 3 | the RoPE convention | right | agreement at a 1-token prompt, where RoPE is the identity |
+| 4 | Q8 versus F32 | right | `LoadGguf` defaults to `quantize: true`; the binary path stays F32 |
+
+Hypotheses 1 and 2 were plausible, arithmetically supported, and false. Each was killed by a tool rather
+than by argument — the GGUF tensor table, a per-layer cosine walk, and a split by prompt length. **The
+measurement that separates causes is worth more than the one that confirms a suspicion**: comparing final
+logits said only "they differ"; comparing per layer said *where*, and comparing across prompt lengths said
+*why*.
+
+### Two mistakes of my own, recorded because they are the reusable part
+
+**A check added on a hypothesis outlives the hypothesis.** Believing (2), I asserted the structural
+difference before the logit comparison. When (2) was refuted I wrote that down in the comment — and left
+the assertion in place, where it then blocked the test from ever reaching the comparison it exists for. A
+guard written from a guess reads, afterwards, like an established fact.
+
+**Estimating instead of measuring.** Asked how long regenerating the 13.6 GB `.bin` would take, I guessed
+"single-digit to twenty minutes". Measured: **36 seconds**.
+
+### Numbers
+
+| | before | after |
+|---|--:|--:|
+| layer 0 cosine, 3-token prompt | 0.978913 | 0.999908 |
+| last layer, 3-token prompt | 0.863897 | 0.992236 |
+| logits, quantised reference | cosine 0.833465 | cosine 0.990972 |
+| logits, F32 reference (max abs) | 7.83 | **0.000053** |
+
+The residual in the quantised row is not a defect: `LoadGguf` makes attention, FFN and the LM head
+Q8_0-resident while the binary path stays F32. The loader already exposes `quantize: false` and documents
+it as "the parity reference"; the test simply had not used it.
+
+### Also fixed on the way
+
+Both converters died on their own progress line (`... -> f32 ...`) whenever stdout was a pipe rather than
+a console — Python then picks the system code page, cp1252 here, which has no arrow. They now force UTF-8.
+Nothing had been written when it crashed, so the failure was harmless; it was also invisible until output
+was captured.

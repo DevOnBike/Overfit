@@ -35,7 +35,8 @@ namespace DevOnBike.Overfit.Navigator
         /// <summary>Loads the solution once, then serves requests until stdin closes.</summary>
         public static async Task<int> RunAsync(string solutionPath, CancellationToken cancellationToken)
         {
-            var started = Stopwatch.GetTimestamp();
+            var started = Stopwatch.StartNew();
+
             using var loader = await WorkspaceLoader.OpenAsync(solutionPath, cancellationToken).ConfigureAwait(false);
 
             // Warming here rather than on first query is the whole reason this is a server: the host's first

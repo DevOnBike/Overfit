@@ -6,6 +6,7 @@
 using System.Text;
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning;
+using DevOnBike.Overfit.Maths;
 using DevOnBike.Overfit.Ops;
 using DevOnBike.Overfit.Optimizers;
 using DevOnBike.Overfit.Training;
@@ -76,6 +77,13 @@ namespace DevOnBike.Overfit.Tests.Examples
             const int optSteps = 400;
             const int accumWords = 8;
             const float lrMax = 0.01f, lrMin = 1e-4f;
+
+            // SEED THE WEIGHTS, not just the data order. The `new Random(20260527)` below seeds which
+            // words this test draws; it does NOT touch weight initialisation, which is what actually made
+            // this test flaky. Measured 2026-08-07 on unchanged code: 5/24 recognised on one run, 23/24 on
+            // another. The LSTM inside the CRNN drew from `Random.Shared`, outside any seed's reach, until
+            // it was routed through MathUtils the same day.
+            MathUtils.SetSeed(20260527);
 
             using var ocr = new Crnn(
                 imageHeight: H, imageWidth: Wmax, classCount: Classes,

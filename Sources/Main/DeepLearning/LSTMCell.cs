@@ -6,6 +6,7 @@
 using System.Numerics.Tensors;
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning.Abstractions;
+using DevOnBike.Overfit.Maths;
 using DevOnBike.Overfit.Ops;
 using DevOnBike.Overfit.Tensors;
 using DevOnBike.Overfit.Tensors.Core;
@@ -131,11 +132,20 @@ namespace DevOnBike.Overfit.DeepLearning
             return (h0, c0);
         }
 
+        /// <summary>
+        /// Uniform init in <c>[-limit, limit)</c>, drawn from <see cref="MathUtils"/> so that
+        /// <see cref="MathUtils.SetSeed"/> actually reaches it.
+        ///
+        /// <para>This used <c>Random.Shared</c>, which <c>SetSeed</c> cannot touch — so any model
+        /// containing an LSTM was unseedable even when its caller did everything right. Measured
+        /// 2026-08-07: <c>CtcOcrLettersDemoTests</c> seeds its data order and still scored 5/24 on one run
+        /// and 23/24 on the next, because this line was outside the seed's reach.</para>
+        /// </summary>
         private static void InitUniform(Span<float> span, float limit)
         {
             for (var i = 0; i < span.Length; i++)
             {
-                span[i] = (Random.Shared.NextSingle() * 2f - 1f) * limit;
+                span[i] = (MathUtils.NextSingle() * 2f - 1f) * limit;
             }
         }
 
