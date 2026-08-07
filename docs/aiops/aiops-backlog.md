@@ -15,7 +15,7 @@ silence, and silence is what this subsystem exists to distinguish from health.
 
 | # | Task | Why now | ROI | Difficulty | Risk |
 |---|---|---|---|---|---|
-| A1 | **24-hour run on the current build and config** | The 5/day figure belongs to a configuration that no longer exists: five floors and two code paths changed on 2026-08-05. A number quoted to a client must belong to the thing shipped. Pass: rate inside 1–9/day, zero cycle failures, zero `RequestsPerSecond` incidents from the diurnal ramp. | **highest** | trivial (one day of clock, no attention) | none |
+| A1 | 🔴 **RUN 2026-08-06/07 — DID NOT PASS, and the tail is contaminated.** **11 incidents in 24.83 h = 10.63/day** against a 1-9/day criterion, plus **one cycle failure**. Zero `RequestsPerSecond` incidents, so that third condition held. See the section below. | | The 5/day figure belongs to a configuration that no longer exists: five floors and two code paths changed on 2026-08-05. A number quoted to a client must belong to the thing shipped. Pass: rate inside 1–9/day, zero cycle failures, zero `RequestsPerSecond` incidents from the diurnal ramp. | **highest** | trivial (one day of clock, no attention) | none |
 | A2 | ✅ **DONE 2026-08-05 — and it found two defects, one of them ours.** (1) The stack's default route is `receiver: "null"`: a correct alert delivered nowhere. (2) **`time() - overfit_guard_last_cycle_timestamp_seconds > 900` cannot fire when the guard is gone** — the series vanishes with the pod, the expression evaluates over an empty vector, and the alert returns to `inactive`. Measured: `pending` for 60 s, then `inactive` for six minutes, zero notifications. With `absent()` added: **`firing` after 60 s, alert in Alertmanager, two notifications delivered, none failed.** Shipped as `k8s/lab/guard-alerts.yaml`. | **highest** | low | low |
 | A3 | ✅ **DONE 2026-08-05.** Second instance: **42 Mi, 1m CPU**, Prometheus +12 Mi and no CPU change. But 42 Mi is a guard eleven minutes old — the steady-state figure measured over the 24-hour run is **130 Mi, peak 146**. **Quote 146, not 42**: fifty namespaces is **7.3 GB**, not 2.1. The script's own arithmetic multiplied the fresh number and was wrong by 3.5x. Prometheus at 50x is extrapolation (≈2.8 queries/s), not measurement. | high | trivial | none |
 | A4 | **Evening diurnal check** | Closes the last two unverified floors (`RequestsPerSecond` gap and trend), raised 2026-08-05 and verifiable only by waiting — the fault panel cannot move deployment-wide traffic. Already scheduled. | medium | zero (scheduled) | none |
@@ -248,3 +248,53 @@ different way, and none of them does it by touching the pods** — which is why 
 wrong question and "what does it invalidate" is the right one.
 
 Everything else waits for evidence that somebody is paying for it.
+
+
+---
+
+## A1, run 2026-08-06/07 — the number, and why it does not settle anything yet
+
+Read out of `Tests/bin/fp-run-guard-log-FINAL.txt` on 2026-08-07 rather than from anyone's recollection,
+because the run finished and its result was never written down — the watcher was removed the same day and
+took the only record of the outcome with it.
+
+| | |
+|---|---|
+| window | 2026-08-06 08:04 -> 2026-08-07 08:54 UTC (**24.83 h**) |
+| cycles | 298 |
+| incidents opened | **11** |
+| incidents resolved | 10 (one still open at the end) |
+| **rate** | **10.63 / day** — criterion was 1-9 |
+| cycle failures | **1** — criterion was zero |
+| `RequestsPerSecond` incidents | **0** — criterion met |
+| cycles with at least one finding | 280 of 298 |
+| max concurrent incidents | 1 |
+
+**Two of the three pass conditions failed.** That is the headline and it is not softened below.
+
+### The contamination, which is mine
+
+The cycle failure at 2026-08-07 08:29 is `Connection refused` to
+`overfit-lab-prometheus.monitoring.svc.cluster.local:9090`, immediately preceded by *"Pod topology could
+not be refreshed; grouping this cycle used the previous snapshot of 12 pod(s)"*. Prometheus was evicted —
+by the `[LongFact]` suite run happening on the same box that morning, the run whose single-process form
+peaked at 21.7 GB and evicted the monitoring stack once before (recorded as A3).
+
+Two of the eleven incidents (08:34 and 08:44) fall **after** that disturbance. Excluding them gives
+8.85/day, which is inside the band.
+
+**They are not excluded.** Dropping the two inconvenient points would require showing that the disturbance
+CAUSED them, which has not been shown — proximity is not causation, and this file exists partly because
+that kind of reasoning is how a measurement becomes a wish. The recorded rate is 10.63/day with the
+disturbance documented alongside it, and a clean re-run is what would replace it.
+
+### The protection existed and was bypassed
+
+`Scripts/longfact_gate.py` opens with `refuse_if_the_box_is_an_instrument()`, which reads
+`Tests/bin/fp-run-clean-start.txt` and exits 3 while a 24-hour measurement is in flight. It works. It was
+simply not on the path taken: the suite was launched as `dotnet test` directly, which no marker check
+guards. A guard that only covers one of two entrances is worth naming as such rather than trusting.
+
+**Fix, when A1 is re-run:** put the marker check where the *test process* starts rather than where one
+convenience script does — an xUnit assembly fixture that refuses to run the long suite while the marker is
+fresh would cover every entrance, including a developer pressing Run in an IDE.

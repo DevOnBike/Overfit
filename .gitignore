@@ -272,21 +272,11 @@ out_temp/
 # Jetbrains Rider
 .idea/
 
+# Claude Code scratch
+.claude/
+
 # Claude Code per-user overrides
 .claude/settings.local.json
-
-# Claude Code scratch — run.py is rewritten for every command (see CLAUDE.md), so its contents are
-# never meaningful history, and the logs are process output. Everything else under .claude/ IS project
-# configuration and belongs in the repo: settings.json (the permission allow-list that makes the run.py
-# convention work), commands/, agents/, skills/.
-.claude/run*.py
-.claude/run*.ps1
-.claude/*.log
-
-# Native-AOT publish output kept next to the helper that produces it (aot.bat). 80+ MB of exe and pdb —
-# build artefacts, regenerable, and exactly the kind of thing that is committed once by accident and then
-# lives in the history for ever.
-.claude/aot-cli/
 
 # models
 *.bin
