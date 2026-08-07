@@ -87,7 +87,7 @@ namespace DevOnBike.Overfit.Tests.Diagnostics
                 : 1.0;
         }
 
-        [LongFact]  // runtime unmeasured — the test failed after 3min7s (2026-08-07)
+        [LabFact(LabEndpoint.Replicas)]
         public async Task DriveTrafficAtTheLabReplicas()
         {
             var endpoints = Endpoints();

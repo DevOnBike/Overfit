@@ -75,7 +75,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
             _output = output;
         }
 
-        [LongFact]  // runtime unmeasured — the test failed after 2s (2026-08-07)
+        [LabFact(LabEndpoint.Prometheus)]
         public async Task RecordsAWindowOfTheLabIntoAFixture()
         {
             var minutes = Setting("OVERFIT_LAB_MINUTES", 20);

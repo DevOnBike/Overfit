@@ -41,7 +41,7 @@ warm file cache is faster and this is not an average of anything.
 | T4 | **`BatchedQuantProjection.UseTiledPrefillQ4K` is left mutated** | `TinyBlasTiledPrefillE2EPhase3Tests` sets the static flag and never restores it, so it stays `true` for every test that follows in the same process. Masked today only because each chunk is its own process. | medium | trivial (`try/finally`) | none |
 | T5 | **`AnomalyLabLoadGeneratorTests` needs a second forward nobody documented** | Fails with *"no request succeeded — the lab is reachable but not serving"*. It needs the workload replicas forwarded (`k8s/overfit/forward-replicas.cmd`), which is a different route from the Prometheus one fixed in A4. | medium | trivial | none |
 | T6 | ⏳ **Light half measured, heavy half deferred.** 245 test results, **101 minutes** of measured runtime. The distribution is why the gate had to split: median chunk 5 s, but **one test takes 27.4 min** (`QwenGgufKnowledgeInjectionDemoTests`), the next 15.8 and the next 9.6. The 34-test heavy group has not been run and 29 of its entries are still name-guesses. | medium | hours of clock for the heavy half | none |
-| T7 | **Split answered by measurement; the skip policy still open.** The heavy/light split exists and is driven by timing (`Scripts/longfact_heavy.txt`). What is still undecided is the environment half: a gate that goes red on a machine without a lab teaches people to ignore it. **Do not decide before T1** — the same mechanism answers both. | medium | low | medium — the wrong split hides real failures |
+| T7 | ✅ **RESOLVED 2026-08-07 — the lab skips loudly and the gate refuses to call itself green.** `LabFact` skips instead of failing, `OVERFIT_LAB=0` skips without touching the network (GitHub CI), and the gate names every lab test that did not run and exits **4** — green, but incomplete, and someone has to say that is acceptable. Fixing the report exposed four defects in the gate's own scripts; see the section below. | — | — | — |
 
 ---
 
@@ -399,3 +399,68 @@ leaving 1.3x rather than the 2x it claimed.
 reproduced in 40+ runs, including 12 under 30 CPU burners on 32 cores. Determinism kills both candidate
 explanations: there is no run-to-run noise, and a fixed difference crosses a threshold always or never.
 Something about that process differed and nothing since has revealed what. **Recorded as unexplained.**
+
+
+---
+
+## T7, resolved 2026-08-07 — a missing lab is a decision, not a statistic
+
+The instruction was explicit: **notify that there is no lab and make the user decide**; the lab exists on
+this box, and on GitHub CI it must not run at all. That is a third state, and the suite previously had two.
+
+| Situation | Meaning | Behaviour |
+|---|---|---|
+| Model fixture absent | a fact about somebody's disk | `ModelFact` / `FixtureFact` skip quietly |
+| Lab absent | a slice of the gate did not run | `LabFact` skips and is **reported by name**, gate exits 4 |
+| Fixture present but inconsistent | a configuration defect | assert and fail |
+
+`LabFact` takes a `LabEndpoint` because the lab has two faces on separate routes — Prometheus
+(`k8s\monitoringorward.cmd`) and the replicas (`k8s\overfitorward-replicas.cmd`) — and having one up
+says nothing about the other. That distinction cost an afternoon on 2026-08-07, when five diagnostics failed
+on a missing Prometheus forward and a sixth failed for the opposite reason.
+
+`OVERFIT_LAB` controls the probe: unset probes with a 500 ms TCP budget, `0`/`off` skips without touching
+the network (this is what CI sets), `1` assumes present. The probe is a TCP connect and deliberately not an
+HTTP request, because it runs during **test discovery** and discovery must not hang — a dead forward refuses
+a connect immediately, while an HTTP call into a half-open tunnel can sit there. It establishes only that
+something is listening; a forward aimed at the wrong pod still fails on the test's own assertions, correctly.
+
+**All three states measured, not assumed:**
+
+| State | Outcome | Cost |
+|---|---|---|
+| lab up | `Passed` — the test ran | — |
+| `OVERFIT_LAB=0` | `NotExecuted`, no network touched | 1 s |
+| no lab, probe runs | `NotExecuted`, names the remedy | 13 s |
+
+The gate then prints the lab skips separately and exits **4** — not 0, not 1. Nothing failed, but the gate
+is incomplete, and the two cases call for different reactions. `--allow-no-lab` accepts the gap and records
+that acceptance in the timing log, so the decision leaves a trace.
+
+### Building the report found four defects in the gate's own scripts
+
+Every one of these was invisible while nothing skipped on purpose. They are listed because the pattern is
+the same each time: **a reporting bug does not announce itself, it just reads as good news.**
+
+1. **Skips were counted as failures.** `outcome != "Passed"` drove the "FAILING TESTS" list, so the first
+   run with deliberate skips would have printed six failures that were not failures.
+2. **`notExecuted` in `<Counters>` is always 0 on this runner.** Measured: a TRX whose single result carries
+   `outcome="NotExecuted"` still writes `notExecuted="0"` — only `total` and `executed` are filled. The gate
+   printed that attribute, so a run where everything skipped would have summarised itself as "not
+   executed 0". Skips are now `total - executed`.
+3. **The classifier could not see `[ModelFact([Dir, RefJson], "3ms")]`.** Its `[^\]]*` stopped at the array's
+   closing bracket, so **five tests appeared in neither the heavy group nor the light one** — they ran
+   nowhere, which is the precise condition this gate was built to end. Two hand-written copies of that
+   pattern had also drifted apart and answered 256 against 229 for "how many `[LongFact]` are there"; there
+   is now one pattern, built from attributes **resolved from the source** rather than listed by hand.
+4. **The classification's authority was a stale artefact.** It read test names from a `full-suite.trx`
+   written that morning, so five diagnostics written the same afternoon were absent from it and fell out of
+   both groups. Names now come from the source, which cannot go stale. Assembling them exposed two further
+   traps worth recording: `\bclass\s+(\w+)` matches the word in **prose**, yielding owners called `of` and
+   `10`; and the nearest declaration above a method is a **nested helper** wherever one exists, which
+   produced `Data.Mnist.Replica.…` for a method on `MnistDataParallelBenchTests`. Both make a name that
+   resolves to no test. The rule is now "last **top-level** declaration", verified in both directions
+   against the runner's own list.
+
+A fifth was self-inflicted and belongs here anyway: `longfact_split.py` called `main()` unguarded, so
+importing it to inspect one regex **started a test run**. Both scripts now guard with `__main__`.

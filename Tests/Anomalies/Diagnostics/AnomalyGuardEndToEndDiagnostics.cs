@@ -51,7 +51,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
             _output = output;
         }
 
-        [LongFact]  // runtime unmeasured — the test failed after 2s (2026-08-07)
+        [LabFact(LabEndpoint.Prometheus)]
         public async Task DetectsTheDegradedReplicaAndGroupsTheFindings()
         {
             var baseUrl = Environment.GetEnvironmentVariable("OVERFIT_LAB_PROMETHEUS")

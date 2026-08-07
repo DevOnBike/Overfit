@@ -69,23 +69,101 @@ def measured():
     return found
 
 
-def all_longfacts():
-    """Every [LongFact] full name, from the full-suite TRX crossed with the source attributes."""
-    text = (BIN / "full-suite.trx").read_text(encoding="utf-8", errors="replace")
-    skipped = re.findall(r'<UnitTestResult[^>]*testName="([^"]+)"[^>]*outcome="NotExecuted"', text)
+def longfact_attributes():
+    """Every attribute that IS a LongFact, resolved from the source rather than listed by hand.
 
-    pattern = re.compile(
-        r"\[(?:LongFact|ProductionAnomalyBaseFact)[^\]]*\](?:[ \t]*//[^\n]*)?(?:\s*\[[^\]]*\])*\s*public\s+(?:async\s+)?"
-        r"[\w<>\[\]\.,\s]+?\s+(\w+)\s*\(")
-    names = set()
+    Hardcoding the list was fine when there were two. Four more arrived on 2026-08-07 — `ModelFact`,
+    `FixtureFact`, `LabFact`, plus subclasses of those — and a hardcoded list does not fail when it goes
+    stale, it silently drops those tests out of the heavy group. So walk the inheritance to a fixpoint:
+    anything deriving from a known LongFact is one.
+    """
+    declarations = []
 
     for p in TESTS.rglob("*.cs"):
         if any(x in p.parts for x in ("bin", "obj")):
             continue
 
-        names.update(pattern.findall(p.read_text(encoding="utf-8", errors="replace")))
+        declarations += re.findall(r"class\s+(\w+)\s*:\s*(\w+)",
+                                   p.read_text(encoding="utf-8", errors="replace"))
 
-    return [n for n in skipped if n.rsplit(".", 1)[-1] in names]
+    known = {"LongFact"}
+
+    for _ in range(8):  # BOUND: inheritance depth here is 2; 8 is slack, not a real limit.
+        grown = {d for d, base in declarations if base in known}
+
+        if grown <= known:
+            break
+
+        known |= grown
+
+    return sorted(known)
+
+
+def longfact_method_pattern():
+    """One pattern, used by this script AND by longfact_gate — group 1 is the method name.
+
+    Two copies of it gave two different answers to "how many [LongFact] are there", 256 against 229, which
+    is precisely the mis-sized gate the gate's own docstring warns about.
+
+    Two details are load-bearing. `(?:[^\\[\\]]|\\[[^\\]]*\\])*` rather than `[^\\]]*`, because the argument
+    list can itself contain a bracket, as in `[ModelFact([Dir, RefJson], "3ms")]` — the simple form stopped
+    at the array's closing bracket and five tests fell out of BOTH groups, running nowhere. And the
+    optional `//` after the attribute, because several sites carry a trailing note there.
+    """
+    return re.compile(
+        r"\[(?:" + "|".join(longfact_attributes()) + r")(?:[^\[\]]|\[[^\]]*\])*\](?:[ \t]*//[^\n]*)?"
+        r"(?:\s*\[[^\]]*\](?:[ \t]*//[^\n]*)?)*\s*public\s+(?:async\s+)?"
+        r"[\w<>\[\]\.,\s]+?\s+(\w+)\s*\(")
+
+
+def all_longfacts():
+    """Every [LongFact] full name, read from the SOURCE.
+
+    It used to take the names from `full-suite.trx` and merely cross-check them against the source. That
+    made a stale artefact the authority on what exists: the TRX in `Tests/bin` was written at 10:20 on
+    2026-08-07 and five diagnostics added that afternoon were absent from it, so they landed in neither
+    the heavy group nor the light one — invisible, and in exactly the way this gate exists to prevent.
+
+    The source cannot go stale. A name assembled wrongly here is also not silent: the filter matches
+    nothing, the chunk executes zero of one, and `run_chunk` reports FAIL.
+    """
+    pattern = longfact_method_pattern()
+    found = []
+
+    for p in TESTS.rglob("*.cs"):
+        if any(x in p.parts for x in ("bin", "obj")):
+            continue
+
+        text = p.read_text(encoding="utf-8", errors="replace")
+        namespace = re.search(r"^\s*namespace\s+([\w.]+)", text, re.M)
+
+        if not namespace:
+            continue
+
+        for m in pattern.finditer(text):
+            # The declaring class: the last TOP-LEVEL declaration above the attribute.
+            #
+            # Two narrower versions were wrong. `\bclass\s+(\w+)` also matches the word in prose, and
+            # did — doc comments produced owners called `of` and `10`. Anchoring to a line start fixed
+            # that but still took the nearest declaration, which is a NESTED helper wherever one sits
+            # above the test: that gave `Data.Mnist.Replica.…` for a method on
+            # `MnistDataParallelBenchTests`. Both errors produce a name that resolves to no test.
+            #
+            # Top-level is the shallowest indent in the file (block-scoped namespaces, .editorconfig).
+            declarations = [
+                (len(c.group(1)), c.group(2)) for c in re.finditer(
+                    r"^([ \t]*)(?:(?:public|internal|private|protected|sealed|abstract|static|partial)"
+                    r"[ \t]+)*class[ \t]+(\w+)", text[:m.start()], re.M)]
+
+            if not declarations:
+                continue
+
+            outermost = min(d[0] for d in declarations)
+            owner = next(name for indent, name in reversed(declarations) if indent == outermost)
+
+            found.append(f"{namespace.group(1)}.{owner}.{m.group(1)}")
+
+    return sorted(set(found))
 
 
 def classify(names, timings):
@@ -114,6 +192,44 @@ def classify(names, timings):
     return heavy, light
 
 
+# Must match LabFact.Marker in Tests/LabFact.cs, same as in longfact_gate.py.
+LAB_MARKER = "LAB NOT AVAILABLE"
+
+
+def split_results(trx_text):
+    """(failures, skips, lab_skips) from one chunk's TRX — three states, because they mean three things."""
+    import xml.etree.ElementTree as ET
+
+    failures, skips, lab = [], [], []
+
+    try:
+        root = ET.fromstring(trx_text)
+    except ET.ParseError:
+        return sorted(set(re.findall(r'testName="([^"]+)"[^>]*outcome="Failed"', trx_text))), [], []
+
+    for element in root.iter():
+        if not element.tag.endswith("UnitTestResult"):
+            continue
+
+        outcome, name = element.get("outcome", ""), element.get("testName", "?")
+
+        if outcome == "Passed":
+            continue
+
+        if outcome != "NotExecuted":
+            failures.append(name)
+
+            continue
+
+        skips.append(name)
+        message = " ".join((m.text or "") for m in element.iter() if m.tag.endswith("Message"))
+
+        if LAB_MARKER in message:
+            lab.append(name)
+
+    return sorted(set(failures)), sorted(set(skips)), sorted(set(lab))
+
+
 def run_chunk(label, names, index, total, kind="light"):
     trx = BIN / f"longfact-{kind}-{index:03d}.trx"
 
@@ -130,7 +246,7 @@ def run_chunk(label, names, index, total, kind="light"):
     elapsed = time.time() - started
 
     passed = failed = executed = 0
-    bad = []
+    bad, skipped, lab = [], [], []
 
     if trx.exists():
         text = trx.read_text(encoding="utf-8", errors="replace")
@@ -141,12 +257,15 @@ def run_chunk(label, names, index, total, kind="light"):
             passed, failed = int(c.get("passed", 0)), int(c.get("failed", 0))
             executed = int(c.get("executed", 0))
 
-        bad = sorted(set(m.group(1) for m in re.finditer(
-            r'<UnitTestResult[^>]*testName="([^"]+)"[^>]*outcome="(?!Passed)(\w+)"', text)))
+        bad, skipped, lab = split_results(text)
 
-    state = "ok  " if (failed == 0 and executed == len(names)) else "FAIL"
+    # A skip is NOT a failure. Conflating them would report the whole heavy group red on a box whose lab
+    # is down or whose model fixtures live elsewhere — and a group that is red for a reason nobody can
+    # fix is a group people stop reading.
+    state = "ok  " if (failed == 0 and executed + len(skipped) == len(names)) else "FAIL"
+    note = (f"  skip {len(skipped)}" + (f" (lab {len(lab)})" if lab else "")) if skipped else ""
     print(f"[{index:2d}/{total}] {state} {elapsed:6.0f}s  {len(names):2d} tests  pass {passed:2d} "
-          f"fail {failed:2d}  {label}", flush=True)
+          f"fail {failed:2d}{note}  {label}", flush=True)
 
     for b in bad[:8]:
         print(f"          !! {b.replace('DevOnBike.Overfit.Tests.', '')}", flush=True)
@@ -156,10 +275,12 @@ def run_chunk(label, names, index, total, kind="light"):
         if msg:
             print(f"             {msg.group(1).strip().splitlines()[0][:170]}", flush=True)
 
+    # `kind`, not a hardcoded "LIGHT": every heavy chunk was about to be logged as light, which would have
+    # made the one artefact that answers "how long does the release gate take" answer it wrongly.
     with PROGRESS.open("a", encoding="utf-8") as fh:
-        fh.write(f"{datetime.datetime.now(datetime.timezone.utc):%Y-%m-%dT%H:%M:%SZ}\tLIGHT\t{label}\t"
-                 f"{len(names)}\t{elapsed:.0f}s\tpass {passed}\tfail {failed}\t"
-                 f"{';'.join(bad) if bad else '-'}\n")
+        fh.write(f"{datetime.datetime.now(datetime.timezone.utc):%Y-%m-%dT%H:%M:%SZ}\t{kind.upper()}\t"
+                 f"{label}\t{len(names)}\t{elapsed:.0f}s\tpass {passed}\tfail {failed}\t"
+                 f"skip {len(skipped)}\tlab {len(lab)}\t{';'.join(bad) if bad else '-'}\n")
 
     return passed, failed, len(names), bad
 
@@ -251,4 +372,7 @@ def main():
             print("   ", b.replace("DevOnBike.Overfit.Tests.", ""))
 
 
-main()
+# Guarded, same as longfact_gate.py. Unguarded, `import longfact_split` to check one of its regexes
+# STARTS A TEST RUN — which is what happened at 20:41 on 2026-08-07 and had to be killed.
+if __name__ == "__main__":
+    main()

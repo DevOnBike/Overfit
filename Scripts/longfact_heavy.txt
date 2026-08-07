@@ -1,5 +1,5 @@
 # [LongFact] HEAVY group — excluded from the per-merge gate, run before a release.
-# Written 2026-08-07T10:21:31Z by Scripts/longfact_split.py
+# Written 2026-08-07T14:39:41Z by Scripts/longfact_split.py
 # HEAVY means: measured at or above 120s, OR its name says it trains or
 # benchmarks and it has never been measured. The second kind is marked GUESSED and is a
 # hypothesis, not a measurement — it becomes a measurement the first time the heavy group
