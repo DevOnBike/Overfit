@@ -29,14 +29,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
 
         private static string SafetensorsPath => Path.Combine(TestModelPaths.Qwen3B.Dir, "model.safetensors");
 
-        [LongFact("4ms")]
+        [FixtureFact(TestFixture.QwenSafetensors, "4ms")]
         public void LoadConfig_RealQwen05B_MatchesArchitecture()
         {
-            if (!File.Exists(SafetensorsPath))
-            {
-                _out.WriteLine("model.safetensors not present — skipping.");
-                return;
-            }
 
             var cfg = LlamaConfigReader.ReadFromDirectory(TestModelPaths.Qwen3B.Dir);
 
@@ -51,14 +46,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             Assert.True(cfg.TieWeights);
         }
 
-        [LongFact("5s")]
+        [FixtureFact(TestFixture.QwenSafetensors, "5s")]
         public void Generate_RealQwen05B_FromSafetensors_CompletesCoherently()
         {
-            if (!File.Exists(SafetensorsPath))
-            {
-                _out.WriteLine("model.safetensors not present — skipping.");
-                return;
-            }
 
             using var engine = SafetensorsLlamaLoader.Load(TestModelPaths.Qwen3B.Dir, quantize: false);
             var tok = QwenTokenizer.Load(TestModelPaths.Qwen3B.Dir);

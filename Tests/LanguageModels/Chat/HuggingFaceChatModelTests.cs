@@ -25,14 +25,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Chat
 
         private static string SafetensorsPath => Path.Combine(TestModelPaths.Qwen3B.Dir, "model.safetensors");
 
-        [LongFact("4s")]
+        [FixtureFact(TestFixture.QwenSafetensors, "4s")]
         public void Chat_RealQwen05B_GenericPipeline_Responds()
         {
-            if (!File.Exists(SafetensorsPath))
-            {
-                _out.WriteLine("model.safetensors not present — skipping.");
-                return;
-            }
 
             using var model = HuggingFaceChatModel.LoadFromDirectory(TestModelPaths.Qwen3B.Dir, maxContextLength: 512, quantize: false);
             Assert.Equal(ChatTemplateFormat.ChatML, model.Format);   // Qwen detected as ChatML

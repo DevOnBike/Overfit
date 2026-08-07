@@ -39,14 +39,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
         private readonly ITestOutputHelper _out;
         public LoRAMergeDecodeSpeedTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact("1min54s")]
+        [ModelFact([Orpheus, Adapter], "1min54s")]
         public void Merged_Vs_Preset_DecodeTokensPerSecond()
         {
-            if (!File.Exists(Orpheus) || !File.Exists(Adapter))
-            {
-                _out.WriteLine("missing orpheus/adapter");
-                return;
-            }
 
             using var trainer = new VoiceCloneTrainer(Orpheus, maxSeqLen: 256, new QLoRAOptions());
             trainer.LoadAdapter(Adapter);

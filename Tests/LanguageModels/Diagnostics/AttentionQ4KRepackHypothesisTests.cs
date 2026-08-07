@@ -30,14 +30,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
 
         public AttentionQ4KRepackHypothesisTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact("871ms")]
+        [FixtureFact(TestFixture.Avx2AndFma, "871ms")]
         public unsafe void Whole_Q4K_Gemv_vs_PerHead_Q8_Projection()
         {
-            if (!CpuFeatures.HasAvx2)
-            {
-                _out.WriteLine("AVX2 not available — the Q4_K repacked GEMV is AVX2-only; skipping the measurement.");
-                return;
-            }
 
             // Qwen-3B attention projection dims: Q and O are 2048×2048 (the heavy ones; K/V are narrow under GQA).
             const int inputSize = 2048;

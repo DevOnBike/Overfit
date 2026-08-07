@@ -32,7 +32,7 @@ warm file cache is faster and this is not an average of anything.
 
 | # | Task | Why now | ROI | Difficulty | Risk |
 |---|---|---|---|---|---|
-| T1 | **62 of 256 `[LongFact]` pass green without executing** | See the section below. This is 24% of the release gate, and on a machine without model fixtures — that is, on CI — it reports success having checked nothing. | **highest** — it is the credibility of the gate itself | medium (62 sites, mechanical, but each needs the right skip condition) | low; the change can only turn silent passes into visible skips |
+| T1 | ⏳ **65 of 72 converted 2026-08-07; 7 left, each with a stated reason.** Silent passes now skip. Three mechanisms: `ModelFact` (28) for a `const` path, `FixtureFact` + `TestFixture` (31) for a path resolved at runtime, `ProductionAnomalyBaseFact` (2). See the section below for the seven that remain and why. | **highest** — it is the credibility of the gate itself | the remaining 7 need a judgement each, not a sweep | low; the change can only turn silent passes into visible skips |
 | T2 | **Weight initialisation is not seedable, and two tests assert through it** | `MathUtils.Rng` seeds from `Guid.NewGuid().GetHashCode()`, `LSTMCell` and `FastTensorExtensions` draw from `Random.Shared`. Neither `GPT1Model` nor `Crnn` takes a seed, so every run starts from a different network. Two failures below are consequences. | high | medium — touches `Sources/Main`, so it goes through the delivery chain | medium — a seed parameter changes behaviour for every caller that omits it |
 | T3 | ✅ **RESOLVED 2026-08-07 by experiment — and it split in two.** Both parity tests pass once the kernel layout is held constant, so they are test bugs (see the section below). The half that did not dissolve is now **T8**. | — | — | — |
 | T8 | **The repacked/tiled Q4_K GEMM does not reproduce run to run** | Measured 2026-08-07 and the contrast is the evidence: two invocations of the **per-row** kernel in one process produced identical greedy output; two invocations of the **repacked** kernel produced output diverging from token 0 (`matched 0/24`). Most likely a reduction order that follows the parallel work split. **This is not an exotic path** — `IsPrepacked` makes it the default wherever a `*.gguf.repack` sidecar sits next to the model, which is ordinary usage here. | **high** — it decides what a coherence assertion can mean anywhere in the repo | medium — needs a look at how `GemmTiled` accumulates | low to investigate |
@@ -44,7 +44,76 @@ warm file cache is faster and this is not an average of anything.
 
 ---
 
-## T1, measured 2026-08-07 — 24% of the gate can pass without running
+## T1, measured and largely fixed 2026-08-07 — a quarter of the gate could pass without running
+
+**65 of 72 sites converted. 7 remain, listed at the end with the reason for each.**
+
+The pattern, in the shapes it actually took:
+
+```csharp
+if (!File.Exists(Path)) { _out.WriteLine("missing gguf"); return; }   // a PASS
+if (path is null)       { _out.WriteLine("not found");    return; }   // a PASS
+var tok = TryLoad(); if (tok is null) { return; }                     // a PASS
+if (!Avx2.IsSupported) { return; }                                    // a PASS
+```
+
+Three mechanisms, because one would not have fitted:
+
+| | | |
+|--:|---|---|
+| **28** | `ModelFact(path)` | the path is a `const string`, so the attribute can take it directly |
+| **31** | `FixtureFact(TestFixture.X)` | the path is built at runtime — `Path.Combine(TestModelPaths…)`, or a walk up the tree — which no attribute argument can express, so an **enum** travels instead and resolution lives in one place |
+| **2** | `ProductionAnomalyBaseFact` | one fixture with its own search across three directories |
+
+`TestFixture.Avx2AndFma` is in that enum although it is not a fixture at all. It is deliberate: the reader's
+question is identical — *was this actually checked?* — and it deserves the same answer in the same place
+rather than a second mechanism nobody remembers exists.
+
+### Why the proof is five ordinary `[Fact]` and not a run of the converted tests
+
+Every fixture named by those 65 tests is present on the development box, so all of them genuinely execute
+here and always did. **The defect was only ever observable where the models are missing — on CI** — which
+is also the one place nobody reads a per-test outcome rather than a colour. `ModelFactTests` therefore
+proves the mechanism against a path chosen to be absent, deterministically, inside the fast suite: a
+missing fixture must produce a `Skip` naming the path, a present one must not skip, and without
+`OVERFIT_RUN_LONG` the long-running skip must still win. It also asserts the wording contains
+*"SKIPPED, not passed"* — "fixture not present" on its own reads as an explanation for a pass, and that
+reading is what let this survive.
+
+### What it cost to do, which is the part worth remembering
+
+Three attempts to do this with a pattern, three different failures:
+
+1. a condition-matching bug meant ten sites were never touched, and the script reported the shortfall as
+   **"converted 9"** — no match is indistinguishable from nothing to do;
+2. a non-greedy regex ended a method at the wrong brace and left two files unparseable — 32 syntax errors,
+   which is the **loud** kind of failure and the one to prefer;
+3. deleting `if (!TryLoad(out var engine, out var tok))` as "a guard" also deleted the only **declaration**
+   of both variables. The condition had never done anything — the helper's own documentation says it
+   "returns true unconditionally" — so the whole substance of that line was its side effect.
+
+The fourth attempt drove from an explicit table and worked. And while consolidating two byte-identical
+copies of `LocateOverfitExe`, the replacement hardcoded `overfit.exe` and dropped the platform check —
+which would have made that fixture **permanently absent on Linux**, silently, by skipping instead of
+passing. Caught only because the wreckage from (2) was being read line by line.
+
+### The seven left, and why none of them is a sweep away
+
+| test | guard | why it needs a decision |
+|---|---|---|
+| `BuildFromGguf_RealQwen3B_ProducesOpenableSidecar` | `!File.Exists(gguf)` | `gguf` is built in the body |
+| `Load_RealGpt2Safetensors_BitParity_WithBinFixture` | `safe is null \|\| bin is null` | two locals from two separate helpers |
+| `Hybrid_VsDense_OnRealDocsCorpus` | `indexed is null` | what `BuildIndex()` needs has not been established |
+| `Fusion_KSweep_OnRealDocsCorpus` | `indexed is null` | as above |
+| `DraftModel_Speculative_BitIdentical_AndSpeedup_OnNovelText` | `Path.Combine(DraftDir, …)` | not a constant |
+| `Qwen05B_Agentic_Probe` | `Path.Combine(Dir, …)` | not a constant |
+| `RealMixtralVocab_RoundTrips` | `!File.Exists(path)` | guards on a local |
+
+Each turns on *what this test actually requires*, which is a question for the code. Guessing would attach an
+attribute that skips for the wrong reason — a defect harder to notice than the one being removed, because
+it looks like a fix.
+
+### The original diagnosis, kept because the reasoning is the reusable part
 
 The pattern, in three forms, all equivalent:
 

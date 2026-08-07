@@ -18,13 +18,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Embeddings
     {
         private const string MiniLmDir = @"C:\minilm";
 
-        [LongFact("2s")]
+        [ModelFact(MiniLmDir, "2s")]
         public void Embed_FullLengthPassage_DoesNotExhaustArena()
         {
-            if (!Directory.Exists(MiniLmDir))
-            {
-                return;
-            }
 
             using var embedder = SentenceEmbedder.ForMiniLm(MiniLmDir);
 

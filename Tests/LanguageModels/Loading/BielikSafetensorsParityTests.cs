@@ -28,14 +28,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
         private readonly ITestOutputHelper _out;
         public BielikSafetensorsParityTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact("3ms")]
+        [ModelFact([Dir, RefJson], "3ms")]
         public void Bielik_Safetensors_GreedyParity_vs_HF()
         {
-            if (!Directory.Exists(Dir) || !File.Exists(RefJson))
-            {
-                _out.WriteLine("missing C:\\bielik-st or bielik_st_ref.json (run the python ref first)");
-                return;
-            }
 
             using var doc = JsonDocument.Parse(File.ReadAllText(RefJson));
             var promptIds = doc.RootElement.GetProperty("prompt_ids").EnumerateArray().Select(e => e.GetInt32()).ToArray();

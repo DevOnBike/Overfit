@@ -43,14 +43,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
         private readonly ITestOutputHelper _out;
         public BielikDraftSpeculativeBench(ITestOutputHelper output) => _out = output;
 
-        [LongFact]  // heavy group, never measured — see Scripts/longfact_heavy.txt
+        [ModelFact([TargetGguf, DraftGguf])]  // heavy group, never measured — see Scripts/longfact_heavy.txt
         public void Bielik_DraftModel_Speculative_BitIdentical_AndSpeedup()
         {
-            if (!File.Exists(TargetGguf) || !File.Exists(DraftGguf))
-            {
-                _out.WriteLine("missing target or draft gguf");
-                return;
-            }
 
             using var target = CachedLlamaInferenceEngine.LoadGguf(TargetGguf);
             using var draft = CachedLlamaInferenceEngine.LoadGguf(DraftGguf);

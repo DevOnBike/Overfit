@@ -42,17 +42,10 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             _output = output;
         }
 
-        [LongFact("3ms")]
+        [ProductionAnomalyBaseFact("3ms")]
         public void ProductionBase_PerPodLoRA_FlattensBenignRegime_StillFlagsIncident()
         {
             var path = ResolveProductionBase();
-            if (path is null)
-            {
-                _output.WriteLine(
-                    "Production base not found ($OVERFIT_MODEL_DIR / test_fixtures / D:\\ " +
-                    "k8s_anomaly_production.bin) — skipping.");
-                return;
-            }
 
             var config = DetectConfigFromCheckpoint(path);
             _output.WriteLine($"Loaded base: {config.DModel}d / {config.NLayers}L from {path}");

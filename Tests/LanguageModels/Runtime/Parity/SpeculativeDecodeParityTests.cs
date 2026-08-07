@@ -91,17 +91,12 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
             Assert.True(anyMultiCommit, "speculative never committed >1 token — drafter/verify not exercised.");
         }
 
-        [LongFact]  // heavy group, never measured — see Scripts/longfact_heavy.txt
+        [FixtureFact(TestFixture.Qwen3BTokenizerJson)]
         public void Speculative_DecodeSpeedup_OnRepetitiveText()
         {
             if (!File.Exists(ModelPath))
             {
                 _out.WriteLine($"missing {ModelPath}");
-                return;
-            }
-            if (!File.Exists(@"C:\qwen3b\tokenizer.json"))
-            {
-                _out.WriteLine("no tokenizer");
                 return;
             }
 
@@ -184,7 +179,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
         /// (CanSpeculate false → single-token). The generation is short enough that the window never
         /// evicts, so the maths is identical — any text difference is a speculative-wiring bug. [LongFact].
         /// </summary>
-        [LongFact]  // heavy group, never measured — see Scripts/longfact_heavy.txt
+        [FixtureFact(TestFixture.Qwen3BTokenizerJson)]
         public void ChatSession_SpeculativePath_MatchesSingleToken_Greedy()
         {
             if (!File.Exists(ModelPath))
@@ -193,11 +188,6 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
                 return;
             }
             const string dir = @"C:\qwen3b";
-            if (!File.Exists(Path.Combine(dir, "tokenizer.json")))
-            {
-                _out.WriteLine("no tokenizer");
-                return;
-            }
 
             using var engine = CachedLlamaInferenceEngine.LoadGguf(ModelPath);
             var tok = new QwenChatTokenizer(QwenTokenizer.Load(dir));

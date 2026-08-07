@@ -26,14 +26,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Chat
 
         private static string SafetensorsPath => Path.Combine(TestModelPaths.Qwen3B.Dir, "model.safetensors");
 
-        [LongFact("3s")]
+        [FixtureFact(TestFixture.QwenSafetensors, "3s")]
         public void Chat_RealQwen05B_FromDirectory_ZeroPython_Responds()
         {
-            if (!File.Exists(SafetensorsPath))
-            {
-                _out.WriteLine("model.safetensors not present — skipping.");
-                return;
-            }
 
             using var model = QwenChatModel.LoadFromDirectory(TestModelPaths.Qwen3B.Dir, maxContextLength: 512, quantize: false);
             model.Chat.AddSystem("You are a concise assistant. Answer in one short sentence.");

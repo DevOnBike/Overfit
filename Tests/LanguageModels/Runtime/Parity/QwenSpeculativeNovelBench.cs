@@ -17,14 +17,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
         private readonly ITestOutputHelper _out;
         public QwenSpeculativeNovelBench(ITestOutputHelper output) => _out = output;
 
-        [LongFact]  // heavy group, never measured — see Scripts/longfact_heavy.txt
+        [ModelFact(ModelPath)]  // heavy group, never measured — see Scripts/longfact_heavy.txt
         public void Speculative_OnNovelPrompt_RealisticCase()
         {
-            if (!File.Exists(ModelPath) || !File.Exists(@"C:\qwen3b\tokenizer.json"))
-            {
-                _out.WriteLine("missing");
-                return;
-            }
             using var engine = CachedLlamaInferenceEngine.LoadGguf(ModelPath);
             var tok = QwenTokenizer.Load(@"C:\qwen3b");
             // Novel, non-echoing prompt — the model generates fresh prose; the n-gram drafter rarely matches.

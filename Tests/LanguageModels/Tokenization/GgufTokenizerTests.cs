@@ -213,15 +213,11 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Tokenization
             }
         }
 
-        [LongFact("184ms")]
+        [ModelFact(QwenMoeGguf, "184ms")]
         public void RealQwenVocab_MatchesQwenTokenizer()
         {
             // Gold cross-check: the GGUF-embedded vocab must tokenise identically to the validated
             // tokenizer.json-based QwenTokenizer — when both describe the same Qwen tokenizer.
-            if (!File.Exists(QwenMoeGguf))
-            {
-                return;
-            }
             if (!File.Exists(@"C:\qwen3b\tokenizer.json") && !File.Exists(@"C:\qwen3b\vocab.json"))
             {
                 return;

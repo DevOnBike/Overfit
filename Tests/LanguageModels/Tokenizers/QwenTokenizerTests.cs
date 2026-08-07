@@ -30,27 +30,19 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Tokenizers
             return QwenTokenizer.Load(TestModelPaths.Qwen3B.RequireTokenizerJsonPath());
         }
 
-        [LongFact("87ms")]
+        [FixtureFact(TestFixture.QwenTokenizerJson, "87ms")]
         public void Load_ValidFile_Succeeds()
         {
             var tok = TryLoad();
-            if (tok is null)
-            {
-                return;
-            }
 
             Assert.True(tok.VocabSize >= 150_000, $"Unexpected vocab size: {tok.VocabSize}");
             Console.WriteLine($"Vocab size: {tok.VocabSize}");
         }
 
-        [LongFact("107ms")]
+        [FixtureFact(TestFixture.QwenTokenizerJson, "107ms")]
         public void Encode_Hello_ReturnsNonEmptyTokens()
         {
             var tok = TryLoad();
-            if (tok is null)
-            {
-                return;
-            }
 
             var tokens = tok.Encode("Hello");
             Assert.NotEmpty(tokens);
@@ -58,14 +50,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Tokenizers
             Console.WriteLine($"'Hello' → [{string.Join(", ", tokens)}]");
         }
 
-        [LongFact("85ms")]
+        [FixtureFact(TestFixture.QwenTokenizerJson, "85ms")]
         public void Encode_Decode_RoundTrip_SimpleAscii()
         {
             var tok = TryLoad();
-            if (tok is null)
-            {
-                return;
-            }
 
             const string input = "Hello, world! How are you?";
             var tokens = tok.Encode(input);
@@ -75,14 +63,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Tokenizers
             Console.WriteLine($"'{input}' → {tokens.Length} tokens → '{decoded}'");
         }
 
-        [LongFact("135ms")]
+        [FixtureFact(TestFixture.QwenTokenizerJson, "135ms")]
         public void Encode_Decode_RoundTrip_Polish()
         {
             var tok = TryLoad();
-            if (tok is null)
-            {
-                return;
-            }
 
             const string input = "Cześć, jak się masz?";
             var tokens = tok.Encode(input);
@@ -92,14 +76,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Tokenizers
             Console.WriteLine($"'{input}' → {tokens.Length} tokens → '{decoded}'");
         }
 
-        [LongFact("72ms")]
+        [FixtureFact(TestFixture.QwenTokenizerJson, "72ms")]
         public void Encode_SpecialTokens_Recognised()
         {
             var tok = TryLoad();
-            if (tok is null)
-            {
-                return;
-            }
 
             var tokens = tok.Encode("<|im_start|>user\nHello<|im_end|>");
             Assert.Contains(QwenTokenizer.ImStart, tokens);
@@ -107,27 +87,19 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Tokenizers
             Console.WriteLine($"Special tokens: [{string.Join(", ", tokens)}]");
         }
 
-        [LongFact("82ms")]
+        [FixtureFact(TestFixture.QwenTokenizerJson, "82ms")]
         public void BosTokenId_Is151643()
         {
             var tok = TryLoad();
-            if (tok is null)
-            {
-                return;
-            }
 
             Assert.Equal(151643, QwenTokenizer.EndOfText);
             Assert.True(tok.IsSpecialToken(QwenTokenizer.EndOfText));
         }
 
-        [LongFact("74ms")]
+        [FixtureFact(TestFixture.QwenTokenizerJson, "74ms")]
         public void BuildChatPrompt_ContainsSystemAndUser()
         {
             var tok = TryLoad();
-            if (tok is null)
-            {
-                return;
-            }
 
             var tokens = tok.BuildChatPrompt("What is 2+2?");
             var decoded = tok.Decode(tokens);
@@ -140,14 +112,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Tokenizers
             Console.WriteLine(decoded);
         }
 
-        [LongFact("73ms")]
+        [FixtureFact(TestFixture.QwenTokenizerJson, "73ms")]
         public void DecodeToken_SingleToken_ReturnsString()
         {
             var tok = TryLoad();
-            if (tok is null)
-            {
-                return;
-            }
 
             // Encode a simple word and decode each token individually
             var tokens = tok.Encode("Hello");

@@ -17,14 +17,10 @@ namespace DevOnBike.Overfit.Tests.Trees
     /// </summary>
     public sealed class XgboostScoreCliTests
     {
-        [LongFact("71ms")]
+        [FixtureFact(TestFixture.OverfitCli, "71ms")]
         public void ScoreCommand_MatchesInProcessPredictor()
         {
             var exe = LocateOverfitExe();
-            if (exe is null)
-            {
-                return; // exe not built — nothing to exercise
-            }
 
             var modelPath = Path.Combine(AppContext.BaseDirectory, "test_fixtures", "xgboost", "clf_model.json");
             var model = XgboostModelLoader.Load(modelPath);
@@ -106,29 +102,13 @@ namespace DevOnBike.Overfit.Tests.Trees
             return stdout;
         }
 
-        private static string? LocateOverfitExe()
+        private static string LocateOverfitExe()
         {
-            // Walk up to the repo root (the folder with Overfit.sln), then look under Sources/Cli/bin.
-            var dir = new DirectoryInfo(AppContext.BaseDirectory);
-            while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "Overfit.sln")))
-            {
-                dir = dir.Parent;
-            }
-
-            if (dir is null)
-            {
-                return null;
-            }
-
-            var cliBin = Path.Combine(dir.FullName, "Sources", "Cli", "bin");
-            if (!Directory.Exists(cliBin))
-            {
-                return null;
-            }
-
-            var name = OperatingSystem.IsWindows() ? "overfit.exe" : "overfit";
-            var matches = Directory.GetFiles(cliBin, name, SearchOption.AllDirectories);
-            return matches.Length > 0 ? matches[0] : null;
+            // Delegates to the single implementation. Two byte-identical private copies used to live in
+            // this file and in the other CLI test; the attribute that now decides whether this test runs
+            // uses FixtureFact's copy, so a local one answering differently would let the test start and
+            // then fail on the very null the skip exists to prevent.
+            return FixtureFact.LocateOverfitCli();
         }
     }
 }

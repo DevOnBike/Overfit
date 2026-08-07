@@ -22,14 +22,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
         private readonly ITestOutputHelper _out;
         public EmbeddingsTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact("3s")]
+        [FixtureFact(TestFixture.Qwen3BQ4KmGguf, "3s")]
         public void Embed_RealQwen_Normalized_Deterministic_SemanticallyOrdered()
         {
-            if (!File.Exists(TestModelPaths.Qwen3B.Q4KmGgufPath))
-            {
-                _out.WriteLine("Qwen Q4_K_M GGUF not present — skipping.");
-                return;
-            }
 
             using var engine = GgufLlamaLoader.Load(TestModelPaths.Qwen3B.Q4KmGgufPath);
             var tok = QwenTokenizer.Load(TestModelPaths.Qwen3B.Dir);

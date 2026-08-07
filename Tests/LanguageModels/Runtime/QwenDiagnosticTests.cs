@@ -46,13 +46,11 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
         /// Broken model: top tokens are high-ID garbage (>100000).
         /// Working model: top tokens are low-ID common tokens (<5000).
         /// </summary>
-        [LongFact("7s")]
+        [FixtureFact(TestFixture.Qwen3BBinaryAndTokenizer, "7s")]
         public void Diag_BosOnly_TopLogits()
         {
-            if (!TryLoad(out var engine, out var tok))
-            {
-                return;
-            }
+            TryLoad(out var engine, out var tok);
+
             using (engine)
             {
                 using var session = engine!.CreateSession(64);
@@ -92,18 +90,11 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
         /// BOS-only logits vs full-chat-prompt logits should differ.
         /// If model ignores context, both will be identical (avg diff ≈ 0).
         /// </summary>
-        [LongFact("11s")]
+        [FixtureFact(TestFixture.Qwen3BBinaryAndTokenizer, "11s")]
         public void Diag_ContextChangesLogits()
         {
-            if (!TryLoad(out var engine, out var tok))
-            {
-                return;
-            }
-            if (tok is null)
-            {
-                _out.WriteLine("SKIPPED: no tokenizer");
-                return;
-            }
+            TryLoad(out var engine, out var tok);
+
             using (engine)
             {
                 var sampling = SamplingOptions.Greedy;

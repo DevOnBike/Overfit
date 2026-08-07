@@ -26,15 +26,10 @@ namespace DevOnBike.Overfit.Tests.Redaction
             _output = output;
         }
 
-        [LongFact("655ms")]
+        [FixtureFact(TestFixture.OverfitCli, "655ms")]
         public void Gateway_RedactsOutbound_ForwardsRestores_Audits()
         {
             var exe = LocateOverfitExe();
-            if (exe is null)
-            {
-                _output.WriteLine("overfit exe not built — skipping");
-                return;
-            }
 
             string? upstreamReceived = null;
             var upstreamPort = FreePort();
@@ -182,28 +177,13 @@ namespace DevOnBike.Overfit.Tests.Redaction
             throw new TimeoutException($"gateway did not become healthy at {url}");
         }
 
-        private static string? LocateOverfitExe()
+        private static string LocateOverfitExe()
         {
-            var dir = new DirectoryInfo(AppContext.BaseDirectory);
-            while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "Overfit.sln")))
-            {
-                dir = dir.Parent;
-            }
-
-            if (dir is null)
-            {
-                return null;
-            }
-
-            var cliBin = Path.Combine(dir.FullName, "Sources", "Cli", "bin");
-            if (!Directory.Exists(cliBin))
-            {
-                return null;
-            }
-
-            var name = OperatingSystem.IsWindows() ? "overfit.exe" : "overfit";
-            var matches = Directory.GetFiles(cliBin, name, SearchOption.AllDirectories);
-            return matches.Length > 0 ? matches[0] : null;
+            // Delegates to the single implementation. Two byte-identical private copies used to live in
+            // this file and in the other CLI test; the attribute that now decides whether this test runs
+            // uses FixtureFact's copy, so a local one answering differently would let the test start and
+            // then fail on the very null the skip exists to prevent.
+            return FixtureFact.LocateOverfitCli();
         }
     }
 }

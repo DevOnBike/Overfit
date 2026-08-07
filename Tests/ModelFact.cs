@@ -74,9 +74,12 @@ namespace DevOnBike.Overfit.Tests
                 return;
             }
 
+            // Directories count. Several of these fixtures are a folder (a safetensors model is a
+            // directory of shards plus config), and `File.Exists` returns false for one — which would have
+            // made the attribute report every such fixture as permanently missing.
             foreach (var file in RequiredFiles)
             {
-                if (string.IsNullOrWhiteSpace(file) || File.Exists(file))
+                if (string.IsNullOrWhiteSpace(file) || File.Exists(file) || Directory.Exists(file))
                 {
                     continue;
                 }
