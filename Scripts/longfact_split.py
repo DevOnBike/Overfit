@@ -49,10 +49,19 @@ HEAVY_TOKENS = ("QLora", "FineTune", "Training", "TrainStep", "TrainingRam", "Kn
 
 
 def measured():
-    """full test name -> (seconds, outcome), from every chunk TRX written so far."""
+    """full test name -> (seconds, outcome), from every chunk TRX written so far.
+
+    All THREE prefixes, not just `chunk`. `run_chunk` writes `longfact-light-*` and `longfact-heavy-*`,
+    so globbing only `longfact-chunk-*` made every measurement this script itself produced invisible to
+    its own classifier: the 13 runtimes from the 2026-08-07 heavy run were discarded, which both left five
+    mis-guessed tests stranded in the heavy group and would have re-run work that already had an answer.
+    """
     found = {}
 
-    for trx in sorted(BIN.glob("longfact-chunk-*.trx")):
+    for trx in sorted(BIN.glob("longfact-*.trx")):
+        if not trx.name.startswith(("longfact-chunk-", "longfact-light-", "longfact-heavy-")):
+            continue
+
         text = trx.read_text(encoding="utf-8", errors="replace")
 
         for m in re.finditer(

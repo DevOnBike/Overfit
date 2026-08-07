@@ -1,37 +1,32 @@
 # [LongFact] HEAVY group — excluded from the per-merge gate, run before a release.
-# Written 2026-08-07T14:39:41Z by Scripts/longfact_split.py
+# Written 2026-08-07T17:11:45Z by Scripts/longfact_split.py
 # HEAVY means: measured at or above 120s, OR its name says it trains or
 # benchmarks and it has never been measured. The second kind is marked GUESSED and is a
 # hypothesis, not a measurement — it becomes a measurement the first time the heavy group
 # runs to completion. Do not quote a GUESSED entry as a timing.
 #
+DevOnBike.Overfit.Tests.Anomalies.Diagnostics.SyntheticClusterCalibrationSearch.MultiStartDescentShowsWhetherTheLandscapeNeedsAPopulation	measured 247s
 DevOnBike.Overfit.Tests.Anomalies.OfflineTrainingJobTests.TrainMedium_LossDecreases_2000Steps	GUESSED from the name — never measured
 DevOnBike.Overfit.Tests.Anomalies.OfflineTrainingJobTests.TrainOnCsv_LossDecreases_CheckpointWritten	GUESSED from the name — never measured
 DevOnBike.Overfit.Tests.Anomalies.OfflineTrainingJobTests.TrainProduction_LossBelow280	GUESSED from the name — never measured
 DevOnBike.Overfit.Tests.Data.Mnist.MnistTrainingTests.Mnist_FullTrain60k_CnnBeastMode_Benchmark	GUESSED from the name — never measured
 DevOnBike.Overfit.Tests.Data.Mnist.MnistTrainingTests.Mnist_FullTrain60k_CnnDataParallel8_Benchmark	GUESSED from the name — never measured
-DevOnBike.Overfit.Tests.Diagnostics.AnomalyLabLoadGeneratorTests.DriveTrafficAtTheLabReplicas	measured 187s
 DevOnBike.Overfit.Tests.LanguageModels.Demo.MiniInstruction.MiniInstructionCheckpointTests.Demo_LoadCheckpoint_AndShowMiniInstructionGeneration	GUESSED from the name — never measured
 DevOnBike.Overfit.Tests.LanguageModels.Demo.MiniInstruction.MiniInstructionCheckpointTests.Demo_Train_MiniInstruction_AndWriteCheckpointBin	GUESSED from the name — never measured
 DevOnBike.Overfit.Tests.LanguageModels.Demo.TinyShakespeare.TinyShakespeareCheckpointTests.GPT1_EndToEnd_100Steps_GeneratesEnglishWords	GUESSED from the name — never measured
 DevOnBike.Overfit.Tests.LanguageModels.Demo.TinyShakespeare.TinyShakespeareCheckpointTests.Shakespeare_12Layer_Checkpointed_SeqLen256_LossBelow200	GUESSED from the name — never measured
 DevOnBike.Overfit.Tests.LanguageModels.Demo.TinyShakespeare.TinyShakespeareCheckpointTests.Shakespeare_Batch8_SeqLen256_SmokeTest_50Steps	GUESSED from the name — never measured
 DevOnBike.Overfit.Tests.LanguageModels.Demo.TinyShakespeare.TinyShakespeareCheckpointTests.Shakespeare_Batch8_SmallModel_500Steps_Convergence	GUESSED from the name — never measured
-DevOnBike.Overfit.Tests.LanguageModels.Demo.TinyShakespeare.TinyShakespeareSequentialQualityCheckpointTests.Demo_Train_TinyShakespeare_SequentialQuality_AndWriteCheckpointBin	measured 578s
-DevOnBike.Overfit.Tests.LanguageModels.Diagnostics.GcLatencyScopePrefillImpactTests.SustainedLowLatency_GenerationCycle_GcDelta	measured 248s
-DevOnBike.Overfit.Tests.LanguageModels.LoRA.LoRAAdapterTests.LoRA_AfterTraining_LogitsChange	GUESSED from the name — never measured
-DevOnBike.Overfit.Tests.LanguageModels.LoRA.QLoRAFineTunerFacadeTests.Facade_TeachesFact_AndAnswers	measured 950s
-DevOnBike.Overfit.Tests.LanguageModels.Loading.QwenGgufKnowledgeInjectionDemoTests.FineTune_TeachesNovelFact_ModelRecitesItAfterwards	measured 1646s
-DevOnBike.Overfit.Tests.LanguageModels.Loading.QwenGgufQLoraAdapterRoundTripTests.FineTune_SaveAdapter_FreshModelLoadsIt_AndRecitesFact	GUESSED from the name — never measured
-DevOnBike.Overfit.Tests.LanguageModels.Loading.QwenGgufQLoraE2ETests.RealQwenQ4KM_Layer0_TrainableBlock_DifferentiableAndFrozenBase	GUESSED from the name — never measured
-DevOnBike.Overfit.Tests.LanguageModels.Loading.QwenGgufQLoraFineTuneE2ETests.RealQwenQ4KM_FineTune_OverfitsShortSequence_BaseFrozen	GUESSED from the name — never measured
-DevOnBike.Overfit.Tests.LanguageModels.Loading.QwenGgufTrainStepTimeTests.TrainingStepTime_VsSequenceLength	GUESSED from the name — never measured
-DevOnBike.Overfit.Tests.LanguageModels.Loading.QwenGgufTrainingRamTests.RealQwen3B_QLoRA_TrainingRam_FullModelExtrapolation	GUESSED from the name — never measured
-DevOnBike.Overfit.Tests.LanguageModels.Retrieval.HybridVsDenseOnDocsCorpusTests.Fusion_KSweep_OnRealDocsCorpus	GUESSED from the name — never measured
-DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity.BielikDraftSpeculativeBench.Bielik_DraftModel_Speculative_BitIdentical_AndSpeedup	GUESSED from the name — never measured
-DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity.BielikPrefillTtftBench.Bielik_Prefill_Ttft_WeightStationary_vs_Original	GUESSED from the name — never measured
+DevOnBike.Overfit.Tests.LanguageModels.Demo.TinyShakespeare.TinyShakespeareSequentialQualityCheckpointTests.Demo_Train_TinyShakespeare_SequentialQuality_AndWriteCheckpointBin	measured 579s
+DevOnBike.Overfit.Tests.LanguageModels.Diagnostics.GcLatencyScopePrefillImpactTests.SustainedLowLatency_GenerationCycle_GcDelta	measured 487s
+DevOnBike.Overfit.Tests.LanguageModels.Diagnostics.SpeculativeVerifyVsSingleTokenDiagnostics.HowFarApartAreBatchedAndSingleTokenLogitsOnTheSameContext	GUESSED from the name — never measured
+DevOnBike.Overfit.Tests.LanguageModels.Diagnostics.SpeculativeVerifyVsSingleTokenDiagnostics.WhereDoTheSpeculativeAndGreedyPathsFirstDisagree	GUESSED from the name — never measured
+DevOnBike.Overfit.Tests.LanguageModels.LoRA.QLoRAFineTunerFacadeTests.Facade_TeachesFact_AndAnswers	measured 916s
+DevOnBike.Overfit.Tests.LanguageModels.Loading.QwenGgufKnowledgeInjectionDemoTests.FineTune_TeachesNovelFact_ModelRecitesItAfterwards	measured 1006s
+DevOnBike.Overfit.Tests.LanguageModels.Loading.QwenGgufQLoraAdapterRoundTripTests.FineTune_SaveAdapter_FreshModelLoadsIt_AndRecitesFact	measured 1003s
+DevOnBike.Overfit.Tests.LanguageModels.Loading.QwenGgufTrainStepTimeTests.TrainingStepTime_VsSequenceLength	measured 145s
+DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity.BielikPrefillTtftBench.Bielik_Prefill_Ttft_WeightStationary_vs_Original	measured 332s
 DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity.DraftModelSpeculativeBench.DraftModel_Speculative_BitIdentical_AndSpeedup_OnNovelText	GUESSED from the name — never measured
-DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity.Q4KBatchedProjectionScalingBench.BatchedProjection_CostScaling_ByRows	GUESSED from the name — never measured
 DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity.QwenMaxDraftSweep.Sweep_MaxDraft_OnEchoText	GUESSED from the name — never measured
 DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity.QwenSpeculativeNovelBench.Speculative_OnNovelPrompt_RealisticCase	GUESSED from the name — never measured
 DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity.SpeculativeDecodeParityTests.ChatSession_SpeculativePath_MatchesSingleToken_Greedy	GUESSED from the name — never measured
