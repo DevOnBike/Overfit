@@ -164,14 +164,16 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Tokenization
 
         // ── Real GGUF vocab (Mixtral SPM) ────────────────────────────────────
 
-        [LongFact("12ms")]
+        /// <summary>
+        /// Lifted out of the method body so the attribute can name it — a method-local <c>const</c> is a
+        /// compile-time constant that an attribute still cannot see.
+        /// </summary>
+        private const string MixtralGguf = @"C:\mixtral\mixtral-8x7b-instruct-v0.1.Q4_K_M.gguf";
+
+        [ModelFact(MixtralGguf, "12ms")]
         public void RealMixtralVocab_RoundTrips()
         {
-            const string path = @"C:\mixtral\mixtral-8x7b-instruct-v0.1.Q4_K_M.gguf";
-            if (!File.Exists(path))
-            {
-                return;
-            }
+            const string path = MixtralGguf;
 
             var tok = GgufTokenizer.Load(path);
             Assert.Equal(32000, tok.VocabSize);
@@ -213,22 +215,27 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Tokenization
             }
         }
 
-        [ModelFact(QwenMoeGguf, "184ms")]
+        // Gold cross-check: the GGUF-embedded vocab must tokenise identically to the validated
+        // tokenizer.json-based QwenTokenizer — when both describe the same Qwen tokenizer. The attribute
+        // establishes that both sides exist; either tokenizer.json or vocab.json satisfies the reference,
+        // which is why this needs a named fixture rather than a list of required paths.
+        [FixtureFact(TestFixture.QwenMoeGgufAndReferenceTokenizer, "184ms")]
         public void RealQwenVocab_MatchesQwenTokenizer()
         {
-            // Gold cross-check: the GGUF-embedded vocab must tokenise identically to the validated
-            // tokenizer.json-based QwenTokenizer — when both describe the same Qwen tokenizer.
-            if (!File.Exists(@"C:\qwen3b\tokenizer.json") && !File.Exists(@"C:\qwen3b\vocab.json"))
-            {
-                return;
-            }
-
             var gguf = GgufTokenizer.Load(QwenMoeGguf);
             var reference = QwenTokenizer.Load(@"C:\qwen3b");
-            if (gguf.VocabSize != reference.VocabSize)
-            {
-                return;
-            }   // different tokenizer revision
+
+            // A DIFFERENT KIND OF EARLY RETURN, and it used to be silent. Both fixtures are present and
+            // the test still had nothing to compare, because they describe different tokenizer revisions —
+            // and it reported that as a pass, i.e. as "the two vocabularies agree".
+            //
+            // Asserted rather than skipped: reaching here means somebody deliberately has both files, so a
+            // mismatch is a fixture-pairing problem they can fix, and the sizes name it precisely. A box
+            // with neither never gets this far — the attribute skips it first.
+            Assert.True(gguf.VocabSize == reference.VocabSize,
+                $"the GGUF vocab has {gguf.VocabSize} entries and the reference tokenizer "
+                + $"{reference.VocabSize}: these are different tokenizer revisions, so this cross-check "
+                + "cannot say anything. Pair the MoE GGUF with the tokenizer.json of the same revision.");
 
             foreach (var text in new[]
             {

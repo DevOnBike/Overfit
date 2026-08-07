@@ -39,15 +39,12 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
         private readonly ITestOutputHelper _out;
         public DraftModelSpeculativeBench(ITestOutputHelper output) => _out = output;
 
-        [LongFact]  // heavy group, never measured — see Scripts/longfact_heavy.txt
+        // Both files, named individually so the skip says WHICH one is missing. `DraftDir + @"\..."`
+        // rather than Path.Combine because concatenating constants is itself a constant and can travel
+        // in an attribute; a method call cannot.
+        [ModelFact([TargetGguf, DraftDir + @"\model.safetensors"])]  // heavy group, never measured — see Scripts/longfact_heavy.txt
         public void DraftModel_Speculative_BitIdentical_AndSpeedup_OnNovelText()
         {
-            if (!File.Exists(TargetGguf) || !File.Exists(Path.Combine(DraftDir, "model.safetensors")))
-            {
-                _out.WriteLine("missing target gguf or draft safetensors");
-                return;
-            }
-
             using var target = CachedLlamaInferenceEngine.LoadGguf(TargetGguf);
             using var draft = SafetensorsLlamaLoader.Load(DraftDir);   // 0.5B, Q4_K by default
             var tok = QwenTokenizer.Load(DraftDir);

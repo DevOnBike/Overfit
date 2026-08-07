@@ -107,14 +107,16 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Retrieval
             new("mixed", "how do I evaluate prompts locally for free?", "skill-eval.md"),
         ];
 
-        [LongFact("1min17s")]
+        [FixtureFact(TestFixture.MiniLmSafetensors, "1min17s")]
         public void Hybrid_VsDense_OnRealDocsCorpus()
         {
             var indexed = BuildIndex();
-            if (indexed is null)
-            {
-                return;
-            }
+
+            // Asserted, not returned. BuildIndex() has two ways to yield null and they deserve opposite
+            // treatment: a missing MiniLM fixture is a legitimate skip and the attribute above now handles
+            // it, but a missing docs/ folder when the suite runs from a checkout means the tree layout is
+            // wrong — that is a defect, and it should fail rather than disappear as a pass.
+            Assert.NotNull(indexed);
 
             var (embedder, hybrid, chunkIdsByFile, fileCount) = indexed.Value;
             using var _ = embedder;
@@ -200,14 +202,16 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Retrieval
         /// found by ONE arm at rank 1 (1/61 ≈ 0.016) loses to a document found by BOTH arms at ranks 5 and 3
         /// (1/65 + 1/63 ≈ 0.031). k is exactly the knob that sets that balance.
         /// </summary>
-        [LongFact]  // heavy group, never measured — see Scripts/longfact_heavy.txt
+        [FixtureFact(TestFixture.MiniLmSafetensors)]
         public void Fusion_KSweep_OnRealDocsCorpus()
         {
             var indexed = BuildIndex();
-            if (indexed is null)
-            {
-                return;
-            }
+
+            // Asserted, not returned. BuildIndex() has two ways to yield null and they deserve opposite
+            // treatment: a missing MiniLM fixture is a legitimate skip and the attribute above now handles
+            // it, but a missing docs/ folder when the suite runs from a checkout means the tree layout is
+            // wrong — that is a defect, and it should fail rather than disappear as a pass.
+            Assert.NotNull(indexed);
 
             var (embedder, hybrid, chunkIdsByFile, _) = indexed.Value;
             using var disposable = embedder;

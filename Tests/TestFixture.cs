@@ -38,6 +38,26 @@ namespace DevOnBike.Overfit.Tests
         /// <summary>The Qwen-3B binary checkpoint plus the tokenizer the diagnostics load beside it.</summary>
         Qwen3BBinaryAndTokenizer,
 
+        /// <summary>
+        /// GPT-2 Small in both forms at once — <c>model.safetensors</c> and <c>gpt2_small.bin</c>.
+        ///
+        /// <para>Both, because the test that needs it compares one loader against the other. With only one
+        /// present there is nothing to compare, and a pass would report that the two agree.</para>
+        /// </summary>
+        Gpt2SafetensorsAndBinary,
+
+        /// <summary>The MiniLM sentence-transformer weights.</summary>
+        MiniLmSafetensors,
+
+        /// <summary>
+        /// The Qwen1.5-MoE GGUF <b>and</b> a reference Qwen tokenizer to cross-check it against —
+        /// either <c>tokenizer.json</c> or <c>vocab.json</c> will do.
+        ///
+        /// <para>The either-or is why this needs its own entry rather than a list of required files:
+        /// <see cref="ModelFact"/> requires every path it is given, and here one of two suffices.</para>
+        /// </summary>
+        QwenMoeGgufAndReferenceTokenizer,
+
         /// <summary>The Qwen-3B Q4_K_M GGUF.</summary>
         Qwen3BQ4KmGguf,
 

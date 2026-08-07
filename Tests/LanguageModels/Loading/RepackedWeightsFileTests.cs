@@ -68,14 +68,17 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             }
         }
 
-        [LongFact("1s")]
+        /// <summary>
+        /// The GGUF this builds a sidecar from. Lifted out of the method body so the attribute can name
+        /// it: an attribute argument must be a compile-time constant, and a method-local <c>const</c> —
+        /// which this was — is invisible from the attribute even though it is one.
+        /// </summary>
+        private const string SourceGguf = @"C:\qwen3b\qwen.q4km.gguf";
+
+        [ModelFact(SourceGguf, "1s")]
         public void BuildFromGguf_RealQwen3B_ProducesOpenableSidecar()
         {
-            const string gguf = @"C:\qwen3b\qwen.q4km.gguf";
-            if (!File.Exists(gguf))
-            {
-                return; // model not present
-            }
+            const string gguf = SourceGguf;
 
             var path = Path.Combine(Path.GetTempPath(), $"qwen_repack_{Guid.NewGuid():N}.repack");
             try

@@ -27,15 +27,12 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
         private readonly ITestOutputHelper _out;
         public SmallModelAgenticProbeTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact("8s")]
+        // `Dir + @"\model.safetensors"` rather than Path.Combine: concatenating constants IS a
+        // compile-time constant and so can travel in an attribute, while Path.Combine — being a method
+        // call — cannot. That single difference is what kept this site out of the automated pass.
+        [ModelFact(Dir + @"\model.safetensors", "8s")]
         public void Qwen05B_Agentic_Probe()
         {
-            if (!File.Exists(Path.Combine(Dir, "model.safetensors")))
-            {
-                _out.WriteLine("missing 0.5B");
-                return;
-            }
-
             using var engine = SafetensorsLlamaLoader.Load(Dir);
             using var session = engine.CreateSession(2048);
             ITokenizer tok = new QwenChatTokenizer(QwenTokenizer.Load(Dir));

@@ -91,6 +91,32 @@ namespace DevOnBike.Overfit.Tests
                         "the Qwen-3B binary checkpoint and its tokenizer.json are not both present (set "
                         + "OVERFIT_QWEN3B_DIR)");
 
+                case TestFixture.Gpt2SafetensorsAndBinary:
+                    return Check(
+                        File.Exists(Path.Combine(TestModelPaths.Gpt2Small.Dir, "model.safetensors"))
+                        && File.Exists(TestModelPaths.Gpt2Small.BinaryPath)
+                            ? TestModelPaths.Gpt2Small.BinaryPath
+                            : null,
+                        "GPT-2 model.safetensors and gpt2_small.bin are not both present, so the two "
+                        + "loaders cannot be compared (set OVERFIT_GPT2_DIR, or run "
+                        + "Scripts/convert_gpt2.py)");
+
+                case TestFixture.QwenMoeGgufAndReferenceTokenizer:
+                {
+                    const string gguf = @"C:\qwen-moe\Qwen1.5-MoE-A2.7B-Chat.Q8_0.gguf";
+                    var reference = File.Exists(Path.Combine(TestModelPaths.Qwen3B.Dir, "tokenizer.json"))
+                                    || File.Exists(Path.Combine(TestModelPaths.Qwen3B.Dir, "vocab.json"));
+
+                    return Check(File.Exists(gguf) && reference ? gguf : null,
+                        "the Qwen1.5-MoE GGUF and a reference Qwen tokenizer (tokenizer.json or "
+                        + "vocab.json) are not both available, so the GGUF-embedded vocab has nothing to "
+                        + "be cross-checked against");
+                }
+
+                case TestFixture.MiniLmSafetensors:
+                    return Check(TestModelPaths.MiniLm.SafetensorsPath,
+                        "MiniLM weights not found (set OVERFIT_MINILM_DIR)");
+
                 case TestFixture.Qwen3BQ4KmGguf:
                     return Check(TestModelPaths.Qwen3B.Q4KmGgufPath,
                         "the Qwen-3B Q4_K_M GGUF is not present (set OVERFIT_QWEN3B_DIR)");
