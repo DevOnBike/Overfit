@@ -21,6 +21,10 @@ namespace DevOnBike.Overfit.Anomalies.Contracts
     /// For <see cref="MetricSourceKind.HistogramSeconds"/>, which quantile to take. Ignored otherwise, and
     /// defaulted from the target feature when left at zero — <c>LatencyP95Ms</c> means 0.95.
     /// </param>
+    /// <param name="Query">
+    /// Verbatim PromQL replacing the name-and-kind template; empty for the ordinary case. See the property
+    /// of the same name for why it exists and what it must contain.
+    /// </param>
     public readonly record struct MetricBinding(
         MetricIndex Target,
         string SourceMetric,
@@ -45,8 +49,9 @@ namespace DevOnBike.Overfit.Anomalies.Contracts
         /// series. Deleting the entry instead is worse still: an unbound channel is issued no query at all
         /// and reports blind.</para>
         ///
-        /// <para>Must contain <see cref="PromqlCatalog.SelectorToken"/>, or the query would ignore the
-        /// namespace and pod matchers and silently report on the whole cluster.</para>
+        /// <para>Must contain the selector token <c>%selector%</c> (<c>PromqlCatalog.SelectorToken</c>), or
+        /// the query would ignore the namespace and pod matchers and silently report on the whole
+        /// cluster.</para>
         /// </summary>
         public string Query
         {
