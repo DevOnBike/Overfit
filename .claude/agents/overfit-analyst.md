@@ -643,5 +643,11 @@ in the script rather than to ask.
   in — a `\b` silently became a backspace character in a document here on 2026-08-07, and the result
   looked correct.
 
+**When the script edits repository files, open them in BINARY mode.** This tree has mixed CRLF and LF,
+and `open(path).read()` / `open(path, "w")` rewrites every line ending in the file — the content diff is
+empty, `git status` shows the file modified, and the obvious undo (`git checkout -- path`) is blocked by
+the repository's git guard. Read with `rb`, write with `wb`, and decode explicitly. Found on 2026-08-08 by
+a mutation harness that handed back a product source file it never meant to touch and could not put back.
+
 **Scratch means scratch.** Never leave anything in it that needs to survive, and never treat its current
 contents as documentation of anything.

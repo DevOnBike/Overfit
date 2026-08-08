@@ -92,12 +92,8 @@ reads a file, or adding a dependency — none of those is small, however few lin
 - **Never delete, move or overwrite anything outside `D:\Overfit`.** Model fixtures live at `C:\gpt2`,
   `C:\qwen3b`, `C:\gemma` and similar; they are multi-gigabyte, hand-collected and not reproducible from this
   repository. Reading them is fine.
-- **Invoke `dotnet` directly; do not use `.claude/run.py`.** `CLAUDE.md` tells the *main session* to route
-  commands through that file, and that rule is explicitly scoped to the main session — it does **not** apply
-  to you, and following it would be actively unsafe here. `run.py` is a single scratch file rewritten for
-  every task, so running it executes whatever somebody else is halfway through, and two agents sharing it
-  overwrite each other. If you need a multi-step script, write it to a file named for yourself under
-  `.claude/`, or pass it on the command line.
+- **Route shell commands through `.claude/do-overfit-developer.py`**, per the section below. This used to say the opposite — that the routing rule was scoped to the main session and following it would be "actively unsafe" for you. That was true while `run.py` was a single shared scratch file: two agents running at once overwrote each other. Per-agent files removed that hazard on 2026-08-08, and this paragraph was left contradicting the new one until it was noticed the same day.
+
 - **Check whether a measurement is in progress before you build.** A 24-hour anomaly-guard run or a
   BenchmarkDotNet session makes this box an instrument, and a compile is load on it. If
   `Tests/bin/fp-run-clean-start.txt` is recent, or `Sources/Benchmark` is running, **say so and stop** rather
@@ -380,5 +376,15 @@ in the script rather than to ask.
   in — a `\b` silently became a backspace character in a document here on 2026-08-07, and the result
   looked correct.
 
+**When the script edits repository files, open them in BINARY mode.** This tree has mixed CRLF and LF,
+and `open(path).read()` / `open(path, "w")` rewrites every line ending in the file — the content diff is
+empty, `git status` shows the file modified, and the obvious undo (`git checkout -- path`) is blocked by
+the repository's git guard. Read with `rb`, write with `wb`, and decode explicitly. Found on 2026-08-08 by
+a mutation harness that handed back a product source file it never meant to touch and could not put back.
+
 **Scratch means scratch.** Never leave anything in it that needs to survive, and never treat its current
 contents as documentation of anything.
+**Keep mutation backups out of the working tree.** A harness that writes `foo.cs.bak` beside the file it
+is mutating leaves litter that reaches `git status`, and from there the index — which is exactly what
+happened on 2026-08-08, twice, and the files are still staged. Write backups under `Tests/bin/` (gitignored)
+or hold the original in memory. Restore before you report, and verify the restore rather than assuming it.

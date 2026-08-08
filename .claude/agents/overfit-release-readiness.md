@@ -141,7 +141,7 @@ Report a blocker as soon as you find one; do not stop checking. A list of one it
 ### 1. The working tree (seconds)
 
 - `git status --porcelain`. **Untracked experiment artefacts are a blocker**: generated manifests under
-  `Tests/bin/`, `*.log`, publish output, scratch scripts. `.claude/run.py` is scratch and gitignored by
+  `Tests/bin/`, `*.log`, publish output, scratch scripts. `.claude/do.py` and `.claude/do-*.py` are scratch and gitignored by
   design — if it appears as tracked, that is a finding.
 - Absolute developer paths leaking into anything shipped: `D:\Overfit`, `C:\qwen3b`, `C:\gpt2`, `C:\gemma`,
   a home directory. Fine in `Tests/` and `.claude/`; a blocker in `Sources/**` or `k8s/**`.
@@ -379,5 +379,23 @@ in the script rather than to ask.
   in — a `\b` silently became a backspace character in a document here on 2026-08-07, and the result
   looked correct.
 
+**When the script edits repository files, open them in BINARY mode.** This tree has mixed CRLF and LF,
+and `open(path).read()` / `open(path, "w")` rewrites every line ending in the file — the content diff is
+empty, `git status` shows the file modified, and the obvious undo (`git checkout -- path`) is blocked by
+the repository's git guard. Read with `rb`, write with `wb`, and decode explicitly. Found on 2026-08-08 by
+a mutation harness that handed back a product source file it never meant to touch and could not put back.
+
 **Scratch means scratch.** Never leave anything in it that needs to survive, and never treat its current
 contents as documentation of anything.
+## A finding that lives only in your report does not survive
+
+**Write every finding into a file that outlives this run, and name that file in your report.** The plan it
+belongs to, the relevant backlog, or `docs/TASKS.md` — whichever is the home for that kind of thing.
+
+The reason is measured. On 2026-08-08 `overfit-perf-claim-auditor` found that a figure headed for
+`docs/measured-baselines.md` divided by the wrong denominator — 288 cycles when only 201 completed. It was
+fixed **only because the coordinator relayed it by hand**. Nothing in the process would have caught its
+loss; the report would have scrolled past and the wrong number would have been recorded as measured.
+
+This does not make you an editor of other people's sections. Append to your own, or add a row, or say
+plainly in the report that the finding has no home yet and name where it should go.

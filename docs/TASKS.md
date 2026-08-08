@@ -89,7 +89,7 @@ is not.
 |---|---|---|
 | `MS-1` | DONE | extract `IMetricWindowSource`, wire the field. Verified, reviewed, committed |
 | `MS-2` | DONE | parameterise `now` out of the cycle. Verified, reviewed, committed |
-| `MS-3` | **UNGATED** | historical replay driver + discriminated `GuardCycleOutcome`. **Committed, never verified or reviewed** — the gate was deferred while the tree moved and not resumed |
+| `MS-3` | DONE | historical replay driver + discriminated `GuardCycleOutcome`. Gated after the fact 2026-08-08: the gate returned **BLOCKED** because nothing drove `Blind` or `Failed`, closed in one round. **One thing still unverified**: the `[LabFact]` replay has not run under the now-required `OVERFIT_REPLAY_START_UTC` |
 | `MS-4` | OPEN | live-loop regression guard. No test anywhere constructs `AnomalyGuardService` and drives `ExecuteAsync` |
 
 ## PSI channel — `PS-`

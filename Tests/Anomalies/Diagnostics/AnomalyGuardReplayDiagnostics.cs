@@ -67,8 +67,9 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
     /// </code>
     /// <para>Knobs: <c>OVERFIT_LAB_PROMETHEUS</c>, <c>OVERFIT_REPLAY_CONFIG</c>,
     /// <c>OVERFIT_REPLAY_CYCLES</c>, <c>OVERFIT_REPLAY_CADENCE_SECONDS</c>,
-    /// <c>OVERFIT_REPLAY_START_UTC</c> — <b>set the last one when comparing two runs</b>, or each replays a
-    /// slightly different body of history and the difference is the anchor, not the change under test.</para>
+    /// <c>OVERFIT_REPLAY_START_UTC</c> — the last one is <b>required</b>, and the run refuses to start without
+    /// it; see <see cref="ResolveReplayStart"/> for the measurement that turned that from advice into a
+    /// gate.</para>
     /// </summary>
     public sealed class AnomalyGuardReplayDiagnostics
     {
@@ -144,7 +145,11 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
                 provider.GetRequiredService<ILogger<AnomalyGuardService>>(),
                 topology);
 
-            var first = ReplayStart(cadence, cycles);
+            var first = ResolveReplayStart(
+                Environment.GetEnvironmentVariable("OVERFIT_REPLAY_START_UTC"),
+                cadence,
+                cycles,
+                DateTimeOffset.UtcNow);
             var perCycleMs = new List<double>(cycles);
             var report = new StringBuilder();
 
@@ -286,32 +291,62 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
         }
 
         /// <summary>
-        /// Where the replay starts: <c>OVERFIT_REPLAY_START_UTC</c> if given, otherwise a day back from now,
-        /// <b>snapped down to a whole cadence</b>.
+        /// Where the replay starts. <c>OVERFIT_REPLAY_START_UTC</c> is <b>required</b>, and anything that is
+        /// not a timestamp is refused rather than quietly replaced.
         ///
-        /// <para><b>The snap is not tidiness, it is the difference between a tuning tool and a coin toss.</b>
-        /// Anchoring the range at the raw wall clock means every invocation replays a slightly different body
-        /// of history, and the point of replaying at all is to re-evaluate a <i>fixed</i> one after a
-        /// threshold change. Measured before it was fixed: three back-to-back 288-cycle runs whose anchors
-        /// differed by 7 s and 2.5 min opened 47, 43 and 37 incidents — so a threshold change worth ±10% would
-        /// have been indistinguishable from the anchor moving. That sensitivity is real and belongs to the
-        /// detectors (the sample grid shifts phase with the anchor); pinning the anchor is what stops it
+        /// <para><b>An anchor is the difference between a tuning tool and a coin toss, so it is a gate and no
+        /// longer a comment.</b> Anchoring the range at the wall clock means every invocation replays a
+        /// slightly different body of history, and the point of replaying at all is to re-evaluate a
+        /// <i>fixed</i> one after a threshold change. Measured: three back-to-back 288-cycle runs whose
+        /// anchors differed by 7 s and 2.5 min opened 47, 43 and 37 incidents — a threshold change worth ±10%
+        /// would have been indistinguishable from the anchor moving. That sensitivity is real and belongs to
+        /// the detectors (the sample grid shifts phase with the anchor); pinning the anchor is what stops it
         /// contaminating a comparison.</para>
+        ///
+        /// <para><b>The silent half was the worse half.</b> A variable that was set but misspelt — a date with
+        /// no time, a stray quote — parsed as nothing and fell back to the wall clock, so an operator who
+        /// believed both runs were pinned got the unpinned spread above and no indication of it. Both the
+        /// missing and the unparseable case now stop the run.</para>
+        ///
+        /// <para>What this does <b>not</b> enforce: that two separate runs used the <i>same</i> anchor. One
+        /// process cannot see the other's environment. It enforces that every run has an explicit anchor,
+        /// which is what makes the comparison the operator's stated choice rather than an accident of when
+        /// they pressed enter — and the anchor is echoed into the report so a run's own output says which
+        /// history it read.</para>
         /// </summary>
-        private static DateTimeOffset ReplayStart(TimeSpan cadence, int cycles)
+        /// <param name="configured">The raw <c>OVERFIT_REPLAY_START_UTC</c> value, or <c>null</c> when unset.</param>
+        /// <param name="cadence">Cycle cadence, used only to suggest a whole-cadence anchor in the message.</param>
+        /// <param name="cycles">Cycle count, same.</param>
+        /// <param name="utcNow">The wall clock, taken by the caller so this stays testable.</param>
+        /// <returns>The pinned anchor, exactly as configured.</returns>
+        internal static DateTimeOffset ResolveReplayStart(
+            string? configured, TimeSpan cadence, int cycles, DateTimeOffset utcNow)
         {
-            var configured = Environment.GetEnvironmentVariable("OVERFIT_REPLAY_START_UTC");
+            // A day back, snapped down to a whole cadence — not used, only offered, so the operator's first
+            // run costs one paste rather than a decision about what a good anchor looks like.
+            var back = utcNow - (cadence * cycles);
+            var suggestion = new DateTimeOffset(back.UtcTicks - (back.UtcTicks % cadence.Ticks), TimeSpan.Zero);
 
-            if (DateTimeOffset.TryParse(
+            if (string.IsNullOrWhiteSpace(configured))
+            {
+                throw new InvalidOperationException(
+                    "OVERFIT_REPLAY_START_UTC is not set, and this replay will not run without it: two runs "
+                    + "anchored seconds apart opened 47, 43 and 37 incidents over the same 288 cycles, so an "
+                    + "unpinned run cannot be compared with anything. Pick an anchor and keep it for every "
+                    + $"run you intend to compare, for example the last whole cadence a day back: {suggestion:u}");
+            }
+
+            if (!DateTimeOffset.TryParse(
                     configured, CultureInfo.InvariantCulture,
                     DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal, out var parsed))
             {
-                return parsed;
+                throw new InvalidOperationException(
+                    $"OVERFIT_REPLAY_START_UTC is '{configured}', which is not a timestamp. It is refused "
+                    + "rather than replaced, because falling back to the wall clock here produces an unpinned "
+                    + $"run that looks pinned. Expected an ISO-8601 instant, for example {suggestion:u}");
             }
 
-            var back = DateTimeOffset.UtcNow - (cadence * cycles);
-
-            return new DateTimeOffset(back.UtcTicks - (back.UtcTicks % cadence.Ticks), TimeSpan.Zero);
+            return parsed;
         }
 
         /// <summary>

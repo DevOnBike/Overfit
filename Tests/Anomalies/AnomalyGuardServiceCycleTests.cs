@@ -29,6 +29,11 @@ namespace DevOnBike.Overfit.Tests.Anomalies
     /// <para><b>Scoped to store-less replay.</b> <see cref="AnomalyGuard"/> still falls back to the wall clock
     /// for <c>restoredAt</c> when a durable incident store is supplied; this service passes none, and these
     /// tests do not widen the claim past that.</para>
+    ///
+    /// <para><b>All three cycle outcomes are driven here, not only the one a healthy fixture produces.</b>
+    /// <see cref="GuardCycleOutcome"/> exists to keep "the source saw nothing" apart from "the cycle threw";
+    /// a suite that only ever completes cycles would let those two swap places — or let a caught exception
+    /// report itself as a quiet cluster — without going red.</para>
     /// </summary>
     public sealed class AnomalyGuardServiceCycleTests
     {
@@ -68,6 +73,104 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             Assert.Equal(1, source.Reads);
             Assert.Equal(T0 - options.EndOffset, source.LastEnd);
             Assert.Equal(options.Window, source.LastWindow);
+        }
+
+        /// <summary>
+        /// A cycle whose source returned no window at all is <see cref="GuardCycleKind.Blind"/>, and carries
+        /// nothing to read.
+        ///
+        /// <para>The kind is half the assertion; <see cref="GuardCycleOutcome.TryGetResult"/> answering
+        /// <c>false</c> is the other half, because the failure this contract was written against is a caller
+        /// reading an all-zero result and reporting a cluster nobody could see as a quiet one.</para>
+        ///
+        /// <para><b>Measured:</b> with the blind return mutated to <c>GuardCycleOutcome.Completed(default)</c>
+        /// this goes red on both assertions.</para>
+        /// </summary>
+        [Fact]
+        public async Task ACycleWhoseSourceSawNothingIsBlindAndCarriesNoResult()
+        {
+            using var source = new ScriptedMetricWindowSource([null]);
+            using var service = Service(Options(), source, new NullSink());
+
+            var outcome = await service.RunCycleAsync(T0, CancellationToken.None);
+
+            Assert.Equal(GuardCycleKind.Blind, outcome.Kind);
+            Assert.False(outcome.TryGetResult(out var result));
+            Assert.Equal(default(GuardCycleResult), result);
+            Assert.Equal(1, source.Reads);
+        }
+
+        /// <summary>
+        /// A cycle whose source throws is <see cref="GuardCycleKind.Failed"/> — reported, not rethrown — and
+        /// the next cycle still evaluates.
+        ///
+        /// <para>Both halves matter to a replay driver: it needs to count the crashing cycles separately from
+        /// the blind ones (a run of either produces the same incident totals as a quiet run), and it needs the
+        /// loop to survive one, because a day of history with one unreachable minute in it should not end the
+        /// replay.</para>
+        ///
+        /// <para><b>Measured:</b> with the failed return mutated to <c>GuardCycleOutcome.Blind</c> the kind
+        /// assertion goes red.</para>
+        /// </summary>
+        [Fact]
+        public async Task ACycleThatThrowsIsFailedAndTheNextOneStillRuns()
+        {
+            using var source = new ThrowingFirstReadSource(Synthetic(degraded: 3));
+            using var service = Service(Options(), source, new NullSink());
+
+            var failed = await service.RunCycleAsync(T0, CancellationToken.None);
+
+            Assert.Equal(GuardCycleKind.Failed, failed.Kind);
+            Assert.False(failed.TryGetResult(out var none));
+            Assert.Equal(default(GuardCycleResult), none);
+
+            var next = await service.RunCycleAsync(T0 + Cadence, CancellationToken.None);
+
+            // Completed is only ever returned after the window was evaluated, so this is the assertion that
+            // the service kept working rather than merely not throwing.
+            Assert.Equal(GuardCycleKind.Completed, next.Kind);
+            Assert.True(next.TryGetResult(out _));
+            Assert.Equal(2, source.Reads);
+        }
+
+        /// <summary>
+        /// An outcome that ran is never equal to one that did not, and no two kinds are equal to each other.
+        ///
+        /// <para><b>This is the guard on the trap the contract was designed around</b>, which until now was
+        /// held up by nothing but the code happening to be right today: a blind or failed cycle carries a
+        /// <c>default</c> result, so an equality that compared only the result — or a
+        /// <see cref="GuardCycleKind"/> whose zero value stopped being <see cref="GuardCycleKind.Blind"/> —
+        /// would make "nothing ran" compare equal to "ran and found nothing". Two replays compared
+        /// outcome-for-outcome would then agree while one of them was blind throughout.</para>
+        ///
+        /// <para>The positive assertions are not padding: without them an <c>Equals</c> mutated to return
+        /// <c>false</c> unconditionally would satisfy every inequality above it.</para>
+        ///
+        /// <para><b>Measured:</b> with <c>GuardCycleOutcome.Equals</c> mutated to compare only the result
+        /// (dropping <c>Kind</c>) the first three assertions go red; mutated to a constant <c>false</c>, the
+        /// positive ones do.</para>
+        /// </summary>
+        [Fact]
+        public void AnOutcomeThatRanIsNeverEqualToOneThatDidNot()
+        {
+            var quiet = GuardCycleOutcome.Completed(default);
+            var busy = GuardCycleOutcome.Completed(new GuardCycleResult(1, 1, 1, 0, 0, 0, 0));
+
+            Assert.NotEqual(GuardCycleOutcome.Blind, quiet);
+            Assert.NotEqual(GuardCycleOutcome.Failed, quiet);
+            Assert.NotEqual(GuardCycleOutcome.Failed, GuardCycleOutcome.Blind);
+            Assert.True(GuardCycleOutcome.Blind != quiet);
+            Assert.False(GuardCycleOutcome.Blind == quiet);
+
+            Assert.Equal(GuardCycleOutcome.Blind, GuardCycleOutcome.Blind);
+            Assert.Equal(GuardCycleOutcome.Failed, GuardCycleOutcome.Failed);
+            Assert.Equal(quiet, GuardCycleOutcome.Completed(default));
+            Assert.NotEqual(quiet, busy);
+
+            // An uninitialised outcome — one element of an array a driver has not filled yet — must not read
+            // as a completed cycle, which is why Blind is the zero value.
+            Assert.Equal(GuardCycleKind.Blind, default(GuardCycleOutcome).Kind);
+            Assert.False(default(GuardCycleOutcome).TryGetResult(out _));
         }
 
         /// <summary>
@@ -299,6 +402,47 @@ namespace DevOnBike.Overfit.Tests.Anomalies
                 }
 
                 return Task.FromResult(_script[Reads++]);
+            }
+
+            public void Dispose()
+            {
+            }
+        }
+
+        /// <summary>
+        /// Throws on its first read the way an unreachable Prometheus does, then behaves.
+        ///
+        /// <para>A separate double rather than a flag on <see cref="ScriptedMetricWindowSource"/>: the script
+        /// is a list of windows, and a list that can also hold "throw here" is a small state machine in a
+        /// fixture, which is the sort of thing that ends up needing its own test.</para>
+        /// </summary>
+        private sealed class ThrowingFirstReadSource : IMetricWindowSource
+        {
+            private static readonly string[] None = [];
+
+            private readonly MetricWindow _afterwards;
+
+            public ThrowingFirstReadSource(MetricWindow afterwards) => _afterwards = afterwards;
+
+            public IReadOnlyList<string> StalePodsExcluded => None;
+
+            /// <summary>Reads attempted, the throwing one included.</summary>
+            public int Reads
+            {
+                get; private set;
+            }
+
+            public Task<MetricWindow?> ReadAsync(
+                DateTimeOffset end, TimeSpan window, CancellationToken ct = default)
+            {
+                Reads++;
+
+                if (Reads == 1)
+                {
+                    throw new HttpRequestException("connection refused (scripted)");
+                }
+
+                return Task.FromResult<MetricWindow?>(_afterwards);
             }
 
             public void Dispose()

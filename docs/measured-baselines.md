@@ -93,6 +93,38 @@ claim it is handled; do not fix it without the census.
 | peer memory gap, generation `7765564ff6` | median **5.9 MB**, clears the floor in **0 of 108** samples |
 | peer visibility | **blind to a single OOMKill**, by construction |
 
+### Historical replay through the guard's own cycle, 2026-08-08
+
+`Tests/Anomalies/Diagnostics/AnomalyGuardReplayDiagnostics.cs` (`[LabFact]`), 12 `lab-workload` pods, 288
+cycles at 5-minute cadence, against the lab's live Prometheus.
+
+**Read every figure below as an order-of-magnitude ceiling, not as a baseline** — this is
+`overfit-perf-claim-auditor`'s verdict on the run, and the caveats are the reason: **one run per sample**
+(four runs, not best-of-N), taken on the dev box that **also hosts the lab it queries**, with **no canary and
+no ABAB interleave**. The ~23% spread between runs matches this box's known drift and is not evidence of
+anything structural. These are the first numbers of their kind in this repository; a controlled repeat
+supersedes them.
+
+| subject | measured |
+|---|---|
+| 288-cycle replay, wall clock | **4.8–5.9 s** per run (against the diagnostic's 30-minute failable ceiling) |
+| of which in-memory guard processing + logging | 2.15–3.16 s, i.e. **~10.7–15.7 ms per *completed* cycle** |
+| `PrometheusMetricWindowSource.ReadAsync`, live round trip | ~5 ms/call |
+| `PrometheusTopologySource.RefreshAsync` | ~4 ms/call |
+| whole cycle, distribution | p50 19 ms, p95 30–52 ms, max 137 ms |
+| cycle outcomes | **201 completed, 87 blind, 0 failed** — the blind ones are a real 7.67 h scrape gap, re-verified against Prometheus by the auditor rather than taken on trust |
+| replay determinism | unpinned anchor: **47 / 43 / 37** incidents opened over the same window; pinned anchor: identical twice |
+
+**Denominator trap, paid for on this very run.** The first report of it said "≈11 ms per completed cycle",
+dividing the 2.15–3.16 s processing total by all **288** cycles when only **201** completed — a blind cycle
+returns before `_guard.RunCycle` and contributes nothing to the numerator. **~10.7–15.7 ms is the corrected
+figure; do not re-cite the ~11 ms one.**
+
+**The anchor is the measurement, not a detail of it.** Three back-to-back replays of "the same" window whose
+start anchors differed by 7 s and 2.5 min opened 47, 43 and 37 incidents — a threshold change worth ±10%
+would have been indistinguishable from the anchor moving. `OVERFIT_REPLAY_START_UTC` is now required by the
+diagnostic and an unparseable value is refused rather than silently replaced.
+
 ## Semantic navigator (`Tools/SemanticNavigator`), 2026-08-06
 
 | phase | cost |
