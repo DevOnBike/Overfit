@@ -79,7 +79,9 @@ namespace DevOnBike.Overfit.Tests
             // made the attribute report every such fixture as permanently missing.
             foreach (var file in RequiredFiles)
             {
-                if (string.IsNullOrWhiteSpace(file) || File.Exists(file) || Directory.Exists(file))
+                var resolved = Resolve(file);
+
+                if (string.IsNullOrWhiteSpace(file) || File.Exists(resolved) || Directory.Exists(resolved))
                 {
                     continue;
                 }
@@ -93,5 +95,41 @@ namespace DevOnBike.Overfit.Tests
 
         /// <summary>The files whose absence makes this skip.</summary>
         public string[] RequiredFiles { get; }
+
+        /// <summary>
+        /// Resolves a fixture path. An absolute one is returned unchanged — model fixtures live outside
+        /// the tree (<c>C:\qwen3b</c>, <c>C:\bielik</c>) and are named absolutely on purpose.
+        ///
+        /// <para><b>A RELATIVE one is resolved against the repository root, not the working directory</b>,
+        /// which is the whole point. An attribute argument must be a compile-time constant, so a fixture
+        /// that lives inside the checkout can only be named relatively — and a bare name checked against
+        /// the test process's working directory (<c>Tests/bin/Release/net10.0</c>) never exists, so the
+        /// test would skip silently everywhere. That is how a hardcoded <c>D:\Overfit\…</c> came to be
+        /// here in the first place; this removes the reason for it.</para>
+        /// </summary>
+        private static string Resolve(string file)
+        {
+            if (string.IsNullOrWhiteSpace(file) || Path.IsPathRooted(file))
+            {
+                return file;
+            }
+
+            var directory = new DirectoryInfo(AppContext.BaseDirectory);
+
+            while (directory is not null)
+            {
+                if (File.Exists(Path.Combine(directory.FullName, "Overfit.sln")))
+                {
+                    return Path.Combine(directory.FullName, file);
+                }
+
+                directory = directory.Parent;
+            }
+
+            // No root found: return it unchanged so the caller reports "fixture not present" with the
+            // name it was given, rather than a path assembled from a guess.
+            return file;
+        }
+
     }
 }

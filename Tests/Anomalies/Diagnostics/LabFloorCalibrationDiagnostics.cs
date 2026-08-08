@@ -10,6 +10,7 @@ using DevOnBike.Overfit.Anomalies.Contracts;
 using DevOnBike.Overfit.Anomalies.Monitoring;
 using DevOnBike.Overfit.Statistics;
 using Xunit.Abstractions;
+using DevOnBike.Overfit.Tests.TestSupport;
 
 namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
 {
@@ -57,7 +58,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
             var prometheus = Environment.GetEnvironmentVariable("OVERFIT_LAB_PROMETHEUS")
                              ?? "http://127.0.0.1:9098";
             var configPath = Environment.GetEnvironmentVariable("OVERFIT_LAB_CONFIG")
-                             ?? @"D:\Overfit\Tests\bin\lab-guard.json";
+                             ?? RepositoryPaths.TestsBin("lab-guard.json");
             var windows = Setting("OVERFIT_LAB_WINDOWS", 24);
             var windowMinutes = Setting("OVERFIT_LAB_WINDOW_MINUTES", 20);
             var stepMinutes = Setting("OVERFIT_LAB_STEP_MINUTES", 5);

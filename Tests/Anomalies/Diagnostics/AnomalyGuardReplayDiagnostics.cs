@@ -15,6 +15,7 @@ using DevOnBike.Overfit.Anomalies.Monitoring.Abstractions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Xunit.Abstractions;
+using DevOnBike.Overfit.Tests.TestSupport;
 
 namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
 {
@@ -320,7 +321,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
         private static AnomalyGuardConfigFile ReadConfiguration(string prometheus)
         {
             var path = Environment.GetEnvironmentVariable("OVERFIT_REPLAY_CONFIG")
-                       ?? "D:/Overfit/Tests/bin/lab-guard.json";
+                       ?? RepositoryPaths.TestsBin("lab-guard.json");
 
             Assert.True(File.Exists(path),
                 $"no guard configuration at {path}. Pull the deployed one out of the cluster first — "

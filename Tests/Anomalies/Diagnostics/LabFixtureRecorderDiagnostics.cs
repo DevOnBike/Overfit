@@ -8,6 +8,7 @@ using System.Text;
 using DevOnBike.Overfit.Anomalies.Contracts;
 using DevOnBike.Overfit.Anomalies.Monitoring;
 using Xunit.Abstractions;
+using DevOnBike.Overfit.Tests.TestSupport;
 
 namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
 {
@@ -66,7 +67,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
         /// </summary>
         private static string ConfigPath =>
             Environment.GetEnvironmentVariable("OVERFIT_LAB_CONFIG")
-            ?? "D:/Overfit/Tests/bin/lab-guard.json";
+            ?? RepositoryPaths.TestsBin("lab-guard.json");
 
         private readonly ITestOutputHelper _output;
 

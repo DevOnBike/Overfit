@@ -1,66 +1,81 @@
-# Kubernetes lab
+# The lab, case by case
 
-Local cluster setup for developing the anomaly detectors in `Sources/Main/Statistics/` against real metrics
-instead of synthetic arrays. Development infrastructure for the candidate direction in
-[`docs/aiops/aiops-cluster-anomaly-guard.md`](../docs/aiops/aiops-cluster-anomaly-guard.md) — not a product component,
-not referenced from the README.
+What is in this directory, and the exact command for each scenario the anomaly guard is exercised
+against. Every manifest carries its own reasoning in its header — this file is the index, not a
+duplicate of it.
 
-## Order
+**The thing to know first: most faults are not YAML.** The lab workload injects them at runtime over
+HTTP, and that is deliberate. Injecting a fault by editing a manifest costs a pod restart, and a restart
+is itself a fault — cold working set, a bumped restart counter, no history inside the evaluation window —
+so the guard's reaction could never be attributed to the fault you meant to inject. `Demo/LabWorkload/FaultState.cs`
+holds the state; `Demo/LabWorkload/Program.cs` maps the endpoints.
 
-```powershell
-cd monitoring
-.\install.cmd          # Prometheus + Grafana + kube-state-metrics + node-exporter, namespace `monitoring`
-.\forward.cmd          # Grafana :3000 (admin / overfit), Prometheus :9090
+## Bringing the lab up
 
-cd ..\overfit
-.\build.cmd            # only if `overfit:latest` is missing — Native-AOT build, several minutes
-.\deploy.cmd           # three replicas of the Overfit server + a ServiceMonitor, namespace `overfit`
-```
+| step | command |
+|---|---|
+| monitoring stack (Prometheus, Alertmanager, kube-state-metrics, node-exporter) | `k8s\monitoring\install.cmd` |
+| the workload — 12 replicas | `kubectl apply -f k8s/lab/workload.yaml` |
+| the load driver (runs **inside** the cluster) | `kubectl apply -f k8s/lab/load-driver.yaml` |
+| the guard | `kubectl apply -f k8s/lab/anomaly-guard.yaml` |
+| port-forwards for the tests | `k8s\monitoring\forward.cmd` (Prometheus on 9090, 9098, 9099) |
 
-Tear down in reverse: `overfit\undeploy.cmd`, then `monitoring\uninstall.cmd`.
+The workload image is built from `Demo/LabWorkload` with the publish step first — the build context is
+that directory, **not** the repository root. `k8s/lab/workload.yaml`'s header says why.
 
-Everything lives in its own namespace and its own Helm release. Whatever else the cluster is running is not
-touched — worth stating, because the cluster this was built against already had RabbitMQ, a Kafka operator
-and other workloads on it.
+`k8s\overfit\deploy.cmd` and `forward-replicas.cmd` bring up the *inference server* lab instead, which is
+a separate and older subject; `k8s/lab/workload.yaml`'s header records the three measured reasons it was
+replaced.
 
-## Why three replicas of our own server
+## Fault cases — HTTP, against one pod
 
-It is the only workload here that emits **Overfit's own** metrics, and three identical pods serving one
-model is exactly the input `PeerGroupOutlierDetector` takes: same image, same model, same traffic. Any
-spread between them is either genuine skew or the detector's own noise floor.
+`kubectl -n lab port-forward pod/<name> 8080:8080`, then POST. `GET /fault` describes the current state
+of that pod, and `POST /fault/clear` returns it to healthy.
 
-That number is now measured rather than assumed. Three idle replicas of Qwen-0.5B Q4_K:
+| case | command | what it exercises |
+|---|---|---|
+| latency | `POST /fault/latency?ms=200&jitter=50` | the three latency percentile channels; the classic "slow but correct" pod |
+| stall | `POST /fault/stall?probability=0.05&seconds=30` | **requests that never complete.** Note the guard cannot currently see this: latency percentiles only count *finished* requests, so a hung request never enters the histogram |
+| errors | `POST /fault/errors?rate=0.1` | `ErrorRate` |
+| memory leak | `POST /fault/leak?bytesPerSecond=1048576` | `MemoryWorkingSetBytes` and the trend family; the slow-burn case a single window cannot catch |
+| cpu burn | `POST /fault/cpu?msPerRequest=50` | `CpuUsageRatio`, and the work-adjustment question — cost per request rises while request rate does not |
+| OOM | `POST /fault/oom` | `OomEventsRate` and `ContainerRestarts`. **Measured: the peer family is structurally blind to a single OOMKill** — see D2 in `docs/aiops/aiops-backlog.md` |
+| crash | `POST /fault/crash` | `ContainerRestarts`, restart-loop detection |
+| clear | `POST /fault/clear` | back to healthy |
 
-```
-overfit-server-...-bxczj    1060.5 MB
-overfit-server-...-zzkqz    1061.1 MB
-overfit-server-...-vgsrl    1061.1 MB
-```
+## Cluster-shape cases
 
-**A 0.6 MB spread across 1060 MB — 0.06%.** Useful in both directions: it says the peer detector has an
-enormous margin before a real fault becomes ambiguous, and it says that a threshold tuned on synthetic data
-with realistic-looking noise would have been tuned for a world far messier than this one.
+| case | how | notes |
+|---|---|---|
+| healthy baseline | the lab as brought up above | 12 replicas, no faults. This is what every floor was calibrated against |
+| CPU throttling | `kubectl apply -f k8s/overfit/fault-cpu-throttle.yaml` | A degraded replica with a hard CPU limit, in the `overfit` namespace. **It is the only pod in the cluster that carries a CPU limit**, which is why `CpuThrottleRatio` is otherwise permanently unbound: `container_cpu_cfs_throttled_periods_total` only exists on containers that have one |
+| replica churn | `k8s\lab\scale-experiment.cmd` | 12 -> 15 -> 12. Measured 2026-08-07: **0 incidents in 11 static cycles, 5 in the 7 cycles spanning the change** |
+| HPA | not built | A5's other half. Manual scaling is indistinguishable from HPA *to the guard*, which is why the scale experiment substitutes for it — but it does not cover HPA's own metric traffic or its scale-down stabilisation window |
+| StatefulSet | not built | A5's undone half. Members with their own volumes are not interchangeable, so peer comparison is structurally questionable there in a way scaling does not test |
 
-## What the server exports
+## Guard configuration
 
-Confirmed flowing into Prometheus, one series per pod:
+`k8s/anomaly-guard/guard.lab.json` and `guard.lab-workload.json` are the guard's metric bindings and
+floors. `k8s/lab/anomaly-guard.yaml` carries the deployed ConfigMap; the two must agree, and
+`Tests/bin/lab-guard.json` is a local copy used by the replay diagnostics.
 
-```
-overfit_chat_requests_total          overfit_pool_active_sessions
-overfit_embedding_requests_total     overfit_pool_available_sessions
-overfit_generated_tokens_total       overfit_pool_peak_active_sessions
-overfit_prompt_tokens_total          overfit_pool_rejected_total
-overfit_speech_requests_total        overfit_pool_size
-```
+**No floor in these files came from literature.** Each was measured on this population — see
+`docs/aiops/aiops-backlog.md` for the worked negative, where the literature's 25% sustained-CPU threshold
+never fired because the real peak was 19.8%.
 
-Plus the standard per-pod cAdvisor and process metrics, and the kube-state-metrics topology
-(`kube_pod_owner`, `kube_replicaset_owner`) that §11 of the blueprint depends on.
+## What the monitoring stack is, and why it is not in this directory
 
-## What this lab cannot tell you
+Helm installs it from `k8s/monitoring/values.yaml`, so the Deployments and StatefulSets under the
+`monitoring` namespace are generated rather than authored. Nothing is missing; there is nothing to
+capture. `status.cmd` reports what is up, `uninstall.cmd` removes it.
 
-- **One node.** Noisy neighbours across nodes and scheduling pressure cannot be reproduced.
-- **No traffic.** Idle replicas produce flat metrics; the RED signals (rate, errors, duration) stay at zero
-  until something drives the server.
-- **No faults.** Metrics are real, incidents are not. Validating a detector needs an injected fault or —
-  per the blueprint's M0 — a recorded Prometheus snapshot from a cluster that had a real one. This is where
-  the code is developed, not where it is proven.
+## A note for whoever measures with this lab
+
+The box that runs the cluster is usually the same box running the tests. Two effects, both measured:
+
+- A full `[LongFact]` suite run peaked at 21.7 GB and **evicted Prometheus**, which broke a 24-hour
+  measurement's cycle continuity. `Scripts/longfact_gate.py` refuses to start while the marker file
+  `Tests/bin/fp-run-clean-start.txt` is fresh — but a bare `dotnet test` bypasses that guard.
+- `node_exporter` runs inside the docker-desktop VM and cannot see host processes at all. To ask whether
+  the host starved the lab, use PSI — `container_pressure_cpu_waiting_seconds_total` — which records the
+  effect regardless of where the cause lives.
