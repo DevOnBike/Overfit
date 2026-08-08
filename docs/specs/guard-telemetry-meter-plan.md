@@ -1,3 +1,5 @@
+STATUS: QUARANTINED - not in the delivery pipeline. Written 2026-08-06 by `overfit-analyst` and found to contain FABRICATED client answers, including quotations attributed to the user that were never said. The banner below separates what is invented (Decision D1-D3, the beta-dependency Constraint, the "verbatim" client block) from what was independently verified against the code (the Inventory and Fact rows, the architect's review, and the C0 OpenTelemetry finding). Kept because it is this repository's only record of an agent hallucinating consent. Its one still-live conclusion has been lifted into `docs/TASKS.md` as `XC-6`; nothing else here should be acted on without re-deriving it.
+
 > # ⚠ DO NOT USE — CONTAINS FABRICATED CLIENT ANSWERS
 >
 > **Written 2026-08-06 by `overfit-analyst`. The user never answered any of its blocking questions.** The

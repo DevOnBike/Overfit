@@ -42,6 +42,13 @@ for plan in sorted((ROOT / "docs" / "specs").glob("*-plan.md")):
 
         continue
 
+    # QUARANTINED is terminal and deliberate: the plan is not in the pipeline and is not going to be.
+    # Recognising it is the difference between "somebody forgot this" and "somebody decided this".
+    if "QUARANTINED" in status.upper():
+        print(f"[quarantined, not in the pipeline] {plan.name}")
+
+        continue
+
     reached = [s for s in STAGES if re.search(rf"\b{s}\b", status)]
     committed = "COMMITTED" in status.upper()
 
