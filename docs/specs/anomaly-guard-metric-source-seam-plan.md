@@ -1,6 +1,6 @@
 # Spec/Plan: `AnomalyGuardService` metric-source seam (enable replay)
 
-STATUS: APPROVED - Task 1 IMPLEMENTED + VERIFIED + REVIEWED 2026-08-08 (interface extracted, both registrations wired, 3 tests with executed negative controls; 1 review finding fixed in round 1 of 3). Tasks 2-3 not started. NOT yet PR-gated: the tree carries unrelated uncommitted work.
+STATUS: APPROVED - Tasks 1 and 2 IMPLEMENTED + VERIFIED + REVIEWED and COMMITTED 2026-08-08 (e6398fa, e69645e). Tasks 3 and 4 not started, both lab-dependent. OPEN for Task 3: RunCycleAsync returns null for both "no window" and "cycle threw" - decide the shape before a consumer exists. Success metric (determinism) NOT yet measured end to end: it needs Task 3, and the plan's replay-duration claim still lacks a pod count (architect Finding 9).
 
 Owner of this file: `overfit-analyst` (this document) → `overfit-architect` signs DESIGN before
 `overfit-developer` writes source. See `.claude/skills/overfit-spec/SKILL.md` for the gate.
@@ -205,13 +205,31 @@ replay, eventually a recorded fixture) can be substituted without changing the h
 instead of the method reading `DateTimeOffset.UtcNow` internally, **so that** incident ages, floor-
 proposal cadence and fetched data all agree with the timestamp I intended, not the wall clock.
 
+- **Decision — client, 2026-08-08 (resolving an `overfit-verifier` BLOCKED finding on this
+  criterion, option B)**: the original wording of this bullet named a `[LabFact]` regression guard
+  as the oracle. **No such diagnostic exists, and none ever has** — verified independently by the
+  developer and the verifier: `new AnomalyGuardService(` appears in `Tests/` only in Task 1's and
+  Task 2's own new test files, and all five `[LabFact]` diagnostics in `Tests/Anomalies/Diagnostics/`
+  construct `AnomalyGuard` + `PrometheusMetricWindowSource` directly, never `AnomalyGuardService`,
+  `ExecuteAsync` or `RunCycleAsync`. The criterion was **structurally untestable as worded** — the
+  lab being down (port-forwards are currently down) was never the blocker, and bringing it up would
+  not have satisfied it either. Replaced below with what is actually true and checkable, and the
+  limitation is stated in the criterion itself rather than in prose beneath it.
 - Given `RunOneCycleAsync` renamed/reshaped to accept `DateTimeOffset now` as a parameter and marked
   `internal` (see open question on visibility),
   When `ExecuteAsync`'s loop calls it with `DateTimeOffset.UtcNow` exactly where it used to compute
   it internally,
-  Then every existing `[LabFact]` diagnostic that exercises the live loop continues to pass with
-  no observable change (same value, same call site, moved up one frame — this is the regression
-  guard for "did I change live behaviour by accident").
+  Then a code-level review confirms the *value* is unchanged (still one `DateTimeOffset.UtcNow`
+  call, still fed into the same `_guard.RunCycle`/`ProposeFloors` calls) — **but Task 2 explicitly
+  does NOT claim the live loop's *behaviour* is unchanged, and does not claim to verify it.**
+  Specifically: `now` is now read at the `ExecuteAsync`/`RunCycleAsync` call boundary, i.e. **before**
+  `RefreshTopologyAsync` runs; the previous code read it **after**. This ordering flip is **recorded
+  and unmeasured** — not regression-guarded, not asserted negligible, just named. Its plausible
+  magnitude is one topology-refresh HTTP round trip against a two-minute default `EndOffset`, but
+  that is reasoning, not a measurement. **Task 2 ships with live-loop behaviour explicitly
+  unverified as a stated limitation of this task**, not grown to cover it (client decision, option
+  B, over growing Task 2 to build the missing guard itself) — Task 4 below is the guard this
+  criterion originally assumed existed, and closes this gap and the ordering question together.
 - Given a scripted `IMetricWindowSource` test double serving fixed `MetricWindow` data regardless of
   the `end` argument (mirroring `ScriptedRawMetricSource`'s pattern),
   When the new per-cycle method is called directly, twice, with the same historical `now` and the
@@ -238,6 +256,50 @@ evaluates in seconds" is demonstrated, not just asserted.
   is naturally `[LabFact]`-gated like its siblings, not part of the fast default suite.
 - Verify: run manually per `Tests/README.md`'s `[LabFact]` instructions; not part of `dotnet test -c
   Release`.
+
+### 4. Live-loop regression guard for `AnomalyGuardService` (Should) — **new task, client decision,
+2026-08-08, option B**
+
+**Why this exists and why it is a new task rather than growing Task 2**: `overfit-verifier` returned
+BLOCKED on Task 2's original first acceptance criterion, which named a `[LabFact]` regression guard
+that does not exist and never has (see the corrected Task 2 criterion above). The client's own
+reasoning for keeping this separate rather than folding it into Task 2: **this gap is not introduced
+by this change** — `AnomalyGuardService` has had zero tests of any kind since it was written,
+confirmed independently by the developer and verifier. Bolting a lab-backed guard onto Task 2 would
+conflate "this change is sound" (provable today, in-process, no lab needed — see Task 2's two tests)
+with "this subsystem was never tested" (a pre-existing gap needing lab infrastructure Task 2 does not
+have). **Should, not Must** — same justification as Task 3: it needs a live/lab Prometheus reachable,
+so it is naturally `[LabFact]`-gated and cannot be part of the fast default suite, and — unlike Tasks
+1–2 — it is not required for this plan's own correctness claim (Task 2's determinism test already
+proves that in-process); it closes a longstanding testability gap and answers the ordering question
+Task 2 left open, which is valuable but not blocking.
+
+**As** whoever next changes `AnomalyGuardService`'s host loop (`ExecuteAsync`, cadence, topology
+refresh ordering, or anything else inside it), **I want** a test that actually drives the live loop
+against a real Prometheus, **so that** a future change to that ordering — the exact kind Task 2 just
+made, un-guarded — has something that can go red instead of shipping silently, the way this one did.
+
+- Given a lab (or otherwise reachable) Prometheus and a real `PrometheusMetricWindowSource` pointed
+  at it,
+  When an `[LabFact]` diagnostic constructs `AnomalyGuardService` itself (not `AnomalyGuard` directly,
+  which is what every existing diagnostic does instead) and drives it through `RunCycleAsync` and/or
+  `ExecuteAsync` for at least one real cadence tick,
+  Then it completes without throwing and produces a `GuardCycleResult` consistent with the lab's
+  known state, giving a future host-loop change something to break.
+- Given the same diagnostic run before and after a change to the ordering between reading `now` and
+  calling `RefreshTopologyAsync`,
+  When the two runs are compared,
+  Then this closes the open ordering question Task 2 left unmeasured (see corrected Task 2 criterion
+  above) — either by showing the flip is observably inert at lab scale, or by surfacing a real
+  difference worth investigating. This is the first time that question will have an actual answer
+  rather than a reasoned guess.
+- **Dependencies**: Tasks 1–2 (needs the interface and the parameterised per-cycle method to exist).
+  **Needs the local lab's Prometheus port-forwards up** — currently down, per the same precondition
+  every existing `[LabFact]` diagnostic in this file already states; this task cannot run until they
+  are.
+- Verify: run manually per `Tests/README.md`'s `[LabFact]` instructions, following the same
+  port-forward preconditions as `AnomalyGuardShadowRunDiagnostics`/`AnomalyGuardEndToEndDiagnostics`;
+  not part of `dotnet test -c Release`.
 
 ## Decision table — which mode needs what
 
@@ -572,6 +634,51 @@ supplied on 2026-08-08.
 
 Signed: this plan is **APPROVED** for `overfit-developer`. Build against Finding 1's corrected Task 2
 acceptance criterion, not the literal text under "Tasks" above.
+
+### Addendum — 2026-08-08, second pass (`overfit-verifier` BLOCKED on Task 2 → analyst correction,
+client decision option B → new Task 4)
+
+**Signature holds.** This is a read of the delta only (Task 2's rewritten first criterion, new Task 4),
+not a re-review — per the coordinator's framing and because nothing outside those two spots changed.
+
+**Does the corrected Task 2 criterion still support the success metric? Yes — provably, not merely
+plausibly.** The ordering flip only has a code path to matter through `RefreshTopologyAsync`, and that
+method returns immediately, doing nothing, when `_topology is null`
+(`AnomalyGuardService.cs:284-287`). `ExecuteAsync` now captures `now` at line 269, before
+`RunCycleAsync` calls `RefreshTopologyAsync` internally at line 417 — confirmed by reading the shipped
+code, not the plan's description of it. Task 2's determinism test
+(`Tests/Anomalies/AnomalyGuardServiceCycleTests.cs:193-197`, already written) constructs
+`AnomalyGuardService` with four positional arguments (`options, source, sink, logger`); `topology`
+takes its default of `null` (`AnomalyGuardService.cs:174`). **The ordering flip and the determinism
+test do not share a code path** — the flip is inert, not "negligible," for every input the
+success-metric oracle exercises. This is stronger than, and independent of, the store-less-replay
+boundary already stated in Decision 4 / Finding 5.
+
+**Should is the right level for Task 4 — confirmed, with the reasoning written down rather than left
+as "plausibly."** Two independent points:
+1. *Structural*: as above, the ordering flip cannot touch anything Task 2's oracle checks, so Task 4
+   does not gate this plan's own correctness claim — the client's stated reasoning for keeping it
+   separate holds up under inspection, not just under the client's assertion of it.
+2. *Magnitude, live path only*: `RefreshTopologyAsync` is one HTTP round trip
+   (`PrometheusTopologySource`, kube-state-metrics-backed), and the shift it introduces moves the
+   window's anchor **earlier** — further from the moment `EndOffset`'s two-minute margin exists to
+   stay clear of (`PrometheusMetricWindowSource.ReadAsync`'s own doc comment: leave a margin behind
+   "now" because rate expressions are still filling in at the trailing edge, per the lab incident that
+   motivated `EndOffset` in the first place). A topology refresh taking Δt now means `end`/`observedAt`
+   sit Δt **further back** in history than before — the safer direction relative to that specific,
+   documented failure mode, not the dangerous one. Under a healthy cluster, Δt is
+   milliseconds-to-low-hundreds-of-ms against a 120 s margin; under a degraded/slow Prometheus it could
+   grow, but that is a pre-existing failure mode of `RefreshTopologyAsync` itself (already handled:
+   previous snapshot stands, logged as stale) that this change does not make more likely or more
+   severe — only the order relative to `now` changed. This is reasoning, not measurement, exactly as
+   the analyst's correction states, and Task 4 is what turns it into one — an argument for building
+   Task 4 soon once the lab is up, not for blocking Task 2 on it now.
+
+**Finding 7 and Finding 9 stand unchanged.** Neither is about `now`'s ordering relative to
+`RefreshTopologyAsync` — Finding 7 is interface-dispatch cost, Finding 9 is Task 3's pod-count-dependent
+wall-clock claim. The ordering flip touches neither.
+
+`STATUS:` line left exactly as given.
 
 ### SUGGESTED IMPROVEMENTS TO MY ROLE
 
