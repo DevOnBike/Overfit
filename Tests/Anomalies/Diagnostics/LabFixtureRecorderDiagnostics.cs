@@ -47,10 +47,17 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
     /// <para>It is <c>[LongFact]</c>, so it never runs in an ordinary <c>dotnet test</c>. Knobs, read from
     /// the code rather than from memory: <c>OVERFIT_LAB_PROM</c> — <b>not</b>
     /// <c>OVERFIT_LAB_PROMETHEUS</c>, which is what every other diagnostic in this directory uses —
-    /// <c>OVERFIT_LAB_CONFIG</c>, <c>OVERFIT_LAB_FIXTURE</c>, and <c>OVERFIT_LAB_FAULT_PODS</c>
-    /// (comma-separated, annotated in the header). An earlier version of this list also named
-    /// <c>OVERFIT_LAB_MINUTES</c> and <c>OVERFIT_LAB_STEP_SECONDS</c>; neither is read anywhere in this
-    /// file, so setting them did nothing.</para>
+    /// <c>OVERFIT_LAB_CONFIG</c>, <c>OVERFIT_LAB_FIXTURE</c>, <c>OVERFIT_LAB_FAULT_PODS</c>
+    /// (comma-separated, annotated in the header), <c>OVERFIT_LAB_MINUTES</c>,
+    /// <c>OVERFIT_LAB_STEP_SECONDS</c>, and the two that decide where the window ends —
+    /// <c>OVERFIT_LAB_END_OFFSET_MINUTES</c> and <c>OVERFIT_LAB_END_UTC</c>, see
+    /// <see cref="EndOfWindow"/>.</para>
+    ///
+    /// <para>An earlier version of that list asserted that <c>OVERFIT_LAB_MINUTES</c> and
+    /// <c>OVERFIT_LAB_STEP_SECONDS</c> were <i>not</i> read anywhere in this file and that setting them did
+    /// nothing. Both have been read since the first version of the method — they are the first two lines of
+    /// it — so the warning was false, and following it would have meant recording the default twenty minutes
+    /// while believing a longer window was impossible.</para>
     /// </summary>
     public sealed class LabFixtureRecorderDiagnostics
     {
@@ -85,14 +92,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
             var faultPods = (Environment.GetEnvironmentVariable("OVERFIT_LAB_FAULT_PODS") ?? string.Empty)
                 .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
-            // Ends a step short of now: the most recent point is often still being filled in, and a partial
-            // last sample would read as a dip in every series at once.
-            //
-            // OVERFIT_LAB_END_OFFSET_MINUTES pushes the window further back, which is what recording after a
-            // load run needs — the rate() window is two minutes wide, so samples taken right after traffic
-            // stops are still decaying and would put a false downward trend in every RED signal at once.
-            var offset = Setting("OVERFIT_LAB_END_OFFSET_MINUTES", 0);
-            var end = DateTime.UtcNow.AddSeconds(-stepSeconds).AddMinutes(-offset);
+            var end = EndOfWindow(stepSeconds);
             var start = end.AddMinutes(-minutes);
 
             // The same mapping the deployed guard runs, so the fixture holds the series the guard actually
@@ -196,10 +196,50 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
             // turns the first header line into something that does not compare equal to "#...".
             File.WriteAllText(
                 path,
-                Render(series, pods, timestamps, faultPods, minutes, stepSeconds),
+                Render(series, pods, timestamps, faultPods, minutes, stepSeconds, start, end),
                 new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
 
             _output.WriteLine($"\nwritten: {path}  ({new FileInfo(path).Length / 1024} KB)");
+        }
+
+        /// <summary>
+        /// The instant the recorded window ends at.
+        ///
+        /// <para>By default a step short of <b>now</b>: the most recent point is often still being filled in,
+        /// and a partial last sample would read as a dip in every series at once.
+        /// <c>OVERFIT_LAB_END_OFFSET_MINUTES</c> pushes that further back, which is what recording after a
+        /// load run needs — the <c>rate()</c> window is two minutes wide, so samples taken right after traffic
+        /// stops are still decaying and would put a false downward trend in every RED signal at once.</para>
+        ///
+        /// <para><b><c>OVERFIT_LAB_END_UTC</c> pins it to an absolute instant instead</b>, which is what
+        /// recording a <i>past</i> stretch out of Prometheus retention needs. The offset knob can reach the
+        /// past too, and doing it that way is a trap: the offset is counted from whenever the test happens to
+        /// start, so the same command run twenty minutes later records a different window and the two results
+        /// are not comparable. A recording used as a calibration reference has to name the stretch it covers,
+        /// not a distance from an unrecorded present.</para>
+        /// </summary>
+        private static DateTime EndOfWindow(int stepSeconds)
+        {
+            var pinned = Environment.GetEnvironmentVariable("OVERFIT_LAB_END_UTC");
+
+            if (!string.IsNullOrWhiteSpace(pinned))
+            {
+                var parsed = DateTime.TryParse(
+                    pinned,
+                    CultureInfo.InvariantCulture,
+                    DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal,
+                    out var instant);
+
+                Assert.True(parsed,
+                    $"OVERFIT_LAB_END_UTC='{pinned}' is not a parseable instant. Use ISO-8601 UTC, "
+                    + "e.g. 2026-08-07T20:00:00Z.");
+
+                return instant;
+            }
+
+            var offset = Setting("OVERFIT_LAB_END_OFFSET_MINUTES", 0);
+
+            return DateTime.UtcNow.AddSeconds(-stepSeconds).AddMinutes(-offset);
         }
 
         /// <summary>
@@ -293,7 +333,9 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
             List<long> timestamps,
             string[] faultPods,
             int minutes,
-            int stepSeconds)
+            int stepSeconds,
+            DateTime start,
+            DateTime end)
         {
             var sb = new StringBuilder();
 
@@ -305,6 +347,12 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
             sb.Append("#\n");
             sb.Append(string.Create(CultureInfo.InvariantCulture,
                 $"# recorded_utc={DateTime.UtcNow:O}\n"));
+
+            // When the recording is historical, recorded_utc says nothing about what is in the file — the
+            // range does, and it is the only thing that makes the recording citable as evidence about a
+            // particular stretch of the cluster's life.
+            sb.Append(string.Create(CultureInfo.InvariantCulture,
+                $"# range_start_utc={start:yyyy-MM-ddTHH:mm:ssZ} range_end_utc={end:yyyy-MM-ddTHH:mm:ssZ}\n"));
             sb.Append(string.Create(CultureInfo.InvariantCulture,
                 $"# window_minutes={minutes} step_seconds={stepSeconds} scrapes={timestamps.Count}\n"));
             sb.Append("# load=even (SKEW=1), driven by AnomalyLabLoadGeneratorTests\n");

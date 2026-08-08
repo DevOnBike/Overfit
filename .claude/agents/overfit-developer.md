@@ -145,6 +145,17 @@ Found on 2026-08-08, when the plan's determinism oracle turned out not to detect
 determinism and clock-independence were two properties behind one test, and only a mutation that stayed
 green revealed it.
 
+**When a change exists because an existing check missed something, run the mutation against the PRE-CHANGE
+code too, and report both outcomes.** "My new test goes red on this corruption" and "the old test did not"
+are different claims, and only the second establishes that you added coverage rather than moved it. The
+first alone is satisfied by a test that duplicates one already there.
+
+Measured on 2026-08-08, and it was the most useful artefact of that run: the fixture gate was widened to
+validate every recording rather than the default one, and the same corruption of the non-default recording
+was run through the old enumeration. **0 of 14 tests failed.** Without that arm the change had a plausible
+story and no evidence; with it, the gap is a number. Restore the pre-change code from git rather than
+hand-reverting it, and say in your report which arm produced which outcome.
+
 ### Performance work
 
 **Write the benchmark first.** A `Sources/Benchmark` class with both shapes side by side and
@@ -376,6 +387,19 @@ in the script rather than to ask.
   in — a `\b` silently became a backspace character in a document here on 2026-08-07, and the result
   looked correct.
 
+**Set the encoding explicitly on BOTH ends, or the first command fails.** This is not defensive coding —
+on this box the failure is immediate and total. MSBuild output is not cp1252, so `subprocess.run` without
+an encoding dies with `UnicodeDecodeError`; and the console is cp1252, so printing a Polish diagnostic or
+a box-drawing character dies with `UnicodeEncodeError`. Both lines are required, at the top of every script:
+
+```python
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+subprocess.run(..., encoding="utf-8", errors="replace")
+```
+
+Measured 2026-08-08: two consecutive invocations lost to exactly these two errors, in that order, before
+any real work ran.
+
 **When the script edits repository files, open them in BINARY mode.** This tree has mixed CRLF and LF,
 and `open(path).read()` / `open(path, "w")` rewrites every line ending in the file — the content diff is
 empty, `git status` shows the file modified, and the obvious undo (`git checkout -- path`) is blocked by
@@ -388,3 +412,17 @@ contents as documentation of anything.
 is mutating leaves litter that reaches `git status`, and from there the index — which is exactly what
 happened on 2026-08-08, twice, and the files are still staged. Write backups under `Tests/bin/` (gitignored)
 or hold the original in memory. Restore before you report, and verify the restore rather than assuming it.
+
+**A mutation harness has two failure modes that both report GREEN, and neither is a fact about the code.**
+Both were hit on 2026-08-08 in a single run, and both are mechanical:
+
+- **Assert the anchor matched exactly once, and print the count.** A hand-typed find-string that matches
+  zero times mutates nothing, the suite passes, and the output is indistinguishable from a real pass. The
+  count is what separates "the code survived this mutation" from "no mutation happened."
+- **Mutate build outputs AFTER building, and re-run with `--no-build`.** Fixtures under
+  `CopyToOutputDirectory="PreserveNewest"` are re-copied by the next build, which silently undoes a
+  mutation of the copied file. This produced a GREEN that was read as missing coverage until the cause
+  was found.
+
+**A GREEN you cannot explain is a claim about your harness first and about the code second.** Establish
+that the mutation actually reached the code under test before you report it as a coverage finding.

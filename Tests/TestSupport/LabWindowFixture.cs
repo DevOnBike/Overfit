@@ -38,18 +38,53 @@ namespace DevOnBike.Overfit.Tests.TestSupport
         /// </summary>
         public static string Path =>
             System.IO.Path.Combine(
-                AppContext.BaseDirectory, "test_fixtures", "lab",
+                Directory,
                 Environment.GetEnvironmentVariable("OVERFIT_LAB_FIXTURE_NAME") ?? "lab-window.csv");
+
+        /// <summary>Where recordings live in the test output. Read from here, never from the source tree.</summary>
+        public static string Directory =>
+            System.IO.Path.Combine(AppContext.BaseDirectory, "test_fixtures", "lab");
 
         /// <summary>Whether the fixture is present — it is copied to output, so normally yes.</summary>
         public static bool Exists => File.Exists(Path);
 
         /// <summary>
+        /// Every recording present, sorted by file name.
+        ///
+        /// <para><b>Enumerated rather than named, because naming one is how the second recording went
+        /// ungated.</b> <see cref="Path"/> defaults to <c>lab-window.csv</c>, so the gate that runs on every
+        /// <c>dotnet test</c> only ever saw one of the two checked-in files — and the other, which a published
+        /// table was scored against, fails validation unmodified. Anything dropped into this directory is now
+        /// gated by the fact of being there.</para>
+        ///
+        /// <para>The directory also receives recordings that are deliberately <i>not</i> checked in — a
+        /// 36-hour window is 7.54 MB — so this reflects what is on the box, not what is in git.</para>
+        /// </summary>
+        public static IReadOnlyList<string> AllPaths()
+        {
+            if (!System.IO.Directory.Exists(Directory))
+            {
+                return [];
+            }
+
+            var paths = System.IO.Directory.GetFiles(Directory, "*.csv");
+
+            Array.Sort(paths, StringComparer.OrdinalIgnoreCase);
+
+            return paths;
+        }
+
+        /// <summary>
         /// Loads the window, and the pods the header marks as faulted.
         /// </summary>
-        public static (MetricWindow Window, IReadOnlyList<string> FaultedPods) Load()
+        public static (MetricWindow Window, IReadOnlyList<string> FaultedPods) Load() => Load(Path);
+
+        /// <summary>Loads a named recording, for a caller enumerating more than one.</summary>
+        public static (MetricWindow Window, IReadOnlyList<string> FaultedPods) Load(string path)
         {
-            var lines = File.ReadAllLines(Path);
+            ArgumentNullException.ThrowIfNull(path);
+
+            var lines = File.ReadAllLines(path);
 
             var faulted = new List<string>();
             var stepSeconds = 15;

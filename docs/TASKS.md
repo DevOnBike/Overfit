@@ -56,7 +56,7 @@ is not.
 | `AN-C1` | OPEN | re-tune the heap floor on an aged population | current number is extrapolation |
 | `AN-C2` | DEFER | `GcPauseRatio.minTrendChange` | one finding is not evidence enough to arm a gate |
 | `AN-D1` | OPEN | peer reports a fixed pod property as a recurring anomaly | diagnosed 2026-08-06, unfixed. **Independently corroborated 2026-08-08**: 272 of 298 cycles carried exactly one finding, which is not a noise distribution |
-| `AN-D2` | OPEN | peer is structurally blind to a single OOMKill | measured |
+| `AN-D2` | **PART** | peer is blind to a single OOMKill — but the guard is not. The row predates its own fix by four hours: `ForRareEvent` was wired to `OomEventsRate` at 23:40 on 2026-08-05, the row written at 19:21. **Wiring verified, behaviour not** — inject `POST /fault/oom` and watch two cycles |
 | `AN-D3` | OPEN | a CPU rise on every replica at once is invisible to all four families | measured 2026-08-01, never diagnosed to the end |
 | `AN-D4` | OPEN | the heap oscillates with a period near the evaluation window | measured 2026-08-05 |
 | `AN-D5` | DONE | `incidents=` counter disagreed with the events | |
@@ -64,7 +64,9 @@ is not.
 | `AN-E2` | DEFER | a CPU-limited deployment so throttle is testable | **now justified rather than optional**: PSI covers starvation without a limit, but throttle itself still cannot be tested any other way |
 | `AN-E3` | DEFER | rebuild the guard image | ships free with the next deploy |
 | `AN-F1` | **OPEN** | the learned seasonal history makes the guard 3x noisier | 2026-08-08: 11 → 33 opened on the same window; floor calibration moved nothing, history is the whole lever. **Unexplained** |
-| `AN-F2` | **OPEN** | work-adjusted trend measured and not shipped | 2026-08-08: a 51% traffic rise on a healthy cluster took incidents from 11 to 40. This is the quantified cost |
+| `AN-F2` | **REFUTED** | the `+1.00` premise has no artefact and is not reproducible (measured +0.38 per pod per window, the level the detector judges); `fixed cost = 0` does not follow from a correlation, which is intercept-invariant — the generator's own `0.45 + 0.040 x traffic` gives exactly +1.00 at 52% fixed cost. ROADMAP reason 2 void; reasons 1 and 3 stand, so the not-shipped decision holds. **New blocker for any retry**: the injected fault is work-proportional by construction, and a fixed-term step is the only regime separating affine from division — the 11/11 tie is experiment design, not a result |
+| `AN-F5` | **DONE** | lab-fixture gate rebuilt: per-channel verdicts (a recording can be valid for CPU and rejected for latency), fleet-excursion detection with scrape-level excision to NaN, and the gate globs every `test_fixtures/lab/*.csv` instead of the default name. Threshold measured, not chosen: 3.38x clean vs 90.85x inside the excursion, gate at 5.0. **M7 is the evidence**: the same corruption through the pre-change enumeration failed 0 of 14 tests. Suite 2478/2209/269/0 |
+| `AN-F4` | OPEN | **precondition for any AN-F2 successor** — both diagnostics inject the fault as `marginal x work x (factor-1)`, i.e. work-proportional, and a step in the FIXED term is the only regime separating the affine fit from plain division. Add a fixed-term case, or a longer recording returns the same 11/11 tie it structurally must |
 | `AN-F3` | PART | the calibrated floors lived only in a gitignored file | rescued to `k8s/anomaly-guard/guard.lab-workload.calibrated.json`; reconciling the three guard configs is still open, and `guard.lab.json` targets a superseded deployment |
 
 ## Release gate — `TG-`

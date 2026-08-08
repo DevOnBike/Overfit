@@ -180,6 +180,48 @@ the injected regression, 3 windows to 4. They do not buy quiet with deafness —
 to resolve at this sample size. **What would settle it is a longer recording**: an hour yields nine
 overlapping windows, several hours would yield dozens of independent ones.
 
+**Correction 2026-08-08 — the `+1.00` premise does not survive checking, and reason 2 above is void.**
+
+Three things were checked and each is reproducible from the repository.
+
+1. **No artefact computes it.** Neither `WorkAdjustedTrendDiagnostics` nor `AffineTrendOnLabFixtureDiagnostics`
+   computes a correlation at all, and no file in `Sources/`, `Tests/` or `Scripts/` both computes one and names
+   `CpuUsageRatio` and `RequestsPerSecond`. The number exists only in prose, here and in `CHANGELOG.md`. Six
+   independent readings on the recording reached **+0.38 to +0.47** — per pod inside a twenty-minute window,
+   which is the level the detector actually judges, **+0.38**.
+
+2. **`fixed cost = 0` does not follow from `correlation = +1.00`.** Correlation is invariant to the intercept,
+   so it carries no information about fixed cost whatever. Against the same simulated traffic curve:
+
+   | fixed cost | fixed as % of value | corr(cpu, traffic) |
+   |---|---|---|
+   | 0.00 | 0.0% | 1.0000 |
+   | 0.10 | 19.2% | 1.0000 |
+   | 0.45 | 51.6% | 1.0000 |
+   | 2.00 | 82.6% | 1.0000 |
+
+   The middle row is `cpu = 0.45 + 0.040 x traffic` — **the generator's own model**, the one reason 2 calls the
+   regime "only the generator" exhibits. It has a fixed cost of 52% of the value and a correlation of exactly
+   +1.00. The number cited as evidence that the lab is unlike the generator is a number the generator produces
+   exactly. Reason 2 is therefore not a reason.
+
+3. **+1.00 is not reachable on a scrape series at all.** Adding scrape noise to the same perfectly affine model
+   drops the correlation to 0.92 at sigma 0.02 and to 0.41-0.54 at sigma 0.10, at either fixed cost. A recorded
+   series correlating at +1.00 is the signature of an aggregated or fitted series, not a measured one.
+
+**What this does and does not change.** Reason 1 (the effect does not clear its own noise, 15 against 11 with
+overlapping Poisson intervals on non-independent windows) and reason 3 (the absolute floor was the lever that
+actually worked, 16 of 22 incidents to 2 of 12) are untouched, and either alone still justifies not shipping.
+The decision stands; its second argument does not.
+
+**A fourth reason, found while checking, which is stronger than the one it replaces.** Both diagnostics inject
+the regression as `marginal x work x (factor - 1)` — deliberately proportional to work, and
+`WorkAdjustedTrendDiagnostics` says so: *"Deliberately NOT a step in the fixed term."* But a change in the fixed
+term is **the only regime in which the affine fit and plain division differ**. So the experiment that returned
+11/11 and 4/4 could not have separated them: the tie is a property of the injected fault, not a finding about
+the treatments. Any next attempt must inject a fixed-term step as a second case, or it will report the same tie
+however long the recording is.
+
 Separately, and not fixed by any treatment: a 50% rise in per-request GC pause is invisible to the trend
 family in all three arms, because `GcPauseRatio` on this lab sits at 5.3e-6 and a relative gate has nothing
 to divide. That is the same pattern as the heap and CPU, and it has the same remedy — an absolute floor,
