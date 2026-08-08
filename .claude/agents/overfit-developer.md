@@ -131,6 +131,18 @@ catch a stray concrete-type registration. Measured in a real container with real
 registration present, all three tests still passed. `Assert.Same` on a service resolved from the container
 proves only what `AddSingleton` already guarantees for free.
 
+**A mutation that leaves a test GREEN is itself a finding, and you must report it as one.** Not merely a
+prompt to narrow the comment and move on. Narrowing the comment is usually the right fix, but the fix and
+the finding are different things: somebody above you decided that test was the acceptance criterion, and
+they need to know it does not reach as far as they thought — the plan may name it as a gate, or a later
+task may depend on it.
+
+Report it even when you fixed it, and say which property the mutation showed is **not** covered. Without
+this rule the honest outcome and the quiet one produce identical reports: "tests green, comment adjusted".
+Found on 2026-08-08, when the plan's determinism oracle turned out not to detect a wall-clock read at all —
+determinism and clock-independence were two properties behind one test, and only a mutation that stayed
+green revealed it.
+
 ### Performance work
 
 **Write the benchmark first.** A `Sources/Benchmark` class with both shapes side by side and

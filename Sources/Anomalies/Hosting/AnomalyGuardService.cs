@@ -263,7 +263,10 @@ namespace DevOnBike.Overfit.Anomalies.Hosting
             // returns false once the token fires, so there is no other way out and no way to spin.
             while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false))
             {
-                await RunOneCycleAsync(stoppingToken).ConfigureAwait(false);
+                // The one wall-clock read in this subsystem's cycle path, and it lives here rather than
+                // inside the cycle so a caller replaying history can name a different moment. Live behaviour
+                // is the same read, one frame up.
+                await RunCycleAsync(DateTimeOffset.UtcNow, stoppingToken).ConfigureAwait(false);
             }
         }
 
@@ -380,13 +383,39 @@ namespace DevOnBike.Overfit.Anomalies.Hosting
                 null);
         }
 
-        private async Task RunOneCycleAsync(CancellationToken ct)
+        /// <summary>
+        /// One evaluation cycle, against the moment the caller names rather than against the wall clock.
+        ///
+        /// <para><b>Taking <paramref name="now"/> as a parameter is what makes a threshold change testable.</b>
+        /// The cycle uses it twice — the window it asks the source for ends at <c>now - EndOffset</c>, and the
+        /// guard ages its incidents against it — so a method that read the clock itself could only ever
+        /// evaluate the present, whatever source it was handed. Re-evaluating a fixed body of history after
+        /// each threshold change then costs another day of cluster time instead of a test run.</para>
+        ///
+        /// <para><b>One ordering difference from the version that read the clock inside.</b> A parameter is
+        /// evaluated before the call, so <paramref name="now"/> is read before the topology refresh rather
+        /// than after it — earlier by the duration of one refresh. It moves the window end by that much
+        /// against an <c>EndOffset</c> whose default is two minutes, which is why this is recorded rather
+        /// than guarded.</para>
+        ///
+        /// <para><b>Deterministic for store-less replay only.</b> Two cold instances driven through the same
+        /// windows and the same <paramref name="now"/> sequence produce equal results;
+        /// <see cref="AnomalyGuard"/> still falls back to the wall clock for <c>restoredAt</c> when a durable
+        /// store is supplied, and this service passes none.</para>
+        /// </summary>
+        /// <param name="now">The moment this cycle is evaluated as of.</param>
+        /// <param name="ct">Cancellation.</param>
+        /// <returns>
+        /// What the cycle decided, or <c>null</c> when it decided nothing — no window came back, or the cycle
+        /// failed and was skipped. Both are already reported; the value is here so a replay driver can collect
+        /// results without reading them back out of a log.
+        /// </returns>
+        internal async Task<GuardCycleResult?> RunCycleAsync(DateTimeOffset now, CancellationToken ct)
         {
             try
             {
                 await RefreshTopologyAsync(ct).ConfigureAwait(false);
 
-                var now = DateTimeOffset.UtcNow;
                 var end = now - _options.EndOffset;
                 var window = await _source.ReadAsync(end, _options.Window, ct).ConfigureAwait(false);
 
@@ -395,7 +424,7 @@ namespace DevOnBike.Overfit.Anomalies.Hosting
                     // No pod returned anything. Not an empty cluster — a cluster this source cannot see.
                     _blind(_logger, (int)MetricIndex.Count, 0, 0, 0, null);
 
-                    return;
+                    return null;
                 }
 
                 var result = _guard.RunCycle(window, now);
@@ -483,6 +512,8 @@ namespace DevOnBike.Overfit.Anomalies.Hosting
                 }
 
                 ProposeFloors(window, now);
+
+                return result;
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -496,6 +527,8 @@ namespace DevOnBike.Overfit.Anomalies.Hosting
                 // incidents is exactly what a healthy cluster looks like.
                 _guard.Telemetry.Failed();
                 _cycleFailed(_logger, ex);
+
+                return null;
             }
         }
     }
