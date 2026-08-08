@@ -19,7 +19,7 @@ silence, and silence is what this subsystem exists to distinguish from health.
 | A2 | ✅ **DONE 2026-08-05 — and it found two defects, one of them ours.** (1) The stack's default route is `receiver: "null"`: a correct alert delivered nowhere. (2) **`time() - overfit_guard_last_cycle_timestamp_seconds > 900` cannot fire when the guard is gone** — the series vanishes with the pod, the expression evaluates over an empty vector, and the alert returns to `inactive`. Measured: `pending` for 60 s, then `inactive` for six minutes, zero notifications. With `absent()` added: **`firing` after 60 s, alert in Alertmanager, two notifications delivered, none failed.** Shipped as `k8s/lab/guard-alerts.yaml`. | **highest** | low | low |
 | A3 | ✅ **DONE 2026-08-05.** Second instance: **42 Mi, 1m CPU**, Prometheus +12 Mi and no CPU change. But 42 Mi is a guard eleven minutes old — the steady-state figure measured over the 24-hour run is **130 Mi, peak 146**. **Quote 146, not 42**: fifty namespaces is **7.3 GB**, not 2.1. The script's own arithmetic multiplied the fresh number and was wrong by 3.5x. Prometheus at 50x is extrapolation (≈2.8 queries/s), not measurement. | high | trivial | none |
 | A4 | **Evening diurnal check** | Closes the last two unverified floors (`RequestsPerSecond` gap and trend), raised 2026-08-05 and verifiable only by waiting — the fault panel cannot move deployment-wide traffic. Already scheduled. | medium | zero (scheduled) | none |
-| A5 | 🟡 **HPA half MEASURED 2026-08-07 — both claims confirmed, plus one nobody predicted.** Dilution and ghost series are real, and **scaling DOWN disturbs as much as scaling up, with an after-effect that outlives the change**: 0 incidents opened in 11 baseline cycles against **5 in the 7 cycles spanning a 12 -> 15 -> 12 round trip**. The StatefulSet half is NOT done. See the section below. | | The lab is twelve identical stateless replicas. Peer comparison is structurally weakest exactly where a client is not: members with their own volumes and shards are not interchangeable, and HPA leaves ghost series and dilutes groups. Documented, never measured. | medium | medium | none |
+| A5 | ✅ **RESOLVED 2026-08-08 — both halves measured, and the second needed a control to mean anything.** HPA half: 0 incidents in 11 static cycles against 5 in the 7 spanning a 12→15→12 round trip. StatefulSet half: findings median **14** against **1** for the same twelve pods replaced under an unchanged topology — so the topology contributes an effect over and above pod age, which the first run alone could not have shown. See the section below. | | The lab is twelve identical stateless replicas. Peer comparison is structurally weakest exactly where a client is not: members with their own volumes and shards are not interchangeable, and HPA leaves ghost series and dilutes groups. Documented, never measured. | medium | medium | none |
 
 ## B. Client readiness — documentation, not code
 
@@ -593,3 +593,70 @@ over a non-existent metric with an empty result, not an error. Reading "no sampl
 move" would have produced a confident wrong answer. The names came from
 `/api/v1/label/__name__/values` with a `match[]` selector — ask the instrument what it has before asking
 it what it says.
+
+
+---
+
+## A5, StatefulSet half measured 2026-08-08 — and the first run proved nothing until a control was added
+
+The claim: peer comparison is structurally weakest where members are not interchangeable, and a
+StatefulSet's are not. Documented since the row was written, never measured.
+
+### What the code already handled, checked before deploying rather than after
+
+Predicted failure: grouping keys on the ReplicaSet, and a StatefulSet has none. **The prediction was
+wrong and the code is right.**
+
+- `PrometheusTopologySource` resolves a StatefulSet pod's workload in **one hop** instead of two and leaves
+  `ReplicaSet` empty on purpose — its own comment says inventing one "would be worse than reporting what
+  is known".
+- `IncidentGrouper.Matches` is `first.Length > 0 && string.Equals(...)`, so **empty does not match empty**.
+  Members fall through to `SameWorkload` rather than being scored `SameReplicaSet` on a shared absence of
+  information.
+- `PeerCohorts` does not key on the ReplicaSet at all; that was tried and reverted within the hour because
+  it left canaries alone in a cohort below the minimum group size.
+
+Confirmed live: `kube_pod_owner` reported `StatefulSet` for all twelve members, and the guard held
+`pods=12`.
+
+### The measurement, and why the first table was not evidence
+
+The lab was swapped onto a StatefulSet named `lab-workload`, so its pods are `lab-workload-0..11` and the
+guard's existing `lab-workload-.*` selector matched them with **no configuration change**.
+
+| arm | findings per cycle | median | max |
+|---|---|---|---|
+| Deployment, aged pods | 0 0 0 0 0 0 1 0 | 0 | 1 |
+| **StatefulSet, fresh pods** | 0 0 12 14 26 25 16 | **14** | **26** |
+| Deployment, **fresh** pods (`rollout restart`) | 0 1 0 1 6 4 3 | **1** | **6** |
+
+**The first two rows alone would have been a false result.** Every one of the twelve pods was minutes old,
+and A5's own first half had already measured that fresh pods produce findings — three of them gave 5 and
+11. Twelve fresh pods reaching 12–26 is entirely consistent with pod age and needs no topology at all. The
+shape agreed: 12 → 14 → 26 → 25 → **16**, a rise and the start of a fall, which is a warm-up transient and
+not a stable structural property. `WarmUpGrace` is 15 minutes.
+
+The third row is the control that separates them: **the same twelve pods replaced under an unchanged
+topology**, changing pod age and nothing else. It produces a real but far smaller effect — median 1
+against 14, peak 6 against 26.
+
+**So both effects exist and they are separable.** Pod age is worth about 6; the StatefulSet topology adds
+roughly a further four-fold on the peak and fourteen-fold on the median. A5's claim holds.
+
+**Limits, stated rather than implied.** One run per arm, no repetition. The StatefulSet mounted per-member
+PVCs that the Deployment does not, which is a difference beyond topology even though the workload never
+writes to them. Every floor in use was calibrated on the Deployment population. And the load was **even
+across members** — a real sharded service is uneven, so this measured the topology of sharding, not
+sharding itself.
+
+### Two findings the control produced that nobody asked for
+
+**An ordinary `rollout restart` — that is, every deployment — lifts findings from zero to six for roughly
+fifteen minutes.** Operationally that means a routine deploy lights the guard up, on a healthy cluster,
+with nothing wrong.
+
+**During the rollout the guard reported `pods=24`**, counting both generations at once. Peer comparison
+therefore treats pods of two different software versions as equals for a cycle or two. This is not a
+defect: `IncidentGrouper` scores `SameReplicaSet` above `SameWorkload` precisely to separate versions, but
+the cohorts deliberately do not split on it, because splitting left canaries invisible. It is a known
+trade — now with its cost measured, and it belongs beside the ghost-series result from the first half.

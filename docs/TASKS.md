@@ -15,6 +15,17 @@ nothing is renumbered and every existing cross-reference inside those documents 
 | `PS-` | PSI CPU-pressure channel | `docs/specs/anomaly-guard-psi-cpu-channel-plan.md` |
 | `RS-` | .NET runtime signals | `docs/specs/anomaly-guard-runtime-signals-plan.md` |
 | `XC-` | cross-cutting, no plan of its own | this file |
+| `NR-` | NASA Power of 10 follow-ups | `ROADMAP.md` §NASA Power of 10 |
+| `AV-` | agentic / interop / vision backlog | `ROADMAP.md` §Agentic / interop / vision backlog |
+| `TT-` | audio / TTS backlog | `ROADMAP.md` §Audio / TTS backlog |
+| `AL-` | adoption / launch roadmap | `ROADMAP.md` §Adoption / launch roadmap |
+| `LG-` | llama.cpp scope-gap snapshot | `ROADMAP.md` §llama.cpp scope-gap snapshot |
+| `MO-` | Mixture-of-Experts post-launch track | `ROADMAP.md` §Post-launch track #1 — MoE |
+| `LT-` | LoRA / QLoRA training track | `ROADMAP.md` §Active track (anomaly LoRA) + §Deferred → LoRA training + GGUF→training bridge |
+| `QT-` | quantization / format coverage | `ROADMAP.md` §Deferred — Qwen / Llama / quantization track |
+| `PB-` | performance backlog | `ROADMAP.md` §Performance backlog |
+| `MK-` | market-driven priorities | `ROADMAP.md` §Market-driven priorities |
+| `MT-` | medium-term features & distribution | `ROADMAP.md` §Medium-term |
 
 The problem it solves: three plan documents each have a "Task 1", so "do task 3" was ambiguous. `MS-3`
 is not.
@@ -40,7 +51,7 @@ is not.
 | `AN-A2` | DONE | alert delivery | found two defects, one ours |
 | `AN-A3` | DONE | second-instance cost | 42 Mi, 1m CPU |
 | `AN-A4` | OPEN | evening diurnal check | closes the last two unverified floors; verifiable only by waiting |
-| `AN-A5` | **PART** | StatefulSet and HPA | HPA half measured 2026-08-07: 0 incidents in 11 static cycles, **5 in the 7 spanning a 12→15→12 round trip**. StatefulSet half not started |
+| `AN-A5` | DONE | StatefulSet and HPA | both halves measured 2026-08-08. StatefulSet: findings median **14** vs **1** for the same pods replaced under an unchanged topology — the control that made the first table mean something. Bonus: a plain `rollout restart` lifts findings 0→6, and the guard counts `pods=24` mid-rollout |
 | `AN-B1` | DONE | client-readiness documentation | folded into `aiops-client-readiness.md` |
 | `AN-C1` | OPEN | re-tune the heap floor on an aged population | current number is extrapolation |
 | `AN-C2` | DEFER | `GcPauseRatio.minTrendChange` | one finding is not evidence enough to arm a gate |
@@ -115,3 +126,168 @@ floor is measured.
 | `XC-3` | **OPEN** | three `.bak` files from the RS0030 experiment were committed. Mine, and they need `git rm` |
 | `XC-4` | OPEN | three copies of the repository-root walk exist (`FixtureFact`, `TelemetryInstrumentWiringTests`, `HybridVsDenseOnDocsCorpusTests`); `RepositoryPaths` is the fourth and the one meant to be shared |
 | `XC-5` | OPEN | `gh` is not authenticated, so no CI job status has been checked all session. The AOT guard may have been red |
+
+---
+
+## Transcribed from `ROADMAP.md` (2026-08-08)
+
+Dropped as not-actionable, with reason: the **release-readiness snapshot** (2026-05-29) is a point-in-time
+status table superseded by later sections; the **status snapshot** table is pure status, nothing to do;
+**long-term ideas** are unscoped with no owner (graph compilation, mixed precision, GPU investigation — not
+sized, not actionable as written). Shipped-and-accurately-labelled items are not transcribed at all (M.E.AI
+adapter, OpenAI API, JSON-Schema, trailing-babble/acronym/LoRA-merge TTS fixes, embeddings, Whisper,
+interpretability hooks, MCP server side) — the roadmap already tells the truth about these.
+
+**Standing constraint, not a task list: decode throughput is closed.** Every lever tried — MHA consolidation
+(+1-2%, shelved), Q8-KV (shipped, but for RAM not speed), register/cache-blocking (prefill 1.61x TTFT;
+cache-blocking itself measured negative and reverted), AVX-512/VNNI (≈0), adaptive early-exit (≈4.6% ceiling
+at unacceptable quality cost) — is measured. The residual ~1.13x gap to llama.cpp is uniform across context
+length and memory-access-efficiency bound, not a missing kernel. Treat any new decode-speed proposal as guilty
+until it is sized against its share of the decode step (`ROADMAP.md` §"Decode throughput catch-up").
+
+### NASA Power of 10 follow-ups — `NR-`
+
+| id | status | task | note |
+|---|---|---|---|
+| `NR-1` | OPEN | gate "check every returned status" (rule 7) mechanically, else-sweep style | enable as `suggestion`, count sites, read a sample, promote per directory. Verified not built — no `CA1806`-style enablement found in `Directory.Build.props`/`.editorconfig` |
+| `NR-2` | OPEN | write the rule-2 analyzer: a size/loop-bound/index read from `BinaryReader`/JSON without passing a validator | text sweep already run by hand (19 candidates, 7 real defects, 4 false positives, all four false positives the same `if (length != expected) throw` shape). **`OVERFIT024` is already taken** by an unrelated env-var-literal rule (`Sources/Analyzers/EnvironmentVariableNameAnalyzer.cs`) — this analyzer needs a new id |
+| `NR-3` | DONE | the seven read-then-use defects the rule-2 sweep named | verified fixed in code: `WhisperGgmlLoader.cs` (nTokens/len/nDims×2/nameLen, `RequireFits` guards at lines 69-98), `RepackedWeightsFile.cs:176`, `LlamaLoRAAdapter.cs:224`, `ModelSerializer.cs:65` (rank now checked before `new int[rank]`, ordering fixed). Matches the roadmap's own "Done 2026-08-03" claim |
+| `NR-4` | OPEN | `CheckpointedModule.FindNonDeterministic` unbounded recursion | verified still present, `Sources/Main/DeepLearning/CheckpointedModule.cs:89` carries `#pragma warning disable OVERFIT022` justified by "a handful of levels at most" — an unproved bound. `Sequential.Add(self)` is legal today and crashes the process with an uncatchable `StackOverflowException`. Fix is an explicit `Stack<IModule>` + reference-identity `HashSet<IModule>`, not a bigger limit |
+| `NR-5` | OPEN | audit `Audio/Mp3` end to end with `overfit-find-bugs-game` | verified: no audio bug-hunt exists after `docs/bug-hunts/audio-2026-08-01-2245-bugs-game-findings.md`. A 2026-08-04 spot-check found the file in good shape (bounded switches, a clamped `big_values`) but did not cover it end to end |
+| `NR-6` | OPEN | census the lengths `Simd.Add`/`Simd.MulAdd` actually receive before moving `Avx512Threshold` | verified: `Sources/Main/Intrinsics/Simd.cs:19` comment still says the threshold is unmeasured and wrong at the low end (128 floats: 512-bit won every op in the microbench that exists) |
+| `NR-7` | OPEN | re-run `ElseRefactorBenchmark` under .NET 10's larger inlining budget | verified: `Sources/Benchmark/ElseRefactorBenchmark.cs` last touched 2026-07-23, before the .NET 10 note was written (2026-08-04/05). `OVERFIT021`'s 2.25x extraction-penalty justification has not been re-measured against the new JIT |
+
+### Agentic / interop / vision backlog — `AV-`
+
+| id | status | task | note |
+|---|---|---|---|
+| `AV-1` | OPEN | Grad-CAM + saliency maps (vision-XAI) | extends the shipped LLM activation-capture/logit-lens to CNN/ONNX; autograd for both already exists |
+| `AV-2` | **REFUTED** | plain population GA on prompt text (SkillOpt) | sizing #2, 2026-07-18: population(4)+tournament+elitism reaches hill-climbing's 87.5% but costs 45 calls just to seed (vs hill-climbing's 32 total), then 12 generations with zero improvement — the whole population converges to identical fitness, no diversity pressure. **Do not build GA-on-prompts** |
+| `AV-3` | OPEN | size MAP-Elites before building it | the only variant left standing after `AV-2`; show prompt-behaviour descriptors (e.g. verbosity × accuracy) actually have resolution first, or it degenerates the same way |
+| `AV-4` | OPEN | `overfit score` as an OpenAI-server / dedicated route | verified: no score route exists under the server code today |
+| `AV-5` | OPEN | "Use Overfit from Semantic Kernel" sample (docs only) | verified: no `docs/*semantic-kernel*` file exists; same item as `MK-4`, cross-reference only |
+
+### Audio / TTS backlog — `TT-`
+
+Trailing-babble root-cause, acronym lexicon and LoRA-merge-to-fast-engine are shipped and accurately labelled
+`DONE` in the roadmap — not transcribed.
+
+| id | status | task | note |
+|---|---|---|---|
+| `TT-1` | OPEN | real-time TTS on CPU (smaller ~0.5B same-arch model, or port Kokoro 82M) | product/moat decision — real-time is partly the private differentiator |
+| `TT-2` | OPEN | signal-domain (waveform) watermark | current watermark is metadata-only; compliance/IP item, near launch |
+| `TT-3` | OPEN, low ROI | align `OrpheusTrainingSequence` to the canonical prompt | cosmetic — inference already works regardless, base dominates |
+| `TT-4` | DEFER | zero-alloc + SIMD SNAC decode | not a speed win — SNAC is cheap, the LM is the bottleneck; would only be a "zero-alloc" banner |
+| `TT-5` | DEFER | Polish-language TTS normalisation | blocked — Orpheus is EN-only, needs a PL TTS model |
+
+### Adoption / launch roadmap — `AL-`
+
+Items #1 (M.E.AI adapter), #2 (OpenAI API), #3 (JSON-Schema), #5 increment 1 (RAG harness), #9 (QLoRA), #10
+(Whisper), #11 (interpretability), #12 (raw-tok/s deprioritised), #13 server-side (MCP) are shipped and
+accurately labelled — not transcribed. Item #8 (model-manager CLI) was later self-corrected in the roadmap's
+own "UPDATE 2026-06-05" section (`overfit pull/list/chat/serve` + `PackAsTool` all verified present in
+`Sources/Cli`) — not stale, not transcribed.
+
+| id | status | task | note |
+|---|---|---|---|
+| `AL-4` | **DONE — roadmap stale** | Production LocalAgent template (auth, audit log, `/healthz` `/readyz`, Dockerfile) | roadmap's table still reads "Phase-1 walking skeleton"; verified `Demo/LocalAgentAspNetDemo` has `Infrastructure/ApiKeyAuthMiddleware.cs`, `AuditMiddleware.cs`, `Observability/AuditLog.cs` + `MetricsCollector.cs`, `Program.cs:180-181` (`/healthz`, `/readyz`), and a `Dockerfile` |
+| `AL-6` | **DONE — roadmap stale** | persistent (file-backed) vector store | roadmap's table still reads "In-memory VectorStore → restart without re-indexing" as open (8/10 ROI); verified `Sources/Main/LanguageModels/Retrieval/PersistentVectorStore.cs` exists (dated 2026-06-21) — on-disk store + source-document manifest with content-hash re-index skip, no SQLite |
+| `AL-7` | **PART — roadmap stale** | `dotnet new` project template | roadmap's table still reads open (7.8/10); verified `Templates/content/OverfitChat` ships a real template (`dotnet new overfit-chat`, Minimal API + `IChatClient`, dated 2026-07-20). Gap: it is a chat-app scaffold, not the agent/tool-calling/RAG scaffold the roadmap item names |
+| `AL-8` | OPEN | MCP host role — bridge `McpTool → ToolDefinition` so `ReActAgent`/`ToolCallConstraint` can consume tools from any MCP server | server side ships with no ceiling; host value is capped by small-model tool-calling reliability (needs 7B+, per the ReAct e2e finding) |
+| `AL-9` | OPEN | persistent KV-cache to disk (cross-session resume) | verified: `Sources/Main/LanguageModels/Runtime/KvCacheSnapshot.cs` is in-memory only, no save/load-to-file path |
+| `AL-10` | OPEN | token healing (re-tokenize boundary + KV rollback) | verified absent; would fix the BPE dead-end that today only graceful-stops |
+| `AL-11` | OPEN | GBNF (generic CFG) grammar constraint | verified absent; same item as `LG-6`. JSON-mode + `ToolCallConstraint` cover the common cases today |
+| `AL-12` | OPEN | continuous / in-flight batching for serving | dotLLM only plans it; not started here either |
+| `AL-13` | OPEN, low priority | per-state token-mask cache for constrained decoding | mask is O(vocab × token-len)/step; fine for short structured output today, named as the follow-on if profiling shows it |
+
+### llama.cpp scope-gap snapshot — `LG-` (2026-05-29)
+
+Mirostat, typical-p/XTC/top-nσ/DRY samplers and Whisper are shipped and accurately checked off — not
+transcribed.
+
+| id | status | task | note |
+|---|---|---|---|
+| `LG-1` | OPEN | Q2_K / Q3_K dequant + decode | verified absent — no Q2_K/Q3_K decode path in `Sources/Main`, present only as an enum tag in `GgmlType.cs`; ~2 days each per the roadmap's own estimate |
+| `LG-2` | OPEN | infill/FIM sampler (prefix/middle/suffix masking) | verified absent |
+| `LG-3` | OPEN | load + compose external `.gguf` LoRA adapters at runtime | Overfit has training-side LoRA; loading/composing externally-trained adapters is separate and verified absent |
+| `LG-4` | OPEN | RoPE scaling variants — Yarn/NTK-by-parts, DynamicNTK, AliBi, per-section | verified absent; unlocks long-context Qwen/Llama variants |
+| `LG-5` | OPEN | encoder-decoder (T5/FLAN) | verified absent; roadmap notes it reuses the shipped BERT-encoder building blocks |
+| `LG-6` | OPEN | GBNF grammar engine | same item as `AL-11`, cross-reference only |
+| `LG-7` | OPEN | one vision-language model stack (LLaVA / Qwen2-VL / Pixtral) | 2-4 weeks per roadmap's own estimate; no product decision recorded on niche fit |
+| `LG-8` | DEFER | state-space / Mamba / RWKV | deferred unless a specific user model demands it |
+| `LG-9` | DEFER | multi-token-prediction + speculative rollback (Qwen3.5/Gemma3N draft heads) | deferred |
+
+### Mixture-of-Experts post-launch track — `MO-`
+
+Track is functionally complete (Qwen1.5-MoE + Mixtral load and generate coherently, Q4_K_M/Q5/Q8_0/F32 all
+covered, GGUF-embedded tokenizer for both SPM and BPE). One optional follow-on remains.
+
+| id | status | task | note |
+|---|---|---|---|
+| `MO-1` | OPEN, optional | native 5-bit (Q5_0/Q5_K) dot kernel | verified absent — MoE experts currently widen Q5→Q8 and dot against the Q8 kernel; a native 5-bit kernel would tighten the working set, not required for correctness |
+
+### LoRA / QLoRA training track — `LT-`
+
+The anomaly-detector LoRA track and the GGUF→training bridge are both shipped end to end (base training, all
+three LoRA stages, adapter save/load, knowledge-injection demo, RAM measured at 2.92 GB peak on real
+Qwen-3B). Two items remain, one of them a measured negative.
+
+| id | status | task | note |
+|---|---|---|---|
+| `LT-1` | OPEN | fast fine-tuned decode — hook a trained LoRA adapter into the optimized (repacked Q4_K GEMV) inference engine as a side-GEMV | today's fast engine runs the frozen base only; the trainable model has LoRA but naive kernels. ~2-3 sessions, touches the hot decode path |
+| `LT-2` | **REFUTED** | training-model KV-cache as a decode speed-up (Option A) | built and bit-correct (`GenerateCached_MatchesUncachedGenerate`), but measured **6x slower** than uncached (2700 ms/token vs 424 ms/token) on real Qwen-3B — the cached path is single-threaded while the uncached forward already parallelises the dequant-matmul across cores. Kept as a correct reference path only, no speed claim |
+| `LT-3` | OPEN — **needs an architect decision** | "backward through Linear/RMSNorm/SwiGLU/attention for the Llama family", from the older LoRA-training checklist | the GGUF→training bridge (`TrainableLlamaModel`) already does exactly this for Qwen/Llama-shaped GGUF; this checklist line predates that bridge and may simply be stale. Confirm before treating as separate scope |
+
+### Quantization / format coverage — `QT-`
+
+Q4_K_M and Q8_0 in-RAM quant storage are shipped and measured (Q4_K_M: 1.4s load, 14.56 tok/s, 4396 MB
+steady RAM on the dev box).
+
+| id | status | task | note |
+|---|---|---|---|
+| `QT-1` | OPEN | Q4_K_M byte-layout integration parity test against a real downloaded file, tolerance too strict | `GgufQ4KMParityTests.Q4KM_TopTokenMatches_FP16Baseline_OnCanonicalPrompt` exists as `[LongFact]` but the roadmap records it **RED** on the maximally-ambiguous 3-token canonical prompt (top-1 token 474 vs 40, swing 2.16, only 4/10 top-k overlap) — assertion is over-strict for that prompt; needs either a less-ambiguous prompt or a top-k-overlap relaxation |
+| `QT-2` | DONE | Q5_0 / Q5_K dequantizer | shipped as part of the MoE track (`GgmlDequant.DecodeQ5_0Block`, `DecodeQ5_KBlock`) — the roadmap's separate "Other quant formats" checklist is stale on this line |
+| `QT-3` | OPEN | Q2_K / Q3_K_S dequant | same item as `LG-1`, cross-reference only |
+
+### Performance backlog — `PB-`
+
+Decode worker headroom fix, huge-pages investigation, and `OverfitParallelFor`'s bulk-wake dispatcher are
+shipped/closed and accurately labelled — not transcribed except where a follow-on remains open.
+
+| id | status | task | note |
+|---|---|---|---|
+| `PB-1` | OPEN | true batched training (B > 1) for MHA in the training path | flagged in the roadmap as "biggest single lever for CPU saturation" — every existing parallel-over-batch path only activates once B > 1 exists |
+| `PB-2` | OPEN | `Conv2D` fwd+bwd migration to `OverfitParallelFor` | needs a per-worker workspace pattern (`GCHandle`-pin or POH refactor of `Conv2DWorkspace`); ~100-150 ms/5 epochs on MNIST, worth doing when GPT-2-scale batched training lands |
+| `PB-3` | OPEN | migrate `TensorMath.Sequence` (LSTM), `TensorMath.Attention`, `Optimizers.Adam` to `OverfitParallelFor` | listed as deferred migrations alongside the ones already done |
+| `PB-4` | OPEN | SIMD path for `MaxPool2DForwardWithIndicesNchw` (training path) | scalar today because index tracking needs comparison masks; ~40 ms/epoch on MNIST (~7%), estimated 1-2 hours + parity tests |
+| `PB-5` | OPEN | verify `ScaledDotProductAttention` forward parallel-over-batch at B ≥ 4 | forward parallel path landed (measured -40% wall / +75% cores-effective on GPT-1 batch 32); roadmap still lists a residual verification item at higher batch |
+| `PB-6` | OPEN | numerical-equivalence tests across scalar/SIMD paths + a determinism policy for parallel training kernels | "Correctness" section of the performance backlog, no owner |
+| `PB-7` | OPEN | make `dotnet build` join the three-level machine-exclusion mutex scheme | verified: only test (`Tests/MeasurementExclusion.cs`) and benchmark (`Sources/Benchmark/Program.cs`) hold `Global\DevOnBike.Overfit.MachineMeasurement`; `Directory.Build.props` has no `OVERFIT_MEASUREMENT_OWNER` guard. The roadmap's anomaly-guard section specifies this design in full but it is unbuilt |
+| `PB-8` | **REFUTED** | huge pages / TLB tuning for the decode weight mmap | closed 2026-07-05 — Windows has no large-page support for file mappings (only private commits), and the 96 MB vs 32 MB V-Cache CCD measured identically (13.75 vs 13.96 tok/s); a 2 GB model dwarfs any L3 |
+| `PB-9` | DEFER, explicitly | per-CPU/per-RAM worker-count lookup table | the mechanism (never take every CPU) is already one line in `ResolveDecodeMaxWorkers`; a table would overfit to the single measured machine — build an opt-in `overfit tune` profiler instead if a materially different box ever shows up |
+| `PB-10` | OPEN, unsized | misc backlog: `LinearKernels` threshold retuning, `Adam`/`AdamW` parameter-parallel update audit, AVX2/AVX-512/AVX10 SIMD audit, thread-scaling stabilisation for large training workloads | grouped because none is individually sized; revisit when GPT-2-scale batched training (`PB-1`) lands |
+
+### Market-driven priorities — `MK-`
+
+Embedding-model support (#1) is shipped — not transcribed.
+
+| id | status | task | note |
+|---|---|---|---|
+| `MK-2` | PART | deepen regulated/private-inference positioning docs | `docs/scenarios/regulated-industries.md` + README "What Overfit is not" started; roadmap names the "library-in-process > exposed server" security argument (175k exposed Ollama servers actively exploited) as still to add |
+| `MK-3` | OPEN | first-class opt-in decision/audit record (input + model hash + output + timestamp) | motivated by EU AI Act Aug-2026 enforcement; deterministic greedy decode + file-versioned weights already exist, the record itself does not |
+| `MK-4` | OPEN | Microsoft Agent Framework / Semantic Kernel adapter positioning | same item as `AV-5`, cross-reference only |
+
+### Medium-term features & distribution — `MT-`
+
+Chat templates, `OverfitClient` facade, depthwise conv, and the four agentic-loop primitives (ReAct,
+critic-loop, circuit breaker, summarising memory) are shipped and accurately labelled — not transcribed.
+
+| id | status | task | note |
+|---|---|---|---|
+| `MT-1` | OPEN | ONNX LSTM/GRU import operators | verified absent |
+| `MT-2` | OPEN | standalone Softmax + CrossEntropy layers (beyond the fused loss) | verified absent |
+| `MT-3` | OPEN | `GroundedAnswerCache` — 4-gated safe semantic answer cache for RAG | per arXiv:2605.27494; primitives exist (`VectorStore`, `BertEncoder`, `WordPieceTokenizer`), the gated cache itself does not. ~200-400 LoC per the roadmap's own estimate; needs `VectorStore.Add` extended to carry a version hash |
+| `MT-4` | OPEN — **needs the client to define "polish"** | NuGet package metadata polish | `Main.csproj` already carries `Authors`/`PackageTags`/description; the roadmap item names no specific gap |
+| `MT-5` | OPEN | Blazor sample: streaming generation via `IAsyncEnumerable`/Rx | verified absent |
+| `MT-6` | OPEN | benchmark page: Format × Model × RAM × tok/s table | verified absent |
+| `MT-7` | DEFER | Gaussian-Process (or cheaper EWMA/z-score) baseline to benchmark the GPT anomaly detector | design sketch exists at `docs/aiops/gp-anomaly-baseline.md`; explicitly deferred as a separate experiment, not a product feature |
