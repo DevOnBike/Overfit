@@ -55,8 +55,19 @@
       "kind": "Gauge"
     },
     "OomEventsRate": {
-      "source": "container_oom_events_total",
-      "kind": "EventCount"
+      "source": "kube_pod_container_status_restarts_total",
+      "kind": "EventCount",
+      "_comment": [
+        "NOT container_oom_events_total. Measured 2026-08-08 against a pod Kubernetes reported as OOMKilled",
+        "with exit 137: that series read 0 for the killed pod, and across 43 series cluster-wide over an hour",
+        "the only distinct value present was 0.0 - cAdvisor does not populate it on this runtime. The channel",
+        "bound, reported a number, satisfied every coverage check and could never fire.",
+        "kube-state-metrics carries the fact in two series: the restart increase says an event happened inside",
+        "the window, the last-terminated reason says it was an OOM. A name and a kind cannot express a join,",
+        "which is why 'query' exists. Verbatim queries carry their own range - keep [2m] in step with",
+        "prometheus rate window by hand."
+      ],
+      "query": "sum by (pod) (increase(kube_pod_container_status_restarts_total{%selector%}[2m]) * on (namespace, pod, container) group_left() kube_pod_container_status_last_terminated_reason{%selector%,reason=\"OOMKilled\"})"
     },
     "ContainerRestarts": {
       "source": "kube_pod_container_status_restarts_total",

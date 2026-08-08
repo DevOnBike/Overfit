@@ -340,8 +340,30 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
                 [MetricIndex.MemoryWorkingSetBytes] =
                     $"sum by (pod) (container_memory_working_set_bytes{{{S}}})",
 
+                // NOT container_oom_events_total. Measured 2026-08-08 against a pod Kubernetes reported as
+                // OOMKilled with exit 137: that series read 0 for the killed pod, and across 43 series
+                // cluster-wide over an hour the only distinct value present was 0.0 — cAdvisor does not
+                // populate it on this runtime. A channel pinned at zero is worse than one with no series at
+                // all, because the missing one is counted as blind in every cycle line while this one
+                // reports a number, satisfies coverage checks and can never fire.
+                //
+                // kube-state-metrics carries the fact. The restart increase says an event happened inside
+                // the window; the last-terminated reason says it was an OOM. Multiplying keeps both
+                // properties: measured 1.00 for the killed pod and NO series for the other eleven.
+                //
+                // The reason flag alone was rejected on the same measurement. It is a STATE that persists
+                // for the container's lifetime, so it would hold the pod anomalous forever; this product
+                // decays with the window — measured 0 at 2/5/15 min and 1.00 at 30 min for a kill 17
+                // minutes old. Matching on (namespace, pod, container) rather than pod alone because pod
+                // names are unique per namespace, not per cluster.
+                //
+                // Known limit, stated rather than hidden: a container that OOMs and then restarts for a
+                // different reason has its flag overwritten, so that OOM stops being attributed. That is a
+                // narrower gap than reading a series which is always zero.
                 [MetricIndex.OomEventsRate] =
-                    $"sum by (pod) (rate(container_oom_events_total{{{S}}}[{range}]))",
+                    $"sum by (pod) (increase(kube_pod_container_status_restarts_total{{{S}}}[{range}])"
+                    + " * on (namespace, pod, container) group_left()"
+                    + $" kube_pod_container_status_last_terminated_reason{{{S},reason=\"OOMKilled\"}})",
 
                 [MetricIndex.LatencyP50Ms] = LatencyQuery(0.50, S, range),
                 [MetricIndex.LatencyP95Ms] = LatencyQuery(0.95, S, range),
@@ -393,8 +415,12 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
                 MetricIndex.MemoryWorkingSetBytes =>
                     $"sum by (pod) (container_memory_working_set_bytes{{{S}}})",
 
+                // See OverfitServerQueries for the measurement: container_oom_events_total is zero on every
+                // series this lab's runtime produces, including for a pod Kubernetes reported as OOMKilled.
                 MetricIndex.OomEventsRate =>
-                    $"sum by (pod) (rate(container_oom_events_total{{{S}}}[1m]))",
+                    $"sum by (pod) (increase(kube_pod_container_status_restarts_total{{{S}}}[1m])"
+                    + " * on (namespace, pod, container) group_left()"
+                    + $" kube_pod_container_status_last_terminated_reason{{{S},reason=\"OOMKilled\"}})",
 
                 MetricIndex.LatencyP50Ms => OtelLatencyQuery(0.50, S),
                 MetricIndex.LatencyP95Ms => OtelLatencyQuery(0.95, S),

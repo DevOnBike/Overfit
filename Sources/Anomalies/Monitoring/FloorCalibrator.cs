@@ -62,6 +62,14 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
         private BoundedSamples[] _levelShifts;
 
         /// <summary>
+        /// The exact range of raw samples per channel, which answers a question none of the accumulators
+        /// above can: has this channel <b>ever</b> moved? See <see cref="ObservedRange"/> for why a
+        /// median-based accumulator gets that wrong in the one direction that matters, and
+        /// <see cref="InertChannels"/> for what it is used for.
+        /// </summary>
+        private readonly ObservedRange[] _observedExtremes = NewExtremes();
+
+        /// <summary>
         /// The same three accumulators for channels the enum does not have, keyed by name.
         ///
         /// <para><b>Custom channels were observed by every detector and by nothing that proposes a floor.</b>
@@ -175,6 +183,11 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
                 {
                     var series = window.Series(pod, metric);
                     var median = Median(series);
+
+                    // Folded from the RAW series and before the finite-median guard, because a channel that
+                    // reports one spike among NaNs has still moved, and the question this answers is only
+                    // whether it ever did.
+                    _observedExtremes[m] = _observedExtremes[m].Fold(series);
 
                     medians[pod] = median;
 
@@ -327,6 +340,8 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
             {
                 var series = window.Series(pod, name);
                 var median = Median(series);
+
+                channel.Observed = channel.Observed.Fold(series);
 
                 medians[pod] = median;
 
@@ -556,6 +571,76 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
         /// <summary>Custom channel names observed so far, so a report can enumerate them.</summary>
         public IReadOnlyCollection<string> CustomChannels => _customChannels.Keys;
 
+        /// <summary>
+        /// Channels that have reported throughout and never once changed value — see
+        /// <see cref="InertChannel"/> for the two that were found this way and why they are not equally
+        /// conclusive.
+        ///
+        /// <para><b>This belongs here rather than on the cycle, and the difference is what makes it usable.</b>
+        /// A single evaluation window is far too short: <c>OomEventsRate</c> is <i>supposed</i> to be zero
+        /// across almost every twenty-minute window on a healthy cluster, so a per-cycle version of this check
+        /// would fire constantly and be switched off within a day. The calibrator is the only component that
+        /// already holds hours of history per channel, which is the horizon at which "never varied" means
+        /// anything.</para>
+        ///
+        /// <para><b>Constant-ness is tested against the exact maximum, not against a sampled spread.</b>
+        /// <see cref="BoundedSamples"/> keeps <see cref="BoundedSamples.Max"/> exactly while percentiles are
+        /// reservoir-sampled, so a series that spiked once has a maximum that differs from its floor even if
+        /// the spike itself was never retained. Comparing the two therefore cannot miss a channel that moved;
+        /// it can only be conservative, which is the right direction for something that accuses a binding of
+        /// being dead.</para>
+        /// </summary>
+        /// <param name="minimumObservations">
+        /// How much history is required before the question is worth asking. The default is 240, which at a
+        /// five-minute cycle is twenty hours — long enough that a real signal has moved and short enough to
+        /// report within a shadow day. Below this a channel is simply not judged, rather than judged leniently.
+        /// </param>
+        public IReadOnlyList<InertChannel> InertChannels(int minimumObservations = 240)
+        {
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(minimumObservations);
+
+            var inert = new List<InertChannel>();
+
+            for (var m = 0; m < (int)MetricIndex.Count; m++)
+            {
+                if (IsInert(_observedExtremes[m], _magnitudes[m].Count, minimumObservations))
+                {
+                    inert.Add(new InertChannel(
+                        (MetricIndex)m, string.Empty, _observedExtremes[m].Max, _magnitudes[m].Count));
+                }
+            }
+
+            foreach (var pair in _customChannels)
+            {
+                var channel = pair.Value;
+
+                if (IsInert(channel.Observed, channel.Magnitudes.Count, minimumObservations))
+                {
+                    inert.Add(new InertChannel(
+                        MetricIndex.Count, pair.Key, channel.Observed.Max, channel.Magnitudes.Count));
+                }
+            }
+
+            return inert;
+        }
+
+        private static bool IsInert(ObservedRange observed, int count, int minimumObservations)
+        {
+            return count >= minimumObservations && observed.IsConstant;
+        }
+
+        private static ObservedRange[] NewExtremes()
+        {
+            var extremes = new ObservedRange[(int)MetricIndex.Count];
+
+            for (var i = 0; i < extremes.Length; i++)
+            {
+                extremes[i] = ObservedRange.Empty;
+            }
+
+            return extremes;
+        }
+
         private FloorProposal[] Compute()
         {
             var proposals = new FloorProposal[(int)MetricIndex.Count];
@@ -722,6 +807,9 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
 
             /// <inheritdoc cref="FloorCalibrator._levelShifts"/>
             public BoundedSamples LevelShifts { get; init; } = new();
+
+            /// <inheritdoc cref="FloorCalibrator._observedExtremes"/>
+            public ObservedRange Observed = ObservedRange.Empty;
 
             public FloorProposal? Cached
             {

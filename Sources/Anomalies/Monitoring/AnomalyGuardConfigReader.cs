@@ -51,7 +51,18 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
                     continue;
                 }
 
-                if (string.IsNullOrWhiteSpace(entry.Source))
+                var query = entry.Query.Trim();
+
+                if (query.Length > 0 && !query.Contains(PromqlCatalog.SelectorToken, StringComparison.Ordinal))
+                {
+                    found.Add($"Metrics['{key}'].query does not contain {PromqlCatalog.SelectorToken} — "
+                              + "without it the query ignores the namespace and pod matchers and silently "
+                              + "reports on the whole cluster.");
+
+                    continue;
+                }
+
+                if (string.IsNullOrWhiteSpace(entry.Source) && query.Length == 0)
                 {
                     found.Add($"Metrics['{key}'].source is blank — omit the entry instead, which states "
                               + "plainly that this cluster does not have it.");
@@ -59,7 +70,8 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
                     continue;
                 }
 
-                bindings.Add(new MetricBinding(metric, entry.Source.Trim(), kind, entry.Quantile));
+                bindings.Add(new MetricBinding(
+                    metric, entry.Source.Trim(), kind, entry.Quantile, query));
             }
 
             foreach (var (key, entry) in file.CustomMetrics)

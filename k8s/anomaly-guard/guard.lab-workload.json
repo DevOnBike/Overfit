@@ -4,7 +4,9 @@
     "Nothing here is recognised by name: the guard knows MetricIndex.LatencyP95Ms, the cluster exports",
     "labapp_request_duration_seconds, and this file is the only thing that connects them. That is the point.",
     "",
-    "CpuThrottleRatio and OomEventsRate come from cadvisor rather than the app; ErrorRate is derived from the",
+    "CpuThrottleRatio comes from cadvisor rather than the app, and is unbound here because no pod carries",
+    "a CPU limit. OomEventsRate comes from kube-state-metrics; see its own comment for why not cadvisor.",
+    "ErrorRate is derived from the",
     "app's own error counter over its request counter, which the map cannot express as a single source, so it",
     "is left out and reported blind."
   ],
@@ -52,8 +54,19 @@
       "kind": "Gauge"
     },
     "OomEventsRate": {
-      "source": "container_oom_events_total",
-      "kind": "EventCount"
+      "source": "kube_pod_container_status_restarts_total",
+      "kind": "EventCount",
+      "_comment": [
+        "NOT container_oom_events_total. Measured 2026-08-08 against a pod Kubernetes reported as OOMKilled",
+        "with exit 137: that series read 0 for the killed pod, and across 43 series cluster-wide over an hour",
+        "the only distinct value present was 0.0 - cAdvisor does not populate it on this runtime. The channel",
+        "bound, reported a number, satisfied every coverage check and could never fire.",
+        "kube-state-metrics carries the fact in two series: the restart increase says an event happened inside",
+        "the window, the last-terminated reason says it was an OOM. A name and a kind cannot express a join,",
+        "which is why 'query' exists. Verbatim queries carry their own range - keep [2m] in step with",
+        "prometheus rate window by hand."
+      ],
+      "query": "sum by (pod) (increase(kube_pod_container_status_restarts_total{%selector%}[2m]) * on (namespace, pod, container) group_left() kube_pod_container_status_last_terminated_reason{%selector%,reason=\"OOMKilled\"})"
     },
     "ContainerRestarts": {
       "source": "kube_pod_container_status_restarts_total",

@@ -220,6 +220,14 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
         {
             var name = binding.SourceMetric;
 
+            // Verbatim PromQL wins over name-plus-kind — see MetricBinding.Query for the channel that could
+            // not be expressed any other way. The selector token is still substituted downstream, which is
+            // why the reader refuses a query that does not contain one.
+            if (!string.IsNullOrWhiteSpace(binding.Query))
+            {
+                return binding.Query;
+            }
+
             return binding.Kind switch
             {
                 MetricSourceKind.Gauge => $"sum by (pod) ({name}{{{token}}})",

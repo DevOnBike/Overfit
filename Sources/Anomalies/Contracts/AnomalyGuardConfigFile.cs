@@ -114,6 +114,19 @@ namespace DevOnBike.Overfit.Anomalies.Contracts
             {
                 get; set;
             }
+
+            /// <summary>
+            /// Verbatim PromQL, replacing whatever <see cref="Kind"/> would have built around
+            /// <see cref="Source"/>. Leave empty unless the correct query cannot be expressed as a name and
+            /// a shape — see <see cref="MetricBinding.Query"/> for the channel that forced this to exist.
+            /// Must contain <c>%selector%</c>, and the reader rejects the file if it does not.
+            ///
+            /// <para><b>The rate range is yours to write and is not substituted.</b> A templated query takes
+            /// the window the guard is configured with; a verbatim one carries whatever you typed, so a
+            /// change to that setting will not reach it. Keep the two in step by hand, or do not use this
+            /// field.</para>
+            /// </summary>
+            public string Query { get; set; } = string.Empty;
         }
 
         /// <summary>One metric outside the modelled set.</summary>

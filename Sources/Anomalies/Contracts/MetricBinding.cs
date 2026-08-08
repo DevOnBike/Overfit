@@ -25,9 +25,36 @@ namespace DevOnBike.Overfit.Anomalies.Contracts
         MetricIndex Target,
         string SourceMetric,
         MetricSourceKind Kind,
-        double Quantile = 0.0)
+        double Quantile = 0.0,
+        string Query = "")
     {
+        /// <summary>
+        /// Verbatim PromQL, used in place of everything <see cref="Kind"/> would have wrapped around
+        /// <see cref="SourceMetric"/>. Empty for the ordinary case, which is nearly all of them.
+        ///
+        /// <para><b>It exists because a name and a shape cannot express every correct query, and the gap is
+        /// not academic.</b> <c>OomEventsRate</c> has to read the restart counter joined against the
+        /// last-terminated reason — kube-state-metrics carries the OOM fact in one series and the event in
+        /// another, and no combination of name-plus-kind produces a join. Measured 2026-08-08: the channel
+        /// had been bound to <c>container_oom_events_total</c>, which is zero on every series this runtime
+        /// produces, so the guard's OOM channel could never fire.</para>
+        ///
+        /// <para><b>The reason this had to be added rather than worked around</b>: the built-in template was
+        /// fixed first, and it had no effect, because a configured binding overrides it. A deployment with
+        /// an explicit <c>metrics</c> block — which is every real one — would have kept reading the dead
+        /// series. Deleting the entry instead is worse still: an unbound channel is issued no query at all
+        /// and reports blind.</para>
+        ///
+        /// <para>Must contain <see cref="PromqlCatalog.SelectorToken"/>, or the query would ignore the
+        /// namespace and pod matchers and silently report on the whole cluster.</para>
+        /// </summary>
+        public string Query
+        {
+            get;
+        } = Query;
+
         /// <summary>Whether this binding can produce a query at all.</summary>
-        public bool IsUsable => !string.IsNullOrWhiteSpace(SourceMetric);
+        public bool IsUsable => !string.IsNullOrWhiteSpace(SourceMetric)
+                                || !string.IsNullOrWhiteSpace(Query);
     }
 }
