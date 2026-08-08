@@ -4,6 +4,7 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using DevOnBike.Overfit.LabWorkload;
 
 // A stand-in for a client's application: it serves requests, exports metrics, and can be told to misbehave
@@ -20,8 +21,8 @@ using DevOnBike.Overfit.LabWorkload;
 //   POST /fault/errors?rate=
 //   POST /fault/leak?bytesPerSecond=
 //   POST /fault/cpu?msPerRequest=
-//   POST /fault/clear            back to a good replica, no restart
-//   POST /fault/oom              allocate until the container limit kills it
+//   POST /fault/clear            back to a good replica, no restart — cancels a running OOM allocation too
+//   POST /fault/oom              allocate NATIVE memory, every page touched, until the limit kills it
 //   POST /fault/crash            exit(1) — a restart without an OOM
 //
 // Every fault is off by default, so an unconfigured pod is a healthy replica.
@@ -190,31 +191,93 @@ app.MapPost("/fault/clear", () =>
 //
 // Runs on a background thread so the response is sent before the process dies; without that the caller sees
 // a connection reset and cannot tell an OOM from a network fault.
+//
+// MEASURED 2026-08-08 (AN-D6): the previous version could not produce an OOM at all, and returned 200 while
+// failing. It allocated managed byte[64 MB] and touched chunk[0] and chunk[^1] only. Two things went wrong
+// and either alone was fatal:
+//
+//   1. Two writes fault in two 4 KB pages. A cgroup limit counts RESIDENT memory, not reservation, so after
+//      the process reached VmSize 6.65 GB the cgroup was charged 37 MB of its 512 MiB limit and the kernel
+//      OOM killer was never anywhere near it. This is the same trap the leak timer above documents in
+//      detail — the fix landed there and not here.
+//   2. Managed allocation cannot reach the limit even when every page IS touched, because the
+//      container-aware GC sets a heap hard limit at 75% of the cgroup limit (384 MiB of 512 MiB) and throws
+//      a managed OutOfMemoryException first. Thrown inside a detached Task.Run with no continuation, it was
+//      swallowed: the loop stopped, nothing was logged, and GET /fault still said "healthy".
+//
+// So the allocation is now NATIVE — outside the GC heap, therefore not subject to its hard limit — and every
+// page is written, so the cgroup is charged what was allocated. Marshal rather than NativeMemory keeps the
+// project free of unsafe blocks.
 app.MapPost("/fault/oom", () =>
 {
+    // 32 MiB per step reaches a 512 MiB limit in sixteen steps; at 100 ms that is under two seconds, which is
+    // deliberate. The memory RAMP is the leak fault's job and it has a rate knob for it. What this endpoint
+    // owes the detector is the EVENT.
+    const int chunkBytes = 32 * 1024 * 1024;
+    const int pageBytes = 4096;
+
+    // A bound, not `while (true)`: 4 GiB is eight times the limit this lab sets, so reaching it means no kill
+    // happened. That is a defect to report loudly — an injector whose failure looks like success is exactly
+    // how AN-D6 survived, and it would have been read as evidence that the detector is blind.
+    const long maxBytes = 4L * 1024 * 1024 * 1024;
+
+    var token = faults.BeginOomAllocation();
+    var logger = app.Logger;
+
     _ = Task.Run(() =>
     {
-        Thread.Sleep(500);
+        var held = new List<IntPtr>((int)(maxBytes / chunkBytes));
+        var allocated = 0L;
 
-        var held = new List<byte[]>();
-
-        // The bound is the container memory limit and it is enforced by the kernel, not by this process —
-        // which is the whole behaviour being reproduced. An in-process counter would stop before the OOM and
-        // produce no event at all. Without a limit on the pod this would take the node down instead, so the
-        // manifest that exposes this endpoint is the manifest that must set one.
-#pragma warning disable OVERFIT023
-        while (true)
-#pragma warning restore OVERFIT023
+        try
         {
-            var chunk = new byte[64 * 1024 * 1024];
-            chunk[0] = 1;
-            chunk[^1] = 1;
-            held.Add(chunk);
-            Thread.Sleep(50);
-        }
-    });
+            Thread.Sleep(500);
 
-    return Results.Text("allocating until the container limit kills this pod");
+            while (allocated < maxBytes && !token.IsCancellationRequested)
+            {
+                var block = Marshal.AllocHGlobal(chunkBytes);
+
+                held.Add(block);
+
+                for (var offset = 0; offset < chunkBytes; offset += pageBytes)
+                {
+                    Marshal.WriteByte(block, offset, 1);
+                }
+
+                allocated += chunkBytes;
+                Thread.Sleep(100);
+            }
+
+            if (token.IsCancellationRequested)
+            {
+                logger.LogInformation(
+                    "oom fault cancelled after {Mib} MiB — released, no kill", allocated / (1024 * 1024));
+
+                return;
+            }
+
+            logger.LogError(
+                "oom fault reached its {Mib} MiB bound WITHOUT being killed — this pod has no enforced "
+                + "memory limit, so no container_oom_events_total was produced and the silence that "
+                + "follows is NOT evidence about the detector", maxBytes / (1024 * 1024));
+        }
+        catch (Exception ex)
+        {
+            // Observed, not swallowed. The previous version's throw vanished and the endpoint stayed silent.
+            logger.LogError(ex, "oom fault failed after {Mib} MiB", allocated / (1024 * 1024));
+        }
+        finally
+        {
+            // Only reached when the kill did NOT happen; a killed process frees nothing. Releasing here is
+            // what makes POST /fault/clear a real undo rather than a label change.
+            foreach (var block in held)
+            {
+                Marshal.FreeHGlobal(block);
+            }
+        }
+    }, token);
+
+    return Results.Text("allocating native memory until the container limit kills this pod");
 });
 
 // A restart WITHOUT an OOM, so the two can be told apart downstream: ContainerRestarts moves, OomEventsRate

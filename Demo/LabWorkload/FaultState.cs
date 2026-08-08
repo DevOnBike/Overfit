@@ -21,7 +21,9 @@ namespace DevOnBike.Overfit.LabWorkload
     ///
     /// <para>Fields are volatile rather than locked: every one is a single word written by one request thread
     /// and read by another, torn reads are not possible on a <c>double</c> at this width on the platforms
-    /// this runs on, and a lock around a knob that a test flips once per minute would be ceremony.</para>
+    /// this runs on, and a lock around a knob that a test flips once per minute would be ceremony. The OOM
+    /// cancellation source is the exception — it is swapped with <see cref="Interlocked"/> because two
+    /// concurrent injections must not each believe they own the running allocation.</para>
     /// </summary>
     internal sealed class FaultState
     {
@@ -32,6 +34,14 @@ namespace DevOnBike.Overfit.LabWorkload
         private double _errorRate;
         private double _leakBytesPerSecond;
         private double _cpuBurnMs;
+
+        /// <summary>
+        /// Non-null while an OOM allocation is running. It exists because the first version had no way to
+        /// stop one: the loop was <c>while (true)</c> in a detached task, so <see cref="Clear"/> returned
+        /// "healthy" while the thread kept allocating, and only killing the pod could end it — which is the
+        /// one thing the control plane exists to avoid.
+        /// </summary>
+        private CancellationTokenSource? _oomAllocation;
 
         public FaultState(FaultProfile initial)
         {
@@ -95,6 +105,27 @@ namespace DevOnBike.Overfit.LabWorkload
             set => Volatile.Write(ref _cpuBurnMs, Math.Max(0.0, value));
         }
 
+        /// <summary>True while an OOM allocation is in flight, so <see cref="Describe"/> cannot claim health
+        /// during the seconds before the kernel kills this process.</summary>
+        public bool IsAllocatingToOom
+            => Volatile.Read(ref _oomAllocation) is { IsCancellationRequested: false };
+
+        /// <summary>
+        /// Starts an OOM allocation and returns the token that stops it. Any allocation already running is
+        /// cancelled first: two overlapping injections would otherwise race to the limit and leave one loop
+        /// unreachable.
+        /// </summary>
+        public CancellationToken BeginOomAllocation()
+        {
+            var fresh = new CancellationTokenSource();
+            var previous = Interlocked.Exchange(ref _oomAllocation, fresh);
+
+            previous?.Cancel();
+            previous?.Dispose();
+
+            return fresh.Token;
+        }
+
         /// <summary>Back to a good replica, without a restart.</summary>
         public void Clear()
         {
@@ -102,11 +133,16 @@ namespace DevOnBike.Overfit.LabWorkload
             ErrorRate = 0.0;
             LeakBytesPerSecond = 0.0;
             CpuBurnMs = 0.0;
+
+            var allocation = Interlocked.Exchange(ref _oomAllocation, null);
+
+            allocation?.Cancel();
+            allocation?.Dispose();
         }
 
         public string Describe()
         {
-            var faults = new List<string>(4);
+            var faults = new List<string>(5);
 
             if (StallProbability > 0.0)
             {
@@ -126,6 +162,11 @@ namespace DevOnBike.Overfit.LabWorkload
             if (CpuBurnMs > 0.0)
             {
                 faults.Add($"cpu {CpuBurnMs:F0}ms/req");
+            }
+
+            if (IsAllocatingToOom)
+            {
+                faults.Add("oom (allocating)");
             }
 
             return faults.Count == 0

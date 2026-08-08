@@ -39,7 +39,7 @@ of that pod, and `POST /fault/clear` returns it to healthy.
 | errors | `POST /fault/errors?rate=0.1` | `ErrorRate` |
 | memory leak | `POST /fault/leak?bytesPerSecond=1048576` | `MemoryWorkingSetBytes` and the trend family; the slow-burn case a single window cannot catch |
 | cpu burn | `POST /fault/cpu?msPerRequest=50` | `CpuUsageRatio`, and the work-adjustment question — cost per request rises while request rate does not |
-| OOM | `POST /fault/oom` | `OomEventsRate` and `ContainerRestarts`. **Measured: the peer family is structurally blind to a single OOMKill** — see D2 in `docs/aiops/aiops-backlog.md` |
+| OOM | `POST /fault/oom` | `OomEventsRate` and `ContainerRestarts`. Allocates **native** memory with every page touched — measured 2026-08-08: a real `OOMKilled`, exit 137, in under 5 s. Managed allocation cannot do this: the container-aware GC throws at 75% of the limit before the kernel acts (`AN-D6`). **Measured: the peer family is structurally blind to a single OOMKill** — see D2 in `docs/aiops/aiops-backlog.md` |
 | crash | `POST /fault/crash` | `ContainerRestarts`, restart-loop detection |
 | clear | `POST /fault/clear` | back to healthy |
 
