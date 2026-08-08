@@ -1,6 +1,6 @@
 # Spec/Plan: `AnomalyGuardService` metric-source seam (enable replay)
 
-STATUS: APPROVED - Tasks 1 and 2 IMPLEMENTED + VERIFIED + REVIEWED and COMMITTED 2026-08-08 (e6398fa, e69645e). Tasks 3 and 4 not started, both lab-dependent. OPEN for Task 3: RunCycleAsync returns null for both "no window" and "cycle threw" - decide the shape before a consumer exists. Success metric (determinism) NOT yet measured end to end: it needs Task 3, and the plan's replay-duration claim still lacks a pod count (architect Finding 9).
+STATUS: APPROVED - Tasks 1, 2 and 3 IMPLEMENTED and COMMITTED 2026-08-08 (e6398fa, e69645e, a597635/4510b44). Tasks 1-2 are VERIFIED + REVIEWED. **Task 3 is committed but was NEVER verified or reviewed** - the gate was deferred while the tree was moving and then not resumed; it needs overfit-verifier and overfit-reviewer before it can be called done. Task 4 (live-loop regression guard) not started, lab-dependent. Success metric (determinism) MEASURED end to end 2026-08-08: identical counts across two runs with a pinned start anchor, 288 cycles in 4.8-5.9 s - but the anchor requirement was a discovery, not a design, and unpinned runs differ (47/43/37 incidents).
 
 Owner of this file: `overfit-analyst` (this document) → `overfit-architect` signs DESIGN before
 `overfit-developer` writes source. See `.claude/skills/overfit-spec/SKILL.md` for the gate.
