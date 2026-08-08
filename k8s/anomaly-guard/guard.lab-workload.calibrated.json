@@ -90,5 +90,15 @@
       "minGap": "0.01",
       "minTrendChange": "0.01"
     }
+  },
+  "customMetrics": {
+    "GcCommittedBytes": {
+      "source": "dotnet_gc_committed_bytes",
+      "kind": "Gauge",
+      "loadSensitive": false,
+      "class": "Resource",
+      "minGap": "1.0MB",
+      "minTrendChange": "3.0MB"
+    }
   }
 }

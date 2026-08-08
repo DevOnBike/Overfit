@@ -1,6 +1,6 @@
 {
   "// what this is": [
-    "The guard's configuration for the synthetic lab workload — the stand-in for a client's application.",
+    "The guard's configuration for the synthetic lab workload \u2014 the stand-in for a client's application.",
     "Nothing here is recognised by name: the guard knows MetricIndex.LatencyP95Ms, the cluster exports",
     "labapp_request_duration_seconds, and this file is the only thing that connects them. That is the point.",
     "",
@@ -8,11 +8,9 @@
     "app's own error counter over its request counter, which the map cannot express as a single source, so it",
     "is left out and reported blind."
   ],
-
   "prometheus": "http://127.0.0.1:9090",
   "namespace": "lab",
   "podRegex": "lab-workload-.*",
-
   "metrics": {
     "RequestsPerSecond": {
       "source": "labapp_requests_total",
@@ -21,7 +19,7 @@
     "LatencyP50Ms": {
       "source": "labapp_request_duration_seconds",
       "kind": "HistogramSeconds",
-      "quantile": 0.50
+      "quantile": 0.5
     },
     "LatencyP95Ms": {
       "source": "labapp_request_duration_seconds",
@@ -62,10 +60,19 @@
       "kind": "EventCount"
     }
   },
-
   "thresholds": {
     "MemoryWorkingSetBytes": {
       "minTrendChange": "256MiB"
+    }
+  },
+  "customMetrics": {
+    "GcCommittedBytes": {
+      "source": "dotnet_gc_committed_bytes",
+      "kind": "Gauge",
+      "loadSensitive": false,
+      "class": "Resource",
+      "minGap": "1.0MB",
+      "minTrendChange": "3.0MB"
     }
   }
 }
