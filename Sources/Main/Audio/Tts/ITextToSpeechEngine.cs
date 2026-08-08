@@ -7,8 +7,8 @@ namespace DevOnBike.Overfit.Audio.Tts
 {
     /// <summary>
     /// Backend-agnostic text-to-speech contract. A concrete engine (an LLM + neural-codec stack such as
-    /// Orpheus + SNAC, or another model) turns <paramref name="text"/> into speech in the given
-    /// <see cref="VoiceProfile"/> and pushes the mono PCM to <paramref name="output"/>. Keeping this interface
+    /// Orpheus + SNAC, or another model) turns its <c>text</c> argument into speech in the given
+    /// <see cref="VoiceProfile"/> and pushes the mono PCM to its <c>output</c> sink. Keeping this interface
     /// model-independent lets the runtime, enrollment, demos and the voice loop be built and tested before any
     /// specific model is ported.
     /// </summary>

@@ -100,7 +100,7 @@ namespace DevOnBike.Overfit.Statistics
 
             var sorted = new double[_stored];
 
-            Array.Copy(_values, sorted, _stored);
+            _values.AsSpan(0, _stored).CopyTo(sorted);
             Array.Sort(sorted);
 
             var index = (int)(q * (_stored - 1));

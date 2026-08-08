@@ -38,6 +38,10 @@ namespace DevOnBike.Overfit.Audio.Tts
         /// <para>To write a genuinely unmarked file - a decision, not an omission - pass
         /// <see cref="SyntheticSpeechMetadata.Unmarked"/> and say why at the call site.</para>
         /// </param>
+        /// <param name="output">Destination stream the WAV bytes are written to.</param>
+        /// <param name="sampleRate">Sample rate in Hz of the PCM this sink will be given. Must be positive.</param>
+        /// <param name="format">Sample encoding written into the header and used when converting incoming samples.</param>
+        /// <param name="leaveOpen">When <c>true</c> the stream survives this sink's disposal; the default closes it.</param>
         public WavAudioSink(
             Stream output,
             int sampleRate,

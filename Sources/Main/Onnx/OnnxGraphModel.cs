@@ -152,7 +152,9 @@ namespace DevOnBike.Overfit.Onnx
             {
                 var node = _nodes[i];
                 sb.AppendLine(
+                    #pragma warning disable RS0030 // AOT-safe: type name in a profiling report line.
                     $"  [{i,2}] {node.Module.GetType().Name,-26} out={node.OutputSize,9}  {_nodeTicks[i] * toMs / runs,8:F2} ms");
+                    #pragma warning restore RS0030
             }
 
             return sb.ToString();
@@ -187,7 +189,9 @@ namespace DevOnBike.Overfit.Onnx
 
             for (var i = 0; i < _nodes.Length; i++)
             {
+                #pragma warning disable RS0030 // AOT-safe: type name used to group per-node timings in a report.
                 var name = _nodes[i].Module.GetType().Name;
+                #pragma warning restore RS0030
                 total += _nodeTicks[i];
 
                 var slot = -1;

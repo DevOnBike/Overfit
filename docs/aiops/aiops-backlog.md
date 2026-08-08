@@ -501,3 +501,95 @@ continuation and carries none — the timestamp sits on the header line above it
 report simply read as "no events". Fixed with `kubectl logs --timestamps`, which prefixes continuation lines
 too, and the window was recovered from the logs without re-running anything. Third instance in one day of a
 reporting bug that reads as good news.
+
+
+---
+
+## The replay is faithful, the learned state makes it worse, and the "unexplained" incidents were traffic
+
+Three results from 2026-08-08, in the order they were found. Each overturned the hypothesis that produced
+the previous one, which is why they are recorded together.
+
+### 1. The replay reproduces A1 exactly — cold, with no learned state
+
+The first historical replay compared **21.4 incidents per 100 completed cycles** against A1's **3.7**, a
+5.8x gap, and the leading hypothesis was that replay runs cold while the deployed guard carries seasonal
+history and floor calibration.
+
+**Wrong.** Replaying A1's *own* window — its 298 cycle timestamps read out of
+`Tests/bin/fp-run-guard-log-FINAL.txt` — cold, reproduced **all 11 incidents in the same 11 cycles**, nine
+of them within one second and the worst within 24. Findings 296 against 301 live.
+
+| window | state | completed | findings | opened | per 100 |
+|---|---|---|---|---|---|
+| A1's own window | cold | 298 | 296 | **11** | **3.7** |
+| A1's own window | warm (deployed state) | 298 | 517 | **33** | 11.1 |
+| recent 24 h | cold | 201 | 242 | 40 | 19.9 |
+| recent 24 h | warm | 201 | 306 | 35 | 17.4 |
+| recent 24 h | calibration only | 201 | 238 | 40 | 19.9 |
+| recent 24 h | history only | 201 | 316 | 35 | 17.4 |
+
+A1 live was 3.7. Cold replay of A1's window is 3.7. **Replay is a faithful instrument**, which is what the
+2026-08-07 decision to prefer it over living through another day depended on and had not verified.
+
+### 2. The learned state makes the guard NOISIER, and the seasonal history is the whole lever
+
+Feeding the real deployed state into A1's window takes it from **11 opened to 33**, and findings from 296
+to 517. Stripping one section of the payload at a time isolates it: **calibration-only moves nothing**
+(40 opened, cycle-for-cycle identical to cold), **history-only reproduces the full warm result** (35, identical
+to full-warm). Direction is not a contamination artefact — the deployed state contains the replayed days,
+which biases it *quieter*, and it still came out louder.
+
+**And the deployed guard was effectively cold too, by construction.** `MinimumHistoryDays = 2`
+(`Contracts/AnomalyGuardOptions.cs:115`) and `MetricHistory` keeps one observation per
+(workload, metric, hour) **per calendar day**. At A1's start the PVC held five hour-buckets from a single
+day, so essentially nothing qualified — and **a 24-hour run cannot arm it at all**, because one day
+contributes one observation per bucket. That is a property of the design, not of that particular run.
+
+Open, and it is a product question rather than a measurement one: is the seasonal regression a defect, or
+an expectation of the wrong shape? The hypothesis on offer — an hourly-anchored interpolation subtracted
+from a smooth signal injects apparent trend — is reasoning, not measurement.
+
+### 3. The 34 "unexplained" incidents were a 51% rise in traffic
+
+Of the recent window's 40 incidents, five fell inside the 12 -> 15 -> 12 scaling experiment and one in the
+hour after the scrape outage. The remaining 34, clustered 2026-08-07 12:00-22:15Z, had no explanation.
+
+The hypothesis was host contention: this session drove the heavy `[LongFact]` group — Qwen-3B and
+Bielik-4.5B loads, QLoRA fine-tunes, MNIST training — on the machine that hosts the cluster, over exactly
+those hours. **Refuted by direct measurement.**
+
+| | A1 (quiet) | suspect window | |
+|---|---|---|---|
+| request rate p50 | 14.17/s | **21.46/s** | **+51%** |
+| CPU p50 | 0.0176 | 0.0224 | +27% |
+| **CPU per request p50** | 0.00121 | **0.00106** | **-12%** |
+| PSI cpu waiting p50 | 1.39e-5 | 1.46e-5 | unchanged |
+| PSI memory / io | 0 | 0 | zero |
+| p95 latency | 0.0488 s | 0.0488 s | identical |
+| errors | 0 | 0 | zero |
+
+`container_pressure_cpu_waiting_seconds_total` measures time a container was runnable and denied CPU. It
+did not move. **Node-level metrics cannot settle this question** — `node_exporter` runs inside the
+docker-desktop VM and cannot see host processes at all — but PSI measures the effect regardless of where
+the cause lives, and there was no effect.
+
+What happened is simply that the lab received half again as much traffic. CPU rose because work rose;
+per-request cost *fell* 12% and kept falling through the afternoon (0.00169 at 06:00Z to 0.00099 at
+19:00Z), consistent with JIT warm-up under sustained load.
+
+**So the 34 are false positives of a class this backlog already names and shelved:** the "Optional" table's
+*"Affine work-adjusted trend for load-sensitive signals — measured and NOT shipped"*.
+
+**The quantified cost of not shipping it: 11 incidents at 14 req/s, 40 at 21 req/s.** Raising traffic by
+half roughly quadrupled the alarm count on an unchanged, healthy cluster. That is a stronger argument for
+work adjustment than anything previously recorded here, and it reframes A1's failure — the 10.63/day was
+measured on a lab whose traffic was flat, and a client whose traffic varies gets worse, not better.
+
+### One methodological note worth keeping
+
+Three of four metric names guessed for this investigation did not exist, and Prometheus answers a query
+over a non-existent metric with an empty result, not an error. Reading "no samples" as "the value did not
+move" would have produced a confident wrong answer. The names came from
+`/api/v1/label/__name__/values` with a `match[]` selector — ask the instrument what it has before asking
+it what it says.

@@ -157,6 +157,11 @@ namespace DevOnBike.Overfit.Data
         /// <param name="rows">Row indices, permuted in place so that <c>[start, end)</c> is this node's subset.</param>
         /// <param name="start">First index of this node's slice of <paramref name="rows"/>.</param>
         /// <param name="end">One past the last.</param>
+        /// <param name="x">Feature matrix, rows by features.</param>
+        /// <param name="y">Target column, one entry per row of <paramref name="x"/>.</param>
+        /// <param name="depth">Depth of this node, compared against the configured maximum to decide whether to split.</param>
+        /// <param name="nodes">Flat node list being built; this method appends its own node and returns that index.</param>
+        /// <param name="importance">Per-feature importance accumulator, added to as splits are chosen.</param>
         private int BuildRecursive(
             FastTensor<float> x,
             FastTensor<float> y,

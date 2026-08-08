@@ -140,7 +140,7 @@ separable from `ExecuteAsync`'s `PeriodicTimer`.
 - A DI-wiring regression test resolving `AnomalyGuardService` itself (not just `AnomalyGuardServiceOptions`) through `AddOverfitAnomalyGuard(...)`, closing the gap noted in the inventory.
 
 **Should**
-- One proof-of-capability test/diagnostic that replays a **historical** window (live Prometheus, past range) through `RunCycleAsync` several times back-to-back with no `Task.Delay`, demonstrating the "day into seconds" claim end to end using only the Must-scope changes — no new source implementation needed, since `PrometheusMetricWindowSource` already accepts arbitrary historical ranges.
+- One proof-of-capability test/diagnostic that replays a **historical** window (live Prometheus, past range) through `RunCycleAsync` several times back-to-back with no `Task.Delay`, demonstrating the "day into a bounded, measured run" claim end to end (30-minute failable ceiling, measured number reported — see Task 3, corrected 2026-08-08 per architect Rulings 1–2) using only the Must-scope changes plus a discriminated `RunCycleAsync` return type — no new source implementation needed, since `PrometheusMetricWindowSource` already accepts arbitrary historical ranges.
 - The twice-replayed-determinism acceptance test (see success metric above), run against the scripted source from Must (fast, no live cluster needed) rather than the live lab.
 
 **Could**
@@ -242,18 +242,68 @@ proposal cadence and fetched data all agree with the timestamp I intended, not t
 ### 3. Historical replay proof-of-capability (Should)
 
 **As** whoever tunes the guard's thresholds, **I want** one example of replaying a real historical
-Prometheus window through several cycles with no wall-clock delay between them, **so that** "a day
-evaluates in seconds" is demonstrated, not just asserted.
+Prometheus window through several cycles with no wall-clock delay between them, **so that** the
+24-hour live run is replaced by a bounded, measured run — not asserted as "seconds," but proven
+inside a ceiling that can actually fail, with the real number reported afterward.
 
-- Given a live (or lab) Prometheus that still retains a window of history, and the Task 1+2 changes,
-  When a small driver loop calls the new internal per-cycle method repeatedly with `now` walking
-  backward-to-forward through that window (no `Task.Delay`), using the **existing**
-  `PrometheusMetricWindowSource` unchanged,
-  Then it completes in low seconds for a day's worth of 5-minute cadence cycles (~288 cycles) and
-  produces incident counts that can be compared against the recorded A1 headline (11/day) as a sanity
-  check, not a pass/fail gate.
-- **Dependencies**: Tasks 1–2. This task needs a live Prometheus (lab or otherwise) reachable, so it
-  is naturally `[LabFact]`-gated like its siblings, not part of the fast default suite.
+- **Decision — architect, 2026-08-08 (fourth-pass addendum, Ruling 1 — `overfit-reviewer`'s
+  null-return finding)**: before the driver is built, `RunCycleAsync`'s return type must be widened
+  from `Task<GuardCycleResult?>` to a discriminated outcome — proposed shape a `GuardCycleKind`
+  enum (`Completed`/`Blind`/`Failed`) paired with the `GuardCycleResult`, valid only when
+  `Completed`. Placed at the front of Task 3, not as a reopening of Tasks 1–2 (committed and
+  verified at `e6398fa`/`e69645e`, and neither needed the distinction) — Task 3's driver is the
+  first real consumer, and widening the contract after a consumer exists is a breaking change.
+  **Named trap, so it is not rediscovered**: do not make the result readable without going through
+  the kind — a plain public `Result` field defaulting to an all-zero `GuardCycleResult` for
+  `Blind`/`Failed` recreates the exact ambiguity being fixed, one field over, since a caller reading
+  counts would see zeros and could not tell "nothing happened" from "nothing ran." Prefer something
+  that makes skipping the check awkward (pattern-matching on `Kind`, or a
+  `TryGetResult(out GuardCycleResult)` that returns `false` for anything but `Completed`).
+- Given `RunCycleAsync` returns the new discriminated outcome,
+  When Task 2's existing tests (`AnomalyGuardServiceCycleTests.cs:65,122,137,142,149`, currently
+  reading `GuardCycleResult?`/`.Value`/`.HasValue`) are migrated to the new shape,
+  Then they still pass unchanged in substance — this is a mechanical signature update, not a
+  redesign, and is the regression guard that the widening itself did not silently change Task 2's
+  already-verified behaviour.
+- Given a live (or lab) Prometheus that still retains a window of history, and the Task 1+2 changes
+  (plus the widened return type above),
+  When a small driver loop calls the per-cycle method repeatedly with `now` walking backward-to-
+  forward through that window (no `Task.Delay`), using the **existing** `PrometheusMetricWindowSource`
+  unchanged, against the lab's actual scale of **12 `lab-workload` replicas**,
+  Then it produces one outcome per cycle (`Completed`/`Blind`/`Failed`, from the widening above) for
+  a day's worth of 5-minute cadence cycles (~288 cycles), and the `Completed`-cycle incident counts
+  are compared against the recorded A1 headline (11/day) as a sanity check — reported **alongside**
+  the `Blind` and `Failed` counts, not folded into it, since a run with several blind or crashing
+  cycles can match a clean run's incident-count total and is not the same finding about the replay.
+- **Decision — architect, 2026-08-08 (fourth-pass addendum, Ruling 2 — timing criterion corrected)**:
+  "low seconds" is replaced because it named no scale and the benchmark behind it does not cover
+  what this task actually does. `AnomalyGuardScaleBenchmark` measures `_guard.RunCycle` alone against
+  an in-memory `MetricWindow`, with **no I/O** — it is a lower bound on Task 3's wall time, not an
+  estimate of it, because Task 3 drives `PrometheusMetricWindowSource` against a **live** Prometheus
+  for all ~288 cycles, and this repository has no measured number for that round trip yet. Corrected
+  criterion:
+  Given the lab's actual scale (12 pods, strictly between the benchmark's measured 4-pod and 20-pod
+  points),
+  When the ~288-cycle replay runs to completion,
+  Then the **in-memory guard-processing component alone is bounded between ≈1.2 s and ≈8.8 s** by
+  monotonic interpolation of `AnomalyGuardScaleBenchmark`'s measured 4-pod (4.174 ms/cycle) and
+  20-pod (30.669 ms/cycle) points — labelled explicitly as a **lower bound that excludes Prometheus
+  round trips**, not the pass criterion — and the **actual pass/fail ceiling is 30 minutes
+  wall-clock total** for the full ~288-cycle replay (fetch + processing together): generous enough
+  not to assert a number nobody has measured, ~48× faster than living through the day, and still
+  genuinely failable (a driver that regressed into per-cycle sleeping or serial re-fetching would
+  land near the original ~24 h, ~48× over the ceiling). **The task must measure and report the real
+  wall-clock number** (and the fetch/processing split, if cheap to obtain) rather than merely passing
+  under the ceiling — this run is this repository's first opportunity to have a measured figure for
+  `PrometheusMetricWindowSource.ReadAsync`'s live round-trip cost at all, and a task that passes
+  without producing it wastes that opportunity. The reported number is a candidate for
+  `docs/measured-baselines.md`, replacing this 30-minute placeholder with a tighter, measured ceiling
+  for any future replay task.
+- **Dependencies**: Tasks 1–2, plus the return-type widening above (now the first step of this task,
+  not a reopening of them). This task needs a live Prometheus (lab or otherwise) reachable, so it is
+  naturally `[LabFact]`-gated like its siblings, not part of the fast default suite. **The lab is up**
+  as of 2026-08-08 (12 `lab-workload` replicas, guard and load driver running, Prometheus
+  port-forwards restored) — this task is unblocked on infrastructure grounds as of this decision.
 - Verify: run manually per `Tests/README.md`'s `[LabFact]` instructions; not part of `dotnet test -c
   Release`.
 
@@ -315,7 +365,7 @@ made, un-guarded — has something that can go red instead of shipping silently,
 |---|---|---|---|---|
 | Decide the 1–9/day criterion on hundreds of events, in seconds | Repeatable re-evaluation after a threshold change | Task 1 | Interface extracted, field retyped, existing tests green | `dotnet test --filter Anomalies` |
 | — | — | Task 2 | Twice-replayed same-input run is byte-identical | New `AnomalyGuardService` unit test |
-| — | — | Task 3 | A real historical window replays in low seconds, no live-day wait | `[LabFact]` diagnostic, manual run |
+| — | — | Task 3 | Discriminated `RunCycleAsync` outcome shipped first; 12-pod, ~288-cycle replay completes within a 30-minute failable ceiling (not "low seconds" — corrected 2026-08-08) and reports the measured wall-clock number | `[LabFact]` diagnostic, manual run |
 
 ## Open questions
 
@@ -679,6 +729,84 @@ as "plausibly."** Two independent points:
 wall-clock claim. The ordering flip touches neither.
 
 `STATUS:` line left exactly as given.
+
+### Addendum — 2026-08-08, fourth pass (pre-Task-3 rulings: `overfit-reviewer`'s null-return finding,
+Finding 9's scale gap)
+
+Two rulings, both mine to make, both bearing on Task 3 before it is dispatched. `STATUS:` and the
+analyst's task text left untouched; where task text needs to change, said explicitly below rather than
+edited here.
+
+**Ruling 1 — the ambiguous `null` return. Introduce a discriminated outcome now, before Task 3's
+driver becomes the first consumer.** The reviewer is right, and precisely for the reason given:
+`RunCycleAsync`'s own doc comment justifies returning a value at all as "so a replay driver need not
+read it back out of a log," and `Task<GuardCycleResult?>` only delivers half of that once a driver
+exists to care — `null` from a blind cluster (`:427`) and `null` from a caught exception (`:531`) are
+already logged differently (`_blind` vs `_cycleFailed`, confirmed by reading both call sites) but are
+the same value to any caller. Task 3's own acceptance criterion (incident counts compared against the
+A1 headline as a sanity check) is exactly the case that needs the distinction: a replay with several
+blind cycles and a replay with several crashing cycles can produce the identical incident-count
+sequence and are not the same finding about the replay.
+
+**Shape**: widen the return type to a small discriminated outcome — e.g. a `GuardCycleKind` enum
+(`Completed`/`Blind`/`Failed`) paired with the `GuardCycleResult`, valid only when `Completed`. One
+concrete trap to name so the fix does not quietly recreate the bug it fixes: **do not make the result
+field readable without going through the kind.** A `GuardCycleOutcome` whose `Result` is a plain
+public field defaulting to an all-zero `GuardCycleResult` for `Blind`/`Failed` looks exactly like "a
+clean cycle that found nothing" to any caller that forgets to check `Kind` first — the same ambiguity,
+one field over. Prefer something that makes skipping the check awkward (pattern-matching on `Kind`, or
+a `TryGetResult(out GuardCycleResult)` that returns `false` for anything but `Completed`) over a plain
+struct with two public fields and an honour system.
+
+**Where this lands**: Task 1 and Task 2 are committed and VERIFIED (`e6398fa`, `e69645e`) — this is not
+a defect in either, since neither needed the distinction, and reopening a verified commit to widen a
+return type is a heavier move than doing it once, ahead of the first real consumer. Recommend this be
+the **first step of Task 3** ("before building the driver, widen `RunCycleAsync`'s return type") rather
+than a Task 2 amendment — Task 2's own tests need only mechanical updates (`AnomalyGuardServiceCycleTests.cs:65,122,137,142,149`
+currently read `GuardCycleResult?`/`.Value`/`.HasValue`; migrating them to the new shape is small and
+contained, not a redesign). **This needs task text — the analyst's, not mine — to add it as Task 3
+scope. Please route it.**
+
+**Ruling 2 — Task 3's wall-clock criterion still names no scale, and Finding 9's numbers need a caveat
+before they're used to pick one.** Correcting my own earlier framing first: `AnomalyGuardScaleBenchmark`
+(cited in Finding 7 and Finding 9) measures `_guard.RunCycle` alone — the in-memory detection/grouping/
+tracking pipeline — against a pre-built `MetricWindow` with **no I/O**. It does **not** measure
+`RunCycleAsync`'s `_source.ReadAsync` call, and Task 3 explicitly drives the **existing**
+`PrometheusMetricWindowSource` against a **live** Prometheus for all ~288 cycles — real network round
+trips this benchmark never takes. Finding 7's conclusion is unaffected and if anything strengthened (a
+larger true per-cycle cost only widens the margin over interface-dispatch overhead), but Finding 9's
+specific figures (1.2 s @ 4 pods, 202 s @ 200 pods) are a **lower bound** on Task 3's real wall time,
+not an estimate of it — this repository has no measured number for `PrometheusMetricWindowSource.ReadAsync`'s
+round-trip cost against a live cluster, run back-to-back. Recording this as a caveat on Finding 9 rather
+than a rewrite: its pod-count-sensitivity conclusion still holds (more pods still costs more, monotonically),
+it just isn't the whole story for a task that does real I/O.
+
+Given that, a single precise "N seconds" bound would be false precision — asserting a number this repo
+has not measured, the exact trap CLAUDE.md's performance section exists to catch. The lab's own history
+is reassuring but not a tight bound either: the live guard has run 5-minute-cadence cycles against real
+Prometheus for extended periods with zero cycle failures (`docs/measured-baselines.md`'s "false
+positives, 24h to 2026-08-05… 292 cycles, 0 failures"), which is existence evidence that a cycle's
+total cost — processing *and* fetch — comfortably fits inside 300 s, not evidence of where inside it.
+
+**Ruling**: replace "low seconds" with a bound that (a) names the lab's actual scale, (b) is generous
+enough not to assert a number nobody has measured, and (c) is still genuinely failable — the coordinator's
+own bar. Concretely: **at the lab's 12 replicas, the in-memory guard-processing component of a
+288-cycle replay is bounded between ≈1.2 s and ≈8.8 s by monotonic interpolation of `AnomalyGuardScaleBenchmark`'s
+measured 4-pod (4.174 ms/cycle) and 20-pod (30.669 ms/cycle) points (12 sits strictly between them, and
+the benchmark's cost is monotonically increasing in pod count at every measured point, so this is
+interpolation between two real measurements, not extrapolation past them). Set the task's pass/fail
+ceiling at 30 minutes wall-clock total for the ~288-cycle replay** — about 48× faster than replaying it
+live (24 h), comfortably inside reach even under a Prometheus round trip an order of magnitude slower
+than the in-memory component per cycle, and still hard enough to fail a real regression (a driver that
+resurrected a per-cycle `Task.Delay(Cadence)`, for instance, would land at ~24 h, ~48× over). **Task 3
+should also record and report the actual measured wall-clock time (and, if cheap, the fetch/processing
+split) as an observation** — this run is the first opportunity in this repository to get a real number
+for `PrometheusMetricWindowSource.ReadAsync`'s live round-trip cost, and that number belongs in
+`docs/measured-baselines.md` once it exists, replacing the 30-minute placeholder ceiling with a tighter
+one for any future replay task. **This also needs task text — the analyst's — to carry the number and
+the reporting requirement. Please route it alongside Ruling 1.**
+
+`STATUS:` line left exactly as given; neither ruling touches Task 1 or Task 2's already-verified text.
 
 ### SUGGESTED IMPROVEMENTS TO MY ROLE
 

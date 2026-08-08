@@ -64,6 +64,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// <param name="kvHeadCount">
         /// Number of KV heads for GQA. 0 or equal to headCount = standard MHA.
         /// </param>
+        /// <param name="headDim">Per-head dimension. 0 (the default) means <c>dModel / headCount</c>; Qwen3 sets it explicitly, so Q/K/V need not be square.</param>
+        /// <param name="attnLogitSoftcap">Soft-cap applied to attention logits; 0 disables it (Gemma-2 sets it).</param>
         public CachedMultiHeadAttention(
             int dModel,
             int headCount,

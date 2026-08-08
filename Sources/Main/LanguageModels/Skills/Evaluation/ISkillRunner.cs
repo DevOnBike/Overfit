@@ -7,7 +7,7 @@ namespace DevOnBike.Overfit.LanguageModels.Skills.Evaluation
 {
     /// <summary>
     /// Runs a prompt against a local model — once with the skill's instructions in context
-    /// (<paramref name="skillEnabled"/> = true) and once without — so the evaluator can measure the skill's
+    /// (<c>skillEnabled</c> = true) and once without — so the evaluator can measure the skill's
     /// <b>lift</b> over the unaided model (the "retire the skill when the bare model matches it" test).
     /// The implementation decides how the skill is injected (system prompt, tool set, …) and controls decoding:
     /// greedy/seeded for a byte-reproducible regression run, or temperature for a capability distribution. This

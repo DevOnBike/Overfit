@@ -62,9 +62,9 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             using var source = new ScriptedMetricWindowSource([Synthetic(degraded: 3)]);
             using var service = Service(options, source, new NullSink());
 
-            var result = await service.RunCycleAsync(T0, CancellationToken.None);
+            var outcome = await service.RunCycleAsync(T0, CancellationToken.None);
 
-            Assert.NotNull(result);
+            Assert.Equal(GuardCycleKind.Completed, outcome.Kind);
             Assert.Equal(1, source.Reads);
             Assert.Equal(T0 - options.EndOffset, source.LastEnd);
             Assert.Equal(options.Window, source.LastWindow);
@@ -76,7 +76,9 @@ namespace DevOnBike.Overfit.Tests.Anomalies
         ///
         /// <para>Two independently constructed services, both cold, both store-less, both handed the very same
         /// <see cref="MetricWindow"/> objects and the very same <c>now</c> values. Every cycle's
-        /// <see cref="GuardCycleResult"/> must match, and so must every incident row the sinks saw — the rows
+        /// <see cref="GuardCycleOutcome"/> must match — kind as well as counts, so a run that went blind where
+        /// the other completed is a difference rather than a pair of matching zeros — and so must every
+        /// incident row the sinks saw; the rows
         /// are the stricter half, since they carry the incident ids and the narratives that the counts do not.
         /// Measured: with <c>IncidentTracker</c> mutated to draw its incident ids from
         /// <c>Random.Shared</c>, the per-cycle result comparison stayed green and only the row comparison went
@@ -101,13 +103,13 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             var script = Script();
             var moments = Moments(script.Count);
 
-            var (resultsA, rowsA) = await Replay(script, moments);
-            var (resultsB, rowsB) = await Replay(script, moments);
+            var (outcomesA, rowsA) = await Replay(script, moments);
+            var (outcomesB, rowsB) = await Replay(script, moments);
 
             for (var cycle = 0; cycle < script.Count; cycle++)
             {
-                Assert.NotNull(resultsA[cycle]);
-                Assert.Equal(resultsA[cycle], resultsB[cycle]);
+                Assert.Equal(GuardCycleKind.Completed, outcomesA[cycle].Kind);
+                Assert.Equal(outcomesA[cycle], outcomesB[cycle]);
             }
 
             Assert.Equal(rowsA, rowsB);
@@ -117,9 +119,9 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             var ongoing = 0;
             var resolved = 0;
 
-            for (var cycle = 0; cycle < resultsA.Count; cycle++)
+            for (var cycle = 0; cycle < outcomesA.Count; cycle++)
             {
-                var result = resultsA[cycle]!.Value;
+                Assert.True(outcomesA[cycle].TryGetResult(out var result));
 
                 opened += result.Opened;
                 ongoing += result.Ongoing;
@@ -134,24 +136,24 @@ namespace DevOnBike.Overfit.Tests.Anomalies
         /// <summary>
         /// One cold run: a fresh service, a fresh scripted source over the shared windows, a fresh sink.
         /// </summary>
-        private static async Task<(IReadOnlyList<GuardCycleResult?> Results, IReadOnlyList<IncidentLogRecord> Rows)> Replay(
+        private static async Task<(IReadOnlyList<GuardCycleOutcome> Outcomes, IReadOnlyList<IncidentLogRecord> Rows)> Replay(
             IReadOnlyList<MetricWindow?> script,
             IReadOnlyList<DateTimeOffset> moments)
         {
             var sink = new CapturingSink();
-            var results = new List<GuardCycleResult?>(script.Count);
+            var outcomes = new List<GuardCycleOutcome>(script.Count);
 
             using var source = new ScriptedMetricWindowSource(script);
             using var service = Service(Options(), source, sink);
 
             for (var cycle = 0; cycle < script.Count; cycle++)
             {
-                results.Add(await service.RunCycleAsync(moments[cycle], CancellationToken.None));
+                outcomes.Add(await service.RunCycleAsync(moments[cycle], CancellationToken.None));
             }
 
             Assert.Equal(script.Count, source.Reads);
 
-            return (results, sink.Rows);
+            return (outcomes, sink.Rows);
         }
 
         /// <summary>Degraded for the first cycles, healthy after — one incident, opened once and closed once.</summary>

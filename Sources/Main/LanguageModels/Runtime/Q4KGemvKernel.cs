@@ -628,6 +628,16 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// configured, parity-tested and documented as active did not run on one path - and that path is the
         /// short-prompt case banding exists for.</para>
         /// </param>
+        /// <param name="repacked">Weight matrix in the repacked <c>block_q4_Kx8</c> layout.</param>
+        /// <param name="outputSize">Number of output rows in the weight matrix.</param>
+        /// <param name="inputSize">Number of input elements per row.</param>
+        /// <param name="cols">Activation columns (prompt tokens) computed in this call; at most <see cref="MaxTileCols"/>.</param>
+        /// <param name="actQuants">Q8_K activation quants, column-contiguous.</param>
+        /// <param name="actScales">Per-super-block activation scales.</param>
+        /// <param name="actBsums">Per-group activation block sums, used for the min correction.</param>
+        /// <param name="output">Destination, column-major: <c>output[c * outputSize + row]</c>.</param>
+        /// <param name="bias">Optional per-row bias added after the dot; empty for none.</param>
+        /// <param name="decodedScales">Optional pre-widened F16 row scales; empty means decode them inline.</param>
         public static void GemmTiled512(
             ReadOnlySpan<byte> repacked,
             int outputSize,

@@ -11,7 +11,7 @@ namespace DevOnBike.Overfit.DeepLearning
 {
     /// <summary>
     /// 2D max pooling as <see cref="IModule"/> + <see cref="IInferenceShapeProvider"/>.
-    /// Uses <see cref="PoolingKernels.MaxPool2DForwardNchw"/> for zero-allocation inference.
+    /// Uses <c>PoolingKernels.MaxPool2DForwardNchw</c> for zero-allocation inference.
     /// </summary>
     public sealed class MaxPool2DLayer : IModule, IInferenceShapeProvider
     {
@@ -26,6 +26,10 @@ namespace DevOnBike.Overfit.DeepLearning
         /// — the classic non-overlapping pool. A smaller value gives an overlapping pool (e.g. ResNet's 3x3
         /// stride-2).</param>
         /// <param name="padding">Symmetric zero-padding on each spatial edge (ONNX pads with -inf for max).</param>
+        /// <param name="channels">Number of input channels. Pooling is per-channel, so the count is unchanged.</param>
+        /// <param name="inputH">Input height in elements.</param>
+        /// <param name="inputW">Input width in elements.</param>
+        /// <param name="poolSize">Side length of the square pooling window.</param>
         public MaxPool2DLayer(int channels, int inputH, int inputW, int poolSize, int stride = 0, int padding = 0)
         {
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(channels);

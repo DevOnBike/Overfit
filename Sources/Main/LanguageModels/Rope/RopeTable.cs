@@ -42,6 +42,8 @@ namespace DevOnBike.Overfit.LanguageModels.Rope
         /// When true, uses the split-half rotation layout (rotate-half over the two contiguous halves of
         /// each head) instead of the adjacent-pair layout. Default false.
         /// </param>
+        /// <param name="freqFactors">Optional per-dimension frequency divisors (Phi-3 longrope); null = none.</param>
+        /// <param name="attnFactor">Uniform scale applied to the computed sin/cos, 1 = unscaled.</param>
         public RopeTable(int maxSequenceLength, int headDimension, float theta = 10_000f, RopeScaling? scaling = null, bool splitHalf = false, float[]? freqFactors = null, float attnFactor = 1f)
         {
             SplitHalf = splitHalf;

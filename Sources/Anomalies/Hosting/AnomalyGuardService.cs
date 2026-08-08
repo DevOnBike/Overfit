@@ -406,11 +406,15 @@ namespace DevOnBike.Overfit.Anomalies.Hosting
         /// <param name="now">The moment this cycle is evaluated as of.</param>
         /// <param name="ct">Cancellation.</param>
         /// <returns>
-        /// What the cycle decided, or <c>null</c> when it decided nothing — no window came back, or the cycle
-        /// failed and was skipped. Both are already reported; the value is here so a replay driver can collect
-        /// results without reading them back out of a log.
+        /// How the cycle ended, and what it decided when it completed.
+        ///
+        /// <para><b>Three outcomes rather than a nullable result</b>, because the two absent cases are not the
+        /// same finding: a cluster the source cannot see and a cycle that threw are logged as different events
+        /// here, and a caller collecting results — which is the reason this method returns anything at all —
+        /// could not tell them apart while both were <c>null</c>. See <see cref="GuardCycleOutcome"/> for why
+        /// the result is reachable only through <c>TryGetResult</c>.</para>
         /// </returns>
-        internal async Task<GuardCycleResult?> RunCycleAsync(DateTimeOffset now, CancellationToken ct)
+        internal async Task<GuardCycleOutcome> RunCycleAsync(DateTimeOffset now, CancellationToken ct)
         {
             try
             {
@@ -424,7 +428,7 @@ namespace DevOnBike.Overfit.Anomalies.Hosting
                     // No pod returned anything. Not an empty cluster — a cluster this source cannot see.
                     _blind(_logger, (int)MetricIndex.Count, 0, 0, 0, null);
 
-                    return null;
+                    return GuardCycleOutcome.Blind;
                 }
 
                 var result = _guard.RunCycle(window, now);
@@ -513,7 +517,7 @@ namespace DevOnBike.Overfit.Anomalies.Hosting
 
                 ProposeFloors(window, now);
 
-                return result;
+                return GuardCycleOutcome.Completed(result);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -528,7 +532,7 @@ namespace DevOnBike.Overfit.Anomalies.Hosting
                 _guard.Telemetry.Failed();
                 _cycleFailed(_logger, ex);
 
-                return null;
+                return GuardCycleOutcome.Failed;
             }
         }
     }

@@ -430,3 +430,13 @@ dotnet_diagnostic.OVERFIT034.severity = error
 [Sources/Anomalies/**.cs]
 dotnet_diagnostic.OVERFIT033.severity = error
 dotnet_diagnostic.OVERFIT034.severity = error
+
+# ── Source-generated files, by name ───────────────────────────────────────────────────────────────────
+# The System.Text.Json source generator emits its context under a path the [**/obj/**] section does not
+# match, so RS0030 fell through to its default Warning there. Directory.Build.props used to handle that by
+# exempting RS0030 from TreatWarningsAsErrors globally — which ALSO downgraded it on real code, measured
+# 2026-08-08: three System.Reflection sites and one banned Array.Copy sat as warnings in Sources/Main while
+# both files asserted in comments that this could not happen. Scoping by filename is narrow enough to leave
+# the ban armed everywhere it matters.
+[*.g.cs]
+dotnet_diagnostic.RS0030.severity = none

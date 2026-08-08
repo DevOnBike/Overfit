@@ -9,7 +9,7 @@ namespace DevOnBike.Overfit.Audio.Tts.Snac
     /// The SNAC codec decoder forward pass — residual-VQ codes back to a 24 kHz waveform — wired exactly to the
     /// reference graph: <c>from_codes</c> (per level: codebook gather → 1×1 <c>out_proj</c> → repeat-interleave →
     /// sum) → depthwise input conv → 1×1 to <c>decoder_dim</c> → four <see cref="DecoderBlock"/>s (Snake →
-    /// transposed-conv upsample → optional noise → 3 dilated <see cref="ResidualUnit"/>s) → Snake → output conv →
+    /// transposed-conv upsample → optional noise → 3 dilated <c>ResidualUnit</c>s (SNAC's own name for them)) → Snake → output conv →
     /// <c>tanh</c>. Correctness-first plain-span (decode runs once per utterance, not a per-token hot loop).
     /// </summary>
     internal sealed class SnacDecoder

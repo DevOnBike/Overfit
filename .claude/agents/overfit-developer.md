@@ -114,6 +114,12 @@ Do not fuse them. A clever kernel written before its correctness is proven is un
 alters behaviour and performance together cannot be A/B-isolated. This is how Winograd and the whole-matrix
 Q4_K work were done here, and it is why both produced trustworthy answers — including the negative ones.
 
+**Running a skipped test: set the environment variable, never edit the attribute.** `[LongFact]` needs
+`OVERFIT_RUN_LONG=1`; `[LabFact]` needs that **and** `OVERFIT_LAB=1`; `[ModelFact]`/`[FixtureFact]` skip on
+a missing fixture and cannot be forced. Advice to "flip it to `[Fact]` temporarily" is stale and actively
+harmful — the switch exists precisely because a flipped attribute was once left flipped until somebody
+noticed it by hand. Editing a test's attribute to run it is editing the test.
+
 **Name the oracle before you start.** Cosine against ONNX Runtime or PyTorch on an existing fixture, a
 finite-difference gradient check (with an absolute-difference floor near zero — 5e-4 is the value that works
 here), byte-parity against a conversion script, or coherent generation on a real model. If you cannot name
