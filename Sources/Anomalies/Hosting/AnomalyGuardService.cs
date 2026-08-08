@@ -16,7 +16,7 @@ namespace DevOnBike.Overfit.Anomalies.Hosting
     /// <summary>
     /// The loop: read a window, evaluate it, report what changed, wait, repeat.
     ///
-    /// <para>Everything it does lives elsewhere — <see cref="PrometheusMetricWindowSource"/> fetches,
+    /// <para>Everything it does lives elsewhere — an <see cref="IMetricWindowSource"/> fetches,
     /// <see cref="AnomalyGuard"/> evaluates, an <see cref="IIncidentSink"/> reports. This is scheduling and
     /// failure handling, which is why it is the only part that belongs to the host rather than the library.</para>
     ///
@@ -103,7 +103,7 @@ namespace DevOnBike.Overfit.Anomalies.Hosting
                 "Anomaly guard cycle failed; skipping it and continuing.");
 
         private readonly AnomalyGuardServiceOptions _options;
-        private readonly PrometheusMetricWindowSource _source;
+        private readonly IMetricWindowSource _source;
         private readonly IRefreshablePodTopology? _topology;
         private readonly AnomalyGuard _guard;
         private readonly ILogger<AnomalyGuardService> _logger;
@@ -132,8 +132,11 @@ namespace DevOnBike.Overfit.Anomalies.Hosting
         /// measured ones and the window especially should not be widened on intuition — a four-hour window
         /// sits on the slope of the daily traffic curve and measured 2583 false incidents a day against 234
         /// at twenty minutes.</param>
-        /// <param name="source">Reads a rolling window of Prometheus. One instance for the process, lending
-        /// its HTTP client to a per-cycle source.</param>
+        /// <param name="source">Reads the window this cycle evaluates. One instance for the process; the
+        /// live implementation lends its HTTP client to a per-cycle Prometheus source. Taken as the interface
+        /// rather than as <see cref="PrometheusMetricWindowSource"/> so a window that has already passed can
+        /// drive the same loop — which is what makes a threshold change testable against a fixed body of
+        /// history instead of against another day of cluster time.</param>
         /// <param name="sink">Where findings and incidents go. Defaults to the logging sink in shadow mode,
         /// which counts and explains and wakes nobody.</param>
         /// <param name="logger">The loop's own voice. Everything an operator learns about coverage — blind
@@ -165,7 +168,7 @@ namespace DevOnBike.Overfit.Anomalies.Hosting
         /// </param>
         public AnomalyGuardService(
             AnomalyGuardServiceOptions options,
-            PrometheusMetricWindowSource source,
+            IMetricWindowSource source,
             IIncidentSink sink,
             ILogger<AnomalyGuardService> logger,
             IRefreshablePodTopology? topology = null,

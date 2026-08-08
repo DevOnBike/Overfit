@@ -584,9 +584,19 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// per-row RoPE + cache writes (K/V-once for GQA); per Q head in the group, batched Q
         /// projection + per-row RoPE + the proven causal <see cref="BatchedAttentionKernel"/> (query n
         /// attends <c>[0..basePosition+n]</c>) + batched O projection accumulated into
-        /// <paramref name="output"/> in ascending head order — <b>bit-identical</b> to N× single-token
-        /// <see cref="Decode"/>. The cache must already be advanced to length
+        /// <paramref name="output"/> in ascending head order. The cache must already be advanced to length
         /// <c>basePosition + rows</c>. Scratch is per-call (prefill, not the 0-alloc decode path).
+        ///
+        /// <para><b>NOT bit-identical to N× single-token <see cref="Decode"/> on a Q4_K model</b>, which
+        /// this doc claimed until 2026-08-07. The whole-O path eighty lines below is default-on whenever
+        /// <c>WoWhole.IsQ4K</c> — true for a typical Q4_K_M GGUF — and its own comment says it reassociates
+        /// the sum the per-head path performs in ascending head order. Reassociation is not a rounding
+        /// detail here: measured end to end on Qwen2.5-3B Q4_K_M, feeding a prompt through this batched
+        /// path versus one token at a time moves the logits by <b>0.47–1.02</b>, which exceeds the usual
+        /// gap between the top two tokens and therefore flips argmaxes. <b>The claim held only for the F32
+        /// path</b> (<see cref="DecodeBatched"/> / <c>PrefillBatched</c>), where no repacked kernel is
+        /// involved. This matters to anyone comparing logits, embeddings or determinism across the
+        /// 16-token batching threshold — not only to speculative decoding, where it was first noticed.</para>
         /// </summary>
         internal void DecodeBatchedQuant(
             ReadOnlySpan<float> hidden,

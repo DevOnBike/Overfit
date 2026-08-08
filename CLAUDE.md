@@ -84,14 +84,19 @@ python Scripts/convert_gpt2.py --size small --out Tests/test_fixtures/
 python Scripts/convert_gguf.py ...
 ```
 
-## How Claude runs those commands here (`.claude/run.py`)
+## How Claude runs those commands here (`.claude/do.py`)
 
 The commands above are what a **human** types. Claude does not type them directly — **every shell command
-goes into `.claude/run.py` and is executed as the single invocation `python D:/Overfit/.claude/run.py`.**
+goes into `.claude/do.py` and is executed as the single invocation `python D:/Overfit/.claude/do.py`.**
+(It was `run.py` until 2026-08-07; the allow-list in `settings.json` still carries the old name in a few
+redundant entries, which are harmless because `Bash(python *)` covers both.)
 
-**This applies to the main session, not to subagents.** `.claude/agents/**` each get their own shell and must
-invoke `dotnet` directly — `run.py` is a single scratch file, so two agents sharing it overwrite each other
-mid-task. The rule below is about discipline in this session; it is not a permission boundary.
+**This applies to the main session AND to subagents, but through different files.** The main session uses
+`.claude/do.py`; each agent in `.claude/agents/**` uses its own `.claude/do-<agent-name>.py`, declared in its
+own definition. Per-agent files exist because a single shared scratch file is overwritten by two agents
+running at once — which is why this rule excluded subagents until 2026-08-08. The rule is discipline, not a
+permission boundary: `settings.json` allow-lists `Bash(python *)` broadly, so nothing here is about
+suppressing prompts.
 
 It is a discipline rule, and the discipline is what pays — not the permissions. (`settings.json` in fact
 allow-lists `Bash(dotnet *)` and `Bash(python *)` broadly, so the original "zero prompts" justification is no

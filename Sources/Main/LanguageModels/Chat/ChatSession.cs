@@ -295,9 +295,21 @@ namespace DevOnBike.Overfit.LanguageModels.Chat
             }
 
             // Speculative fast path (prompt-lookup, adaptively gated): commits ≥1 token per batched
-            // verify, sampling-correct, and ~free when drafts don't fire — but it can't mask the draft
-            // against a per-token constraint, so it only runs unconstrained on a speculation-capable
-            // session. Everything else falls back to the exact single-token loop.
+            // verify, and ~free when drafts don't fire (dn == 0 takes a plain single-token step, so the
+            // only cost is the drafter call) — but it can't mask the draft against a per-token
+            // constraint, so it only runs unconstrained on a speculation-capable session. Everything
+            // else falls back to the exact single-token loop.
+            //
+            // "Sampling-correct" used to be claimed here and it needs qualifying, because THIS is the
+            // caller-facing surface. The rejection sampling is exact with respect to the distribution the
+            // verify forward computes — but that forward is batched and quantized, and its logits differ
+            // from the single-token path's by 0.47-1.02 on Qwen2.5-3B Q4_K_M (measured 2026-08-07), which
+            // is more than the usual gap between the top two tokens. So a caller passing
+            // SamplingOptions.Greedy can get DIFFERENT TEXT depending on whether speculation engaged,
+            // and whether it engaged depends on the adaptive gate and on the drafter finding an n-gram —
+            // neither of which the caller can see. OVERFIT_DISABLE_SPECULATIVE forces the exact
+            // single-token loop for the whole process. T11 in docs/test-gate-backlog.md carries the
+            // measurements and the open decision on whether greedy should opt in rather than out.
             // Hoisted out of the condition: the speculative session is needed inside the branch, and a
             // second (negated) test could not re-introduce a pattern variable in the same scope.
             var spec = _session as CachedLlamaSession;

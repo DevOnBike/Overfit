@@ -372,8 +372,14 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// <see cref="DecodeWithoutLogits"/>, using <see cref="CachedTransformerBlock.DecodeBatchedQuant"/>
         /// (RMSNorm + RoPE + GQA + SwiGLU + quantized weights). After the call, the final-norm output of
         /// the LAST row is in <see cref="LastFinalHidden"/> / <c>_finalHidden</c>, ready for
-        /// <see cref="ProjectLogits"/> (the only token whose logits a prefill needs). Bit-identical to
-        /// the single-token loop. The caller must advance the cache to <c>basePosition + rows</c> first.
+        /// <see cref="ProjectLogits"/> (the only token whose logits a prefill needs). The caller must
+        /// advance the cache to <c>basePosition + rows</c> first.
+        ///
+        /// <para><b>Not bit-identical to the single-token loop</b>, which this doc asserted until
+        /// 2026-08-07. Measured on Qwen2.5-3B Q4_K_M, the same context reached through this path versus one
+        /// token at a time differs by <b>0.47–1.02</b> in logits — see
+        /// <see cref="CachedMultiHeadAttention.DecodeBatchedQuant"/> for the mechanism. The F32
+        /// counterpart <see cref="PrefillBatched"/> is unaffected; it composes no repacked kernel.</para>
         /// </summary>
         internal void PrefillBatchedQuant(
             ReadOnlySpan<float> inputHidden,

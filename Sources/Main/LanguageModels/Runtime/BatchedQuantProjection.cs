@@ -395,8 +395,15 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             int inputSize, Span<sbyte> quants, Span<float> scales, Span<short> sums, bool preQuantized)
         {
             // Register-tiled GEMM: repacked block_q4_Kx8, decode each super-block once and reuse across a
-            // tile of NR columns - measured ~3x vs weight-stationary under parallelism, 1.61x end-to-end
-            // prefill. Default-on when the weight is already prepacked (an offline sidecar mmap'd it -> zero
+            // tile of NR columns - measured ~3x vs RE-DECODE-PER-ROW, 1.61x end-to-end prefill.
+            //
+            // The baseline in that "~3x" is the point, and this comment named the wrong one until
+            // 2026-08-07: it said "vs weight-stationary". Against weight-stationary the measured result is
+            // an EXACT TIE (0.999x), because ProjectBatchedWeightStationary already amortises weight decode
+            // across the row tile - the same thing the tiling does. See Runtime/README.md, which has
+            // carried the correction since the bias-support measurement.
+            //
+            // Default-on when the weight is already prepacked (an offline sidecar mmap'd it -> zero
             // extra RAM); otherwise opt-in via OVERFIT_TILED_PREFILL since repacking copies the weight.
             // No-bias only (GemmTiled applies none). AVX2/FMA required - the kernel is x86-only, so on ARM
             // (e.g. the Android app) this falls through to the weight-stationary path even if a sidecar

@@ -383,9 +383,15 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// rejects). Per-row RMSNorm → batched attention (<see cref="CachedMultiHeadAttention.DecodeBatchedQuant"/>)
         /// → residual → per-row RMSNorm → batched SwiGLU FFN
         /// (<see cref="CachedFeedForwardBlock.DecodeSwiGluBatchedDispatched"/>) → residual. Composes the
-        /// per-row-independent norms/residuals with the two batched blocks, so the result is
-        /// <b>bit-identical</b> to N× <see cref="Decode"/>. Dense FFN only (MoE batched prefill is a
-        /// follow-on). The cache must already be advanced to <c>basePosition + rows</c>.
+        /// per-row-independent norms/residuals with the two batched blocks. Dense FFN only (MoE batched
+        /// prefill is a follow-on). The cache must already be advanced to <c>basePosition + rows</c>.
+        ///
+        /// <para><b>The composition is faithful; the pieces are not bit-identical.</b> This doc claimed
+        /// the result was bit-identical to N× <see cref="Decode"/> until 2026-08-07. The norms and
+        /// residuals are genuinely per-row and carry no cross-row dependence, so the block adds no error
+        /// of its own — but it composes <see cref="CachedMultiHeadAttention.DecodeBatchedQuant"/>, whose
+        /// default-on whole-O path reassociates a sum on Q4_K weights. See that method's doc for the
+        /// measured size (0.47–1.02 in logits, enough to flip an argmax).</para>
         /// </summary>
         internal void DecodeBatchedQuant(
             ReadOnlySpan<float> input,

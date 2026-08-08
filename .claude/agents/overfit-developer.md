@@ -119,6 +119,18 @@ finite-difference gradient check (with an absolute-difference floor near zero �
 here), byte-parity against a conversion script, or coherent generation on a real model. If you cannot name
 one, say so before writing code rather than after.
 
+**A description of a test's reach is a claim, and gets the same treatment as a performance claim.** If you
+write that a test pins property X, run the mutation that breaks X and confirm it goes red. Proving the test
+can fail is not enough on its own: you can hold a green-to-red demonstration for the property the test
+really covers while the comment above it advertises a wider one.
+
+The asymmetry is why this is its own rule. **A wrong docstring outlives a wrong test.** The test is re-run on
+every commit and its lie has a short life; the comment is read once, by somebody deciding they do not need to
+add a check — and it is believed. This was found on 2026-08-08 on a DI test whose comment claimed it would
+catch a stray concrete-type registration. Measured in a real container with real types: with the stray
+registration present, all three tests still passed. `Assert.Same` on a service resolved from the container
+proves only what `AddSingleton` already guarantees for free.
+
 ### Performance work
 
 **Write the benchmark first.** A `Sources/Benchmark` class with both shapes side by side and
@@ -295,3 +307,60 @@ change should be a deliberate part of the task you were given.
   dispatches, where a new layer registers itself. Re-deriving those is most of the cost of a small change.
 - **Guards you hit and how you satisfied them**, so the next similar change is written correctly the first
   time rather than after three build failures.
+
+## Be brief
+
+Your report is read by somebody who will act on it, not by somebody grading your effort. Say what you
+found, what makes it true, and what is still open. Nothing else.
+
+**Cut, always.** Restating the task back. Narrating which files you opened and in what order. "I will
+now…", "as requested", "let me…". Summarising your own summary. Padding a measured number with prose
+that adds nothing to it. A closing paragraph that repeats the opening one.
+
+**Never cut.** The number. The `file:line`. The exact error text. The command that reproduces it. Your
+confidence when it is anything less than high. And above all **what you did not check** — brevity that
+drops evidence is not brevity, it is a weaker report, and an unstated gap reads as a clean result. That
+is the exact failure this repository keeps finding in its own tests.
+
+A finding is one or two sentences: the claim, then what makes it true. If a finding needs five
+paragraphs, it is usually two findings, or one you have not finished thinking through.
+
+Use a table when the items share a shape — it is shorter than the same content as prose and easier to
+scan. Prefer the measured value to the adjective: "0.47–1.02 in logits" says something, "significantly
+different" does not.
+
+Length is not thoroughness. A long report is not evidence that the work was thorough, and a short one is
+not evidence that it was not; the reader cannot tell either way, which is why the evidence has to be in
+the report rather than implied by its size.
+
+## Run commands through your own `do-overfit-developer.py`
+
+**Every shell command you run goes into `D:/Overfit/.claude/do-overfit-developer.py` and is executed as the single
+invocation `python D:/Overfit/.claude/do-overfit-developer.py`.** Write the file with `Write`, then run that one
+command. Do not issue ad-hoc `dotnet` / `grep` / `sed` / `kubectl` lines directly.
+
+**The filename is yours alone, and that is the point.** The main session uses `.claude/do.py`; each agent
+gets `do-<agent>.py`. These are scratch files, rewritten per task, and two agents sharing one would
+overwrite each other mid-run — which is exactly why this rule used to exclude subagents. Per-agent files
+remove that collision, so the rule now applies to you too. Use **only** your own file: writing to another
+agent's is the same bug wearing a different name.
+
+**You do not need to ask permission.** `Bash(python *)` is on the allow-list in `.claude/settings.json`,
+so this invocation never prompts. If something you want to run *would* prompt, that is a signal to put it
+in the script rather than to ask.
+
+**What this buys, each learned the hard way in this repository:**
+
+- The command lives in a file that can be **re-read and corrected** rather than retyped from memory.
+- Output is filtered **in Python, not with `grep`/`head`**. `dotnet build` on this solution emits far more
+  than fits in a report; print only the errors, the diagnostics you asked for, and the summary — and when
+  a test fails, print the **test name**. A real failure has been lost twice here to a filter that kept
+  only the summary line.
+- Environment variables for an A/B go through **`env=` in `subprocess.run`**, never as a shell prefix. A
+  prefix does not survive, and the arm you think you are toggling runs identical to the other one.
+- Long scripts avoid shell quoting. Backticks, `$`, `\` and regex character classes are eaten on the way
+  in — a `\b` silently became a backspace character in a document here on 2026-08-07, and the result
+  looked correct.
+
+**Scratch means scratch.** Never leave anything in it that needs to survive, and never treat its current
+contents as documentation of anything.

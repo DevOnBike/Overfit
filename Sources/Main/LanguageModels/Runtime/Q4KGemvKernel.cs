@@ -44,9 +44,16 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         public static readonly bool AttnEnabled = ResolveFlag(OverfitEnvironment.RepackAttn);
 
         /// <summary>
-        /// Opt-in (<c>OVERFIT_TILED_PREFILL=1</c>) for the register-tiled Q4_K prefill GEMM (<see cref="GemmTiled"/>)
-        /// in place of the weight-stationary kernel — measured ~3× per projection under real parallelism. Off by
-        /// default: it repacks the weight (adds ~model RAM) and is AVX2-only.
+        /// Opt-in (<c>OVERFIT_TILED_PREFILL=1</c>) for the register-tiled Q4_K prefill GEMM
+        /// (<see cref="GemmTiled"/>) in place of the weight-stationary kernel. Off by default: it repacks
+        /// the weight (adds ~model RAM) and is AVX2-only.
+        ///
+        /// <para><b>The "~3×" this used to quote is against re-decode-per-row, not against the kernel it
+        /// replaces.</b> Against weight-stationary — which is what this flag actually swaps out — the
+        /// measured result is an <b>exact tie (0.999×)</b>: <c>ProjectBatchedWeightStationary</c> already
+        /// decodes each super-block once per row tile, so the tiling has nothing left to amortise. Turning
+        /// this on for the speedup named here would have bought nothing. Corrected 2026-08-07 from
+        /// <c>Runtime/README.md</c>, which had it right.</para>
         /// </summary>
         public static readonly bool TiledPrefillEnabled = ResolveFlag(OverfitEnvironment.TiledPrefill);
 

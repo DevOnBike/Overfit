@@ -58,7 +58,10 @@ namespace DevOnBike.Overfit.Anomalies.Hosting
 
             // One client for the lifetime of the host, lent to a source per cycle. The source no longer
             // disposes what it is lent — it used to, which would have broken the second cycle.
-            services.AddSingleton(_ => new PrometheusMetricWindowSource(prometheus));
+            //
+            // Registered under the interface, which is the type the loop asks for: a host that wants to drive
+            // the guard from a recorded or already-elapsed window replaces this one line and nothing else.
+            services.AddSingleton<IMetricWindowSource>(_ => new PrometheusMetricWindowSource(prometheus));
 
             return services.AddGuardCore(prometheus, options ?? new AnomalyGuardServiceOptions());
         }
@@ -195,7 +198,10 @@ namespace DevOnBike.Overfit.Anomalies.Hosting
 
             // The custom channels travel outside QueryOverrides, which is keyed by MetricIndex and therefore
             // cannot carry a name the enum does not have.
-            services.AddSingleton(_ => new PrometheusMetricWindowSource(
+            //
+            // Under the interface, as in the overload above — both entry points have to register the same
+            // service type or one of them builds a container the guard cannot be resolved from.
+            services.AddSingleton<IMetricWindowSource>(_ => new PrometheusMetricWindowSource(
                 prometheus, httpClient: null, customQueries: map.CustomQueries()));
 
             return services.AddGuardCore(prometheus, resolved);

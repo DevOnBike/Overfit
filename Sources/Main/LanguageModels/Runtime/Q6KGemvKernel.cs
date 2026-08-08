@@ -277,8 +277,13 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// built first, modelled on the Q4_K one, and measured <b>13.5% slower</b>: it hoisted the whole 6-bit
         /// unpack into a stack buffer, so each row paid a store+reload through L1 instead of consuming the
         /// quants from registers, and inverting the loops made activation reads strided. Tiling keeps the
-        /// unpacked quants <i>in registers</i> and amortises them across columns instead — which is exactly
-        /// why the Q4_K tiled kernel measures ~3.3× over its own weight-stationary variant.</para>
+        /// unpacked quants <i>in registers</i> and amortises them across columns instead.</para>
+        ///
+        /// <para>This sentence used to end "— which is exactly why the Q4_K tiled kernel measures ~3.3× over
+        /// its own weight-stationary variant", a number copied here from the Q4_K kernel with the wrong
+        /// baseline attached. Q4_K tiled versus Q4_K weight-stationary is an <b>exact tie (0.999×)</b>; the
+        /// ~3× belongs to a comparison against re-decode-per-row. The Q6_K argument above stands on its own
+        /// 13.5% measurement and never needed the borrowed one. Corrected 2026-08-07.</para>
         ///
         /// <para><b>Bit-identical to <see cref="GemvAvx2"/> per column:</b> the per-(row, column) operation
         /// sequence and accumulation order are unchanged; only weight decoding moves outward. Layout matches

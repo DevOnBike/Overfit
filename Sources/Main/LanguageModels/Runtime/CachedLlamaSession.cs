@@ -592,11 +592,25 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// them in ONE batched forward. Each draft is accepted by speculative rejection sampling — accept
         /// with probability <c>p(draft)</c> under the sampler's target distribution, else resample from the
         /// renormalised residual <c>norm(max(0, p − e_draft))</c> — so the committed tokens are
-        /// <b>distributed exactly as sampling from the target model directly</b> (greedy is the T→0 case,
-        /// then it is bit-identical to single-token greedy). Commits the accepted prefix plus the
+        /// distributed exactly as sampling from <b>the distribution the verify forward computes</b>.
+        ///
+        /// <para><b>That distribution is not bit-identical to the single-token path's, and this doc used
+        /// to claim it was.</b> The rejection sampling is exact; what differs is its input. The verify runs
+        /// <c>PrefillBatchedQuantAllRows</c> + <c>ProjectLogitsBatched</c>, whose summation order differs
+        /// from single-token decode, and floating-point addition is not associative. Measured 2026-08-07 on
+        /// Qwen2.5-3B Q4_K_M over an identical context: <c>max|Δlogit|</c> of <b>0.47–1.02</b>, against a
+        /// top-2 gap that is routinely smaller (0.43 after one token). So under greedy the sequences agree
+        /// until the first near-tie and then diverge for good — measured on two models and two drafters,
+        /// eight divergences, seven landing on the runner-up and one on rank 3, deficits 0.046–0.569.
+        /// `Tests/TestSupport/SpeculativeDivergence.cs` is the assertion that survives this; T11 in
+        /// `docs/test-gate-backlog.md` carries the numbers and the open product decision.</para>
+        ///
+        /// Commits the accepted prefix plus the
         /// correction/bonus token (forwarded so the cache + <c>_logits</c> stay consistent) into
         /// <paramref name="committed"/>; returns the count (≥1, ≤ maxDraft+2). The win is throughput on
-        /// repetitive / structured output (the agentic moat); ~1× on novel text. Requires the batched path
+        /// repetitive / structured output (the agentic moat); ~1× on novel text — <b>unmeasured for THIS
+        /// (prompt-lookup) path</b>; the draft-MODEL variant measured 0.64–0.89× on CPU, which is a
+        /// different regime and not evidence about this one. Requires the batched path
         /// (RoPE/SwiGLU, non-sliding) — otherwise a plain single-token step.
         /// </summary>
         public int GenerateSpeculative(
@@ -1123,7 +1137,14 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// <summary>
         /// Batched prefill: embed all prompt tokens, advance the cache, run one batched pass per layer
         /// (<see cref="CachedGptStack.PrefillBatchedQuant"/>), then project the last token's logits —
-        /// leaving the session in exactly the state the single-token loop would (bit-identical).
+        /// leaving the session in the same LOGICAL state the single-token loop would.
+        ///
+        /// <para>"Bit-identical" is what this said until 2026-08-07, and it is not. Cache contents and
+        /// logits differ by the reassociation the quantized batched kernels introduce — measured
+        /// <b>0.47–1.02</b> in logits on Qwen2.5-3B Q4_K_M. It is the same numbers, not the same bits, and
+        /// the difference is large enough to change which token a greedy sampler picks at a near-tie.
+        /// <see cref="DisableBatchedPrefillForParity"/> above exists precisely to take this path out of the
+        /// picture when a test needs the two to agree exactly.</para>
         /// </summary>
         private void PrefillBatchedQuant(ReadOnlySpan<int> promptTokens)
         {

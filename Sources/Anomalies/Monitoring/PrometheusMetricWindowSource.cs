@@ -4,6 +4,7 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using DevOnBike.Overfit.Anomalies.Contracts;
+using DevOnBike.Overfit.Anomalies.Monitoring.Abstractions;
 
 namespace DevOnBike.Overfit.Anomalies.Monitoring
 {
@@ -25,8 +26,13 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
     /// <para>Samples with no matching grid slot are dropped rather than snapped to the nearest one: a value
     /// nudged onto a neighbouring step is a fabricated observation, and the gap it would have left is
     /// information the detectors already know how to handle.</para>
+    ///
+    /// <para>The live implementation of <see cref="IMetricWindowSource"/>, and currently the only one. It
+    /// already answers for any range the caller asks for — <see cref="ReadAsync"/> builds a fresh
+    /// <see cref="PrometheusHistoricalSourceConfig"/> per call — so replaying a window a Prometheus still
+    /// retains needs no new implementation, only a caller that supplies a past <c>end</c>.</para>
     /// </summary>
-    public sealed class PrometheusMetricWindowSource : IDisposable
+    public sealed class PrometheusMetricWindowSource : IMetricWindowSource
     {
         private readonly PrometheusHistoricalSourceConfig _template;
         private readonly HttpClient _http;
