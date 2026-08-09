@@ -98,6 +98,25 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
                               + $"{windows,12}\n");
             }
 
+            // The level hypothesis, which survives where the slope one does not: the correction may not
+            // inject a trend at all on a noisy signal, but it collapses the series' own SCALE — and every
+            // relative gate in this guard is a percentage OF that scale. A gate of "12.5% of typical" on a
+            // series whose typical has gone from 10 to 0.3 is no longer a gate.
+            report.Append("\nWhat the subtraction does to the series' own SCALE (3 days of history):\n");
+            report.Append($"   {"noise",10}{"of amp",9}{"typical raw",14}{"typical adj",14}{"collapse",11}\n");
+
+            foreach (var level in new[] { 0.01, 0.1, 0.3, 0.5 })
+            {
+                var (rawTypical, adjustedTypical) = Scale(3, level);
+                var collapse = adjustedTypical > 0.0 ? rawTypical / adjustedTypical : double.NaN;
+
+                report.Append($"   {level,10:F3}{level / Amplitude * 100.0,8:F1}%{rawTypical,14:F3}"
+                              + $"{adjustedTypical,14:F3}{collapse,10:F1}x\n");
+            }
+
+            report.Append("A relative gate is a percentage of the typical column. If it collapses, the gate\n");
+            report.Append("collapses with it and only the absolute floor is left standing.\n");
+
             report.Append("\nFalling with HISTORY would mean noisy anchors, and more days would fix it.\n");
             report.Append("Falling with SIGNAL NOISE means the interpolation SHAPE: a chord subtracted from a\n");
             report.Append("curve leaves a residual that is perfectly monotone inside a twenty-minute window —\n");
@@ -176,6 +195,64 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
             }
 
             return (raw, adjusted, windows);
+        }
+
+        /// <summary>
+        /// The typical magnitude of a window before and after the subtraction, medianed over every window
+        /// of the day after the history — the quantity every relative gate is a percentage of.
+        /// </summary>
+        private static (double Raw, double Adjusted) Scale(int days, double noise)
+        {
+            var history = new MetricHistory();
+            var rng = new Random(20260809);
+            var perDay = (int)(TimeSpan.FromDays(1) / Scrape);
+            var perCadence = (int)(Cadence / Scrape);
+            var series = new double[perDay * (days + 1)];
+
+            for (var i = 0; i < series.Length; i++)
+            {
+                series[i] = Value(i, perDay) + ((rng.NextDouble() - 0.5) * 2.0 * noise);
+            }
+
+            for (var i = 0; i < perDay * days; i += perCadence)
+            {
+                history.Observe(Workload, Signal, Start + (Scrape * i), series[i]);
+            }
+
+            var expectation = new double[WindowSamples];
+            var rawScales = new List<double>();
+            var adjustedScales = new List<double>();
+
+            for (var offset = perDay * days; offset + WindowSamples < series.Length; offset += perCadence)
+            {
+                if (!history.TryExpectation(
+                        Workload, Signal, Start + (Scrape * offset), Scrape, days, expectation))
+                {
+                    continue;
+                }
+
+                var window = series.AsSpan(offset, WindowSamples);
+                var raw = new double[WindowSamples];
+                var adjusted = new double[WindowSamples];
+
+                for (var i = 0; i < WindowSamples; i++)
+                {
+                    raw[i] = Math.Abs(window[i]);
+                    adjusted[i] = Math.Abs(window[i] - expectation[i]);
+                }
+
+                Array.Sort(raw);
+                Array.Sort(adjusted);
+                rawScales.Add(raw[WindowSamples / 2]);
+                adjustedScales.Add(adjusted[WindowSamples / 2]);
+            }
+
+            rawScales.Sort();
+            adjustedScales.Sort();
+
+            return rawScales.Count == 0
+                ? (double.NaN, double.NaN)
+                : (rawScales[rawScales.Count / 2], adjustedScales[adjustedScales.Count / 2]);
         }
 
         /// <summary>
