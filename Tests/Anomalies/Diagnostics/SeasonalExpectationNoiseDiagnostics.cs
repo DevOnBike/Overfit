@@ -12,28 +12,30 @@ using Xunit.Abstractions;
 namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
 {
     /// <summary>
-    /// Why the learned seasonal history makes the guard noisier instead of quieter (<c>AN-F1</c>).
+    /// What the seasonal correction does to a signal that has nothing wrong with it — and what the naive
+    /// version of it would have done.
     ///
-    /// <para><b>The measurement that opened this.</b> Replaying A1's own window cold reproduces its 11
-    /// incidents exactly, so the replay is faithful. Feeding the deployed learned state into the same window
-    /// takes it to <b>33 opened</b> and findings from 296 to 517. Stripping the payload one section at a
-    /// time isolates it: calibration moves nothing, <b>the seasonal history is the whole lever</b>. The
-    /// explanation on offer — that an hourly-anchored interpolation subtracted from a smooth signal injects
-    /// apparent trend — was reasoning, not measurement.
+    /// <para><b>Why this exists.</b> Replaying A1's window cold reproduces its 11 incidents exactly, so the
+    /// replay is faithful. Feeding the deployed learned state into the same window takes it to <b>33</b>, and
+    /// stripping the payload section by section isolates the seasonal history as the whole lever
+    /// (<c>AN-F1</c>). The standing explanation was that an hourly-anchored interpolation subtracted from a
+    /// smooth signal injects apparent trend. <b>Measured here, against the guard's actual arithmetic, it does
+    /// not</b> — 0 findings in every cell, at every history depth from two to seven days and every noise
+    /// level from a perfectly smooth curve to 10% of amplitude. That whole family of explanations is out.</para>
     ///
-    /// <para><b>Two mechanisms could produce it and they are distinguishable, which is what this exists to
-    /// do.</b> Either the ANCHORS are noisy — each is the median across days of a single five-minute
-    /// reading, so with two or three days it carries nearly the full per-sample error, and a line drawn
-    /// between two wrong points has a slope of its own — or the SHAPE is wrong, because a straight chord
-    /// subtracted from a curved signal leaves the curvature behind. The first gets better with more days;
-    /// the second never does.</para>
+    /// <para><b>The load-bearing line is <c>+ level</c> in <see cref="Incidents.AnomalyGuard"/>'s
+    /// <c>Adjust</c>, and this measures how load-bearing.</b> Subtracting the expectation alone leaves a
+    /// residual centred on zero: the scale the relative gates are percentages of collapses by <b>65x at the
+    /// lab's own scatter</b> and 786x on a quiet signal, and on a smooth curve the leftover curvature is
+    /// perfectly monotone inside a twenty-minute window — which is exactly the pattern a rank test is built
+    /// to be most confident about, giving 222 findings in 284 windows where the raw series gives none.
+    /// Adding the median back removes both, completely.</para>
     ///
-    /// <para><b>Measured, and it is the second — which was not the leading hypothesis.</b> More days change
-    /// nothing at all: 222 of 284 windows at two days, the same 222 at seven. What moves it is <b>signal
-    /// noise</b>, and in the direction that first looks backwards — noise <i>hides</i> the effect. The
-    /// reason is that the residual of a chord under a smooth curve is perfectly monotone inside a
-    /// twenty-minute window, which is precisely the pattern a rank correlation is built to detect and be
-    /// confident about; real scatter breaks the monotonicity that convinces it.</para>
+    /// <para><b>Written after getting it wrong.</b> The first version of this diagnostic omitted the
+    /// add-back, reproduced those two effects, and they were recorded as the diagnosis of <c>AN-F1</c> before
+    /// anyone checked what <c>Adjust</c> actually computes. Keeping both arms here is the correction: the
+    /// naive column is what a reviewer would predict, the guard column is what the guard does, and the gap
+    /// between them is a design decision that was previously defended only by a comment.</para>
     /// </summary>
     public sealed class SeasonalExpectationNoiseDiagnostics
     {
@@ -66,93 +68,74 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
             _output = output;
         }
 
-        [LongFact("3s")]
-        public void SubtractingAnHourlyAnchoredExpectationInjectsTrend()
+        [LongFact("4s")]
+        public void TheSeasonalCorrectionInjectsNothingAndTheMedianAddBackIsWhy()
         {
             var report = new StringBuilder();
 
-            report.Append("A smooth diurnal signal, judged raw and judged after subtracting the seasonal\n");
-            report.Append("expectation. Same windows, same detector, same options — the only difference is\n");
-            report.Append("the subtraction.\n\n");
-            // Run WHERE THE EFFECT LIVES. The first version swept history at noise 0.3, which suppresses
-            // the effect entirely, so every row read zero and the table could not have distinguished
-            // anything — a comparison in which no arm can score is not evidence about any arm.
-            report.Append("Does MORE HISTORY help? (noise fixed at 0.01, where the effect is present)\n");
-            report.Append($"   {"history",10}{"raw",10}{"adjusted",12}{"of windows",12}\n");
+            report.Append("A smooth diurnal signal with nothing wrong. Raw, then corrected two ways:\n");
+            report.Append("  guard  = series - expectation + median(expectation)   <- AnomalyGuard.Adjust\n");
+            report.Append("  naive  = series - expectation                         <- the obvious version\n\n");
 
-            for (var days = 2; days <= 7; days++)
-            {
-                var (raw, adjusted, windows) = Score(days, noise: 0.01);
-
-                report.Append($"   {days + " days",10}{raw,10}{adjusted,12}{windows,12}\n");
-            }
-
-            report.Append("\nDoes SIGNAL NOISE? (history fixed at 3 days)\n");
-            report.Append($"   {"noise",10}{"of amp",9}{"raw",10}{"adjusted",12}{"of windows",12}\n");
+            report.Append("Across SIGNAL NOISE, 3 days of history:\n");
+            report.Append($"   {"noise",9}{"of amp",8}{"raw",8}{"guard",8}{"naive",8}{"windows",10}\n");
 
             foreach (var level in new[] { 0.0, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.4 })
             {
-                var (raw, adjusted, windows) = Score(3, level);
+                var guard = Score(3, level, addBack: true);
+                var naive = Score(3, level, addBack: false);
 
-                report.Append($"   {level,10:F3}{level / Amplitude * 100.0,8:F1}%{raw,10}{adjusted,12}"
-                              + $"{windows,12}\n");
+                report.Append($"   {level,9:F3}{level / Amplitude * 100.0,7:F1}%{guard.Raw,8}"
+                              + $"{guard.Adjusted,8}{naive.Adjusted,8}{guard.Windows,10}\n");
             }
 
-            // The level hypothesis, which survives where the slope one does not: the correction may not
-            // inject a trend at all on a noisy signal, but it collapses the series' own SCALE — and every
-            // relative gate in this guard is a percentage OF that scale. A gate of "12.5% of typical" on a
-            // series whose typical has gone from 10 to 0.3 is no longer a gate.
-            report.Append("\nWhat the subtraction does to the series' own SCALE (3 days of history):\n");
-            report.Append($"   {"noise",10}{"of amp",9}{"typical raw",14}{"typical adj",14}{"collapse",11}\n");
+            report.Append("\nAcross HISTORY DEPTH, noise 0.01:\n");
+            report.Append($"   {"history",9}{"raw",8}{"guard",8}{"naive",8}{"windows",10}\n");
+
+            for (var days = 2; days <= 7; days++)
+            {
+                var guard = Score(days, 0.01, addBack: true);
+                var naive = Score(days, 0.01, addBack: false);
+
+                report.Append($"   {days + "d",9}{guard.Raw,8}{guard.Adjusted,8}{naive.Adjusted,8}"
+                              + $"{guard.Windows,10}\n");
+            }
+
+            report.Append("\nThe scale every relative gate is a percentage of:\n");
+            report.Append($"   {"noise",9}{"of amp",8}{"raw",12}{"guard",12}{"naive",12}{"collapse",11}\n");
 
             foreach (var level in new[] { 0.01, 0.1, 0.3, 0.5 })
             {
-                var (rawTypical, adjustedTypical) = Scale(3, level);
-                var collapse = adjustedTypical > 0.0 ? rawTypical / adjustedTypical : double.NaN;
+                var (raw, guard, naive) = Scale(3, level);
+                var collapse = naive > 0.0 ? raw / naive : double.NaN;
 
-                report.Append($"   {level,10:F3}{level / Amplitude * 100.0,8:F1}%{rawTypical,14:F3}"
-                              + $"{adjustedTypical,14:F3}{collapse,10:F1}x\n");
+                report.Append($"   {level,9:F3}{level / Amplitude * 100.0,7:F1}%{raw,12:F3}{guard,12:F3}"
+                              + $"{naive,12:F3}{collapse,10:F1}x\n");
             }
 
-            report.Append("A relative gate is a percentage of the typical column. If it collapses, the gate\n");
-            report.Append("collapses with it and only the absolute floor is left standing.\n");
-
-            report.Append("\nFalling with HISTORY would mean noisy anchors, and more days would fix it.\n");
-            report.Append("Falling with SIGNAL NOISE means the interpolation SHAPE: a chord subtracted from a\n");
-            report.Append("curve leaves a residual that is perfectly monotone inside a twenty-minute window —\n");
-            report.Append("exactly what a rank test is built to find — and real scatter breaks the\n");
-            report.Append("monotonicity that convinces it. More days will never help.\n");
+            report.Append("\nThe guard column is the product. Zero findings everywhere, scale preserved —\n");
+            report.Append("so the correction does NOT explain AN-F1's 11 -> 33, and the family of\n");
+            report.Append("explanations built on it is eliminated.\n");
+            report.Append("The naive column is what one line of arithmetic prevents.\n");
 
             _output.WriteLine(report.ToString());
 
-            Assert.True(WindowSamples > 1);
+            // The claim in the doc comment, pinned: the add-back is load-bearing, not decoration.
+            var withAddBack = Score(3, 0.0, addBack: true);
+            var without = Score(3, 0.0, addBack: false);
+
+            Assert.Equal(0, withAddBack.Adjusted);
+            Assert.True(without.Adjusted > 100,
+                $"the naive form should be badly wrong on a smooth signal; got {without.Adjusted}");
         }
 
         /// <summary>
         /// Builds <paramref name="days"/> days of history, then scores every window of the following day
-        /// twice: on the raw series, and on the series minus the seasonal expectation.
+        /// raw and corrected.
         /// </summary>
-        private static (int Raw, int Adjusted, int Windows) Score(int days, double noise)
+        private static (int Raw, int Adjusted, int Windows) Score(int days, double noise, bool addBack)
         {
-            var history = new MetricHistory();
-            var rng = new Random(20260809);
-            var perDay = (int)(TimeSpan.FromDays(1) / Scrape);
-            var perCadence = (int)(Cadence / Scrape);
-
-            var series = new double[perDay * (days + 1)];
-
-            for (var i = 0; i < series.Length; i++)
-            {
-                series[i] = Value(i, perDay) + ((rng.NextDouble() - 0.5) * 2.0 * noise);
-            }
-
-            // Observed once per CADENCE, as the guard does — not once per scrape. That is what makes each
-            // hourly anchor a single five-minute reading rather than an average of the hour.
-            for (var i = 0; i < perDay * days; i += perCadence)
-            {
-                history.Observe(Workload, Signal, Start + (Scrape * i), series[i]);
-            }
-
+            var (series, history, perDay, perCadence) = Build(days, noise);
             var detector = new TrendDetector();
             var times = new double[WindowSamples];
 
@@ -169,12 +152,10 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
             var adjusted = 0;
             var windows = 0;
 
-            // The day after the history, which is the situation the deployed guard is in.
             for (var offset = perDay * days; offset + WindowSamples < series.Length; offset += perCadence)
             {
-                var windowStart = Start + (Scrape * offset);
-
-                if (!history.TryExpectation(Workload, Signal, windowStart, Scrape, days, expectation))
+                if (!history.TryExpectation(
+                        Workload, Signal, Start + (Scrape * offset), Scrape, days, expectation))
                 {
                     continue;
                 }
@@ -182,9 +163,11 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
                 windows++;
                 series.AsSpan(offset, WindowSamples).CopyTo(rawWindow);
 
+                var level = addBack ? Median(expectation) : 0.0;
+
                 for (var i = 0; i < WindowSamples; i++)
                 {
-                    adjustedWindow[i] = rawWindow[i] - expectation[i];
+                    adjustedWindow[i] = rawWindow[i] - expectation[i] + level;
                 }
 
                 raw += detector.Detect(rawWindow, times, TrendOptions.Balanced).Status
@@ -197,11 +180,55 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
             return (raw, adjusted, windows);
         }
 
-        /// <summary>
-        /// The typical magnitude of a window before and after the subtraction, medianed over every window
-        /// of the day after the history — the quantity every relative gate is a percentage of.
-        /// </summary>
-        private static (double Raw, double Adjusted) Scale(int days, double noise)
+        /// <summary>Typical magnitude per window — raw, as the guard corrects it, and naively.</summary>
+        private static (double Raw, double Guard, double Naive) Scale(int days, double noise)
+        {
+            var (series, history, perDay, perCadence) = Build(days, noise);
+            var expectation = new double[WindowSamples];
+            var raws = new List<double>();
+            var guards = new List<double>();
+            var naives = new List<double>();
+
+            for (var offset = perDay * days; offset + WindowSamples < series.Length; offset += perCadence)
+            {
+                if (!history.TryExpectation(
+                        Workload, Signal, Start + (Scrape * offset), Scrape, days, expectation))
+                {
+                    continue;
+                }
+
+                var window = series.AsSpan(offset, WindowSamples);
+                var level = Median(expectation);
+                var raw = new double[WindowSamples];
+                var guard = new double[WindowSamples];
+                var naive = new double[WindowSamples];
+
+                for (var i = 0; i < WindowSamples; i++)
+                {
+                    raw[i] = Math.Abs(window[i]);
+                    guard[i] = Math.Abs(window[i] - expectation[i] + level);
+                    naive[i] = Math.Abs(window[i] - expectation[i]);
+                }
+
+                Array.Sort(raw);
+                Array.Sort(guard);
+                Array.Sort(naive);
+                raws.Add(raw[WindowSamples / 2]);
+                guards.Add(guard[WindowSamples / 2]);
+                naives.Add(naive[WindowSamples / 2]);
+            }
+
+            raws.Sort();
+            guards.Sort();
+            naives.Sort();
+
+            return raws.Count == 0
+                ? (double.NaN, double.NaN, double.NaN)
+                : (raws[raws.Count / 2], guards[guards.Count / 2], naives[naives.Count / 2]);
+        }
+
+        private static (double[] Series, MetricHistory History, int PerDay, int PerCadence) Build(
+            int days, double noise)
         {
             var history = new MetricHistory();
             var rng = new Random(20260809);
@@ -214,50 +241,29 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
                 series[i] = Value(i, perDay) + ((rng.NextDouble() - 0.5) * 2.0 * noise);
             }
 
+            // Once per CADENCE, as the guard does — which is what makes each hourly anchor a single
+            // five-minute reading rather than an average of the hour.
             for (var i = 0; i < perDay * days; i += perCadence)
             {
                 history.Observe(Workload, Signal, Start + (Scrape * i), series[i]);
             }
 
-            var expectation = new double[WindowSamples];
-            var rawScales = new List<double>();
-            var adjustedScales = new List<double>();
+            return (series, history, perDay, perCadence);
+        }
 
-            for (var offset = perDay * days; offset + WindowSamples < series.Length; offset += perCadence)
-            {
-                if (!history.TryExpectation(
-                        Workload, Signal, Start + (Scrape * offset), Scrape, days, expectation))
-                {
-                    continue;
-                }
+        /// <summary>The median, as <c>AnomalyGuard.Adjust</c> takes it.</summary>
+        private static double Median(double[] values)
+        {
+            var copy = (double[])values.Clone();
 
-                var window = series.AsSpan(offset, WindowSamples);
-                var raw = new double[WindowSamples];
-                var adjusted = new double[WindowSamples];
+            Array.Sort(copy);
 
-                for (var i = 0; i < WindowSamples; i++)
-                {
-                    raw[i] = Math.Abs(window[i]);
-                    adjusted[i] = Math.Abs(window[i] - expectation[i]);
-                }
-
-                Array.Sort(raw);
-                Array.Sort(adjusted);
-                rawScales.Add(raw[WindowSamples / 2]);
-                adjustedScales.Add(adjusted[WindowSamples / 2]);
-            }
-
-            rawScales.Sort();
-            adjustedScales.Sort();
-
-            return rawScales.Count == 0
-                ? (double.NaN, double.NaN)
-                : (rawScales[rawScales.Count / 2], adjustedScales[adjustedScales.Count / 2]);
+            return copy[copy.Length / 2];
         }
 
         /// <summary>
         /// A smooth daily curve — the shape the seasonal baseline exists to cancel. Identical every day, so
-        /// a perfect expectation would leave exactly zero and any finding is injected by the correction.
+        /// a perfect correction leaves exactly zero and any finding is manufactured by the correction.
         /// </summary>
         private static double Value(int index, int perDay)
         {

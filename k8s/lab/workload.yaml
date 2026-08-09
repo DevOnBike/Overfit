@@ -71,6 +71,17 @@ spec:
               # A limit is also mandatory for that endpoint to be safe at all: without one it would allocate
               # until the node died.
               memory: 512Mi
+              # A CPU limit exists for one reason and it is not resource management: CFS accounting only
+              # exists on containers that carry a quota, so without this `container_cpu_cfs_periods_total`
+              # has NO SERIES on these pods and CpuThrottleRatio is counted blind in every single cycle —
+              # 292 of 292 on one measured run. The guard cannot be shown to detect throttling on a cluster
+              # where throttling cannot happen.
+              #
+              # 200m is measured, not chosen. Healthy usage is 0.0018-0.0022 cores per pod with a
+              # three-hour peak of 0.0024, so this is 83x above anything a well replica does and will not
+              # throttle one. It is also low enough for the fault to reach: POST /fault/cpu?msPerRequest=250
+              # at the driver's ~0.8 rps per pod lands exactly on the limit, and 400 clears it outright.
+              cpu: 200m
           # No CPU limit on purpose. CFS throttling is its own fault with its own signal, and mixing it in
           # here would mean every CPU measurement carried a second explanation.
           env:

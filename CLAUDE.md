@@ -124,6 +124,69 @@ Repeatable versions of the three most common cycles live in `.claude/commands/` 
 suite), `/bench <filter>` (benchmark + the measurement traps to check before believing the number), and
 `/sweep <OVERFIT0xx>` (inventory every site an analyzer rule flags).
 
+## How an anomaly (`AN-*`, `RS-*`, `PS-*`) task is run, start to finish
+
+Seven steps, in order. **The first three cost minutes and happen before anything is measured**; every one of
+them was earned by skipping it on 2026-08-09 and paying hours for it. The point of the order is iteration
+count: almost every wasted cycle that day came from discovering the acceptance criteria late.
+
+**1. Read the code path that produces the number, and quote the decisive line.** Not the doc comment — the
+arithmetic. *Earned:* a 200-line diagnostic reproduced the seasonal correction as `series - expectation` and
+its conclusion was recorded as a diagnosis; `AnomalyGuard.Adjust` computes `series - expectation + median`,
+is twenty lines long, and made the entire result an artefact.
+
+**2. Find any rule, profile or constant that already exists for this signal, and read its calibration
+conditions.** They usually name the environment you must reproduce. *Earned:* three hours of CPU-limit
+measurement answered a question `SustainedThresholdOptions.ForCpuThrottling` answers in its own doc —
+including that healthy pods throttle, that the rule keys on persistence rather than height, and that the
+calibration was done at one core, which was the limit to set.
+
+**3. Write down what will close the task, as observations, before measuring anything.** Both directions:
+what must be quiet, and what must fire. *Earned:* `AN-E2` was one sentence from being closed with the
+firing test never run — and a channel that has only ever been observed staying quiet is indistinguishable
+from one that is broken.
+
+**4. Verify the instrument before believing the subject.** Prove the fault injector does what it claims and
+the channel is actually bound, before reading anything into silence. *Earned:* `POST /fault/oom` returned
+200 and produced no OOM, and the resulting silence was the exact observation the hypothesis under test
+predicted — it would have been read as confirmation. Separately, the throttle channel had data in Prometheus
+and was absent from the config, so the guard never queried it and `blind` never moved.
+
+**5. State the mechanism and its unit before choosing any number.** *Earned:* a CPU limit sized at 83x the
+average when CFS throttles on bursts inside a 100 ms period; a floor calibrated over three minutes when the
+quantity is a maximum and the unit is time coverage — a false positive inside the hour.
+
+**6. Measure both arms.** Healthy quiet AND faulted loud, on the same population, with peers as the control.
+One without the other is not evidence.
+
+**7. Read the deployed state back out of the cluster.** `kubectl apply` reports success for a field it
+dropped, and silently removes anything the file does not carry. *Earned:* applying a ConfigMap with no
+`customMetrics` block deleted a live binding and reported `configured`.
+
+Closing the task is then checking the list from step 3, not forming a judgement.
+
+## Read the code before you measure it, and check the number's unit
+
+Two rules, both earned on 2026-08-09 by breaking them four times in one day. They are cheap, and every
+violation cost an hour or more of work that had to be thrown away.
+
+**Before measuring what a component does, read the code path that produces it, end to end, and quote the
+decisive line.** Not the doc comment — the arithmetic. A 200-line diagnostic was written to reproduce the
+seasonal correction and its conclusion recorded as a diagnosis, without anyone opening `AnomalyGuard.Adjust`
+first; that method is twenty lines long and its `+ level` term made the whole result an artefact of an
+operation the product does not perform. The same shape produced the `+1.00` correlation that had no artefact
+behind it at all.
+
+**Before choosing any threshold, name the mechanism and check the number is in the mechanism's unit.** A CPU
+limit was sized at "83x the average usage" when CFS throttles on bursts inside a 100 ms period — average
+cores is not the unit that governs it, so the headroom was real and irrelevant. A floor was calibrated over
+three minutes when the quantity is a maximum and the unit is time coverage. Both numbers were measured
+correctly and meant nothing.
+
+**Say it out loud before running the measurement**, in two lines: what produces this number, in what unit,
+and what observation would refute the explanation. It is catchable from outside by someone who has not read
+the code, which is the entire point — nobody can challenge a premise that was never stated.
+
 ## Answer briefly — you and every agent
 
 Default to the short answer: the result, the number, what it means, what is open. **Expand only when the user

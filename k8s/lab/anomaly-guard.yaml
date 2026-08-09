@@ -200,6 +200,10 @@ data:
         "ContainerRestarts": {
           "source": "kube_pod_container_status_restarts_total",
           "kind": "EventCount"
+        },
+        "CpuThrottleRatio": {
+          "source": "container_cpu_cfs_throttled_periods_total",
+          "kind": "Ratio"
         }
       },
       "thresholds": {

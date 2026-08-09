@@ -145,6 +145,14 @@ Found on 2026-08-08, when the plan's determinism oracle turned out not to detect
 determinism and clock-independence were two properties behind one test, and only a mutation that stayed
 green revealed it.
 
+**On an anomaly task (`AN-*`, `RS-*`, `PS-*`), follow the seven-step procedure in `CLAUDE.md`** — "How an
+anomaly task is run, start to finish". The three that bind you hardest, because breaking them is what made
+the procedure necessary: **read the code path and quote the decisive arithmetic before measuring what it
+does**; **read any rule or constant that already exists for the signal, including its calibration
+conditions**, because they name the environment you must reproduce; and **write the closing observations
+down first, in both directions** — what must be quiet and what must fire. A channel observed only staying
+quiet is indistinguishable from a broken one, and a task was one sentence from being closed in that state.
+
 **When a change exists because an existing check missed something, run the mutation against the PRE-CHANGE
 code too, and report both outcomes.** "My new test goes red on this corruption" and "the old test did not"
 are different claims, and only the second establishes that you added coverage rather than moved it. The

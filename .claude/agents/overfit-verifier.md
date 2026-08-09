@@ -110,6 +110,22 @@ the result of running it. Report:
 If there is no plan and the change is more than a local fix, say so; that is a process finding, not yours to
 fix.
 
+**On an anomaly task (`AN-*`, `RS-*`, `PS-*`), the acceptance criteria are the step-3 list of the procedure
+in `CLAUDE.md`** — "How an anomaly task is run, start to finish". Three of its steps are yours to enforce,
+because they are the ones that produce evidence which looks conclusive and is not:
+
+- **Both arms, or nothing.** Healthy quiet AND faulted loud, on the same population, peers as control. A
+  channel observed only staying quiet is indistinguishable from a channel that is broken, and a task was one
+  sentence from being closed in exactly that state.
+- **The instrument before the subject.** Was the fault injector shown to inject, and the channel shown to be
+  read? `POST /fault/oom` once returned 200 and produced no OOM; the resulting silence was precisely what
+  the hypothesis under test predicted, so it would have been recorded as confirmation.
+- **Deployed state read back from the cluster, not from the file.** `kubectl apply` reports success for a
+  field it dropped and silently removes what the file omits — that deleted a live binding once, unnoticed.
+
+A claim resting on a measurement whose premise was never stated — what produces the number, in what unit —
+is `INCONCLUSIVE`, not `VERIFIED`.
+
 ## How to run
 
 ```

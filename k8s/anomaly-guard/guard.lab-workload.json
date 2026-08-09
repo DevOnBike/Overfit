@@ -75,6 +75,20 @@
     "ContainerRestarts": {
       "source": "kube_pod_container_status_restarts_total",
       "kind": "EventCount"
+    },
+    "CpuThrottleRatio": {
+      "source": "container_cpu_cfs_throttled_periods_total",
+      "kind": "Ratio",
+      "_comment": [
+        "Bound 2026-08-09. It was absent from the metrics block, so the guard issued no query and counted",
+        "the channel blind in every cycle — 1 of 1, unchanged for the whole run.",
+        "The series only exist because the workload now carries a CPU limit: CFS accounting is created by a",
+        "quota, so without one there is nothing to read and no amount of binding would help.",
+        "1000m, not 200m, because SustainedThresholdOptions.ForCpuThrottling was calibrated on a pod limited",
+        "to one core, and a threshold describes the regime it was measured in.",
+        "Measured healthy at 1000m: per-pod share of a 20-minute window at or above the 5% threshold is",
+        "14.6-19.0%, against the rule's 25% - so the healthy population is quiet with margin on both sides."
+      ]
     }
   },
   "thresholds": {
