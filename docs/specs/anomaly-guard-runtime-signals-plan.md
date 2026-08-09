@@ -27,7 +27,7 @@ structurally cannot:
 | Metric | Gap it closes |
 |---|---|
 | `http.server.active_requests` | Latency percentiles only count *completed* requests; a hung request never enters the histogram. In-flight count moves immediately. |
-| `dotnet.monitor.lock_contentions` | A latency cliff with normal CPU and normal GC — every current channel quiet. |
+| `dotnet.monitor.lock_contentions` | A latency cliff with normal CPU and normal GC — every current channel quiet. **Half of this is wrong; corrected below from measurement 2026-08-09.** |
 | `dotnet.gc.last_collection.memory.committed_size` | Committed-vs-used divergence precedes OOM; `GcGen2HeapBytes` measures used and hides it. Coordinator: measured 0.43x spread between pods on this lab. |
 | `dotnet.exceptions` (tagged `error.type`) | First-chance exceptions, distinct from `ErrorRate` — a caught-and-retried exception never becomes a 5xx but often precedes one. |
 | `kestrel.queued_connections`, `kestrel.rejected_connections` | Saturation before the application sees it — a rejected connection is invisible to every current channel. |
@@ -37,6 +37,32 @@ Instrument names given as verified by the coordinator against current Microsoft 
 starting point and still calls out live confirmation as a required task (Scope, below) — this repository's
 own convention (`MetricNameCatalog.cs`'s own doc: "the mapping ... left two channels unbound, reporting
 blind for hours") is not to trust a name until it has been seen coming out of the actual process.
+
+## Correction 2026-08-09 — `lock_contentions` is the sharpest channel, not the only sighted one
+
+The row above says contention arrives with **normal CPU and normal GC**, so every current channel stays
+quiet through it. That was the reason to build the channel. Measured on twelve replicas with the fault
+contending a lock **on the request path**, one pod against eleven:
+
+| | healthy | contending | change | peers, contending |
+|---|---|---|---|---|
+| `LockContentions` | 0.076/s | 11.58/s | **152x** | 0.05–0.08/s |
+| p95 latency | 48.8 ms | 4911 ms | 100x | ~49 ms |
+| `GcPauseRatio` | 0.000007 | 0.000008 | — | — |
+| `CpuUsageRatio` | 0.00250 | 0.02041 | **8x** | 0.0069–0.0085 |
+
+**GC is quiet, as claimed. CPU is not.** It rose eightfold and sat 2.6x above its peers, which is very
+likely enough for `CpuUsageRatio` to report on its own. So the justification changes: this channel is
+**152x against CPU's 2.6x**, which is a much better argument than the one it replaces — a sharper signal
+with a wider margin, not a signal where nothing else can see.
+
+**The likely cause is the reproduction rather than the claim, and it is NOT measured.** .NET monitors spin
+before they block, so sixteen threads fighting over one lock burn CPU that a genuinely long-held lock would
+not. That is a hypothesis. Settling it needs a fault that blocks without spinning; until somebody runs it,
+"contention is invisible to CPU" is not something this plan may assert.
+
+**A second correction, in the classification table below**: the coordinator's `LoadSensitive` for this
+metric does not survive measurement either.
 
 ## Inventory
 
@@ -107,7 +133,7 @@ Applying the same discipline the PSI plan used for `PeerSignalCatalog`, and the 
 | Metric | `MetricSourceKind` | `SignalKind` (recommended) | Reasoning | `SignalClass` | Calibratable on this lab today? |
 |---|---|---|---|---|---|
 | `http.server.active_requests` | `Gauge` (current value) | `LoadSensitive` | In-flight count scales with traffic by construction (more concurrent requests, more in-flight) — the anomaly is active-requests *relative to* `RequestsPerSecond`, not the raw count. Matches `ThreadPoolQueueLength`'s precedent exactly ("a queue is work waiting; comparing depths under different arrival rates compares the rates"). | `Symptom` (what the caller experiences — a stall shows up here before anywhere else) | **Yes, plausibly** — `/fault/stall` already makes requests sit unfinished; this is the one metric of the five with an existing fault to calibrate against. |
-| `dotnet.monitor.lock_contentions` | `Counter` (monotonic, rate-wrapped) | `LoadSensitive` | Coordinator: "scale with traffic." Matches `GcPauseRatio`'s precedent (collection time is driven by allocation, allocation by requests served) — contention is driven by concurrent access, concurrency by requests served. | `Resource` (the workload's own internal consumption) | **No** — no existing fault produces contention; the RPS-paced driver does not create a concurrency spike (see Prerequisite, point 3). Needs new lab infrastructure. |
+| `dotnet.monitor.lock_contentions` | `Counter` (monotonic, rate-wrapped) | ~~`LoadSensitive`~~ → **`LoadIndependent`, measured** | Coordinator: "scale with traffic." Reasoned from `GcPauseRatio`'s precedent. **Measured 2026-08-09 and it does not hold on this lab**: at 0.8 rps per pod the healthy rate is 0 to 0.05/s with most pods at 0, because an *uncontended* acquisition is not a contention at all — the count is driven by conflict, not by volume. Dividing a series that sits at zero by a varying denominator manufactures differences from nothing, which is the failure `PeerSignalCatalog`'s own doc warns about. Bound `loadSensitive: false`. | `Resource` (the workload's own internal consumption) | ~~**No**~~ → **Yes, done.** `POST /fault/contend?threads=&holdMicroseconds=` was built for this, contending a lock **on the request path** — a fault on a private lock proves the counter counts and proves nothing about the case. |
 | `dotnet.gc.last_collection.memory.committed_size` | `Gauge` | `LoadIndependent` | Coordinator: "committed heap does not [scale with traffic]." Matches `MemoryWorkingSetBytes`/`GcGen2HeapBytes`'s precedent — a fixed-cost class PeerSignalCatalog's own doc warns against dividing. | `Resource` | **Partially, already** — the existing `/fault/leak` fault already produces committed/used divergence via LOH growth (per `Program.cs`'s own comments on the leak mechanism); the coordinator's cited 0.43x spread was presumably observed from this without a dedicated fault. The cheap proxy (`dotnet_gc_committed_bytes`, see Inventory) can be bound and calibrated **now**, ahead of the real instrument. |
 | `dotnet.exceptions` (`error.type`) | `Counter`, **design choice flagged below** | See note | Coordinator did not classify; the closest existing sibling, `ErrorRate`, is `LoadIndependent` — but only because it is built as a ratio (`rate(5xx)/rate(total)`) at the PromQL layer, not because errors are inherently load-independent. `dotnet.exceptions.count` is a raw count. **Recommend the same treatment as `ErrorRate`**: wrap it as a rate-over-rate at the query layer and classify `LoadIndependent`, for consistency with the one metric already in this codebase that answers the same kind of question — rather than leaving it a raw `LoadSensitive` count divided at peer-comparison time. This is a developer/architect call, not settled here. | `Symptom` (an exception is closer to the user-visible failure than to the resource that caused it, matching `ErrorRate`'s own class) | **No** — `/fault/errors` returns a deliberate status code, not a `throw`; nothing in the lab currently causes a first-chance exception on demand. |
 | `kestrel.queued_connections` | `Gauge` | `LoadSensitive` | Direct match to `ThreadPoolQueueLength`'s precedent — a connection queue is work waiting for a scarce resource (an accepted-connection slot), and its depth scales with arrival rate for the same reason a thread-pool queue does. | `Infrastructure` (platform-level denial-before-the-app-sees-it, same class as `CpuThrottleRatio`/PSI) | **No** — see Prerequisite, point 3; needs a concurrency spike the current driver does not produce. |
