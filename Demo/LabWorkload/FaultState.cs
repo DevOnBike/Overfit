@@ -34,6 +34,7 @@ namespace DevOnBike.Overfit.LabWorkload
         private double _errorRate;
         private double _leakBytesPerSecond;
         private double _cpuBurnMs;
+        private double _throwRate;
 
         /// <summary>
         /// Non-null while an OOM allocation is running. It exists because the first version had no way to
@@ -112,6 +113,18 @@ namespace DevOnBike.Overfit.LabWorkload
             set => Volatile.Write(ref _cpuBurnMs, Math.Max(0.0, value));
         }
 
+        /// <summary>
+        /// Share of requests that throw an exception <b>which is then caught</b>, so the request still
+        /// succeeds. Deliberately separate from <see cref="ErrorRate"/>: that one returns a 500 without
+        /// throwing, and the difference between the two is exactly what the exceptions channel exists to
+        /// see.
+        /// </summary>
+        public double ThrowRate
+        {
+            get => Volatile.Read(ref _throwRate);
+            set => Volatile.Write(ref _throwRate, Math.Clamp(value, 0.0, 1.0));
+        }
+
         /// <summary>True while an OOM allocation is in flight, so <see cref="Describe"/> cannot claim health
         /// during the seconds before the kernel kills this process.</summary>
         public bool IsAllocatingToOom
@@ -159,6 +172,7 @@ namespace DevOnBike.Overfit.LabWorkload
             ErrorRate = 0.0;
             LeakBytesPerSecond = 0.0;
             CpuBurnMs = 0.0;
+            ThrowRate = 0.0;
 
             var allocation = Interlocked.Exchange(ref _oomAllocation, null);
 
@@ -203,6 +217,11 @@ namespace DevOnBike.Overfit.LabWorkload
             if (IsContending)
             {
                 faults.Add("lock contention");
+            }
+
+            if (ThrowRate > 0.0)
+            {
+                faults.Add($"throwing {ThrowRate:P0}");
             }
 
             return faults.Count == 0

@@ -138,6 +138,21 @@ app.MapPost("/work", async () =>
         _ = random.Next(2);
     }
 
+    // Thrown and caught, so the request still succeeds and the status code never changes. That is the whole
+    // point of this fault: dotnet.exceptions moves while ErrorRate, latency and everything else stay
+    // exactly where they were.
+    if (faults.ThrowRate > 0.0 && random.NextDouble() < faults.ThrowRate)
+    {
+        try
+        {
+            throw new InvalidOperationException("injected first-chance exception");
+        }
+        catch (InvalidOperationException)
+        {
+            // Swallowed on purpose — a caught-and-retried exception is the case being reproduced.
+        }
+    }
+
     await Task.Delay(TimeSpan.FromSeconds(Math.Max(0.0, seconds)));
 
     var failed = faults.ErrorRate > 0.0 && random.NextDouble() < faults.ErrorRate;
@@ -299,6 +314,17 @@ app.MapPost("/fault/oom", () =>
     }, token);
 
     return Results.Text("allocating native memory until the container limit kills this pod");
+});
+
+// Exceptions that are THROWN AND CAUGHT, so the request still succeeds. That is the whole case: the lab had
+// no way to produce a first-chance exception, because POST /fault/errors returns a 500 status without ever
+// throwing — so ErrorRate moved and nothing else could. A caught-and-retried exception is invisible to every
+// channel the guard has, and it is the shape that usually arrives before the failure the error rate sees.
+app.MapPost("/fault/throw", (double? rate) =>
+{
+    faults.ThrowRate = rate ?? 0.0;
+
+    return Results.Text(faults.Describe());
 });
 
 // Threads fighting over one lock. The point is the SHAPE, not the slowdown: contention produces a latency

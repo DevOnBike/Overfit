@@ -152,6 +152,13 @@ namespace DevOnBike.Overfit.LabWorkload
                 Counter(text, "labapp_lock_contentions_total",
                     "Monitor lock contentions, from dotnet.monitor.lock_contentions.",
                     runtime.LockContentionCount, role);
+
+                // Distinct from labapp_errors_total, and that distinction is the point: an exception that is
+                // caught and retried never becomes a 5xx, so the error rate stays flat while the process is
+                // already failing. It usually precedes the failure the error rate eventually sees.
+                Counter(text, "labapp_exceptions_total",
+                    "First-chance exceptions, from dotnet.exceptions.",
+                    runtime.ExceptionCount, role);
             }
 
             Gauge(text, "dotnet_gc_heap_size_bytes", "Managed heap size.", GC.GetTotalMemory(false), role);

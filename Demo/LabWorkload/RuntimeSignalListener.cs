@@ -48,7 +48,15 @@ namespace DevOnBike.Overfit.LabWorkload
         /// </summary>
         public const string LockContentions = "dotnet.monitor.lock_contentions";
 
-        private static readonly string[] Wanted = [ActiveRequests, LockContentions];
+        /// <summary>
+        /// First-chance exceptions, cumulative. Distinct from <c>ErrorRate</c>, which counts 5xx responses:
+        /// an exception that is caught and retried never becomes a 5xx, so the error rate stays flat while
+        /// the process is already in trouble. It frequently precedes the failure the error rate eventually
+        /// sees.
+        /// </summary>
+        public const string Exceptions = "dotnet.exceptions";
+
+        private static readonly string[] Wanted = [ActiveRequests, LockContentions, Exceptions];
 
         private readonly MeterListener _listener;
         private readonly Dictionary<string, string> _subscribed = new(StringComparer.Ordinal);
@@ -105,6 +113,9 @@ namespace DevOnBike.Overfit.LabWorkload
 
         /// <summary>Lock contentions since this process started.</summary>
         public long LockContentionCount => Read(LockContentions);
+
+        /// <summary>First-chance exceptions since this process started, thrown or not caught.</summary>
+        public long ExceptionCount => Read(Exceptions);
 
         /// <summary>
         /// Meter/instrument pairs that were actually published, so a name that does not exist on this

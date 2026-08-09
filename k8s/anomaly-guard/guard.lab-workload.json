@@ -143,9 +143,9 @@
       "kind": "Counter",
       "loadSensitive": false,
       "class": "Resource",
-      "minGap": "0.064",
-      "minTrendChange": "0.064",
-      "ruleThreshold": "0.064",
+      "minGap": "0.119",
+      "minTrendChange": "0.119",
+      "ruleThreshold": "0.119",
       "ruleMinBreachFraction": 0.25,
       "_comment": [
         "Closes a gap every current channel is structurally blind to: contention produces a latency cliff",
@@ -154,7 +154,36 @@
         "throughput 759 -> 26 requests per 10 s, contention rate 2 -> 12/s. Clearing the fault returned every",
         "number to its starting value.",
         "The instrument is OBSERVABLE, so it reports nothing until polled - before RecordObservableInstruments",
-        "was called it read a clean, well-formed, permanent zero through sixteen contending threads."
+        "was called it read a clean, well-formed, permanent zero through sixteen contending threads.",
+        "Floor RECALIBRATED 2026-08-09. The first value, 0.064, came from a peak of 0.0514 measured over only",
+        "~3 minutes on pods that had just started, and it produced a false positive on an unfaulted pod within",
+        "the hour. Re-measured over a settled 20-minute window across both pod generations: healthy per-pod peak",
+        "0.0952/s, so healthy replicas routinely exceeded the old floor. 0.0952 x 1.25 = 0.119, which is still",
+        "about 97x below the injected fault at 11.6/s.",
+        "The lesson is the window, not the number: a floor calibrated on three minutes of a freshly rolled",
+        "population describes the rollout, not the workload."
+      ]
+    },
+    "Exceptions": {
+      "source": "labapp_exceptions_total",
+      "kind": "Counter",
+      "loadSensitive": false,
+      "class": "Symptom",
+      "minGap": "0.0167",
+      "minTrendChange": "0.0167",
+      "ruleThreshold": "0.0167",
+      "ruleMinBreachFraction": 0.25,
+      "_comment": [
+        "First-chance exceptions. Distinct from ErrorRate, which counts 5xx RESPONSES: an exception that is",
+        "caught and retried never becomes a 5xx, so the error rate stays flat while the process is already",
+        "failing.",
+        "Measured 2026-08-09 with half of requests throwing-and-catching: exceptions 0 -> 40/s while the 5xx",
+        "rate stayed at 0, p95 went 63.2 -> 63.1 -> 63.2 ms, throughput was unchanged and NOT ONE response",
+        "was other than 200. This is the one of the three runtime channels where every existing channel is",
+        "genuinely blind - unlike lock contention, where CPU also moved.",
+        "Healthy is exactly 0 on all twelve pods, so InertChannels() will report it as constant-zero and",
+        "AMBIGUOUS. That is correct: it is what a working rare-event channel looks like when the rare event",
+        "has not happened."
       ]
     }
   },

@@ -260,9 +260,19 @@ data:
           "kind": "Counter",
           "loadSensitive": false,
           "class": "Resource",
-          "minGap": "0.064",
-          "minTrendChange": "0.064",
-          "ruleThreshold": "0.064",
+          "minGap": "0.119",
+          "minTrendChange": "0.119",
+          "ruleThreshold": "0.119",
+          "ruleMinBreachFraction": 0.25
+        },
+        "Exceptions": {
+          "source": "labapp_exceptions_total",
+          "kind": "Counter",
+          "loadSensitive": false,
+          "class": "Symptom",
+          "minGap": "0.0167",
+          "minTrendChange": "0.0167",
+          "ruleThreshold": "0.0167",
           "ruleMinBreachFraction": 0.25
         }
       }
