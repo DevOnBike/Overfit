@@ -14,6 +14,7 @@ answer, this page says which file holds it.
 |---|---|
 | What is this and should we run it? | [`aiops-business-case.md`](aiops-business-case.md) |
 | How does it work? | [`aiops-architecture.md`](aiops-architecture.md) |
+| What does it actually watch, and in what unit? | [`aiops-metrics-catalogue.md`](aiops-metrics-catalogue.md) |
 | How do I add a metric? | [`aiops-adding-a-metric.md`](aiops-adding-a-metric.md) |
 | How is an `AN-*` / `RS-*` / `PS-*` task actually run? | [`aiops-task-protocol.md`](aiops-task-protocol.md) — the nine steps and the incident behind each; `CLAUDE.md` links here rather than repeating it |
 | What is broken right now? | [`docs/TASKS.md`](../TASKS.md) — **not a document in this directory.** `aiops-backlog.md` below is history and reasoning, not current status |
@@ -63,6 +64,10 @@ answer, this page says which file holds it.
 - [`aiops-architecture.md`](aiops-architecture.md) — read this first when the question is "what are the
   pieces and where does this change land." System context, assembly boundaries, the four detection families
   each with what they answer and what they cannot see, the two execution paths that never meet.
+- [`aiops-metrics-catalogue.md`](aiops-metrics-catalogue.md) — every channel the guard supports today: source
+  series, `MetricSourceKind`, the PromQL it actually becomes, unit, stack-neutral vs. .NET-specific, which
+  detector families can act on it, its calibrated floor with the conditions it was measured under, and its
+  known failure mode. Read this before binding a new deployment or trusting a number a channel reports.
 - [`aiops-detection-pipeline.md`](aiops-detection-pipeline.md) — 1151 lines, the deepest thing here: how a
   metric becomes an incident, and the measurement behind every calibrated threshold. Read this before
   changing a threshold or a detector's arithmetic. **Known stale on one point, corrected by the file above**:

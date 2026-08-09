@@ -5,6 +5,7 @@
 
 using DevOnBike.Overfit.Exceptions;
 using DevOnBike.Overfit.Onnx.Schema;
+using DevOnBike.Overfit.Runtime;
 
 namespace DevOnBike.Overfit.Onnx
 {
@@ -169,46 +170,11 @@ namespace DevOnBike.Overfit.Onnx
         /// </summary>
         internal static string ResolvePath(string externalDataDir, string location, string initializerName)
         {
-            if (string.IsNullOrWhiteSpace(location))
-            {
-                throw new OverfitFormatException(
-                    $"Initializer '{initializerName}' has an empty external data location.");
-            }
-
-            if (Path.IsPathRooted(location))
-            {
-                throw new OverfitFormatException(
-                    $"Initializer '{initializerName}' references an absolute external data path: "
-                    + $"'{location}'.");
-            }
-
-            var baseDir = Path.GetFullPath(externalDataDir);
-            var fullPath = Path.GetFullPath(Path.Combine(baseDir, location));
-
-            var comparison = OperatingSystem.IsWindows()
-                ? StringComparison.OrdinalIgnoreCase
-                : StringComparison.Ordinal;
-
-            if (!IsInside(fullPath, baseDir, comparison))
-            {
-                throw new OverfitFormatException(
-                    $"External data path for initializer '{initializerName}' escapes the model directory: "
-                    + $"'{location}'.");
-            }
-
-            return fullPath;
-        }
-
-        private static bool IsInside(string path, string directory, StringComparison comparison)
-        {
-            var normalized = directory;
-
-            if (!normalized.EndsWith(Path.DirectorySeparatorChar))
-            {
-                normalized += Path.DirectorySeparatorChar;
-            }
-
-            return path.StartsWith(normalized, comparison);
+            // The checks themselves now live in ContainedPath, because this was the only correct copy of
+            // them in the repository and a second loader joining a model-supplied name to a directory had
+            // none at all. Same three checks, same order, same messages in substance.
+            return ContainedPath.Resolve(
+                externalDataDir, location, $"External data for initializer '{initializerName}'");
         }
 
         /// <summary>

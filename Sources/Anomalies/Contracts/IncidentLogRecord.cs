@@ -68,6 +68,12 @@ namespace DevOnBike.Overfit.Anomalies.Contracts
     /// is still emitted</b> — deleting the evidence to keep the log tidy removes exactly the record somebody
     /// comes back for after a failed deploy. What this changes is routing: a host must not page on it.
     /// </param>
+    /// <param name="Novelty">
+    /// Whether this is a new deviation or one the subject has held since it came up. Last and defaulted, so
+    /// every existing consumer and every saved query keeps working; a
+    /// <see cref="NoveltyKind.Standing"/> row is a reassertion of something already reported and should be
+    /// routed as an update rather than a page.
+    /// </param>
     public readonly record struct IncidentLogRecord(
         int IncidentKey,
         long IncidentId,
@@ -86,7 +92,8 @@ namespace DevOnBike.Overfit.Anomalies.Contracts
         int Signals,
         string Message,
         string Narrative = "",
-        string SuppressedBy = "")
+        string SuppressedBy = "",
+        NoveltyKind Novelty = NoveltyKind.New)
     {
         /// <summary>
         /// Whether a declared maintenance window covered this. The row is still emitted, because an operator

@@ -66,7 +66,13 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
                 Append(text, incident.Subjects.ToString(CultureInfo.InvariantCulture));
                 Append(text, incident.Signals.ToString(CultureInfo.InvariantCulture));
 
-                text.Append(Escape(incident.Summary)).Append('\n');
+                Append(text, incident.Summary);
+
+                // After the summary, which used to end the line. A reader written before this column existed
+                // guards on `f.Length < 20` and still finds the summary at index 19, so an older build reads
+                // a newer file without misinterpreting anything — the same forward-compatibility the
+                // calibration's #windows marker relies on.
+                text.Append(((int)incident.Novelty).ToString(CultureInfo.InvariantCulture)).Append('\n');
             }
 
             return text.ToString();
@@ -160,7 +166,12 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
                 new DateTimeOffset(end, TimeSpan.Zero),
                 subjects,
                 signals,
-                Unescape(f[19]));
+                Unescape(f[19]),
+                f.Length > 20
+                && int.TryParse(f[20], NumberStyles.Integer, CultureInfo.InvariantCulture, out var novelty)
+                && novelty == (int)NoveltyKind.Standing
+                    ? NoveltyKind.Standing
+                    : NoveltyKind.New);
 
             return true;
         }

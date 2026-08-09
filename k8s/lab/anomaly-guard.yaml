@@ -153,10 +153,6 @@ data:
           "source": "labapp_requests_total",
           "kind": "Counter"
         },
-        "ErrorRate": {
-          "source": "labapp_errors_total",
-          "kind": "Counter"
-        },
         "LatencyP50Ms": {
           "source": "labapp_request_duration_seconds",
           "kind": "HistogramSeconds",

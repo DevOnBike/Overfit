@@ -32,6 +32,20 @@ namespace DevOnBike.Overfit.Anomalies.Contracts
     /// finding", and the one that hides behind the other five: the comparison ran, said something, and said it
     /// about a smaller group than the reader assumes.
     /// </param>
+    /// <param name="Novelty">
+    /// What the novelty gate made of it — a <b>seventh</b> cause of "no finding", and the first one that can
+    /// swallow a comparison which passed every gate above. Without it a reader sees an outlier in the trace
+    /// and no incident, with nothing to say which layer removed it.
+    ///
+    /// <para>The peer verdict above is unchanged by this: a standing outlier is still <c>IsOutlier</c>, still
+    /// carries its gap and its effect size. Only whether it reached the incident pipeline this cycle
+    /// moves.</para>
+    /// </param>
+    /// <param name="NoveltyStatus">
+    /// The change test's own verdict on the gap-over-time series, which is what separates "measured stable"
+    /// from "not enough history to say". Both forward the finding; only one of them is a decision.
+    /// </param>
+    /// <param name="Forwarded">Whether the finding reached the incident pipeline this cycle.</param>
     public readonly record struct PeerDecisionTrace(
         string Signal,
         DetectionStatus Status,
@@ -44,5 +58,8 @@ namespace DevOnBike.Overfit.Anomalies.Contracts
         double EffectSize,
         double PValue,
         int UsableSamples,
-        int ExcludedPeers = 0);
+        int ExcludedPeers = 0,
+        NoveltyKind Novelty = NoveltyKind.New,
+        DetectionStatus NoveltyStatus = DetectionStatus.InsufficientData,
+        bool Forwarded = true);
 }

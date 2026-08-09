@@ -58,6 +58,21 @@ namespace DevOnBike.Overfit.Anomalies.Contracts
             get; init;
         } = double.NaN;
 
+        /// <summary>
+        /// Whether this deviation has just started, or is one the subject has held since it came up.
+        ///
+        /// <para><b>A field rather than a sentence in <see cref="Reason"/></b>, for the same argument as
+        /// <see cref="Magnitude"/>: a consumer that wants to filter, badge or route on it has to read it.</para>
+        ///
+        /// <para>Only the peer family sets this today, and only when the novelty gate is configured.
+        /// Everything else reports <see cref="NoveltyKind.New"/> — which is the honest answer, since nothing
+        /// else has measured whether its finding is a standing one.</para>
+        /// </summary>
+        public NoveltyKind Novelty
+        {
+            get; init;
+        }
+
         /// <summary>How long the behaviour lasted.</summary>
         public TimeSpan Duration => End - Start;
     }

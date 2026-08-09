@@ -54,6 +54,7 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
         private long _opened;
         private long _resolved;
         private long _suppressed;
+        private long _noveltyHeld;
         private long _lastCycleUnixSeconds;
         private int _pods;
         private int _blind;
@@ -123,6 +124,20 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
         public void StateWriteFailed()
         {
             Interlocked.Increment(ref _stateWriteFailures);
+        }
+
+        /// <summary>
+        /// Records one peer finding the novelty gate held back because the deviation is a standing one.
+        ///
+        /// <para><b>Its own series for the same reason the muted-findings one exists.</b> This gate makes the
+        /// guard quieter, and a channel that has gone quiet is indistinguishable from a healthy cluster or
+        /// from a broken detector — the distinction the rest of this subsystem exists to preserve, applied to
+        /// the gate itself. An operator watching this alongside
+        /// <c>overfit_guard_findings_total</c> can tell "nothing is wrong" from "something is being held".</para>
+        /// </summary>
+        public void NoveltyHeld()
+        {
+            Interlocked.Increment(ref _noveltyHeld);
         }
 
         /// <summary>
@@ -196,6 +211,12 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
 
             new("overfit_guard_suppressed_cycles_total", "Cycles inside a declared maintenance window.",
                 "counter", t => Interlocked.Read(ref t._suppressed)),
+
+            new("overfit_guard_peer_findings_standing_total",
+                "Peer findings held back because the deviation has been measured stable rather than new. "
+                + "Rising while findings stay flat is the gate working; rising while findings go to zero is "
+                + "how a detector goes silent without anyone noticing.",
+                "counter", t => Interlocked.Read(ref t._noveltyHeld)),
 
             // The HELP text an operator reads in their OWN Prometheus, which is the only documentation most
             // of them will ever see for this series — so the trap goes here rather than only in the source.

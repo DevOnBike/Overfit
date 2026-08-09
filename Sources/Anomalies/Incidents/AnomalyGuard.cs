@@ -70,6 +70,14 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
         /// <summary>Where the absolute floors come from. Configured first, learned as a fallback.</summary>
         private readonly IAbsoluteFloorSource _floors;
 
+        /// <summary>
+        /// How far each replica has sat from its peers over recent cycles, so a difference it has held since
+        /// it started stops being reported as news. Null when
+        /// <see cref="AnomalyGuardOptions.PeerNovelty"/> was not configured, which leaves the peer family
+        /// exactly as it was.
+        /// </summary>
+        private readonly PeerNoveltyTracker? _novelty;
+
         /// <summary>Which moments were declared abnormal on purpose.</summary>
         private readonly IMaintenanceCalendar _calendar;
 
@@ -213,6 +221,7 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
 
             _calendar = options.Calendar ?? new StaticMaintenanceCalendar(options.MaintenanceWindows);
             _workload = options.Workload;
+            _novelty = RestoreNovelty(options, learned.PeerNovelty);
 
             // The one contradiction that can be settled before the first cycle: a window scoped to a named
             // workload, no workload configured, and no topology from which one could be derived. Every such
@@ -249,6 +258,59 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
         public int RestoredIncidents
         {
             get;
+        }
+
+        /// <summary>
+        /// Builds the novelty tracker, or refuses to start when it was asked for without the floor it needs.
+        ///
+        /// <para><b>Refusing is the point.</b> This is a gate that makes the guard <i>quieter</i>, and its
+        /// change floor has never been measured — see
+        /// <see cref="AnomalyGuardOptions.MinAbsoluteGapChange"/>. A missing floor would leave the gate
+        /// running on the relative test alone, which is a threshold nobody chose applied to a suppression
+        /// decision. Starting loudly beats suppressing quietly.</para>
+        ///
+        /// <para><b>Restored with no roster, deliberately.</b> The ADR's reused-pod-name check is enforced on
+        /// the first observation instead — <c>PeerNoveltyTracker</c> resets a pod's history the moment the
+        /// cluster reports a creation time that differs from the recorded one. That covers the case a
+        /// load-time check cannot: topology is frequently unavailable at construction, and refusing every row
+        /// then would make persistence worthless.</para>
+        /// </summary>
+        private static PeerNoveltyTracker? RestoreNovelty(AnomalyGuardOptions options, string state)
+        {
+            if (options.PeerNovelty is not { } novelty)
+            {
+                return null;
+            }
+
+            if (options.MinAbsoluteGapChange is not { } floors || floors.Count < (int)MetricIndex.Count)
+            {
+                throw new ArgumentException(
+                    "The peer-novelty gate is configured but "
+                    + nameof(AnomalyGuardOptions.MinAbsoluteGapChange)
+                    + " is missing or shorter than MetricIndex.Count. The change-in-gap floor has no measured "
+                    + "default and none is invented: a suppression gate running with its floor off would "
+                    + "silence findings against a threshold nobody chose.",
+                    nameof(options));
+            }
+
+            for (var c = 0; c < options.CustomMetrics.Count; c++)
+            {
+                var binding = options.CustomMetrics[c];
+
+                if (binding.MinAbsoluteGapChange > 0.0)
+                {
+                    continue;
+                }
+
+                throw new ArgumentException(
+                    $"The peer-novelty gate is configured and custom channel '{binding.Name}' carries no "
+                    + nameof(CustomMetricBinding.MinAbsoluteGapChange)
+                    + ". Every peer-evaluated channel needs one, and a custom channel has no per-metric table "
+                    + "to fall back on — zero there is indistinguishable from 'not supplied'.",
+                    nameof(options));
+            }
+
+            return PeerNoveltyTracker.Read(state, novelty);
         }
 
         /// <summary>
@@ -445,6 +507,7 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
             var pipeline = new IncidentPipeline
             {
                 Suppressor = Suppressions,
+                StandingSeverityScale = _options.PeerNovelty?.StandingSeverityScale ?? 1.0,
             };
 
             // Expiry enforced before the cycle rather than trusted: IsSuppressed checks the clock too, but a
@@ -473,6 +536,7 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
 
             RunRules(window, pipeline, recentFrom, to, recent);
             RunSilentPods(window, pipeline, from, to);
+            PruneNovelty();
 
             _declaredAbnormal = SuppressionReason(observedAt).Length > 0;
 
@@ -574,7 +638,7 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
                 // restart rather than being carried for ever by a store that only ever grows.
                 _history?.Forget(observedAt, TimeSpan.FromDays(MetricHistory.MaxDays * 2));
                 _historyStore.Save(LearnedState.Write(
-                    _history ?? new MetricHistory(), _calibrator, Labels, Suppressions));
+                    _history ?? new MetricHistory(), _calibrator, Labels, Suppressions, _novelty));
             }
 
             RefreshStateError();
@@ -724,7 +788,23 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
             var findings = new PeerOutlierFinding[podCount];
             var result = _peer.Detect(peers, binding.SignalKind, options, findings);
 
-            pipeline.ObservePeerGroup(binding.Name, result, findings, subjects, from, to, binding.Class);
+            // The gate belongs on BOTH peer call sites. Present only on the built-in one, every channel a
+            // customer adds — and on the deployed lab config that is five of them — would keep re-reporting a
+            // standing outlier for ever, in exactly the half of the system a client is most likely to extend.
+            var pods = new string[podCount];
+
+            for (var pod = 0; pod < podCount; pod++)
+            {
+                pods[pod] = window.Pods[pod];
+            }
+
+            var decisions = Classify(
+                pods, findings, result, MetricIndex.Count, binding.Name, binding.MinAbsoluteGapChange, to);
+
+            var kinds = Demote(findings, decisions);
+
+            pipeline.ObservePeerGroup(
+                binding.Name, result, findings, subjects, from, to, binding.Class, kinds);
 
             return result.Status != DetectionStatus.InsufficientData;
         }
@@ -874,6 +954,24 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
 
                 decided |= result.Status != DetectionStatus.InsufficientData;
 
+                var pods = new string[cohort.Count];
+
+                for (var i = 0; i < cohort.Count; i++)
+                {
+                    pods[i] = window.Pods[cohort[i]];
+                }
+
+                var decisions = Classify(
+                    pods,
+                    findings,
+                    result,
+                    metric,
+                    null,
+                    AnomalyGuardOptions.FloorFor(_options.MinAbsoluteGapChange, metric),
+                    to);
+
+                // BEFORE the demotion below, because the trace's job is to say what the comparison found
+                // and the gate is a separate column on the same row — see PeerDecisionTrace.Novelty.
                 if (peerTrace is not null)
                 {
                     for (var i = 0; i < cohort.Count; i++)
@@ -883,21 +981,151 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
                             result.Status,
                             result.HighCount,
                             result.LowCount,
-                            window.Pods[cohort[i]],
+                            pods[i],
                             findings[i].IsOutlier,
                             findings[i].RelativeGap,
                             findings[i].AbsoluteGap,
                             findings[i].Comparison.EffectSize,
                             findings[i].Comparison.PValueCandidateWorse,
                             findings[i].UsableSamples,
-                            result.ExcludedCount));
+                            result.ExcludedCount,
+                            decisions is null ? NoveltyKind.New : decisions[i].Kind,
+                            decisions is null ? DetectionStatus.InsufficientData : decisions[i].Status,
+                            decisions is null || decisions[i].Forward || !findings[i].IsOutlier));
                     }
                 }
 
-                pipeline.ObservePeerGroup(metric.ToString(), result, findings, cohortSubjects, from, to);
+                var kinds = Demote(findings, decisions);
+
+                pipeline.ObservePeerGroup(
+                    metric.ToString(), result, findings, cohortSubjects, from, to, null, kinds);
             }
 
             return decided;
+        }
+
+        /// <summary>
+        /// Runs the novelty gate over one peer group, folding each outlier's gap into that pod's history.
+        ///
+        /// <para><b>Only outliers are folded, and that is what makes the mechanism robust to a noisy
+        /// ranking.</b> A pod whose gap sits under the material floor never reaches the tracker, so the
+        /// role-churn measured on the live population — the top-ranked pod changing 17 times in 180
+        /// transitions, almost all of it below the floor — never becomes novelty history about anybody.</para>
+        ///
+        /// <para>Returns null when the gate is off, which every caller reads as "forward everything".</para>
+        /// </summary>
+        private NoveltyDecision[]? Classify(
+            string[] pods,
+            PeerOutlierFinding[] findings,
+            in PeerOutlierResult result,
+            MetricIndex metric,
+            string? channel,
+            double minAbsoluteGapChange,
+            DateTimeOffset at)
+        {
+            if (_novelty is null || result.Status != DetectionStatus.Anomalous)
+            {
+                return null;
+            }
+
+            var decisions = new NoveltyDecision[findings.Length];
+
+            for (var i = 0; i < findings.Length; i++)
+            {
+                if (!findings[i].IsOutlier)
+                {
+                    // Not folded and not judged: a cycle in which this pod matched its peers says nothing
+                    // about whether its deviations are standing, and recording a zero gap for it would tell
+                    // the change test the gap collapsed.
+                    decisions[i] = NoveltyDecision.Unknown;
+
+                    continue;
+                }
+
+                var createdAt = CreatedAt(pods[i]);
+
+                decisions[i] = channel is null
+                    ? _novelty.Observe(
+                        pods[i], createdAt, metric, findings[i].AbsoluteGap, at, minAbsoluteGapChange)
+                    : _novelty.Observe(
+                        pods[i], createdAt, channel, findings[i].AbsoluteGap, at, minAbsoluteGapChange);
+            }
+
+            return decisions;
+        }
+
+        /// <summary>
+        /// Clears the deviation on every member the gate held back this cycle, so
+        /// <c>IncidentPipeline.ObservePeerGroup</c>'s existing outlier check skips it — the same demotion
+        /// <c>PeerGroupOutlierDetector.Dominant</c> already performs, one gate further out.
+        /// </summary>
+        /// <returns>Per-member classification for the pipeline, or null when the gate is off.</returns>
+        private NoveltyKind[]? Demote(PeerOutlierFinding[] findings, NoveltyDecision[]? decisions)
+        {
+            if (decisions is null)
+            {
+                return null;
+            }
+
+            var kinds = new NoveltyKind[decisions.Length];
+
+            for (var i = 0; i < decisions.Length; i++)
+            {
+                kinds[i] = decisions[i].Kind;
+
+                if (decisions[i].Forward || !findings[i].IsOutlier)
+                {
+                    continue;
+                }
+
+                findings[i] = findings[i] with
+                {
+                    Deviation = PeerDeviation.None
+                };
+
+                Telemetry.NoveltyHeld();
+            }
+
+            return kinds;
+        }
+
+        /// <summary>
+        /// What the cluster says about when a pod was created, or <c>default</c> when it cannot say. See
+        /// <c>PeerNoveltyTracker.Observe</c> for why a change in this value discards that pod's history.
+        /// </summary>
+        private DateTimeOffset CreatedAt(string pod)
+        {
+            if (_options.PodTopology is { } topology && topology.TryResolve(pod, out var placement))
+            {
+                return placement.CreatedAt;
+            }
+
+            return default;
+        }
+
+        /// <summary>
+        /// Drops novelty state for pods the cluster no longer lists.
+        ///
+        /// <para><b>Against the roster, never against the reporting window.</b> A pod that missed one scrape
+        /// is absent from the window and still very much alive; pruning on that would discard its history and
+        /// silently restart its warm-up. A stale roster can only cause a pod to be forgotten early, which
+        /// makes it report again — the safe direction for a suppression gate.</para>
+        /// </summary>
+        private void PruneNovelty()
+        {
+            if (_novelty is null || _options.PodTopology is not IPodRoster roster)
+            {
+                return;
+            }
+
+            var known = roster.KnownPods;
+
+            if (known.Count == 0)
+            {
+                return;
+            }
+
+            _novelty.Prune(known);
         }
 
         /// <summary>

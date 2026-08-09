@@ -63,6 +63,17 @@ namespace DevOnBike.Overfit.Anomalies.Contracts
     /// <see cref="MetricIndex"/> and cannot hold a name the enum does not have — the same reason custom
     /// channels carry their own floors.</para>
     /// </param>
+    /// <param name="MinAbsoluteGapChange">
+    /// Smallest <b>movement in the peer gap</b>, across the novelty window and in this metric's units, that
+    /// counts as the deviation changing rather than standing. Read only when
+    /// <c>AnomalyGuardOptions.PeerNovelty</c> is configured, and <b>required</b> then — a guard with the
+    /// novelty gate on and this left at zero refuses to start.
+    ///
+    /// <para><b>Nobody has measured it, which is exactly why it has no default.</b> Calibrating it needs the
+    /// distribution of fitted gap-change across healthy pods, which no accumulator here collects yet. A
+    /// silent value would be a guess with a threshold's authority, on a gate whose failure mode is
+    /// silence.</para>
+    /// </param>
     public readonly record struct CustomMetricBinding(
         string Name,
         string Source,
@@ -73,7 +84,8 @@ namespace DevOnBike.Overfit.Anomalies.Contracts
         double MinAbsoluteTrendChange = 0.0,
         double Quantile = 0.0,
         SustainedThresholdOptions? Rule = null,
-        double SaturationLimit = double.NaN)
+        double SaturationLimit = double.NaN,
+        double MinAbsoluteGapChange = 0.0)
     {
         /// <summary>Whether this binding can produce a query at all.</summary>
         public bool IsUsable => !string.IsNullOrWhiteSpace(Name) && !string.IsNullOrWhiteSpace(Source);

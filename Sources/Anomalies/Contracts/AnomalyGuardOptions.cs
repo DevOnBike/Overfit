@@ -218,6 +218,47 @@ namespace DevOnBike.Overfit.Anomalies.Contracts
         public IReadOnlyList<double>? MinAbsoluteTrendChange { get; init; } = DefaultAbsoluteTrendFloors;
 
         /// <summary>
+        /// Turns on the peer-novelty gate, which stops a replica's <i>standing</i> difference from being
+        /// reported as news every cycle. Null — the default — leaves the peer family exactly as it was.
+        ///
+        /// <para><b>Opt-in, and there is no balanced profile to fall into.</b> Two of its four numbers cannot
+        /// be fitted by any measurement this repository can run, so choosing one is a decision an operator
+        /// makes: <see cref="PeerNoveltyOptions.PerShift"/>, <see cref="PeerNoveltyOptions.Daily"/> or
+        /// <see cref="PeerNoveltyOptions.Weekly"/>.</para>
+        ///
+        /// <para>Setting this <b>requires</b> <see cref="MinAbsoluteGapChange"/>, and a
+        /// <see cref="MinAbsoluteGapChange"/> for every entry in <see cref="CustomMetrics"/>. A guard
+        /// configured without them refuses to start rather than running the gate with the change floor off.</para>
+        /// </summary>
+        public PeerNoveltyOptions? PeerNovelty
+        {
+            get; init;
+        }
+
+        /// <summary>
+        /// Smallest movement in a pod's peer gap, across the novelty window, that counts as the deviation
+        /// changing rather than standing — per metric, in that metric's own units, indexed by
+        /// <see cref="MetricIndex"/>. Read only when <see cref="PeerNovelty"/> is set.
+        ///
+        /// <para><b>No default, and the absence is deliberate.</b> This is a third quantity, distinct from
+        /// both tables above: <see cref="MinAbsoluteGap"/> is how far apart two replicas are at an instant,
+        /// <see cref="MinAbsoluteTrendChange"/> is how far one replica's own series moved over a window, and
+        /// this is how far the <i>distance between them</i> moved. Reusing either would be correct arithmetic
+        /// about the wrong quantity — the error this subsystem has already paid for twice.</para>
+        ///
+        /// <para><b>It is unmeasured.</b> Fitting it needs the distribution of gap-change across healthy
+        /// pods, which nothing here accumulates yet; the only figures available are two single-series
+        /// readings from the AN-D1 spike (0.108 MB over 24.4 h on the recorded <c>pj7r8</c> sequence, 0.221 MB
+        /// on a synthetic flat one at the same 6.8% scatter), which is a data point and not a calibration. A
+        /// guessed default here would be a threshold with no measurement behind it, gating a mechanism whose
+        /// failure mode is silence.</para>
+        /// </summary>
+        public IReadOnlyList<double>? MinAbsoluteGapChange
+        {
+            get; init;
+        }
+
+        /// <summary>
         /// The one floor that could be measured rather than left to the caller: <b>256 MiB of working set
         /// over a window</b>.
         ///

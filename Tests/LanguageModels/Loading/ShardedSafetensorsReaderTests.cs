@@ -73,6 +73,52 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             }
         }
 
+        /// <summary>
+        /// The shard name is read out of the index file, so it is chosen by whoever published the model.
+        /// Each of these three shapes reaches a different door in <c>ContainedPath</c>: a rooted name
+        /// replaces the base directory outright (this is the one
+        /// <see cref="Path.Combine(string, string)" /> looks like it prevents and does not), a relative one
+        /// walks out with <c>..</c>, and an empty one resolves to the directory itself.
+        ///
+        /// <para>The target file is one that <b>exists and is readable</b> on purpose. Pointing at a missing
+        /// file would throw whatever happens first and the test would pass without the guard — the failure
+        /// has to be the containment check refusing a file the process could otherwise have opened.</para>
+        /// </summary>
+        [Theory]
+        [InlineData("rooted")]
+        [InlineData("../escape.safetensors")]
+        [InlineData("")]
+        public void Sharded_WeightMapEscapingTheModelDirectory_IsRefused(string shape)
+        {
+            var parent = Directory.CreateTempSubdirectory("overfit_st_escape_").FullName;
+            var dir = Path.Combine(parent, "model");
+            Directory.CreateDirectory(dir);
+
+            var outside = Path.Combine(parent, "escape.safetensors");
+            File.WriteAllBytes(outside,
+                BuildSafetensors(new Dictionary<string, float[]> { ["a.weight"] = [1f] }));
+
+            try
+            {
+                var target = shape == "rooted" ? outside.Replace("\\", "\\\\") : shape;
+
+                File.WriteAllBytes(Path.Combine(dir, "model-00001-of-00001.safetensors"),
+                    BuildSafetensors(new Dictionary<string, float[]> { ["a.weight"] = [1f] }));
+                File.WriteAllText(Path.Combine(dir, "model.safetensors.index.json"),
+                    "{\"weight_map\":{\"a.weight\":\"" + target + "\"}}");
+
+                var error = Assert.Throws<OverfitFormatException>(() => SafetensorsSource.Open(dir));
+
+                // The message has to name the entry, or an operator holding a refused model has nothing to
+                // act on and will assume the model is corrupt rather than hostile.
+                Assert.Contains("a.weight", error.Message, StringComparison.Ordinal);
+            }
+            finally
+            {
+                Directory.Delete(parent, recursive: true);
+            }
+        }
+
         [Fact]
         public void Sharded_Gpt2_LoadsByteIdentical_ToSingleFile()
         {

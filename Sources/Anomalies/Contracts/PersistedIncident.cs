@@ -34,6 +34,10 @@ namespace DevOnBike.Overfit.Anomalies.Contracts
     /// <param name="Subjects">Distinct subjects it covered.</param>
     /// <param name="Signals">Distinct signals it covered.</param>
     /// <param name="Summary">The one-line description a consumer already saw.</param>
+    /// <param name="Novelty">
+    /// Whether the primary finding was a standing deviation. Last, and defaulted, so a payload written before
+    /// this existed reads unchanged and comes back as <see cref="NoveltyKind.New"/> — the fail-open answer.
+    /// </param>
     public readonly record struct PersistedIncident(
         long Id,
         DateTimeOffset FirstSeen,
@@ -54,5 +58,6 @@ namespace DevOnBike.Overfit.Anomalies.Contracts
         DateTimeOffset End,
         int Subjects,
         int Signals,
-        string Summary);
+        string Summary,
+        NoveltyKind Novelty = NoveltyKind.New);
 }

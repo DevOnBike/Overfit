@@ -8,7 +8,8 @@
     "a CPU limit. OomEventsRate comes from kube-state-metrics; see its own comment for why not cadvisor.",
     "ErrorRate is derived from the",
     "app's own error counter over its request counter, which the map cannot express as a single source, so it",
-    "is left out and reported blind."
+    "is left out and reported blind.",
+    "It was bound anyway in the ConfigMap the same day, and the parity test later copied that binding into this file; removed 2026-08-10 (AN-D12). A parity gate makes two artefacts agree and has no opinion about which one was right."
   ],
   "prometheus": "http://127.0.0.1:9090",
   "namespace": "lab",
@@ -16,10 +17,6 @@
   "metrics": {
     "RequestsPerSecond": {
       "source": "labapp_requests_total",
-      "kind": "Counter"
-    },
-    "ErrorRate": {
-      "source": "labapp_errors_total",
       "kind": "Counter"
     },
     "LatencyP50Ms": {

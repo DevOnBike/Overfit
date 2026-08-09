@@ -28,12 +28,20 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
         private const string LabelSection = "### labels";
         private const string SuppressionSection = "### suppressions";
 
+        /// <summary>
+        /// Added for AN-D1. Written last and read by position, so a payload from before it existed parses
+        /// exactly as it always did and the novelty part cold-starts alone — the same graceful degradation
+        /// already proven twice, for labels and for suppressions.
+        /// </summary>
+        private const string PeerNoveltySection = "### peer-novelty";
+
         /// <summary>Renders both parts into one payload.</summary>
         public static string Write(
             MetricHistory history,
             FloorCalibrator calibrator,
             OperatorLabelStore? labels = null,
-            SuppressionStore? suppressions = null)
+            SuppressionStore? suppressions = null,
+            PeerNoveltyTracker? novelty = null)
         {
             ArgumentNullException.ThrowIfNull(history);
             ArgumentNullException.ThrowIfNull(calibrator);
@@ -65,6 +73,13 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
 
             text.Append(SuppressionSection).Append('\n').Append(suppressions?.Write() ?? string.Empty);
 
+            if (!text.ToString().EndsWith('\n'))
+            {
+                text.Append('\n');
+            }
+
+            text.Append(PeerNoveltySection).Append('\n').Append(novelty?.Write() ?? string.Empty);
+
             return text.ToString();
         }
 
@@ -86,6 +101,7 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
             var calibrationStart = state.IndexOf(CalibrationSection, StringComparison.Ordinal);
             var labelStart = state.IndexOf(LabelSection, StringComparison.Ordinal);
             var suppressionStart = state.IndexOf(SuppressionSection, StringComparison.Ordinal);
+            var noveltyStart = state.IndexOf(PeerNoveltySection, StringComparison.Ordinal);
 
             // A payload written before the calibration section existed carries the baseline alone. Reading it
             // as "no sections found, therefore nothing" would silently discard a week of learning and look
@@ -112,8 +128,12 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
                 : null;
 
             var suppressions = suppressionStart >= 0
-                ? state[(suppressionStart + SuppressionSection.Length)..]
+                ? Section(state, suppressionStart + SuppressionSection.Length, noveltyStart)
                 : null;
+
+            var novelty = noveltyStart >= 0
+                ? state[(noveltyStart + PeerNoveltySection.Length)..]
+                : string.Empty;
 
             var calibrator = FloorCalibrator.Read(calibration, trendOptions);
             var store = OperatorLabelStore.Read(labels);
@@ -121,7 +141,13 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
             calibrator.UseLabels(store);
 
             return new LearnedStateSnapshot(
-                MetricHistory.Read(history), calibrator, store, SuppressionStore.Read(suppressions));
+                MetricHistory.Read(history),
+                calibrator,
+                store,
+                SuppressionStore.Read(suppressions))
+            {
+                PeerNovelty = novelty,
+            };
         }
 
         private static string Section(string state, int from, int until)

@@ -154,7 +154,8 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
                     tracked.Incident.End,
                     tracked.Incident.AffectedSubjects,
                     tracked.Incident.DistinctSignals,
-                    tracked.Incident.Summary));
+                    tracked.Incident.Summary,
+                    primary.Novelty));
             }
 
             return state;
@@ -282,7 +283,10 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
                 saved.Start,
                 saved.End,
                 saved.Severity,
-                saved.Summary);
+                saved.Summary)
+            {
+                Novelty = saved.Novelty,
+            };
 
             return new Incident(
                 [primary],

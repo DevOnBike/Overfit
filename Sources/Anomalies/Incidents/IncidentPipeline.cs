@@ -61,6 +61,19 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
             get; private set;
         }
 
+        /// <summary>
+        /// What a <see cref="NoveltyKind.Standing"/> peer finding's severity is multiplied by. 1.0 — the
+        /// default — leaves every finding exactly as it was, which is what a caller that has not configured
+        /// the novelty gate gets.
+        ///
+        /// <para>Here rather than at the call site because severity is derived from the effect size inside
+        /// <see cref="ObservePeerGroup"/>; applying the scale outside would put one formula in two places.</para>
+        /// </summary>
+        public double StandingSeverityScale
+        {
+            get; set;
+        } = 1.0;
+
         /// <summary>Findings accumulated so far this cycle.</summary>
         public int Count => _findings.Count;
 
@@ -324,6 +337,16 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
         /// <param name="windowStart">Start of the evaluated window.</param>
         /// <param name="windowEnd">End of it.</param>
         /// <param name="signalClass">Overrides <see cref="SignalCatalog"/> classification.</param>
+        /// <param name="novelty">
+        /// What the novelty gate concluded about each member, index-aligned with
+        /// <paramref name="findings"/>. <b>Empty means every entry is <see cref="NoveltyKind.New"/></b>, so a
+        /// caller that has not opted in — and every test written before the gate existed — behaves exactly as
+        /// it did.
+        ///
+        /// <para>The severity reduction for a standing finding happens <b>here</b> rather than at the call
+        /// site, because severity is derived from the effect size inside this method; scaling it outside
+        /// would need two places to agree on one formula.</para>
+        /// </param>
         public int ObservePeerGroup(
             string signal,
             in PeerOutlierResult result,
@@ -331,7 +354,8 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
             ReadOnlySpan<IncidentSubject> subjects,
             DateTimeOffset windowStart,
             DateTimeOffset windowEnd,
-            SignalClass? signalClass = null)
+            SignalClass? signalClass = null,
+            ReadOnlySpan<NoveltyKind> novelty = default)
         {
             ArgumentNullException.ThrowIfNull(signal);
 
@@ -341,6 +365,14 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
                     $"{findings.Length} findings against {subjects.Length} subjects — the two must be "
                     + "index-aligned with the peer list the detector was given.",
                     nameof(subjects));
+            }
+
+            if (!novelty.IsEmpty && novelty.Length != findings.Length)
+            {
+                throw new ArgumentException(
+                    $"{novelty.Length} novelty classifications against {findings.Length} findings — supply "
+                    + "one per peer, or none at all.",
+                    nameof(novelty));
             }
 
             if (result.Status != DetectionStatus.Anomalous)
@@ -375,16 +407,20 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
                     break;
                 }
 
+                var kind = novelty.IsEmpty ? NoveltyKind.New : novelty[i];
+                var scale = kind == NoveltyKind.Standing ? StandingSeverityScale : 1.0;
+
                 _findings.Add(new SignalFinding(
                     subjects[i],
                     signal,
                     resolvedClass,
                     windowStart,
                     windowEnd,
-                    Severity(findings[i].Comparison.EffectSize),
+                    Severity(findings[i].Comparison.EffectSize) * scale,
                     Describe(findings[i], result))
                 {
                     Magnitude = Math.Abs(findings[i].AbsoluteGap),
+                    Novelty = kind,
                 });
 
                 added++;
