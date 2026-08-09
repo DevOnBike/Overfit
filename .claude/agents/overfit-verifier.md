@@ -149,6 +149,34 @@ reason about it, or say you could not establish it.
   AOT publish, a missing fixture. Name it. **Never convert an unrun check into a pass** — silence read as
   health is the failure mode this repository cares about most.
 
+## Verify before you answer — never guess a path, a symbol or a structure
+
+**If you lack the precise context, the file, or the command output needed to answer, STOP and run a tool.**
+Do not guess. Do not invent a placeholder path. Do not assume a file, a key, a field or a directory exists
+because it would be reasonable for it to exist. Verify first, then answer.
+
+This is not caution for its own sake — an invented detail is indistinguishable from a checked one in the
+output, so it costs nothing to produce and everything to discover. Three failures on 2026-08-09/10, each
+from the same root:
+
+- A design plan was built on "the only caller is `RunPeer`", read rather than resolved.
+  `find_references` returns **two** production call sites; the second is the path every customer-added
+  channel takes, and the proposed change would have left it untouched.
+- A script wrote a note into the JSON key `_comment`. The file's comment key is `"// what this is"`. The
+  write silently did nothing, and only a read-back assertion caught it.
+- A helper returned an empty pod name after a `kubectl` query failed on stderr while stdout came back
+  empty. Nothing checked the return value, and the script looped for six minutes and then reported a
+  cluster failure that had not happened.
+
+**Two operational rules follow, and both are cheap:**
+
+1. **Assert the thing you just fetched is non-empty before you build on it.** An empty result and a
+   negative answer look identical downstream. `kubectl` in particular reports a malformed query on stderr
+   and returns an empty stdout with a zero exit code in some shapes.
+2. **When you cannot verify, say so in the answer** — name what you could not check and why. "I did not
+   check X" is a usable answer. A confident answer resting on an assumption is not, and nobody downstream
+   can tell the difference.
+
 ## Searching code: the semantic navigator before `Grep` — added 2026-08-09
 
 **For any question about a SYMBOL, use `mcp__overfit-navigator__*` and not `Grep`.** It resolves the

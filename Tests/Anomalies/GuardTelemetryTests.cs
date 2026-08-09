@@ -117,11 +117,16 @@ namespace DevOnBike.Overfit.Tests.Anomalies
                 }
             }
 
-            // Fifteen. Eleven once overfit_guard_state_failures_total joined them — a durable-state write
+            // Sixteen. Eleven once overfit_guard_state_failures_total joined them — a durable-state write
             // that fails is otherwise silent until the next restart reopens everything at once — and four
             // more for operator feedback. Those four exist because every response an operator can give makes
             // the guard quieter, so the amount of silence they have bought has to be visible from outside.
-            Assert.Equal(15, series);
+            //
+            // The sixteenth is overfit_guard_peer_findings_standing_total (AN-D1). Same argument as the
+            // feedback four, applied to a gate rather than to an operator: the novelty gate holds peer
+            // findings back, and a channel that has gone quiet is indistinguishable from a healthy cluster
+            // unless the amount being held is exported.
+            Assert.Equal(16, series);
         }
 
         private static AnomalyGuard Guard(out NullSink sink)
