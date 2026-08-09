@@ -261,7 +261,7 @@ gateway — then:**
 - **do not write it to `docs/bug-hunts/`**, and do not write it to memory;
 - **stop analysing how far it could be exploited.** Establishing that it is real is enough; going further
   produces the attacker's homework;
-- **report it to the user directly** and hand it to `overfit-security` and `overfit-ciso`, who work under
+- **report it to the user directly** and hand it to `overfit-ciso`, who works under
   embargo;
 - **score it and move on** — you do not lose points for a finding you correctly refused to publish.
 

@@ -36,7 +36,7 @@ you dispatch anyone.
 | **FEATURE** | multi-file, new capability, or anything from outside the team | full chain, below |
 | **PUBLIC API / HOT PATH / PARSER** | changes what ships, what allocates per call, or what reads a file | full chain, **no exemptions** |
 | **DEPENDENCY** | a version bump | `overfit-packages-update` → `overfit-developer` → gates |
-| **ADVISORY** | a CVE or a researcher's report | `overfit-packages-update` + `overfit-security` + `overfit-ciso`, **under embargo** |
+| **ADVISORY** | a CVE or a researcher's report | `overfit-packages-update` + `overfit-ciso`, **under embargo** |
 
 **Anything touching `Sources/Main`, crossing an assembly boundary, changing public API, touching a hot path or
 a file parser, or adding a dependency is never TRIVIAL**, however few lines it takes.
@@ -96,12 +96,12 @@ Read the diff, not the intent. Dispatch every gate whose trigger fires:
 
 | trigger in the diff | gate |
 |---|---|
-| a loader, parser, `Onnx/`, GGUF, tokenizer, audio decode, RAG ingestion, path handling, `Server`, `Mcp`, the gateway, or `unsafe` fed by external input | **`overfit-security`** |
+| a loader, parser, `Onnx/`, GGUF, tokenizer, audio decode, RAG ingestion, path handling, `Server`, `Mcp`, the gateway, or `unsafe` fed by external input | **`overfit-ciso`** |
 | any claim of a speedup, ratio, allocation reduction or comparison — in code, comments, docs or the summary | **`overfit-perf-claim-auditor`** (it owns the verdict; nobody else issues one) |
 | a hot path or a kernel | **`overfit-perf-claim-auditor`**, even without a claim — a hot-path change without a measurement is a claim by omission |
-| public documentation, a large refactor, or comments moved with code | **`overfit-code-with-description-drift`** |
+| public documentation, a large refactor, or comments moved with code | **`overfit-reviewer`** (merged 2026-08-09) |
 | `.github/workflows/**`, publishing credentials, release integrity | **`overfit-ciso`** — and the workflow edit itself is the user's, never an agent's |
-| a dependency advisory with reachable impact | **`overfit-security`** + **`overfit-ciso`** |
+| a dependency advisory with reachable impact | **`overfit-ciso`** |
 
 **`overfit-find-bugs-game` is not a gate.** It is bounded exploration on a ten-minute clock and its coverage
 is heuristic. Use it deliberately on a neglected module, never as a required step.

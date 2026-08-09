@@ -97,6 +97,46 @@ one top-level type per file · no jagged `float[][]`.
    commercial side. The Redaction Gateway is never referenced from README or ROADMAP. Loading is
    one-directional: external formats → Overfit, never the reverse.
 
+## Prose against code — merged from `overfit-code-with-description-drift` on 2026-08-09
+
+That agent no longer exists and its work is yours. The split never held: your own remit already included
+"the claims made in comments and docs", so its scope sat entirely inside yours and dispatching both meant
+one of you re-read the same files to reach the same conclusion.
+
+**A wrong docstring outlives a wrong test.** The test is re-run on every commit and its lie has a short
+life; the comment is read once, by somebody deciding they do not need to add a check — and it is believed.
+In `Sources/Main` it is worse still, because those XML docs compile into the NuGet package and reach people
+who cannot see the code.
+
+**Where it matters, in order:** `Sources/Main` first and hardest — the shipped library. Then the other
+`Sources/*` projects. Then `README.md`, `docs/`, `ROADMAP.md`, `CHANGELOG.md`, when a source finding
+contradicts one. **Skip `Tests/`** unless asked — with one exception worth raising if you see it: a test
+whose comment claims to verify something the assertions do not check is not documentation drift, it is a
+test that cannot fail.
+
+**Seven shapes, in the order they cost the most:**
+
+1. **A guarantee the code does not provide.** "Zero allocations per call" on a method that allocates;
+   "thread-safe" on a type with unsynchronised mutable state; "this makes X detectable" when it does not.
+   Highest value and hardest to see — it needs understanding what the code does, not comparing names.
+   **Prefer one of these to ten cref typos.**
+2. **A number with no source, or a stale one.** This repo's comments carry measurements — "2.25x", "112
+   incidents a day". Is the benchmark still there, and does it still say this? A figure true on a different
+   build, population or box is worse than none, because it is quoted. *Measured 2026-08-09:* a `+1.00`
+   correlation quoted for weeks had no artefact computing it anywhere.
+3. **A named thing that no longer exists** — a parameter, method, type, file, config key, environment
+   variable.
+4. **A rule stated in one place and broken in another.** Both files are internally consistent, so only
+   reading them together finds it.
+5. **A description of a scenario that cannot occur** — occasionally a sign that a guard moved and its
+   explanation stayed.
+6. **"Fixed" / "done" / "shipped" claims** that were not. This repo has had at least three.
+7. **A comment describing an earlier design.** Reads plausibly, sends the next reader down a path that no
+   longer exists.
+
+**One caution.** When code and comment disagree, the code is what runs — but it is not automatically what
+was *intended*. Say which you think is wrong and why; do not assume the comment is the error.
+
 ## How to report
 
 Lead with the single most consequential finding. For each: the file and line, what breaks, and the

@@ -93,20 +93,48 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             }
         }
 
-        /// <summary>A custom channel nobody reports is blindness, exactly as for a modelled one.</summary>
+        /// <summary>
+        /// A custom channel nobody reports is blindness, exactly as for a modelled one.
+        ///
+        /// <para><b>Asserted as a DIFFERENCE, and the earlier version could not fail.</b> It read
+        /// <c>BlindMetrics >= 1</c>, which the thirteen built-in channels satisfy on their own in a window
+        /// that fills none of them — so the custom channel contributed nothing to the assertion. Measured
+        /// 2026-08-09: removing the custom blindness accounting entirely (<c>blind += RunCustom</c> to
+        /// <c>_ = RunCustom</c>) left all five tests in this file green.</para>
+        ///
+        /// <para>Two cycles over the same window, one with the binding and one without, isolate the
+        /// channel's own contribution. This is the contract that matters most in this subsystem — absence of
+        /// data must never read as health — so a fixture that cannot fail on it is worse than none.</para>
+        /// </summary>
         [Fact]
         public void AnUnreportedCustomChannelCountsAsBlind()
         {
-            var sink = new CapturingSink();
-            var guard = Guard(sink, Binding());
-
             // The window carries the channel but no pod fills it.
             var window = new MetricWindow(
                 ["pod-0", "pod-1", "pod-2"], 60, T0, TimeSpan.FromSeconds(15), [Lag]);
 
-            var before = guard.RunCycle(window, T0);
+            var withChannel = Guard(new CapturingSink(), Binding()).RunCycle(window, T0);
+            var withoutChannel = GuardWithoutCustomChannels(new CapturingSink()).RunCycle(window, T0);
 
-            Assert.True(before.BlindMetrics >= 1);
+            Assert.Equal(withoutChannel.BlindMetrics + 1, withChannel.BlindMetrics);
+        }
+
+        /// <summary>The same guard with no custom channels at all — the control for the count above.</summary>
+        private static AnomalyGuard GuardWithoutCustomChannels(IIncidentSink sink)
+        {
+            return new AnomalyGuard(
+                new AnomalyGuardOptions
+                {
+                    Namespace = "overfit",
+                    Workload = "consumer",
+                    CustomMetrics = [],
+                    Grouping = IncidentGroupingOptions.Balanced with
+                    {
+                        Topology = TopologyWeights.SingleNode
+                    },
+                },
+                sink,
+                IncidentTrackingOptions.Balanced);
         }
 
         private static void guardRun(CapturingSink sink, CustomMetricBinding binding, MetricWindow window)

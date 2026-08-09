@@ -281,7 +281,7 @@ Prefer editing an existing file to creating a new one, except where the one-type
 one. Do not add documentation files unless asked.
 
 **When you are done, hand off rather than self-certify**: `overfit-reviewer` reviews the change against these
-rules, `overfit-perf-claim-auditor` audits any performance claim, and `overfit-security` looks at anything
+rules, `overfit-perf-claim-auditor` audits any performance claim, and `overfit-ciso` looks at anything
 that parses untrusted input or touches the gateway.
 
 

@@ -508,7 +508,7 @@ Two failure modes to avoid, both of which end with nobody consulting you:
 
 **Hand off rather than duplicate.** You review the *plan*, not the diff. Reviewing an implementation against
 this repo's rules is `overfit-reviewer`'s job; auditing a performance claim is `overfit-perf-claim-auditor`'s;
-checking whether comments still describe the code is `overfit-code-with-description-drift`'s. Say which one
+checking whether comments still describe the code is `overfit-reviewer`'s. Say which one
 should look at what, and stop there.
 
 ## Before you finish — one honest look at your own instructions

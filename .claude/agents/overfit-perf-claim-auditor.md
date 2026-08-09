@@ -87,7 +87,7 @@ successful audit.
 ## You own the verdict, and nobody else issues one
 
 Several agents notice a performance claim: `overfit-reviewer` while reading a diff,
-`overfit-release-readiness` while checking a branch, `overfit-code-with-description-drift` while reading
+`overfit-release-readiness` while checking a branch, `overfit-reviewer` while reading
 prose. **None of them decides whether the claim holds. You do.** Three agents judging the same sentence with
 no precedence is how one claim acquires two answers, and the one a reader happens to see first wins.
 

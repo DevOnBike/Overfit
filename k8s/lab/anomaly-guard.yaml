@@ -278,6 +278,14 @@ data:
           "minTrendChange": "0.0167",
           "ruleThreshold": "0.0167",
           "ruleMinBreachFraction": 0.25
+        },
+        "CpuPressure": {
+          "source": "container_pressure_cpu_waiting_seconds_total",
+          "kind": "Counter",
+          "loadSensitive": false,
+          "class": "Infrastructure",
+          "minGap": "0.00004",
+          "minTrendChange": "0.00004"
         }
       }
     }

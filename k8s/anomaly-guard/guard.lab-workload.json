@@ -199,6 +199,27 @@
         "AMBIGUOUS. That is correct: it is what a working rare-event channel looks like when the rare event",
         "has not happened."
       ]
+    },
+    "CpuPressure": {
+      "source": "container_pressure_cpu_waiting_seconds_total",
+      "kind": "Counter",
+      "loadSensitive": false,
+      "class": "Infrastructure",
+      "minGap": "0.00004",
+      "minTrendChange": "0.00004",
+      "_comment": [
+        "CPU pressure (PSI): time tasks spent waiting for CPU, from the kernel, per cgroup.",
+        "It measures DENIAL rather than usage, and unlike CpuThrottleRatio it needs no CPU quota to exist -",
+        "which is why it covers starvation on clusters that set no limits.",
+        "Measured 2026-08-09 on 12 pods, healthy then with one pod starved (~2 cores of demand against a",
+        "1-core quota): healthy max 0.00003, starved max 0.48682 - a separation of 16485x, the sharpest of",
+        "any channel in this system. Peers stayed under 0.00005 throughout.",
+        "waiting, not stalled: both were measured side by side and read 0.48682 vs 0.48681 under starvation.",
+        "For a single-container cgroup 'some task delayed' and 'all tasks delayed' are the same event, so",
+        "binding both would duplicate one signal.",
+        "Floor 0.00004 = healthy max x 1.25, about 12000x below the fault. No absolute rule yet - that is",
+        "PS-3, which needs its own calibration."
+      ]
     }
   },
   "workload": "lab-workload"

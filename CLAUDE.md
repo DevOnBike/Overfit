@@ -258,15 +258,16 @@ self-assessment is evidence about its instructions, never evidence that its outp
 2026-08-06 note below, where four agents opened by acknowledging an answer nobody had given. Judgement about
 whether the work is right stays with the main session; the dispatch does not move it.
 
-`.claude/agents/` holds **twelve** specialised agents, each with its own context and a `memory:` directory
+`.claude/agents/` holds **eleven** specialised agents, each with its own context and a `memory:` directory
 that persists across sessions. The delivery chain is `overfit-analyst` → `overfit-architect` →
 `overfit-developer` → `overfit-verifier` → `overfit-reviewer`, and it is gated: the analyst and architect
 write **one** plan file in `docs/specs/`, and the developer refuses to write source until the architect has
 signed it. `/overfit-delivery` (a skill, because only the main session can dispatch agents and ask the user
 questions) runs that chain and enforces the gates. Conditional
 specialists: `overfit-perf-claim-auditor` (**sole owner of the verdict on any performance claim** — others
-detect and defer), `overfit-security` (parsers, endpoints, gateway), `overfit-ciso` (threat model, supply
-chain, disclosure), `overfit-code-with-description-drift`, `overfit-packages-update`,
+detect and defer), `overfit-ciso` (threat model, supply
+chain, disclosure, and — merged in on 2026-08-09 — parser/endpoint/gateway review),
+`overfit-packages-update`,
 `overfit-release-readiness`, `overfit-find-bugs-game` (exploratory, not a gate).
 
 `overfit-developer` is the only one that may modify source; the rest report. The three whose findings can be
