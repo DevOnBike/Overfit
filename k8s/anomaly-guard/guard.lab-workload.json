@@ -226,8 +226,17 @@
         "For a single-container cgroup 'some task delayed' and 'all tasks delayed' are the same event, so",
         "binding both would duplicate one signal.",
         "Floor 0.00004 = healthy max x 1.25, about 12000x below the fault. No absolute rule yet - that is",
-        "PS-3, which needs its own calibration."
-      ]
+        "PS-3, which needs its own calibration.",
+        "Absolute rule armed 2026-08-09 (PS-3). Threshold 0.01 = 1% of time with a task waiting on CPU,",
+        "held for a quarter of the window.",
+        "Measured, both sides: healthy peak across twelve pods 0.00005, starved MINIMUM sample 0.167 - the",
+        "threshold is 200x above the first and 16x below the second. Three orders of magnitude of empty space",
+        "between health and fault, which is why the exact value inside it is not load-bearing.",
+        "Breach fraction 0.25 follows ForCpuThrottling's measured shape: persistence separates a starved pod",
+        "from a busy one, not height."
+      ],
+      "ruleThreshold": "0.01",
+      "ruleMinBreachFraction": 0.25
     }
   },
   "workload": "lab-workload"

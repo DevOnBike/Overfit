@@ -286,7 +286,9 @@ data:
           "loadSensitive": false,
           "class": "Infrastructure",
           "minGap": "0.00004",
-          "minTrendChange": "0.00004"
+          "minTrendChange": "0.00004",
+          "ruleThreshold": "0.01",
+          "ruleMinBreachFraction": 0.25
         }
       }
     }

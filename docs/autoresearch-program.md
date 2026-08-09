@@ -113,6 +113,6 @@ and four are not overhead — they are the reason the first two produce somethin
 
 - Never `git commit`, `git push`, or any mutating `gh` command. The loop leaves a dirty tree and reports.
 - `dotnet test` in `Release` only.
-- Every shell command goes through `.claude/run.py`.
+- Every shell command goes through `.claude/do.py`.
 - Negative results are recorded, not discarded. A parameter that turns out not to matter is a finding about
   the generator, and this project has already reverted more measured changes than it has kept.

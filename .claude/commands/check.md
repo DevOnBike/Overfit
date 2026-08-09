@@ -1,14 +1,14 @@
 ---
 description: Full gate — build the solution with CI flags, then run the whole test suite
 argument-hint: (no arguments)
-allowed-tools: Write, Edit, Bash(python D:/Overfit/.claude/run.py)
+allowed-tools: Write, Edit, Bash(python D:/Overfit/.claude/do.py)
 ---
 
 Run the standard gate for this repository: build everything, then run every test.
 
-Write this into `D:\Overfit\.claude\run.py` and execute it with
-`python D:/Overfit/.claude/run.py`. Do not run `dotnet` directly — every command in this repo goes
-through `run.py`, which is the one entry the permission list allows without a prompt.
+Write this into `D:\Overfit\.claude\do.py` and execute it with
+`python D:/Overfit/.claude/do.py`. Do not run `dotnet` directly — every command in this repo goes
+through `do.py`.
 
 ```python
 """Full gate: solution build with CI flags, then the whole test suite."""

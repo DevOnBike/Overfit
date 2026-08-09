@@ -1,13 +1,13 @@
 ---
 description: Run a BenchmarkDotNet class and print its table, with the measurement traps pre-checked
 argument-hint: <filter, e.g. *MannWhitney* or *ScratchBufferStrategy*>
-allowed-tools: Write, Edit, Bash(python D:/Overfit/.claude/run.py)
+allowed-tools: Write, Edit, Bash(python D:/Overfit/.claude/do.py)
 ---
 
 Run the benchmark(s) matching `$1` and report the result table.
 
-Write this into `D:\Overfit\.claude\run.py` (substituting the filter) and execute it with
-`python D:/Overfit/.claude/run.py`:
+Write this into `D:\Overfit\.claude\do.py` (substituting the filter) and execute it with
+`python D:/Overfit/.claude/do.py`:
 
 ```python
 """Run one BenchmarkDotNet class and extract its table."""

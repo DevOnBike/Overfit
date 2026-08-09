@@ -15,6 +15,7 @@ answer, this page says which file holds it.
 | What is this and should we run it? | [`aiops-business-case.md`](aiops-business-case.md) |
 | How does it work? | [`aiops-architecture.md`](aiops-architecture.md) |
 | How do I add a metric? | [`aiops-adding-a-metric.md`](aiops-adding-a-metric.md) |
+| How is an `AN-*` / `RS-*` / `PS-*` task actually run? | [`aiops-task-protocol.md`](aiops-task-protocol.md) — the nine steps and the incident behind each; `CLAUDE.md` links here rather than repeating it |
 | What is broken right now? | [`docs/TASKS.md`](../TASKS.md) — **not a document in this directory.** `aiops-backlog.md` below is history and reasoning, not current status |
 
 ## The four documents written 2026-08-09 and how they relate

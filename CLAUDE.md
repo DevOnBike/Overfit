@@ -91,6 +91,24 @@ goes into `.claude/do.py` and is executed as the single invocation `python D:/Ov
 (It was `run.py` until 2026-08-07; the allow-list in `settings.json` still carries the old name in a few
 redundant entries, which are harmless because `Bash(python *)` covers both.)
 
+**The scratch file is scratch; the lab helpers are not — `.claude/lab.py`.** Anything that drives the
+anomaly-guard lab (run kubectl, query Prometheus, find the guard or workload pods, inject a fault, replay a
+window, run the suite) is written there once and imported:
+
+```python
+import sys
+sys.path.insert(0, r"D:\Overfit\.claude")
+from lab import kubectl, prom, guard_pod, workload_pods, inject, replay_signals, suite
+```
+
+**Written on 2026-08-09 because re-pasting is how a defect propagates.** Every scratch script had its own
+copy of the same four helpers, and each copy carried the previous copy's bugs: the broken unpacking
+`_, target, _ = kubectl(...)` — which returns two values — was pasted three times in one evening and failed
+three times. Two more that the module now gets right once: `guard_pod()` is read **fresh** rather than before
+a rollout, because reading the name first and the log after tails a dead pod and shows nothing, which reads
+as "no cycles" and is really "wrong pod"; and `apply_and_read_back` exists because `kubectl apply` reports
+success for a field it dropped.
+
 **This applies to the main session AND to subagents, but through different files.** The main session uses
 `.claude/do.py`; each agent in `.claude/agents/**` uses its own `.claude/do-<agent-name>.py`, declared in its
 own definition. Per-agent files exist because a single shared scratch file is overwritten by two agents
@@ -111,13 +129,14 @@ Practical consequences, each of which has already gone wrong at least once:
 - **Env vars for an A/B go through `env=` in `subprocess.run`**, never as a shell prefix. A prefix does
   not survive the way these commands are invoked, and the arm you thought you were toggling runs
   identical to the other one.
-- **`run.py` is scratch.** It is rewritten for each task and is gitignored — never put anything in it
-  that needs to survive, and never treat its current contents as documentation of anything.
+- **`do.py` is scratch.** It is rewritten for each task and is gitignored — never put anything in it
+  that needs to survive, and never treat its current contents as documentation of anything. What needs to
+  survive goes to `.claude/lab.py`.
 - **Filter the output in Python, not with `grep`/`sed`.** `dotnet build` on this solution emits far more
   than fits in a reply; print only errors, the diagnostics you asked for, and the test summary line. When
   a test fails, print the **test name** — twice now a real failure has been lost because the filter kept
   only the summary.
-- **Watch the quoting.** Long scripts belong in `run.py` written with `Write`, not squeezed into
+- **Watch the quoting.** Long scripts belong in `do.py` written with `Write`, not squeezed into
   `python -c` — backticks, `$`, `\` and regex character classes get eaten by the shell on the way in.
 
 Repeatable versions of the three most common cycles live in `.claude/commands/` — `/check` (build + full
@@ -126,89 +145,34 @@ suite), `/bench <filter>` (benchmark + the measurement traps to check before bel
 
 ## How an anomaly (`AN-*`, `RS-*`, `PS-*`) task is run, start to finish
 
+**The protocol lives in [`docs/aiops/aiops-task-protocol.md`](docs/aiops/aiops-task-protocol.md) — read it
+before starting one.** It carries the nine steps and, for each, the specific incident that produced it;
+those incidents are the part that makes the steps stick, and they do not fit here. The summary below is a
+reminder of what the steps are, not a substitute for reading them.
+
 **When this applies:** any change to *what the guard detects* — a channel, a binding, a threshold, a rule, a
 detector. Not refactors, not a rename. **One task at a time.**
 
 **Where the task lives:** `docs/TASKS.md` is the registry and the only place carrying status;
-`docs/aiops/aiops-backlog.md` is domain prose and its rows are commentary, not state. Editing a status in
-both is how they diverge — that happened on 2026-08-08.
+`docs/aiops/aiops-backlog.md` is domain prose and its rows are commentary, not state.
 
-### Before implementing
+1. Read the code path that produces the number and **quote the decisive arithmetic** — the task description
+   is not a source of truth.
+2. Name or create the artefacts first: query/binding, positive, negative and **missing-data** fixtures, with
+   the expected output for each.
+3. State the premise out loud: what produces this number, in what unit, **what would refute it**.
+4. Distinguish `Detected` / `Healthy` / `WarmingUp` / `InsufficientData` / `QueryFailed`. **Absence of series
+   is NEVER `Healthy`** — this is the rule the whole subsystem turns on, because a working detector is
+   silent almost all the time and so every defect presents as silence.
+5. No threshold without a measurement **in the mechanism's unit**.
+6. No new metric without proving the workload actually emits it.
+7. Run a mutation that should break the test. If it does not fail, the task is not finished.
+8. **Both arms**, and check each arm was *capable* of a verdict before reading its result.
+9. Read the deployed state back out of the cluster.
 
-**1. Read `docs/aiops/aiops-detection-pipeline.md`, `aiops-adding-a-metric.md` and `aiops-repair-plan.md`,
-then the code path that produces the number — and quote the decisive arithmetic.** Not the doc comment. Also
-read any rule, profile or constant that already exists for this signal, **including its calibration
-conditions**, because they name the environment you must reproduce.
-
-**The task description is not a source of truth.** *Earned three times on 2026-08-09:* an `AN-D2` row written
-four hours before its own fix; a `+1.00` premise with no artefact computing it anywhere; a 200-line
-diagnostic reproducing `series - expectation` when `AnomalyGuard.Adjust` computes `series - expectation +
-median` twenty lines away, which made the recorded diagnosis an artefact. And three hours of CPU-limit
-measurement answered a question `SustainedThresholdOptions.ForCpuThrottling` states in its own doc.
-
-**2. Name or create the artefacts, before writing code**: the query/binding, a **positive** fixture, a
-**negative** fixture, a **missing-data** fixture, and the expected output for each. The missing-data one is
-not optional and not a formality — it is the only artefact that distinguishes a working detector from a
-dead one.
-
-**3. State the premise out loud**: what produces this number, in what unit, and what observation would refute
-the explanation. It is catchable from outside by someone who has not read the code, which is the point —
-nobody can challenge a premise that was never stated.
-
-### Implementing
-
-**4. Every change must distinguish `Detected`, `Healthy`, `WarmingUp`, `InsufficientData`, `QueryFailed`.
-Absence of series is NEVER `Healthy`.** This is the single most important rule in this subsystem, because a
-detector that works is silent almost all the time — so every defect in it *presents as silence*, and silence
-is indistinguishable from success. Partial precedent exists and should be consolidated rather than
-duplicated: `GuardCycleOutcome` (`Completed`/`Blind`/`Failed`) and `DiscoveryOutcome`
-(`Resolved`/`NotFound`/`Ambiguous`) carry the same distinction at the cycle and binding level; this is the
-per-signal version.
-
-**5. No threshold without a measurement IN THE MECHANISM'S UNIT.** Measurement alone is not enough: on
-2026-08-09 both bad thresholds *were* measured — a CPU limit sized at 83x the average when CFS throttles on
-bursts inside a 100 ms period, and a floor calibrated over three minutes when the quantity is a maximum and
-the unit is time coverage. Correct arithmetic about the wrong quantity.
-
-**6. No new metric without proving the workload actually emits it** — queried, non-empty, on the pods the
-guard watches. Two channels were bound to series that were structurally incapable of moving.
-
-### Proving it
-
-**7. Run a mutation that should break the test. If the test does not fail, the task is not finished.** Assert
-the mutation anchor matched exactly once and print the count; refuse to start if the target already differs
-from HEAD, because a harness killed mid-run leaves the source mutated and the next run reads that as its
-baseline.
-
-**8. Both arms.** Healthy quiet AND faulted loud, same population, peers as control. For cluster-side work
-the positive fixture needs a live counterpart: a fixture proves the code path, an **injected fault** proves
-the chain.
-
-**9. Read the deployed state back out of the cluster.** `kubectl apply` reports success for a field it
-dropped and silently removes anything the file does not carry — that deleted a live `GcCommittedBytes`
-binding and reported `configured`.
-
-### The report
-
-Changed files; artefacts read; test results; **mutation result**; **silence risk** — how this specific change
-could fail without anyone noticing; and known limitations. The silence-risk line is the one that earns its
-place: everything else says what works.
-
-**Close with self-improvement notes: what cost iterations on THIS task, and what would have prevented it.**
-Not a ritual and not an apology — a specific, checkable observation, or the honest sentence that nothing
-went wrong. Every rule above exists because a mistake was named this way; the ones that were not named
-repeated. Two examples of the right shape, both from the day this was written: *"the fault was sized for a
-200m limit and not recomputed when the limit moved to 1000m — one variable changed and the consequence was
-not propagated"*, and *"my own test observed exactly `MinimumWindows`, which is also the legacy fallback, so
-both sides read 24 and the test could not fail"*.
-
-Two things to be strict about here. **A rule in a file is weaker than a gate in code** — on the day this was
-written, the only two things that actually caught anything were a parity test and a mutation harness, not
-paragraphs — so when the note is worth keeping, say whether it can become a test rather than a sentence.
-And **an agent's own account of its run is evidence about its instructions, never evidence that its output
-is sound**: one reported "the instructions worked as intended" in a run where it had failed.
-
-Closing the task is then checking the list from step 3, not forming a judgement.
+The report then carries: changed files, artefacts read, test results, **mutation result**, **silence risk**,
+known limitations, and **self-improvement notes** — what cost iterations on this task and what would have
+prevented it.
 
 ## Read the code before you measure it, and check the number's unit
 
@@ -404,60 +368,27 @@ hand-rolled in `Sources/Main/Onnx/`. Unsupported operators throw a clear
 
 ## Performance work — measure, don't assume
 
-**Write the benchmark first, whenever a benchmark makes sense.** Before reasoning about whether a change
-is faster — and *before* asserting anything about it in prose — put the question into
-`Sources/Benchmark` as a BenchmarkDotNet class with the two shapes side by side and
-`[Benchmark(Baseline = true)]` on the old one. A claim about performance that has no benchmark behind it is a
-guess, however confident the reasoning sounds; the ratio column is the only thing that settles it. This is
-cheap for anything expressible as a small A/B (loop shapes, call shapes, allocation strategies, kernel
-variants), so default to writing it rather than arguing. Two traps this repo has already hit, both of which
-produce numbers that look authoritative and are worthless:
+**The details — the four ways a benchmark lies here, and the table of reverted "wins" — are in
+[`docs/performance-discipline.md`](docs/performance-discipline.md). Read it before your first perf task.**
 
-- **Wrong job for the workload.** The shared `BenchmarkConfig` pins `InvocationCount=1`/`UnrollFactor=1`,
-  which fits multi-millisecond model runs but leaves a microbenchmark measuring timer noise — a ~15 µs
-  operation produced `RatioSD` 0.44 and a phantom 1.61x regression that was 1.01 once re-run under a
-  microbenchmark job (`[SimpleJob]`, default invocation counts). Check `RatioSD` and BDN's own warnings
-  before believing a ratio.
-- **The scaffolding outweighs the subject.** `ElseRefactorBenchmark` first reported a non-inlined call as
-  *faster* than inlining it, because the synthetic branch body contained a saturating `float`->`long` cast
-  whose cost depends on where it lands. The benchmark was measuring the cast, not the call. If a result is
-  backwards, suspect the benchmark before the runtime — and use `--disasm` plus a variant with the suspect
-  operation removed to settle it.
+The rule itself is short:
 
-**Two passes, never one.** Write the correct algorithm first — the clearest expression that gets the math
-right — and pin it with tests (parity against a reference / known-good output, ideally box-independent like
-a cosine-vs-ORT or FD check). Only once correctness is green do you make a **second, separate** iteration
-for performance, keeping the validated version as the baseline you A/B against and the parity test as the
-guard that the fast path still matches. Do not fuse the two: a clever kernel written before its correctness
-is proven is unverifiable, and a perf change that also alters behaviour can't be A/B-isolated. This is how
-Winograd (parity cos 1.0 first, *then* measured → reverted as a negative) and whole-matrix Q4_K attention
-(split-after parity pinned, *then* a go/no-go micro-bench before any refactor) were done.
+- **Correctness first, in a separate pass.** Get the maths right, pin it with a parity test (cosine vs ORT,
+  an FD gradient check, a known-good output), and only then iterate for speed against that baseline. A fast
+  path written before its correctness is proven is unverifiable, and a change that moves behaviour and
+  timing at once cannot be A/B-isolated.
+- **Write the benchmark before the argument.** A performance claim with no BenchmarkDotNet run behind it is
+  a guess, however confident the reasoning sounds. Put both shapes in `Sources/Benchmark` with
+  `[Benchmark(Baseline = true)]` on the old one.
+- **Every perf change is a hypothesis until measured** — `MemoryDiagnoser`, best-of-N on **both** sides, one
+  lever isolated, ABAB interleaving in a single process, and a canary path that tells you whether the box
+  moved instead of the code.
+- **If a result is backwards, suspect the benchmark before the runtime.** And if it is a flat 1.00, suspect
+  that the lever you are toggling is not live — that has happened here.
+- **Report negative results.** They are the most valuable output of this work; the linked file lists six,
+  including two that were parity-correct and still reverted.
 
-Every perf change is a **hypothesis until measured**. Benchmark before/after with BenchmarkDotNet +
-`MemoryDiagnoser`, **best-of-N on BOTH sides**, and A/B-isolate the one lever you changed. Document
-**negative results** honestly — they are the most valuable output: in this codebase
-register-blocking (direct-conv), K-blocking + A-packing (im2col GEMM), Winograd F(2,3) for 3x3 stride-1
-convs (parity-correct cos 1.0 but +79% slower on deepcnn, 119.7→214.4 ms — sequential scalar transforms +
-16 small GEMMs + 16x U/V/M blow-up beat the 2.25x FLOP cut), the AVX-512 decode port, bias support in
-the Q4_K tiled prefill GEMM (`GemmTiled` — a path census showed `bias.IsEmpty` barred 88% of prefill
-dispatches, i.e. all attention Q/K/V, from the tiled kernel; lifting it measured **0.999x, an exact
-tie**, because `ProjectBatchedWeightStationary` already amortises weight decode across the row tile —
-the same thing the tiling does; the "~3x" in the kernel docs is against re-decode-per-row, not against
-weight-stationary), and `OverfitPool<T>` all **regressed or tied and were reverted**; the wins were the *opposite* of the
-"obvious" move (`TensorPrimitives` bulk-SIMD beat a hand micro-kernel; the simple register-blocked
-GEMM beat the cache-blocked one — structure of the data around the technique decides, not the
-technique). Mind the **measurement environment**: a thermally-throttled or loaded box invalidates
-A/B (detect it with a *canary* — re-measure an unchanged code path; if it shifted, the box did, not
-your change). The decode spin-pool assumes dedicated cores, so it is sensitive to background load.
-Two corollaries this repo has paid for. **Cross-process before/after does not work here**: a prefill
-change read as +5% while the untouched decode path in the same run moved +32% — interleave the
-configurations run-by-run in ONE process (ABAB…, not all-A-then-all-B) and time a canary path in
-every sample. **Verify the flag you are A/B-ing is actually live**: `OVERFIT_TILED_PREFILL` is a dead
-flag whenever a `*.gguf.repack` sidecar sits next to the model, because `IsPrepacked` short-circuits
-it — both arms ran an identical mix and the "measurement" was noise. Count the paths taken (a
-temporary counter in the dispatcher) before believing any kernel A/B.
-Never ship, claim, or commit a perf "win" you have not measured on a stable box — and prefer
-measuring over reasoning even when the reasoning feels airtight.
+`overfit-perf-claim-auditor` owns the verdict on any performance claim and must not be substituted for.
 
 ## Automated search instead of hand-tuning (`docs/autoresearch-program.md`)
 
