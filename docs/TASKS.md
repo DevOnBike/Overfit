@@ -115,9 +115,9 @@ floor is measured.
 
 | id | status | task |
 |---|---|---|
-| `RS-1` | OPEN | spike: confirm the instrument names live, and measure `MeterListener` overhead on the lab-as-instrument |
+| `RS-1` | **PART** | **name confirmed live, overhead NOT measured.** Spike 2026-08-09: a `MeterListener` in `Demo/LabWorkload` subscribes to `http.server.active_requests` and the instrument IS published on this runtime — 1 instrument bound, from ASP.NET Core's own meter, no application code involved. Two things the spike settled that a name check could not: the published type is a delta (`+1` on start, `-1` on end) so a listener must SUM rather than store the last measurement, and the callback must be registered for `int` **and** `long` because a callback registered for the wrong width is silently never invoked. **Still open: the overhead half** — no measurement of what `MeterListener` costs on the lab-as-instrument |
 | `RS-2` | **OPEN, cheap** | bind `dotnet_gc_committed_bytes` — **already emitted by the workload and bound nowhere**. Committed-vs-used, zero code |
-| `RS-3` | OPEN | `http.server.active_requests` — the hung-request blind spot: latency percentiles only count completed requests |
+| `RS-3` | **PART** | **the gap is real and the signal closes it — measured, not argued.** With 5 requests deliberately hung: `labapp_active_requests` read **6** while `labapp_request_duration_seconds_count` read **0**, because a histogram only records a request when it FINISHES. Every latency percentile was blind for the whole stall; the in-flight count moved immediately. **Calibration note**: the idle baseline is **1, not 0** — the scrape itself is an in-flight request — so an absolute floor must carry that offset, while peer comparison is unaffected because every pod has it. **Remaining: deploy and bind.** Deploying means rebuilding the workload image and replacing pods, which perturbs the population (A5: twelve fresh pods cost 0,1,0,1,6,4,3 findings over seven cycles), so it is a deliberate act |
 | `RS-4` | OPEN | `dotnet.monitor.lock_contentions` — a latency cliff with every current channel quiet |
 | `RS-5` | OPEN | `dotnet.exceptions` — caught exceptions precede 5xx |
 | `RS-6` | OPEN | `kestrel.queued_connections` / `rejected_connections` — saturation before the app sees it |

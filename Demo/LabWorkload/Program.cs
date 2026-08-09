@@ -28,7 +28,12 @@ using DevOnBike.Overfit.LabWorkload;
 // Every fault is off by default, so an unconfigured pod is a healthy replica.
 
 var faults = new FaultState(FaultProfile.FromEnvironment());
-var metrics = new WorkloadMetrics(faults.Role);
+
+// Constructed before the host, because MeterListener only sees instruments published after it starts and
+// the hosting layer creates its own during startup.
+using var runtimeSignals = new RuntimeSignalListener();
+
+var metrics = new WorkloadMetrics(faults.Role, runtimeSignals);
 
 // Retained deliberately and never released — a leak with a rate somebody chose, which is the one fault the
 // real lab could not produce and the one the trend family exists to catch.

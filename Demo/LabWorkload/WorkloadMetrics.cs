@@ -34,11 +34,17 @@ namespace DevOnBike.Overfit.LabWorkload
         private readonly long[] _bucketCounts = new long[Buckets.Length];
         private readonly string _role;
 
+        private readonly RuntimeSignalListener? _runtime;
+
         private long _requests;
         private long _errors;
         private long _sumMicroseconds;
 
-        public WorkloadMetrics(string role) => _role = role;
+        public WorkloadMetrics(string role, RuntimeSignalListener? runtime = null)
+        {
+            _role = role;
+            _runtime = runtime;
+        }
 
         public void Observe(double seconds, bool failed)
         {
@@ -106,6 +112,23 @@ namespace DevOnBike.Overfit.LabWorkload
             // Real runtime figures under this project's own names — the values are not simulated, only the
             // naming is ours, which is what makes the configuration file do real work.
             var info = GC.GetGCMemoryInfo();
+
+            // Requests IN FLIGHT, from ASP.NET Core's own instrument rather than from anything this app
+            // counts. It closes a gap no histogram can: a request only enters the duration family when it
+            // FINISHES, so while one is hung every latency percentile stays quiet and this number does not.
+            //
+            // Exposed with the subscription as evidence beside it. A permanent zero is ambiguous between "no
+            // requests in flight" and "that instrument name does not exist on this runtime", and this repo
+            // has already shipped a channel bound to a series that was silently always zero.
+            if (_runtime is { } runtime)
+            {
+                Gauge(text, "labapp_active_requests", "Requests in flight, from http.server.active_requests.",
+                    runtime.ActiveRequestCount, role);
+
+                Gauge(text, "labapp_runtime_instruments_bound",
+                    "How many of the runtime instruments asked for were actually published.",
+                    runtime.SubscribedNames.Count, role);
+            }
 
             Gauge(text, "dotnet_gc_heap_size_bytes", "Managed heap size.", GC.GetTotalMemory(false), role);
             Gauge(text, "dotnet_gc_committed_bytes", "Committed heap bytes.", info.TotalCommittedBytes, role);
