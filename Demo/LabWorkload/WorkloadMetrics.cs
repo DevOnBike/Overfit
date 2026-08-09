@@ -122,8 +122,21 @@ namespace DevOnBike.Overfit.LabWorkload
             // has already shipped a channel bound to a series that was silently always zero.
             if (_runtime is { } runtime)
             {
-                Gauge(text, "labapp_active_requests", "Requests in flight, from http.server.active_requests.",
-                    runtime.ActiveRequestCount, role);
+                // Minus the scrape. This method only ever runs inside a request to /metrics, so exactly one
+                // of the in-flight requests is the observer — the count is never legitimately zero and the
+                // subtraction is exact by construction rather than a fudge.
+                //
+                // Measured on the lab before this was subtracted: every one of twelve pods reported a flat
+                // 1.0. At ~40 ms of service time and ~10 rps the real in-flight count is about 0.4, so the
+                // observer DOMINATED the signal — and a channel pinned at a constant non-zero value is
+                // exactly what FloorCalibrator.InertChannels() reports as a conclusive defect. It would have
+                // been a false accusation against a correctly working signal, and worse, it would have set
+                // every floor against a baseline that is not the workload's.
+                var inFlight = Math.Max(0L, runtime.ActiveRequestCount - 1L);
+
+                Gauge(text, "labapp_active_requests",
+                    "Requests in flight from http.server.active_requests, excluding this scrape.",
+                    inFlight, role);
 
                 Gauge(text, "labapp_runtime_instruments_bound",
                     "How many of the runtime instruments asked for were actually published.",

@@ -9,11 +9,9 @@
     "counts it blind, which the guard prints at startup. CpuThrottleRatio and ErrorRate are left out on",
     "purpose so that list has something in it on the first run."
   ],
-
   "prometheus": "http://127.0.0.1:9090",
   "namespace": "overfit",
   "podRegex": "overfit-server-.*",
-
   "metrics": {
     "RequestsPerSecond": {
       "source": "overfit_chat_requests_total",
@@ -22,7 +20,7 @@
     "LatencyP50Ms": {
       "source": "overfit_chat_response_time_seconds",
       "kind": "HistogramSeconds",
-      "quantile": 0.50
+      "quantile": 0.5
     },
     "LatencyP95Ms": {
       "source": "overfit_chat_response_time_seconds",
@@ -74,10 +72,29 @@
       "kind": "EventCount"
     }
   },
-
   "thresholds": {
     "MemoryWorkingSetBytes": {
       "minTrendChange": "256MiB"
+    }
+  },
+  "customMetrics": {
+    "ActiveRequests": {
+      "source": "labapp_active_requests",
+      "kind": "Gauge",
+      "loadSensitive": false,
+      "class": "Symptom",
+      "minGap": "3",
+      "minTrendChange": "3",
+      "ruleThreshold": "3",
+      "ruleMinBreachFraction": 0.25,
+      "_comment": [
+        "ActiveRequests closes the hung-request gap: a request only enters the duration histogram when it",
+        "FINISHES, so while one hangs every latency percentile stays quiet. Measured 2026-08-09 with five",
+        "requests deliberately hung: labapp_active_requests read 6 while the histogram count read 0.",
+        "The exporter subtracts the scrape itself, so 0 means idle. Before that subtraction every pod",
+        "reported a flat 1.0 and the observer dominated the signal.",
+        "Floors from measurement: at rest 0 on all twelve pods, ten-minute maxima 0/1/2."
+      ]
     }
   }
 }
