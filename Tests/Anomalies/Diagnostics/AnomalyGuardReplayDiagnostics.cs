@@ -228,6 +228,24 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
                 $"completed {completed}   blind {blind}   failed {failed}   (total {cycles})\n");
             report.Append(CultureInfo.InvariantCulture,
                 $"findings {findings}   opened {opened}   resolved {resolved}   still open {service.Guard.OpenIncidents}   sink rows {sink.Rows}\n");
+            // Which channels produced them. Without this the total answers "did anything happen" and
+            // nothing else, and a replay is nearly always run to find out whether ONE channel reacted.
+            report.Append("rows per signal:");
+
+            var bySignal = sink.BySignal;
+
+            if (bySignal.Count == 0)
+            {
+                report.Append(" (none)");
+            }
+
+            for (var i = 0; i < bySignal.Count; i++)
+            {
+                report.Append(CultureInfo.InvariantCulture, $"  {bySignal[i].Key}={bySignal[i].Value}");
+            }
+
+            report.Append('\n');
+
             report.Append(CultureInfo.InvariantCulture,
                 $"opened per 100 completed cycles: {(completed > 0 ? opened * 100.0 / completed : 0.0):F1} (replay, {opened}/{completed}) vs {A1IncidentsOpened * 100.0 / A1Cycles:F1} (A1 live, {A1IncidentsOpened}/{A1Cycles}) — a sanity check, not a gate.\n");
             report.Append(CultureInfo.InvariantCulture,
@@ -547,14 +565,52 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
         /// </summary>
         private sealed class CountingSink : IIncidentSink
         {
+            /// <summary>
+            /// Rows per signal, because the total on its own cannot answer the question a replay is usually
+            /// run to answer.
+            ///
+            /// <para><b>Measured need, 2026-08-09.</b> A replay of a window containing a deliberate stall
+            /// reported "findings 31" and nothing else, so it could not say whether the channel under test
+            /// had fired — which was the entire reason for running it. A count without the breakdown is the
+            /// same defect this subsystem keeps producing in other forms: a number that is present, correct,
+            /// and carries none of the information the reader came for.</para>
+            /// </summary>
+            private readonly Dictionary<string, int> _bySignal = new(StringComparer.Ordinal);
+
             public int Rows
             {
                 get; private set;
             }
 
+            /// <summary>Signals that produced rows, most frequent first.</summary>
+            public IReadOnlyList<KeyValuePair<string, int>> BySignal
+            {
+                get
+                {
+                    var ordered = _bySignal.ToList();
+
+                    ordered.Sort((a, b) => b.Value != a.Value
+                        ? b.Value.CompareTo(a.Value)
+                        : string.CompareOrdinal(a.Key, b.Key));
+
+                    return ordered;
+                }
+            }
+
             public void Report(ReadOnlySpan<IncidentLogRecord> rows)
             {
                 Rows += rows.Length;
+
+                for (var i = 0; i < rows.Length; i++)
+                {
+                    var signal = rows[i].Signal;
+
+                    // An empty signal is a real value here — an incident-level row rather than a finding —
+                    // and naming it keeps the breakdown summing to the total.
+                    var key = signal.Length > 0 ? signal : "(incident row)";
+
+                    _bySignal[key] = _bySignal.GetValueOrDefault(key) + 1;
+                }
             }
         }
     }
