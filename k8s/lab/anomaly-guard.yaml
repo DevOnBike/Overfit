@@ -203,7 +203,8 @@ data:
         },
         "CpuThrottleRatio": {
           "source": "container_cpu_cfs_throttled_periods_total",
-          "kind": "Ratio"
+          "kind": "Ratio",
+          "query": "sum by (pod) (rate(container_cpu_cfs_throttled_periods_total{%selector%}[2m])) / sum by (pod) (rate(container_cpu_cfs_periods_total{%selector%}[2m]))"
         }
       },
       "thresholds": {

@@ -87,8 +87,16 @@
         "1000m, not 200m, because SustainedThresholdOptions.ForCpuThrottling was calibrated on a pod limited",
         "to one core, and a threshold describes the regime it was measured in.",
         "Measured healthy at 1000m: per-pod share of a 20-minute window at or above the 5% threshold is",
-        "14.6-19.0%, against the rule's 25% - so the healthy population is quiet with margin on both sides."
-      ]
+        "14.6-19.0%, against the rule's 25% - so the healthy population is quiet with margin on both sides.",
+        "CORRECTED 2026-08-09. The first binding set kind=Ratio and nothing else, and MetricMap.Build renders",
+        "Ratio as `{name}{selector}` — no rate(), no division. The channel therefore queried the raw cumulative",
+        "counter, which only ever rises, and the trend family reported it in every window: 12 findings across a",
+        "replay window where the true ratio was 0.0000 on all twelve pods. A config entry overrode a correct",
+        "built-in template with a broken one.",
+        "Deleting the entry is not the fix: an unbound channel is issued no query and counts blind. The verbatim",
+        "query below is what PromqlCatalog would have built."
+      ],
+      "query": "sum by (pod) (rate(container_cpu_cfs_throttled_periods_total{%selector%}[2m])) / sum by (pod) (rate(container_cpu_cfs_periods_total{%selector%}[2m]))"
     }
   },
   "thresholds": {
