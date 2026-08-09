@@ -126,42 +126,87 @@ suite), `/bench <filter>` (benchmark + the measurement traps to check before bel
 
 ## How an anomaly (`AN-*`, `RS-*`, `PS-*`) task is run, start to finish
 
-Seven steps, in order. **The first three cost minutes and happen before anything is measured**; every one of
-them was earned by skipping it on 2026-08-09 and paying hours for it. The point of the order is iteration
-count: almost every wasted cycle that day came from discovering the acceptance criteria late.
+**When this applies:** any change to *what the guard detects* — a channel, a binding, a threshold, a rule, a
+detector. Not refactors, not a rename. **One task at a time.**
 
-**1. Read the code path that produces the number, and quote the decisive line.** Not the doc comment — the
-arithmetic. *Earned:* a 200-line diagnostic reproduced the seasonal correction as `series - expectation` and
-its conclusion was recorded as a diagnosis; `AnomalyGuard.Adjust` computes `series - expectation + median`,
-is twenty lines long, and made the entire result an artefact.
+**Where the task lives:** `docs/TASKS.md` is the registry and the only place carrying status;
+`docs/aiops/aiops-backlog.md` is domain prose and its rows are commentary, not state. Editing a status in
+both is how they diverge — that happened on 2026-08-08.
 
-**2. Find any rule, profile or constant that already exists for this signal, and read its calibration
-conditions.** They usually name the environment you must reproduce. *Earned:* three hours of CPU-limit
-measurement answered a question `SustainedThresholdOptions.ForCpuThrottling` answers in its own doc —
-including that healthy pods throttle, that the rule keys on persistence rather than height, and that the
-calibration was done at one core, which was the limit to set.
+### Before implementing
 
-**3. Write down what will close the task, as observations, before measuring anything.** Both directions:
-what must be quiet, and what must fire. *Earned:* `AN-E2` was one sentence from being closed with the
-firing test never run — and a channel that has only ever been observed staying quiet is indistinguishable
-from one that is broken.
+**1. Read `docs/aiops/aiops-detection-pipeline.md`, `aiops-adding-a-metric.md` and `aiops-repair-plan.md`,
+then the code path that produces the number — and quote the decisive arithmetic.** Not the doc comment. Also
+read any rule, profile or constant that already exists for this signal, **including its calibration
+conditions**, because they name the environment you must reproduce.
 
-**4. Verify the instrument before believing the subject.** Prove the fault injector does what it claims and
-the channel is actually bound, before reading anything into silence. *Earned:* `POST /fault/oom` returned
-200 and produced no OOM, and the resulting silence was the exact observation the hypothesis under test
-predicted — it would have been read as confirmation. Separately, the throttle channel had data in Prometheus
-and was absent from the config, so the guard never queried it and `blind` never moved.
+**The task description is not a source of truth.** *Earned three times on 2026-08-09:* an `AN-D2` row written
+four hours before its own fix; a `+1.00` premise with no artefact computing it anywhere; a 200-line
+diagnostic reproducing `series - expectation` when `AnomalyGuard.Adjust` computes `series - expectation +
+median` twenty lines away, which made the recorded diagnosis an artefact. And three hours of CPU-limit
+measurement answered a question `SustainedThresholdOptions.ForCpuThrottling` states in its own doc.
 
-**5. State the mechanism and its unit before choosing any number.** *Earned:* a CPU limit sized at 83x the
-average when CFS throttles on bursts inside a 100 ms period; a floor calibrated over three minutes when the
-quantity is a maximum and the unit is time coverage — a false positive inside the hour.
+**2. Name or create the artefacts, before writing code**: the query/binding, a **positive** fixture, a
+**negative** fixture, a **missing-data** fixture, and the expected output for each. The missing-data one is
+not optional and not a formality — it is the only artefact that distinguishes a working detector from a
+dead one.
 
-**6. Measure both arms.** Healthy quiet AND faulted loud, on the same population, with peers as the control.
-One without the other is not evidence.
+**3. State the premise out loud**: what produces this number, in what unit, and what observation would refute
+the explanation. It is catchable from outside by someone who has not read the code, which is the point —
+nobody can challenge a premise that was never stated.
 
-**7. Read the deployed state back out of the cluster.** `kubectl apply` reports success for a field it
-dropped, and silently removes anything the file does not carry. *Earned:* applying a ConfigMap with no
-`customMetrics` block deleted a live binding and reported `configured`.
+### Implementing
+
+**4. Every change must distinguish `Detected`, `Healthy`, `WarmingUp`, `InsufficientData`, `QueryFailed`.
+Absence of series is NEVER `Healthy`.** This is the single most important rule in this subsystem, because a
+detector that works is silent almost all the time — so every defect in it *presents as silence*, and silence
+is indistinguishable from success. Partial precedent exists and should be consolidated rather than
+duplicated: `GuardCycleOutcome` (`Completed`/`Blind`/`Failed`) and `DiscoveryOutcome`
+(`Resolved`/`NotFound`/`Ambiguous`) carry the same distinction at the cycle and binding level; this is the
+per-signal version.
+
+**5. No threshold without a measurement IN THE MECHANISM'S UNIT.** Measurement alone is not enough: on
+2026-08-09 both bad thresholds *were* measured — a CPU limit sized at 83x the average when CFS throttles on
+bursts inside a 100 ms period, and a floor calibrated over three minutes when the quantity is a maximum and
+the unit is time coverage. Correct arithmetic about the wrong quantity.
+
+**6. No new metric without proving the workload actually emits it** — queried, non-empty, on the pods the
+guard watches. Two channels were bound to series that were structurally incapable of moving.
+
+### Proving it
+
+**7. Run a mutation that should break the test. If the test does not fail, the task is not finished.** Assert
+the mutation anchor matched exactly once and print the count; refuse to start if the target already differs
+from HEAD, because a harness killed mid-run leaves the source mutated and the next run reads that as its
+baseline.
+
+**8. Both arms.** Healthy quiet AND faulted loud, same population, peers as control. For cluster-side work
+the positive fixture needs a live counterpart: a fixture proves the code path, an **injected fault** proves
+the chain.
+
+**9. Read the deployed state back out of the cluster.** `kubectl apply` reports success for a field it
+dropped and silently removes anything the file does not carry — that deleted a live `GcCommittedBytes`
+binding and reported `configured`.
+
+### The report
+
+Changed files; artefacts read; test results; **mutation result**; **silence risk** — how this specific change
+could fail without anyone noticing; and known limitations. The silence-risk line is the one that earns its
+place: everything else says what works.
+
+**Close with self-improvement notes: what cost iterations on THIS task, and what would have prevented it.**
+Not a ritual and not an apology — a specific, checkable observation, or the honest sentence that nothing
+went wrong. Every rule above exists because a mistake was named this way; the ones that were not named
+repeated. Two examples of the right shape, both from the day this was written: *"the fault was sized for a
+200m limit and not recomputed when the limit moved to 1000m — one variable changed and the consequence was
+not propagated"*, and *"my own test observed exactly `MinimumWindows`, which is also the legacy fallback, so
+both sides read 24 and the test could not fail"*.
+
+Two things to be strict about here. **A rule in a file is weaker than a gate in code** — on the day this was
+written, the only two things that actually caught anything were a parity test and a mutation harness, not
+paragraphs — so when the note is worth keeping, say whether it can become a test rather than a sentence.
+And **an agent's own account of its run is evidence about its instructions, never evidence that its output
+is sound**: one reported "the instructions worked as intended" in a run where it had failed.
 
 Closing the task is then checking the list from step 3, not forming a judgement.
 
