@@ -426,3 +426,11 @@ Both were hit on 2026-08-08 in a single run, and both are mechanical:
 
 **A GREEN you cannot explain is a claim about your harness first and about the code second.** Establish
 that the mutation actually reached the code under test before you report it as a coverage finding.
+
+**Assert the target is CLEAN against HEAD before the first mutation, and refuse to run if it is not.** A
+`finally` that restores is not enough: a harness killed mid-run — by a timeout, by the user, by anything —
+never reaches it and leaves the source mutated. The next run then reads the *mutated* file as its baseline,
+reports "restore verified" against it, matches no anchors, and shows a red it attributes to the code.
+Measured 2026-08-09: exactly that sequence, and every number in the second run was self-consistent and
+meaningless. `git diff -- <path>` is the check; it costs nothing and it is the only thing that distinguishes
+a clean baseline from a leftover.

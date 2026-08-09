@@ -159,7 +159,7 @@ data:
         "GcGen2HeapBytes":       { "source": "dotnet_gc_heap_size_bytes", "kind": "Gauge" },
         "GcPauseRatio":          { "source": "dotnet_gc_pause_seconds_total", "kind": "Counter" },
         "ThreadPoolQueueLength": { "source": "dotnet_threadpool_queue_length", "kind": "Gauge" },
-        "OomEventsRate":         { "source": "kube_pod_container_status_restarts_total", "kind": "EventCount", "query": "sum by (pod) (increase(kube_pod_container_status_restarts_total{%selector%}[2m]) * on (namespace, pod, container) group_left() kube_pod_container_status_last_terminated_reason{%selector%,reason=\"OOMKilled\"})" },
+        "OomEventsRate":         { "source": "kube_pod_container_status_restarts_total", "kind": "EventCount", "query": "sum by (pod) (increase(kube_pod_container_status_restarts_total{%selector%}[2m]) * on (namespace, pod, container) group_left() kube_pod_container_status_last_terminated_reason{%selector%,reason=\"OOMKilled\"}) or sum by (pod) (increase(kube_pod_container_status_restarts_total{%selector%}[2m]) * 0)" },
         "ContainerRestarts":     { "source": "kube_pod_container_status_restarts_total", "kind": "EventCount" }
       },
       "thresholds": {

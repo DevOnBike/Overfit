@@ -360,10 +360,20 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
                 // Known limit, stated rather than hidden: a container that OOMs and then restarts for a
                 // different reason has its flag overwritten, so that OOM stops being attributed. That is a
                 // narrower gap than reading a series which is always zero.
+                //
+                // The `or` tail is not decoration. A join produces NO SERIES for a pod whose right-hand side
+                // is absent, and on a healthy cluster that is every pod — so the first version of this fix
+                // turned the channel from "always zero" into "always blind", measured on the lab within
+                // twenty minutes of deploying it: blind went 1 -> 2 and `Blind on OomEventsRate` fired every
+                // cycle. That is the same per-cycle noise the unbound-channel handling exists to suppress,
+                // and it would train an operator to skip the line the real case shares. The tail is the same
+                // counter multiplied by zero, so it contributes one zero series per pod that reports
+                // restarts at all, and `or` fills in only the pods the join left out.
                 [MetricIndex.OomEventsRate] =
                     $"sum by (pod) (increase(kube_pod_container_status_restarts_total{{{S}}}[{range}])"
                     + " * on (namespace, pod, container) group_left()"
-                    + $" kube_pod_container_status_last_terminated_reason{{{S},reason=\"OOMKilled\"}})",
+                    + $" kube_pod_container_status_last_terminated_reason{{{S},reason=\"OOMKilled\"}})"
+                    + $" or sum by (pod) (increase(kube_pod_container_status_restarts_total{{{S}}}[{range}]) * 0)",
 
                 [MetricIndex.LatencyP50Ms] = LatencyQuery(0.50, S, range),
                 [MetricIndex.LatencyP95Ms] = LatencyQuery(0.95, S, range),
@@ -420,7 +430,8 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
                 MetricIndex.OomEventsRate =>
                     $"sum by (pod) (increase(kube_pod_container_status_restarts_total{{{S}}}[1m])"
                     + " * on (namespace, pod, container) group_left()"
-                    + $" kube_pod_container_status_last_terminated_reason{{{S},reason=\"OOMKilled\"}})",
+                    + $" kube_pod_container_status_last_terminated_reason{{{S},reason=\"OOMKilled\"}})"
+                    + $" or sum by (pod) (increase(kube_pod_container_status_restarts_total{{{S}}}[1m]) * 0)",
 
                 MetricIndex.LatencyP50Ms => OtelLatencyQuery(0.50, S),
                 MetricIndex.LatencyP95Ms => OtelLatencyQuery(0.95, S),

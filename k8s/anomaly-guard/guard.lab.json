@@ -67,7 +67,7 @@
         "which is why 'query' exists. Verbatim queries carry their own range - keep [2m] in step with",
         "prometheus rate window by hand."
       ],
-      "query": "sum by (pod) (increase(kube_pod_container_status_restarts_total{%selector%}[2m]) * on (namespace, pod, container) group_left() kube_pod_container_status_last_terminated_reason{%selector%,reason=\"OOMKilled\"})"
+      "query": "sum by (pod) (increase(kube_pod_container_status_restarts_total{%selector%}[2m]) * on (namespace, pod, container) group_left() kube_pod_container_status_last_terminated_reason{%selector%,reason=\"OOMKilled\"}) or sum by (pod) (increase(kube_pod_container_status_restarts_total{%selector%}[2m]) * 0)"
     },
     "ContainerRestarts": {
       "source": "kube_pod_container_status_restarts_total",

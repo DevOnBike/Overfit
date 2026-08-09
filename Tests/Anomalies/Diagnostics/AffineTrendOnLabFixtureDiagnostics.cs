@@ -69,27 +69,43 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
                           + $"{stepMinutes} min\n\n");
 
             report.Append($"   {"signal",-22}{"treatment",-20}{"false trends",14}{"of windows",12}"
-                          + $"{"regression seen in",20}\n");
+                          + $"{"work-prop.",13}{"fixed step",13}\n");
 
             foreach (var metric in new[] { MetricIndex.CpuUsageRatio, MetricIndex.GcPauseRatio })
             {
+                // Built once per signal: both are the same replica, the same start point and — by
+                // construction — the same MEAN effect. Only their relationship to work differs.
+                var proportional = Regressed(recorded, metric, pod: 3, factor: 1.5, FaultShape.WorkProportional);
+                var fixedStep = Regressed(recorded, metric, pod: 3, factor: 1.5, FaultShape.FixedStep);
+
                 foreach (var treatment in new[] { Treatment.Raw, Treatment.Divided, Treatment.Affine })
                 {
                     var healthy = Count(recorded, metric, windowMinutes, stepMinutes, treatment, -1, out var total);
-                    var broken = Count(
-                        Regressed(recorded, metric, pod: 3, factor: 1.5),
-                        metric, windowMinutes, stepMinutes, treatment, 3, out _);
+                    var caughtProportional = Count(
+                        proportional, metric, windowMinutes, stepMinutes, treatment, 3, out _);
+                    var caughtFixed = Count(
+                        fixedStep, metric, windowMinutes, stepMinutes, treatment, 3, out _);
 
                     report.Append($"   {metric,-22}{Name(treatment),-20}{healthy,14}{total,12}"
-                                  + $"{broken,17} win.\n");
+                                  + $"{caughtProportional,10} win.{caughtFixed,8} win.\n");
                 }
 
                 report.Append('\n');
             }
 
             report.Append("false trends  Anomalous trend verdicts on the RECORDED data, where nothing was wrong\n");
-            report.Append("regression    windows in which the deliberately regressed replica was called anomalous\n");
-            report.Append("A treatment quiet in BOTH columns has not fixed anything — it has gone deaf.\n");
+            report.Append("work-prop.    windows catching a fault PROPORTIONAL to work — the only shape scored\n");
+            report.Append("              until 2026-08-09, and the reason the earlier comparison was uninformative\n");
+            report.Append("fixed step    windows catching a fault INDEPENDENT of work, at the same mean size\n");
+            report.Append("A treatment quiet in BOTH fault columns has not fixed anything — it has gone deaf.\n");
+            report.Append("\nWhy the second fault column exists. Division and the affine fit differ ONLY in how\n");
+            report.Append("they treat a fixed cost: dividing by work spreads a constant step across a varying\n");
+            report.Append("denominator, while the affine fit subtracts only the work-driven part and leaves it.\n");
+            report.Append("A fault built as marginal x work is invisible to that distinction — both treatments\n");
+            report.Append("remove work-proportional structure — so a comparison scored on it alone CANNOT\n");
+            report.Append("separate them, and the 11/11, 4/4 tie recorded in ROADMAP.md was a property of the\n");
+            report.Append("experiment rather than a finding about the treatments. A longer recording would have\n");
+            report.Append("reproduced that tie however long it ran.\n");
 
             _output.WriteLine(report.ToString());
 
@@ -219,12 +235,34 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
             return slopes[slopes.Count / 2];
         }
 
+        /// <summary>Which way the injected fault relates to what the replica is serving.</summary>
+        private enum FaultShape
+        {
+            /// <summary>
+            /// Per-request cost rises — the shape of a bad canary. <b>The only shape scored until
+            /// 2026-08-09</b>, and the reason the comparison it fed could not distinguish its arms.
+            /// </summary>
+            WorkProportional,
+
+            /// <summary>
+            /// A constant added regardless of load — a leaked buffer, a background loop, a sidecar. This is
+            /// the <b>only regime in which the affine fit and plain division differ</b>: division spreads a
+            /// constant across a varying denominator and inflates it exactly when traffic falls, while the
+            /// affine fit subtracts only the work-driven component and leaves the step standing.
+            /// </summary>
+            FixedStep,
+        }
+
         /// <summary>
-        /// A copy of the recording with one replica's per-request cost raised half-way through — the shape of
-        /// a bad canary, and deliberately proportional to what that replica is serving, so a treatment that
-        /// removes the traffic component is at maximum risk of erasing it.
+        /// A copy of the recording with one replica degraded half-way through, in one of two shapes.
+        ///
+        /// <para><b>Both shapes are sized to the same mean effect</b>, so the two fault columns differ in
+        /// their relationship to work and in nothing else. Without that the comparison would confound the
+        /// shape of the fault with its size, and a treatment could win a column by being scored against a
+        /// larger fault.</para>
         /// </summary>
-        private static MetricWindow Regressed(MetricWindow source, MetricIndex metric, int pod, double factor)
+        private static MetricWindow Regressed(
+            MetricWindow source, MetricIndex metric, int pod, double factor, FaultShape shape)
         {
             var copy = new MetricWindow(source.Pods, source.Length, source.Start, source.Step);
 
@@ -241,9 +279,35 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
             var from = source.Length / 2;
             var marginal = MarginalCost(source.Series(pod, metric).ToArray(), work.ToArray());
 
+            if (shape == FaultShape.WorkProportional)
+            {
+                for (var i = from; i < copy.Length; i++)
+                {
+                    target[i] += marginal * work[i] * (factor - 1.0);
+                }
+
+                return copy;
+            }
+
+            // The same total cost, delivered flat. Sized from the mean work over the degraded half, which is
+            // what the proportional arm adds on average across the same samples.
+            var meanWork = 0.0;
+            var counted = 0;
+
             for (var i = from; i < copy.Length; i++)
             {
-                target[i] += marginal * work[i] * (factor - 1.0);
+                if (double.IsFinite(work[i]))
+                {
+                    meanWork += work[i];
+                    counted++;
+                }
+            }
+
+            var step = counted > 0 ? marginal * (meanWork / counted) * (factor - 1.0) : 0.0;
+
+            for (var i = from; i < copy.Length; i++)
+            {
+                target[i] += step;
             }
 
             return copy;

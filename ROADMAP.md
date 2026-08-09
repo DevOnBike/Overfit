@@ -222,6 +222,8 @@ term is **the only regime in which the affine fit and plain division differ**. S
 the treatments. Any next attempt must inject a fixed-term step as a second case, or it will report the same tie
 however long the recording is.
 
+**Done 2026-08-09, and it separates them — just barely.** `AffineTrendOnLabFixtureDiagnostics` now scores both shapes, the fixed step sized to the same mean effect so only its relation to work differs. On `CpuUsageRatio`: raw catches 3 work-proportional and 4 fixed, **divided 4 and 3, affine 4 and 4**. The fixed-step column is the only place the two treatments differ at all, and division loses there exactly as the mechanism says it must. One window of nine overlapping windows is not a decision — but the comparison is no longer structurally incapable of reaching one, which is what makes a longer recording worth taking now.
+
 Separately, and not fixed by any treatment: a 50% rise in per-request GC pause is invisible to the trend
 family in all three arms, because `GcPauseRatio` on this lab sits at 5.3e-6 and a relative gate has nothing
 to divide. That is the same pattern as the heap and CPU, and it has the same remedy — an absolute floor,

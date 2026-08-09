@@ -124,6 +124,32 @@ Repeatable versions of the three most common cycles live in `.claude/commands/` 
 suite), `/bench <filter>` (benchmark + the measurement traps to check before believing the number), and
 `/sweep <OVERFIT0xx>` (inventory every site an analyzer rule flags).
 
+## Answer briefly — you and every agent
+
+Default to the short answer: the result, the number, what it means, what is open. **Expand only when the user
+asks for it.** This binds the main session and every agent in `.claude/agents/**` equally.
+
+What "brief" does not mean: dropping a measurement that contradicts the conclusion, dropping the reason a
+result is uncertain, or dropping what was NOT checked. Cut the narration of how the work was done, the
+restatement of what the user just said, and the reasoning that led nowhere — never the evidence.
+
+## Agents
+
+**You have a team, and you may use it without being asked to.** This is standing permission, recorded here
+on 2026-08-09 because the default posture is to dispatch nobody unless the user says so, and that default is
+wrong in this repository: the agents exist precisely so that work with a specialist owner goes to its owner.
+Dispatch `overfit-analyst` when a request arrives as prose and its scope is not obvious, `overfit-architect`
+before a change crosses an assembly or a public API, `overfit-developer` for a task from a signed plan,
+`overfit-verifier` and `overfit-reviewer` after it, and the conditional specialists when their trigger fires
+— above all `overfit-perf-claim-auditor`, which **owns the verdict on any performance claim** and must not
+be substituted for.
+
+Two limits on that permission, both from measurement rather than caution. **Say which agent you dispatched
+and why**, in the reply, because a finding relayed without its source cannot be weighed. And **a subagent's
+self-assessment is evidence about its instructions, never evidence that its output is sound** — see the
+2026-08-06 note below, where four agents opened by acknowledging an answer nobody had given. Judgement about
+whether the work is right stays with the main session; the dispatch does not move it.
+
 `.claude/agents/` holds **twelve** specialised agents, each with its own context and a `memory:` directory
 that persists across sessions. The delivery chain is `overfit-analyst` → `overfit-architect` →
 `overfit-developer` → `overfit-verifier` → `overfit-reviewer`, and it is gated: the analyst and architect
