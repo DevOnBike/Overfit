@@ -43,6 +43,13 @@ namespace DevOnBike.Overfit.LabWorkload
         /// </summary>
         private CancellationTokenSource? _oomAllocation;
 
+        /// <summary>
+        /// Non-null while threads are deliberately fighting over a lock. Its own source rather than sharing
+        /// the OOM one: an OOM allocation ends the process, contention does not, and a single token would
+        /// make <see cref="Clear"/> unable to stop one without the other having been started.
+        /// </summary>
+        private CancellationTokenSource? _contention;
+
         public FaultState(FaultProfile initial)
         {
             ArgumentNullException.ThrowIfNull(initial);
@@ -126,6 +133,25 @@ namespace DevOnBike.Overfit.LabWorkload
             return fresh.Token;
         }
 
+        /// <summary>True while threads are contending, so <see cref="Describe"/> cannot claim health.</summary>
+        public bool IsContending
+            => Volatile.Read(ref _contention) is { IsCancellationRequested: false };
+
+        /// <summary>
+        /// Starts lock contention and returns the token that stops it, cancelling any run already in
+        /// progress so two injections cannot leave one set of threads unreachable.
+        /// </summary>
+        public CancellationToken BeginContention()
+        {
+            var fresh = new CancellationTokenSource();
+            var previous = Interlocked.Exchange(ref _contention, fresh);
+
+            previous?.Cancel();
+            previous?.Dispose();
+
+            return fresh.Token;
+        }
+
         /// <summary>Back to a good replica, without a restart.</summary>
         public void Clear()
         {
@@ -138,6 +164,11 @@ namespace DevOnBike.Overfit.LabWorkload
 
             allocation?.Cancel();
             allocation?.Dispose();
+
+            var contention = Interlocked.Exchange(ref _contention, null);
+
+            contention?.Cancel();
+            contention?.Dispose();
         }
 
         public string Describe()
@@ -167,6 +198,11 @@ namespace DevOnBike.Overfit.LabWorkload
             if (IsAllocatingToOom)
             {
                 faults.Add("oom (allocating)");
+            }
+
+            if (IsContending)
+            {
+                faults.Add("lock contention");
             }
 
             return faults.Count == 0

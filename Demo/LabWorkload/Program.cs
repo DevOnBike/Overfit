@@ -22,6 +22,7 @@ using DevOnBike.Overfit.LabWorkload;
 //   POST /fault/leak?bytesPerSecond=
 //   POST /fault/cpu?msPerRequest=
 //   POST /fault/clear            back to a good replica, no restart — cancels a running OOM allocation too
+//   POST /fault/contend?threads=&holdMicroseconds=
 //   POST /fault/oom              allocate NATIVE memory, every page touched, until the limit kills it
 //   POST /fault/crash            exit(1) — a restart without an OOM
 //
@@ -39,6 +40,14 @@ var metrics = new WorkloadMetrics(faults.Role, runtimeSignals);
 // real lab could not produce and the one the trend family exists to catch.
 var leaked = new List<byte[]>();
 var leakLock = new object();
+
+// Taken briefly by every request, and fought over by POST /fault/contend. It is on the REQUEST PATH on
+// purpose: a fault contending a private lock proves the counter counts, and proves nothing about the case
+// the channel exists for. Contention only matters because it produces a latency cliff while CPU and GC stay
+// normal, and a request that never waits for the lock cannot show that.
+//
+// Uncontended cost is a few nanoseconds against a ~40 ms service time, so a healthy replica is unaffected.
+var requestLock = new object();
 
 var builder = WebApplication.CreateSlimBuilder(args);
 builder.Logging.AddSimpleConsole(o => o.TimestampFormat = "HH:mm:ss ");
@@ -120,6 +129,13 @@ app.MapPost("/work", async () =>
         while (Stopwatch.GetTimestamp() < burnUntil)
         {
         }
+    }
+
+    // No await inside: the point is to block on a monitor, which is what the runtime counts, and awaiting
+    // under a lock would neither contend nor be legal to hold across.
+    lock (requestLock)
+    {
+        _ = random.Next(2);
     }
 
     await Task.Delay(TimeSpan.FromSeconds(Math.Max(0.0, seconds)));
@@ -283,6 +299,53 @@ app.MapPost("/fault/oom", () =>
     }, token);
 
     return Results.Text("allocating native memory until the container limit kills this pod");
+});
+
+// Threads fighting over one lock. The point is the SHAPE, not the slowdown: contention produces a latency
+// cliff with normal CPU and normal GC, because a thread waiting on a monitor is not running and costs
+// nothing to measure. Every channel the guard has today stays quiet through it, which is why
+// dotnet.monitor.lock_contentions is worth a channel of its own.
+//
+// Deliberately NOT a CPU burn with a lock around it: that would move CpuUsageRatio as well and the
+// experiment could no longer say which channel noticed. The critical section sleeps.
+app.MapPost("/fault/contend", (int? threads, int? holdMicroseconds) =>
+{
+    var count = Math.Clamp(threads ?? 8, 1, 64);
+    var hold = Math.Clamp(holdMicroseconds ?? 200, 1, 100_000);
+    var token = faults.BeginContention();
+    var logger = app.Logger;
+
+    for (var i = 0; i < count; i++)
+    {
+        _ = Task.Factory.StartNew(
+            () =>
+            {
+                try
+                {
+                    // BOUND: exits on the token, which POST /fault/clear cancels. Nothing else can end it,
+                    // and that is stated rather than left to be discovered — the OOM fault shipped with an
+                    // uncancellable loop and only killing the pod could stop it.
+                    while (!token.IsCancellationRequested)
+                    {
+                        lock (requestLock)
+                        {
+                            Thread.Sleep(TimeSpan.FromMicroseconds(hold));
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    // Observed rather than swallowed: a contention thread that dies silently leaves the
+                    // fault half-injected and the measurement unattributable.
+                    logger.LogError(ex, "contention thread failed");
+                }
+            },
+            token,
+            TaskCreationOptions.LongRunning,
+            TaskScheduler.Default);
+    }
+
+    return Results.Text($"contending on one lock with {count} thread(s), {hold} us per hold");
 });
 
 // A restart WITHOUT an OOM, so the two can be told apart downstream: ContainerRestarts moves, OomEventsRate

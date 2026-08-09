@@ -12,73 +12,103 @@ namespace DevOnBike.Overfit.LabWorkload
     /// to <see cref="WorkloadMetrics"/> for exposition.
     ///
     /// <para><b>Different in kind from everything else here.</b> The rest of this app records measurements
-    /// its own code takes; this subscribes to meters somebody else owns. <c>http.server.active_requests</c>
-    /// is maintained by the hosting layer as requests begin and end, and no application code can produce it
-    /// — which is exactly why it closes a gap the request histogram cannot: <b>a histogram only records a
-    /// request when it finishes</b>, so a hung request is invisible to every latency percentile while it is
-    /// hanging. The in-flight count moves the moment it stalls.</para>
+    /// its own code takes; this subscribes to meters somebody else owns. No application code can produce
+    /// these numbers, which is exactly why they close gaps the app's own counters cannot.</para>
     ///
     /// <para><b>Instrument names are not trusted until seen.</b> This repository's own
     /// <c>MetricNameCatalog</c> records a mapping written by the author of the system that still left two
     /// channels unbound, reporting blind for hours. So the listener records which of the names it asked for
-    /// actually arrived — see <see cref="SubscribedNames"/> — and the caller can expose that rather than
-    /// assume.</para>
+    /// actually arrived — see <see cref="SubscribedNames"/> and <see cref="IsPublished"/> — and the caller
+    /// exposes that rather than assuming. A channel bound to an instrument that does not exist reads as a
+    /// permanent zero, which is indistinguishable from health.</para>
     ///
-    /// <para><b>Why an <see cref="UpDownCounter{T}"/> needs a running total rather than a last value.</b>
-    /// The hosting layer publishes deltas: +1 when a request starts, -1 when it ends. A listener that stored
-    /// the most recent measurement would expose "1" or "-1" forever. The sum is the in-flight count.</para>
+    /// <para><b>Two instrument shapes, and treating them alike gives zero or nonsense.</b> A pushed
+    /// instrument (<see cref="UpDownCounter{T}"/>, <see cref="Counter{T}"/>) sends deltas — <c>+1</c> on
+    /// request start, <c>-1</c> on end — so its measurements must be SUMMED; storing the last value would
+    /// report <c>1</c> or <c>-1</c> for ever. An <b>observable</b> instrument sends an absolute value and
+    /// only when asked: it never fires on its own, so it must be POLLED through <see cref="Refresh"/>, and
+    /// summing it would accumulate a running total of a running total.</para>
+    ///
+    /// <para><b>Measured 2026-08-09, which is why the distinction is written down rather than assumed.</b>
+    /// <c>dotnet.monitor.lock_contentions</c> reported as published, the subscription looked correct, and
+    /// the counter stayed at <b>0</b> through sixteen threads deliberately fighting over one lock — because
+    /// nothing had asked it for a value. A clean-looking binding that silently reads zero is the failure
+    /// shape this repository has now hit three times in two days.</para>
     /// </summary>
     internal sealed class RuntimeSignalListener : IDisposable
     {
-        /// <summary>The instrument this closes the hung-request gap with, named as ASP.NET Core publishes it.</summary>
+        /// <summary>Requests in flight. Closes the hung-request gap: a request enters the duration histogram
+        /// only when it FINISHES, so while one hangs every latency percentile stays quiet.</summary>
         public const string ActiveRequests = "http.server.active_requests";
 
-        private readonly MeterListener _listener;
-        private readonly List<string> _subscribed = [];
-        private readonly object _gate = new();
+        /// <summary>
+        /// Monitor lock contentions, cumulative. Closes a different gap: contention produces a latency cliff
+        /// with <b>normal CPU and normal GC</b>, so every channel the guard has today stays quiet through it
+        /// — the threads are waiting, not working, and waiting costs no CPU.
+        /// </summary>
+        public const string LockContentions = "dotnet.monitor.lock_contentions";
 
-        private long _activeRequests;
+        private static readonly string[] Wanted = [ActiveRequests, LockContentions];
+
+        private readonly MeterListener _listener;
+        private readonly Dictionary<string, string> _subscribed = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, long> _totals = new(StringComparer.Ordinal);
+        private readonly HashSet<string> _observable = new(StringComparer.Ordinal);
+        private readonly object _gate = new();
 
         public RuntimeSignalListener()
         {
+            foreach (var name in Wanted)
+            {
+                _totals[name] = 0L;
+            }
+
             _listener = new MeterListener
             {
                 InstrumentPublished = (instrument, listener) =>
                 {
-                    if (!string.Equals(instrument.Name, ActiveRequests, StringComparison.Ordinal))
+                    if (Array.IndexOf(Wanted, instrument.Name) < 0)
                     {
                         return;
                     }
 
                     lock (_gate)
                     {
-                        // The meter name is recorded alongside, because "the instrument exists" and "it comes
-                        // from the meter the documentation names" are different facts and only the second
-                        // survives a framework reorganisation.
-                        _subscribed.Add($"{instrument.Meter.Name}/{instrument.Name}");
+                        // The meter name is recorded alongside, because "the instrument exists" and "it
+                        // comes from the meter the documentation names" are different facts, and only the
+                        // second survives a framework reorganisation.
+                        _subscribed[instrument.Name] = instrument.Meter.Name;
+
+                        if (instrument.IsObservable)
+                        {
+                            _observable.Add(instrument.Name);
+                        }
                     }
 
                     listener.EnableMeasurementEvents(instrument);
                 },
             };
 
+            // long AND int: the published width is the framework's choice, not this project's, and a
+            // callback registered for the wrong one is silently never invoked.
             _listener.SetMeasurementEventCallback<long>(
-                (_, measurement, _, _) => Interlocked.Add(ref _activeRequests, measurement));
+                (instrument, measurement, _, _) => Add(instrument.Name, measurement));
 
-            // int as well as long: the published type is the framework's choice, not this project's, and a
-            // callback registered for the wrong width is silently never invoked.
             _listener.SetMeasurementEventCallback<int>(
-                (_, measurement, _, _) => Interlocked.Add(ref _activeRequests, measurement));
+                (instrument, measurement, _, _) => Add(instrument.Name, measurement));
 
             _listener.Start();
         }
 
         /// <summary>Requests currently in flight, as the hosting layer counts them.</summary>
-        public long ActiveRequestCount => Interlocked.Read(ref _activeRequests);
+        public long ActiveRequestCount => Read(ActiveRequests);
+
+        /// <summary>Lock contentions since this process started.</summary>
+        public long LockContentionCount => Read(LockContentions);
 
         /// <summary>
-        /// Which meter/instrument pairs were actually published, so a name that does not exist on this
-        /// runtime is visible as an empty list rather than as a permanent zero.
+        /// Meter/instrument pairs that were actually published, so a name that does not exist on this
+        /// runtime is visible as an absence rather than as a permanent zero.
         /// </summary>
         public IReadOnlyList<string> SubscribedNames
         {
@@ -86,14 +116,56 @@ namespace DevOnBike.Overfit.LabWorkload
             {
                 lock (_gate)
                 {
-                    return [.. _subscribed];
+                    var names = _subscribed.Select(p => $"{p.Value}/{p.Key}").ToList();
+
+                    names.Sort(StringComparer.Ordinal);
+
+                    return names;
                 }
+            }
+        }
+
+        /// <summary>Whether one named instrument arrived. Exposed per channel so a partial failure is
+        /// visible: two of two is health, one of two is a channel that will never report.</summary>
+        public bool IsPublished(string instrument)
+        {
+            lock (_gate)
+            {
+                return _subscribed.ContainsKey(instrument);
             }
         }
 
         public void Dispose()
         {
             _listener.Dispose();
+        }
+
+        /// <summary>
+        /// Polls every observable instrument. Call immediately before reading, from whatever renders the
+        /// exposition — an observable instrument has no value at all until something asks.
+        /// </summary>
+        public void Refresh()
+        {
+            _listener.RecordObservableInstruments();
+        }
+
+        private void Add(string instrument, long measurement)
+        {
+            lock (_gate)
+            {
+                // Observable instruments report where they are; pushed ones report how far they moved.
+                _totals[instrument] = _observable.Contains(instrument)
+                    ? measurement
+                    : _totals.GetValueOrDefault(instrument) + measurement;
+            }
+        }
+
+        private long Read(string instrument)
+        {
+            lock (_gate)
+            {
+                return _totals.GetValueOrDefault(instrument);
+            }
         }
     }
 }

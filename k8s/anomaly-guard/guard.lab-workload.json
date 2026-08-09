@@ -137,6 +137,25 @@
         "reported a flat 1.0 and the observer dominated the signal.",
         "Floors from measurement: at rest 0 on all twelve pods, ten-minute maxima 0/1/2."
       ]
+    },
+    "LockContentions": {
+      "source": "labapp_lock_contentions_total",
+      "kind": "Counter",
+      "loadSensitive": false,
+      "class": "Resource",
+      "minGap": "0.064",
+      "minTrendChange": "0.064",
+      "ruleThreshold": "0.064",
+      "ruleMinBreachFraction": 0.25,
+      "_comment": [
+        "Closes a gap every current channel is structurally blind to: contention produces a latency cliff",
+        "with NORMAL CPU and NORMAL GC, because a thread waiting on a monitor is not running.",
+        "Measured 2026-08-09 with the contended lock ON THE REQUEST PATH: p50 47 -> 1210 ms, p95 63 -> 5837 ms,",
+        "throughput 759 -> 26 requests per 10 s, contention rate 2 -> 12/s. Clearing the fault returned every",
+        "number to its starting value.",
+        "The instrument is OBSERVABLE, so it reports nothing until polled - before RecordObservableInstruments",
+        "was called it read a clean, well-formed, permanent zero through sixteen contending threads."
+      ]
     }
   },
   "workload": "lab-workload"

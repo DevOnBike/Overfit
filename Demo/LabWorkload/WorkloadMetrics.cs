@@ -122,6 +122,10 @@ namespace DevOnBike.Overfit.LabWorkload
             // has already shipped a channel bound to a series that was silently always zero.
             if (_runtime is { } runtime)
             {
+                // Observable instruments have no value until asked. Without this the contention counter
+                // reads a clean, well-formed, permanent zero.
+                runtime.Refresh();
+
                 // Minus the scrape. This method only ever runs inside a request to /metrics, so exactly one
                 // of the in-flight requests is the observer — the count is never legitimately zero and the
                 // subtraction is exact by construction rather than a fudge.
@@ -141,6 +145,13 @@ namespace DevOnBike.Overfit.LabWorkload
                 Gauge(text, "labapp_runtime_instruments_bound",
                     "How many of the runtime instruments asked for were actually published.",
                     runtime.SubscribedNames.Count, role);
+
+                // Cumulative, so the guard reads it as a rate. Contention is the case where a latency cliff
+                // arrives with NORMAL CPU and NORMAL GC — threads waiting on a lock are not running, so
+                // every channel the guard has today stays quiet through it.
+                Counter(text, "labapp_lock_contentions_total",
+                    "Monitor lock contentions, from dotnet.monitor.lock_contentions.",
+                    runtime.LockContentionCount, role);
             }
 
             Gauge(text, "dotnet_gc_heap_size_bytes", "Managed heap size.", GC.GetTotalMemory(false), role);

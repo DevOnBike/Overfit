@@ -149,29 +149,92 @@ data:
       "workload": "lab-workload",
       "podRegex": "lab-workload-.*",
       "metrics": {
-        "RequestsPerSecond":     { "source": "labapp_requests_total", "kind": "Counter" },
-        "ErrorRate":             { "source": "labapp_errors_total", "kind": "Counter" },
-        "LatencyP50Ms":          { "source": "labapp_request_duration_seconds", "kind": "HistogramSeconds", "quantile": 0.50 },
-        "LatencyP95Ms":          { "source": "labapp_request_duration_seconds", "kind": "HistogramSeconds", "quantile": 0.95 },
-        "LatencyP99Ms":          { "source": "labapp_request_duration_seconds", "kind": "HistogramSeconds", "quantile": 0.99 },
-        "CpuUsageRatio":         { "source": "container_cpu_usage_seconds_total", "kind": "Counter" },
-        "MemoryWorkingSetBytes": { "source": "container_memory_working_set_bytes", "kind": "Gauge" },
-        "GcGen2HeapBytes":       { "source": "dotnet_gc_heap_size_bytes", "kind": "Gauge" },
-        "GcPauseRatio":          { "source": "dotnet_gc_pause_seconds_total", "kind": "Counter" },
-        "ThreadPoolQueueLength": { "source": "dotnet_threadpool_queue_length", "kind": "Gauge" },
-        "OomEventsRate":         { "source": "kube_pod_container_status_restarts_total", "kind": "EventCount", "query": "sum by (pod) (increase(kube_pod_container_status_restarts_total{%selector%}[2m]) * on (namespace, pod, container) group_left() kube_pod_container_status_last_terminated_reason{%selector%,reason=\"OOMKilled\"}) or sum by (pod) (increase(kube_pod_container_status_restarts_total{%selector%}[2m]) * 0)" },
-        "ContainerRestarts":     { "source": "kube_pod_container_status_restarts_total", "kind": "EventCount" }
+        "RequestsPerSecond": {
+          "source": "labapp_requests_total",
+          "kind": "Counter"
+        },
+        "ErrorRate": {
+          "source": "labapp_errors_total",
+          "kind": "Counter"
+        },
+        "LatencyP50Ms": {
+          "source": "labapp_request_duration_seconds",
+          "kind": "HistogramSeconds",
+          "quantile": 0.5
+        },
+        "LatencyP95Ms": {
+          "source": "labapp_request_duration_seconds",
+          "kind": "HistogramSeconds",
+          "quantile": 0.95
+        },
+        "LatencyP99Ms": {
+          "source": "labapp_request_duration_seconds",
+          "kind": "HistogramSeconds",
+          "quantile": 0.99
+        },
+        "CpuUsageRatio": {
+          "source": "container_cpu_usage_seconds_total",
+          "kind": "Counter"
+        },
+        "MemoryWorkingSetBytes": {
+          "source": "container_memory_working_set_bytes",
+          "kind": "Gauge"
+        },
+        "GcGen2HeapBytes": {
+          "source": "dotnet_gc_heap_size_bytes",
+          "kind": "Gauge"
+        },
+        "GcPauseRatio": {
+          "source": "dotnet_gc_pause_seconds_total",
+          "kind": "Counter"
+        },
+        "ThreadPoolQueueLength": {
+          "source": "dotnet_threadpool_queue_length",
+          "kind": "Gauge"
+        },
+        "OomEventsRate": {
+          "source": "kube_pod_container_status_restarts_total",
+          "kind": "EventCount",
+          "query": "sum by (pod) (increase(kube_pod_container_status_restarts_total{%selector%}[2m]) * on (namespace, pod, container) group_left() kube_pod_container_status_last_terminated_reason{%selector%,reason=\"OOMKilled\"}) or sum by (pod) (increase(kube_pod_container_status_restarts_total{%selector%}[2m]) * 0)"
+        },
+        "ContainerRestarts": {
+          "source": "kube_pod_container_status_restarts_total",
+          "kind": "EventCount"
+        }
       },
       "thresholds": {
-        "CpuUsageRatio":         { "minGap": "0.00041",  "minTrendChange": "0.000326" },
-        "MemoryWorkingSetBytes": { "minGap": "9.52MB",   "minTrendChange": "25.85MB" },
-        "GcGen2HeapBytes":       { "minGap": "0.93MB",   "minTrendChange": "3.93MB" },
-        "RequestsPerSecond":     { "minGap": "0.0238",   "minTrendChange": "0.333" },
-        "GcPauseRatio":          { "minGap": "0.0000209" },
-        "LatencyP50Ms":          { "minTrendChange": "50" },
-        "LatencyP95Ms":          { "minTrendChange": "50" },
-        "LatencyP99Ms":          { "minTrendChange": "50" },
-        "ErrorRate":             { "minGap": "0.01",     "minTrendChange": "0.01" }
+        "CpuUsageRatio": {
+          "minGap": "0.00041",
+          "minTrendChange": "0.000326"
+        },
+        "MemoryWorkingSetBytes": {
+          "minGap": "9.52MB",
+          "minTrendChange": "25.85MB"
+        },
+        "GcGen2HeapBytes": {
+          "minGap": "0.93MB",
+          "minTrendChange": "3.93MB"
+        },
+        "RequestsPerSecond": {
+          "minGap": "0.0238",
+          "minTrendChange": "0.333"
+        },
+        "GcPauseRatio": {
+          "minGap": "0.0000209"
+        },
+        "LatencyP50Ms": {
+          "minTrendChange": "50"
+        },
+        "LatencyP95Ms": {
+          "minTrendChange": "50"
+        },
+        "LatencyP99Ms": {
+          "minTrendChange": "50"
+        },
+        "ErrorRate": {
+          "minGap": "0.01",
+          "minTrendChange": "0.01"
+        }
       },
       "customMetrics": {
         "GcCommittedBytes": {
@@ -190,6 +253,16 @@ data:
           "minGap": "3",
           "minTrendChange": "3",
           "ruleThreshold": "3",
+          "ruleMinBreachFraction": 0.25
+        },
+        "LockContentions": {
+          "source": "labapp_lock_contentions_total",
+          "kind": "Counter",
+          "loadSensitive": false,
+          "class": "Resource",
+          "minGap": "0.064",
+          "minTrendChange": "0.064",
+          "ruleThreshold": "0.064",
           "ruleMinBreachFraction": 0.25
         }
       }
