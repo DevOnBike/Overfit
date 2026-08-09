@@ -382,6 +382,47 @@ spec:
       port: 9469
       targetPort: metrics
 ---
+# Port 9469 serves /metrics AND /ack, and /ack is unauthenticated (SEC-1). It suppresses an incident for a
+# caller-chosen duration, so on a cluster without default-deny anyone with pod-level network reach can
+# silence a real finding with one HTTP call and leave nothing behind but a log line. That is the guard being
+# switched off by whoever can reach it.
+#
+# This restricts ingress to the Prometheus namespace, which is the only thing that has any business talking
+# to the port. `kubectl port-forward` still works for an operator acking an incident: it goes through the
+# API server and the kubelet rather than the pod network, so it is not subject to this policy — and it
+# already requires cluster credentials, which is the authentication /ack itself lacks.
+#
+# READ THIS BEFORE TRUSTING IT. **NetworkPolicy is not enforced on Docker Desktop**, which is what this lab
+# runs on: `kube-system` carries no policy-capable CNI (kube-proxy and vpnkit only), so this object is
+# accepted by the API server and does nothing here. Three Strimzi policies in the `dc-a`/`dc-b` namespaces
+# have been in the same state for 153 days. It is correct on a real cluster with Calico, Cilium or
+# equivalent — and **it cannot be verified on this one**, so it is shipped as a deployment control rather
+# than as a tested guarantee.
+#
+# The durable fix is not this file: /ack should require a credential, or bind somewhere /metrics does not.
+# Until then a customer whose CNI ignores NetworkPolicy has no protection at all.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: anomaly-guard-metrics
+  namespace: lab
+  labels:
+    app.kubernetes.io/name: anomaly-guard
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: anomaly-guard
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - protocol: TCP
+          port: 9469
+---
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
