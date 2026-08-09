@@ -52,6 +52,22 @@ var requestLock = new object();
 var builder = WebApplication.CreateSlimBuilder(args);
 builder.Logging.AddSimpleConsole(o => o.TimestampFormat = "HH:mm:ss ");
 
+// A concurrency ceiling, and it is part of the queued/rejected channels rather than a deployment detail.
+// Kestrel only queues a connection when it is AT its limit, and only rejects one when the queue is full —
+// so with the default (unlimited) both kestrel.queued_connections and kestrel.rejected_connections are
+// permanently zero. Binding a channel to a series that cannot move is the failure this repository hit twice
+// on 2026-08-09 alone, and it looks exactly like health.
+//
+// Left unset by default so a plain `dotnet run` behaves as before; the lab manifest sets it well above the
+// concurrency a healthy replica reaches (~1-2 at 0.8 rps and 40 ms) and below what a stall produces (~40,
+// measured while building the in-flight channel).
+var connectionLimit = Environment.GetEnvironmentVariable("OVERFIT_MAX_CONNECTIONS");
+
+if (long.TryParse(connectionLimit, out var maxConnections) && maxConnections > 0)
+{
+    builder.WebHost.ConfigureKestrel(options => options.Limits.MaxConcurrentConnections = maxConnections);
+}
+
 var app = builder.Build();
 
 app.Logger.LogInformation("lab-workload up: role={Role} — {Faults}", faults.Role, faults.Describe());

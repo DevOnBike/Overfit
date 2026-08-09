@@ -159,6 +159,19 @@ namespace DevOnBike.Overfit.LabWorkload
                 Counter(text, "labapp_exceptions_total",
                     "First-chance exceptions, from dotnet.exceptions.",
                     runtime.ExceptionCount, role);
+
+                // Saturation BEFORE the application sees it. A queued connection has not sent a request
+                // yet, so no request-derived channel — latency, error rate, in-flight count — can know it
+                // exists. Both are permanently zero unless Kestrel has a concurrency limit; see the
+                // MaxConcurrentConnections note in Program.cs for why that limit is part of the channel
+                // rather than a deployment detail.
+                Gauge(text, "labapp_queued_connections",
+                    "Connections waiting for a processing slot, from kestrel.queued_connections.",
+                    runtime.QueuedConnectionCount, role);
+
+                Counter(text, "labapp_rejected_connections_total",
+                    "Connections refused, from kestrel.rejected_connections.",
+                    runtime.RejectedConnectionCount, role);
             }
 
             Gauge(text, "dotnet_gc_heap_size_bytes", "Managed heap size.", GC.GetTotalMemory(false), role);

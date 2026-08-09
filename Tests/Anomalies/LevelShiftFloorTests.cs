@@ -128,6 +128,16 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             {
                 var parts = lines[i].Split('\t');
 
+                // The window count is a two-column record and a pre-change writer emitted none, so dropping
+                // it is part of producing a genuinely legacy file rather than an accommodation. Keeping it
+                // would make this test assert about a format that never existed — and it did, until the
+                // count was added: the file still carried the marker and the "legacy" reader saw a window
+                // count no old file could have had.
+                if (parts.Length == 2)
+                {
+                    continue;
+                }
+
                 Assert.Equal(5, parts.Length);
 
                 legacy.Append(string.Join('\t', parts[..4])).Append('\n');

@@ -33,7 +33,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
         {
             var calibrator = new FloorCalibrator();
 
-            for (var cycle = 0; cycle < 20; cycle++)
+            for (var cycle = 0; cycle < FloorProposal.MinimumWindows; cycle++)
             {
                 calibrator.Observe(Healthy(seed: cycle));
             }
@@ -60,6 +60,63 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             calibrator.Observe(Healthy(seed: 1));
 
             Assert.False(calibrator.Propose()[(int)MetricIndex.GcGen2HeapBytes].IsUsable);
+        }
+
+        /// <summary>
+        /// Plenty of samples and not enough time is still not enough.
+        ///
+        /// <para><b>This is the distinction the old gate could not make, and it cost a false positive on
+        /// 2026-08-09.</b> The gate was thirty observations, and one observation is one pod in one window —
+        /// so twelve replicas satisfied it after three cycles. Twelve replicas measured at the same instant
+        /// are twelve views of one moment, and a maximum needs moments. Measured on the lab: a floor from a
+        /// three-minute window put the healthy peak at 0.0514/s, the same population over twenty minutes at
+        /// <b>0.0952/s</b>, and the floor set from the short window reported on an unfaulted pod within the
+        /// hour.</para>
+        /// </summary>
+        [Fact]
+        public void ManySamplesInTooFewWindowsIsNotEnough()
+        {
+            var calibrator = new FloorCalibrator();
+
+            // Three windows on twelve replicas: 36 observations, comfortably past the old sample gate.
+            for (var cycle = 0; cycle < 3; cycle++)
+            {
+                calibrator.Observe(Healthy(seed: cycle));
+            }
+
+            var proposal = calibrator.Propose()[(int)MetricIndex.GcGen2HeapBytes];
+
+            Assert.True(proposal.Samples >= 30,
+                $"the premise of this test is a sample count that passes the old gate; got {proposal.Samples}");
+
+            Assert.True(proposal.Windows < FloorProposal.MinimumWindows);
+            Assert.False(proposal.IsUsable,
+                $"{proposal.Samples} samples across only {proposal.Windows} window(s) must not propose a floor");
+        }
+
+        [Fact]
+        public void TheWindowCountSurvivesARoundTrip()
+        {
+            // Without this the gate would re-arm on every guard restart, suspending proposals for two hours
+            // on an instance that already has a week of history.
+            //
+            // MORE than the minimum, deliberately. The first version of this test observed exactly
+            // MinimumWindows, which is also the value Read() falls back to for a state file that predates
+            // the counter — so both sides came out at 24 and the test passed even with the count not
+            // written at all. Measured: mutating the write to a no-op left it green.
+            const int observed = FloorProposal.MinimumWindows + 6;
+
+            var calibrator = new FloorCalibrator();
+
+            for (var cycle = 0; cycle < observed; cycle++)
+            {
+                calibrator.Observe(Healthy(seed: cycle));
+            }
+
+            var restored = FloorCalibrator.Read(calibrator.Write());
+
+            Assert.Equal(observed, calibrator.Propose()[(int)MetricIndex.GcGen2HeapBytes].Windows);
+            Assert.Equal(observed, restored.Propose()[(int)MetricIndex.GcGen2HeapBytes].Windows);
         }
 
         [Fact]
@@ -92,7 +149,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
         {
             var calibrator = new FloorCalibrator();
 
-            for (var cycle = 0; cycle < 20; cycle++)
+            for (var cycle = 0; cycle < FloorProposal.MinimumWindows; cycle++)
             {
                 calibrator.Observe(Restarting(seed: cycle));
             }
@@ -120,7 +177,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
         {
             var calibrator = new FloorCalibrator();
 
-            for (var cycle = 0; cycle < 20; cycle++)
+            for (var cycle = 0; cycle < FloorProposal.MinimumWindows; cycle++)
             {
                 calibrator.Observe(WithQueueDepth(seed: cycle));
             }
@@ -144,7 +201,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
         {
             var calibrator = new FloorCalibrator();
 
-            for (var cycle = 0; cycle < 20; cycle++)
+            for (var cycle = 0; cycle < FloorProposal.MinimumWindows; cycle++)
             {
                 calibrator.Observe(WithQueueDepth(seed: cycle));
             }
@@ -215,7 +272,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             var calibrator = new FloorCalibrator();
             var windows = new List<MetricWindow>();
 
-            for (var cycle = 0; cycle < 20; cycle++)
+            for (var cycle = 0; cycle < FloorProposal.MinimumWindows; cycle++)
             {
                 var window = Healthy(seed: cycle);
                 windows.Add(window);

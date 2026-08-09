@@ -96,6 +96,18 @@ namespace DevOnBike.Overfit.Anomalies.Hosting
                 + "well. The configured floor is under that, which is why it reports. Based on {Samples} "
                 + "observation(s) — valid only if this period really was healthy.");
 
+        // Observations and windows are reported separately because one does not imply the other and the
+        // difference has already cost a false positive: twelve replicas in one window are twelve
+        // observations of a single moment. "Based on 480 observations" reads as a lot and can be forty
+        // windows or four.
+        private static readonly Action<ILogger, string, int, int, Exception?> _floorTooEarly =
+            LoggerMessage.Define<string, int, int>(
+                LogLevel.Information,
+                new EventId(FloorProposalEventId, "AnomalyGuardFloorProposalTooEarly"),
+                "No floor proposal for {Metric} yet: {Samples} observation(s) across {Windows} window(s). A "
+                + "floor set from too few windows describes the last rollout rather than the workload — "
+                + "measured 2026-08-09, where three minutes gave half the peak that twenty minutes did.");
+
         private static readonly Action<ILogger, Exception?> _cycleFailed =
             LoggerMessage.Define(
                 LogLevel.Error,
@@ -337,12 +349,22 @@ namespace DevOnBike.Overfit.Anomalies.Hosting
             {
                 var proposal = proposals[m];
 
+                var metric = (MetricIndex)m;
+
+                // Said once per proposal interval rather than silently skipped. An operator waiting for a
+                // floor and hearing nothing cannot tell "not enough history yet" from "this channel is
+                // fine" — and the second is what silence usually means everywhere else in this log.
+                if (proposal.Samples > 0 && proposal.Windows < FloorProposal.MinimumWindows)
+                {
+                    _floorTooEarly(_logger, metric.ToString(), proposal.Samples, proposal.Windows, null);
+
+                    continue;
+                }
+
                 if (!proposal.IsUsable || proposal.ProposedMinAbsoluteGap <= 0.0)
                 {
                     continue;
                 }
-
-                var metric = (MetricIndex)m;
 
                 // Both gates, because they are read by different families and only one of them was being
                 // reported. The peer gate governs how far apart two replicas may sit; the trend gate governs

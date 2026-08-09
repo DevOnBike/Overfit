@@ -56,7 +56,21 @@ namespace DevOnBike.Overfit.LabWorkload
         /// </summary>
         public const string Exceptions = "dotnet.exceptions";
 
-        private static readonly string[] Wanted = [ActiveRequests, LockContentions, Exceptions];
+        /// <summary>
+        /// Connections accepted but not yet being processed, because the server is at its concurrency
+        /// limit. Saturation <b>before the application sees it</b>: a queued connection has sent no request
+        /// yet, so it is invisible to every request-derived channel — latency, error rate, in-flight count.
+        /// </summary>
+        public const string QueuedConnections = "kestrel.queued_connections";
+
+        /// <summary>
+        /// Connections refused outright. A healthy server rejects none, so any non-zero value is itself the
+        /// finding — the same shape as <c>OomEventsRate</c> and <c>ContainerRestarts</c>.
+        /// </summary>
+        public const string RejectedConnections = "kestrel.rejected_connections";
+
+        private static readonly string[] Wanted =
+            [ActiveRequests, LockContentions, Exceptions, QueuedConnections, RejectedConnections];
 
         private readonly MeterListener _listener;
         private readonly Dictionary<string, string> _subscribed = new(StringComparer.Ordinal);
@@ -116,6 +130,12 @@ namespace DevOnBike.Overfit.LabWorkload
 
         /// <summary>First-chance exceptions since this process started, thrown or not caught.</summary>
         public long ExceptionCount => Read(Exceptions);
+
+        /// <summary>Connections waiting for a processing slot right now.</summary>
+        public long QueuedConnectionCount => Read(QueuedConnections);
+
+        /// <summary>Connections refused since this process started.</summary>
+        public long RejectedConnectionCount => Read(RejectedConnections);
 
         /// <summary>
         /// Meter/instrument pairs that were actually published, so a name that does not exist on this

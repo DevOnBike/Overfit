@@ -137,12 +137,18 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             Assert.Equal(double.PositiveInfinity, new OperatorLabelStore().SmallestRealMagnitude("anything"));
         }
 
-        /// <summary>Twelve replicas doing nothing wrong, observed long enough for a proposal to be usable.</summary>
+        /// <summary>
+        /// Twelve replicas doing nothing wrong, observed long enough for a proposal to be usable.
+        ///
+        /// <para>Bound to <see cref="FloorProposal.MinimumWindows"/> rather than a literal, because the
+        /// sentence above is a claim about the gate and a literal lets the two drift: this helper said
+        /// "long enough" while observing twenty windows against a minimum of twenty-four.</para>
+        /// </summary>
         private static FloorCalibrator Fitted()
         {
             var calibrator = new FloorCalibrator();
 
-            for (var cycle = 0; cycle < 20; cycle++)
+            for (var cycle = 0; cycle < FloorProposal.MinimumWindows; cycle++)
             {
                 var names = new List<string>(12);
 

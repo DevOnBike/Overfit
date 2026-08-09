@@ -21,6 +21,11 @@ namespace DevOnBike.Overfit.Anomalies.Contracts
     /// cost nothing there costs an incident per cycle here.</para>
     /// </summary>
     /// <param name="Samples">Observations behind the figures; a proposal from a handful means little.</param>
+    /// <param name="Windows">
+    /// Evaluation windows the observations span. <b>Not derivable from <paramref name="Samples"/></b>: one
+    /// cycle on twelve replicas produces twelve observations covering a single moment, and a maximum needs
+    /// time. See <see cref="MinimumWindows"/> for the false positive that made the distinction necessary.
+    /// </param>
     /// <param name="TypicalMagnitude">
     /// The signal's own scale — the median across pods and cycles. Present so a reader can sanity-check the
     /// proposal against something they recognise rather than take a number on trust.
@@ -70,7 +75,8 @@ namespace DevOnBike.Overfit.Anomalies.Contracts
         double ProposedMinAbsoluteGap,
         double ProposedMinAbsoluteTrendChange,
         double ProposedMinAbsoluteLevelShift,
-        bool CappedByOperator = false)
+        bool CappedByOperator = false,
+        int Windows = 0)
     {
         /// <summary>
         /// Whether an operator's <c>--real</c> label held this proposal below what the data alone suggested.
@@ -83,6 +89,33 @@ namespace DevOnBike.Overfit.Anomalies.Contracts
         public bool WasCapped => CappedByOperator;
 
         /// <summary>Whether enough was observed for the proposal to be worth reading.</summary>
-        public bool IsUsable => Samples >= 30;
+        /// <summary>
+        /// Windows the proposal must span before it is offered, whatever the replica count.
+        ///
+        /// <para><b>Samples alone were the wrong unit, and it cost a false positive.</b> The old gate was
+        /// thirty observations, and one observation is one pod in one window — so on a twelve-replica lab it
+        /// was satisfied after <b>three cycles, fifteen minutes</b>. Twelve replicas measured at the same
+        /// instant are twelve views of one moment, not twelve moments; a maximum needs time coverage and
+        /// they supply none.</para>
+        ///
+        /// <para><b>Measured 2026-08-09.</b> A `LockContentions` floor calibrated from a three-minute window
+        /// gave a healthy peak of 0.0514/s. The same population over twenty minutes gave <b>0.0952/s</b> —
+        /// nearly double, and still rising — so healthy replicas routinely exceeded the floor set from the
+        /// short window, and it reported a false positive on an unfaulted pod within the hour.</para>
+        ///
+        /// <para>Twenty-four windows is two hours at the default five-minute cadence. It is chosen as the
+        /// smallest round figure comfortably past the point where the maximum was still visibly climbing —
+        /// <b>not</b> as a value shown to be sufficient, because nothing here has measured where the maximum
+        /// actually settles. A floor is a suggestion for a human either way; this stops it being offered
+        /// from a window that describes a rollout rather than a workload.</para>
+        /// </summary>
+        public const int MinimumWindows = 24;
+
+        /// <summary>
+        /// Whether this is worth offering. Both conditions are required and they answer different questions:
+        /// <see cref="Samples"/> asks whether there is enough data, <see cref="Windows"/> asks whether it
+        /// covers enough time.
+        /// </summary>
+        public bool IsUsable => Samples >= 30 && Windows >= MinimumWindows;
     }
 }

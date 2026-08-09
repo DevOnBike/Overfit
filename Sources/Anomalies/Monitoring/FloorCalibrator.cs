@@ -42,6 +42,13 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
         /// back as that member.</summary>
         private const char CustomMarker = '~';
 
+        /// <summary>
+        /// Marks the serialised window count. Two columns, so a reader written before this existed skips it
+        /// on the column-count guard rather than misreading it — the same forward-compatibility the custom
+        /// channel marker relies on.
+        /// </summary>
+        private const string WindowMarker = "#windows";
+
         private BoundedSamples[] _peerGaps;
         private BoundedSamples[] _trendChanges;
         private BoundedSamples[] _magnitudes;
@@ -60,6 +67,12 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
         /// quantity; see the remarks on <see cref="IAbsoluteFloorSource"/> for the first.</para>
         /// </summary>
         private BoundedSamples[] _levelShifts;
+
+        /// <summary>
+        /// How many evaluation windows have been folded in — incremented once per <see cref="Observe"/>,
+        /// NOT once per pod. That distinction is the whole point: see <see cref="FloorProposal.Windows"/>.
+        /// </summary>
+        private int _windows;
 
         /// <summary>
         /// The exact range of raw samples per channel, which answers a question none of the accumulators
@@ -159,6 +172,8 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
             {
                 return;
             }
+
+            _windows++;
 
             var times = new double[window.Length];
             window.WriteTimestampSeconds(times);
@@ -420,6 +435,8 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
                     .Append(channel.LevelShifts.Write()).Append('\n');
             }
 
+            text.Append(WindowMarker).Append('\t').Append(_windows).Append('\n');
+
             return text.ToString();
         }
 
@@ -437,10 +454,21 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
             }
 
             var lines = state.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+            var sawWindowCount = false;
+            var restoredAnything = false;
 
             for (var i = 0; i < lines.Length; i++)
             {
                 var parts = lines[i].Split('\t');
+
+                if (parts.Length == 2 && parts[0] == WindowMarker
+                    && int.TryParse(parts[1], out var storedWindows))
+                {
+                    calibrator._windows = storedWindows;
+                    sawWindowCount = true;
+
+                    continue;
+                }
 
                 // Four columns is the format written before the step accumulator existed, and it still
                 // reads: that column comes back empty and the step floor is relearned within a window or
@@ -480,6 +508,20 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
                 calibrator._trendChanges[m] = BoundedSamples.Read(parts[2]);
                 calibrator._magnitudes[m] = BoundedSamples.Read(parts[3]);
                 calibrator._levelShifts[m] = steps;
+                restoredAnything = true;
+            }
+
+            // A file written before the window count existed carries no marker, and treating that as ZERO
+            // windows would suspend every proposal for two hours on a guard that already has a week of
+            // history. That is the upgrade turning into the no-floors state this class exists to avoid —
+            // the same reasoning as the four-column tolerance above, and the same measured cost behind it.
+            //
+            // The restored samples were accumulated by a run that had whatever coverage it had; assuming it
+            // met the minimum reproduces the previous behaviour exactly, and the next Write() records the
+            // real count from then on.
+            if (restoredAnything && !sawWindowCount)
+            {
+                calibrator._windows = FloorProposal.MinimumWindows;
             }
 
             return calibrator;
@@ -561,7 +603,8 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
                 proposedGap,
                 proposedChange,
                 proposedStep,
-                capped);
+                capped,
+                _windows);
 
             channel.Cached = proposal;
 
@@ -680,7 +723,8 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
                     proposedGap,
                     proposedChange,
                     proposedStep,
-                    capped);
+                    capped,
+                    _windows);
             }
 
             return proposals;
