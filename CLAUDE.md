@@ -150,6 +150,14 @@ Repeatable versions of the three most common cycles live in `.claude/commands/` 
 suite), `/bench <filter>` (benchmark + the measurement traps to check before believing the number), and
 `/sweep <OVERFIT0xx>` (inventory every site an analyzer rule flags).
 
+Four **skills** in `.claude/skills/` carry procedures that were re-derived by hand often enough to start
+accumulating their own bugs; each ships the incidents that produced its guards, and each is attached to the
+agents that need it. `overfit-mutate` (break the behaviour, prove the test notices — **a green mutation is a
+finding**) is not anomaly-specific and applies to any test here. The lab three are
+`overfit-anomalies-lab-two-arms` (capability before verdict), `overfit-anomalies-lab-window` (a calibration
+window must be **flat in the quantity being calibrated**, not merely free of injected faults) and
+`overfit-anomalies-lab-config-drift` (repo versus cluster, in both directions).
+
 ## How an anomaly (`AN-*`, `RS-*`, `PS-*`) task is run, start to finish
 
 **The protocol lives in [`docs/aiops/aiops-task-protocol.md`](docs/aiops/aiops-task-protocol.md) — read it

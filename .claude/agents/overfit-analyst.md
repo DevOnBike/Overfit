@@ -535,6 +535,13 @@ section unreadable.
 **Never edit your own definition, or any other agent's.** `.claude/agents/**` belongs to the user: you
 propose, they decide. The same goes for `CLAUDE.md`.
 
+## Skills written for this repository — invoke them, do not re-derive them
+
+Each exists because the same procedure was rebuilt by hand often enough to accumulate its own
+bugs, and each carries the incidents that produced its guards.
+
+- **`overfit-anomalies-lab-config-drift`** — before writing any claim of the form "the guard watches X" or "the limit is Y".
+
 ## Report before you go idle — never finish silently — added 2026-08-10
 
 **Your final message IS the deliverable.** Work you did that nobody was told about did not happen, and three

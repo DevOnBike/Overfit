@@ -55,6 +55,7 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
         private long _resolved;
         private long _suppressed;
         private long _noveltyHeld;
+        private long _trendSeasonalOnly;
         private long _lastCycleUnixSeconds;
         private int _pods;
         private int _blind;
@@ -141,6 +142,25 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
         }
 
         /// <summary>
+        /// Records one channel-cycle in which the per-pod trend had to fall back to the seasonal
+        /// expectation because no cross-peer component was available.
+        ///
+        /// <para><b>It exists to stop a reference switch being invisible</b>, which is what `AN-F1` was.
+        /// The per-pod trend prefers the cross-peer component and uses seasonal only when the fleet is
+        /// smaller than <c>CrossPeerBaseline.MinimumPeers</c> or the decomposition is off — and in that
+        /// regime a movement every replica shares stays inside each replica's own series, so one shared
+        /// climb becomes one finding per pod. That is the regime the fix does not reach, and an operator
+        /// seeing findings arrive in per-pod bursts needs to know they are in it.</para>
+        ///
+        /// <para>Counted per channel per cycle rather than per pod: the question is "which reference was
+        /// used", and that is answered once for the whole fleet.</para>
+        /// </summary>
+        public void TrendSeasonalOnly()
+        {
+            Interlocked.Increment(ref _trendSeasonalOnly);
+        }
+
+        /// <summary>
         /// Records what operator feedback is currently doing to the guard.
         ///
         /// <para><b>This is the series that keeps the feature honest.</b> Everything an operator can press
@@ -217,6 +237,14 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
                 + "Rising while findings stay flat is the gate working; rising while findings go to zero is "
                 + "how a detector goes silent without anyone noticing.",
                 "counter", t => Interlocked.Read(ref t._noveltyHeld)),
+
+            new("overfit_guard_trend_seasonal_only_total",
+                "Channel-cycles whose per-pod trend fell back to the seasonal expectation because no "
+                + "cross-peer component was available — fewer than three pods, or the decomposition off. In "
+                + "that regime a movement every replica shares is left inside each replica's own series, so "
+                + "one shared climb arrives as one finding per pod. Rising alongside a burst of per-pod "
+                + "findings is the explanation for the burst, not a second problem.",
+                "counter", t => Interlocked.Read(ref t._trendSeasonalOnly)),
 
             // The HELP text an operator reads in their OWN Prometheus, which is the only documentation most
             // of them will ever see for this series — so the trap goes here rather than only in the source.

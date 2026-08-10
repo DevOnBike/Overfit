@@ -126,7 +126,18 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             // feedback four, applied to a gate rather than to an operator: the novelty gate holds peer
             // findings back, and a channel that has gone quiet is indistinguishable from a healthy cluster
             // unless the amount being held is exported.
-            Assert.Equal(16, series);
+            //
+            // The seventeenth is overfit_guard_trend_seasonal_only_total (AN-F1), and it is the same
+            // argument again in the other direction — not silence, but a REFERENCE SWITCH that made the
+            // guard louder. When fewer than three pods report, the per-pod trend falls back to the seasonal
+            // expectation, which leaves a movement every replica shares inside each replica's own series and
+            // turns one shared climb into one finding per pod. Measured at 0 against 12 of 12. An operator
+            // watching a burst of per-pod findings needs to be able to tell that from a fleet-wide fault.
+            //
+            // **This count is the point of this assertion.** It is deliberately a literal rather than
+            // `Catalog.Length`: comparing the catalogue against itself would pass for any number, and what
+            // is being asserted is that somebody thought about the series before adding it.
+            Assert.Equal(17, series);
         }
 
         private static AnomalyGuard Guard(out NullSink sink)

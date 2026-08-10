@@ -126,6 +126,67 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
                 + "removing exactly that is what it is for:" + Environment.NewLine + report);
         }
 
+        /// <summary>
+        /// The half of this that stops the fix being a regression: **one pod genuinely diverging from a flat
+        /// fleet must still be reported against the cross-peer reference.**
+        ///
+        /// <para>Without it, "fewer findings" and "blind" are the same measurement. The existing
+        /// `SeasonalExpectationTests` cannot answer this — traced by hand, all four of its pods move
+        /// identically in every scenario, so nothing there exercises a divergence and none of it would have
+        /// caught the original `AN-F1` regression or would catch a re-regression.</para>
+        /// </summary>
+        [Fact]
+        public void APodDivergingFromAFlatFleetIsStillReportedAgainstTheCommonReference()
+        {
+            var detector = new TrendDetector();
+            var options = TrendOptions.Balanced with { MinAbsoluteChangeOverWindow = 1.089e6 };
+            var times = new double[Length];
+
+            for (var i = 0; i < Length; i++)
+            {
+                times[i] = i * StepSeconds;
+            }
+
+            var pods = Fleet(0.0);
+
+            // Pod 0 climbs 15% while its eleven siblings stay flat — the shape the channel exists to catch,
+            // and the exact case a common-mode reference must NOT absorb.
+            var rng = new Random(20260811);
+            var start = pods[0][0];
+
+            for (var i = 0; i < Length; i++)
+            {
+                var phase = i / (double)(Length - 1);
+
+                pods[0][i] = start * (1.0 + (0.15 * phase)) * (1.0 + ((rng.NextDouble() - 0.5) * 0.05));
+            }
+
+            var common = CommonComponent(pods);
+            var verdict = detector.Detect(pods[0], times, options, double.NaN, common);
+
+            Assert.True(
+                verdict.Status == DetectionStatus.Anomalous,
+                "the diverging pod was NOT reported against the cross-peer reference, so the AN-F1 fix "
+                + $"trades false positives for blindness. Status was {verdict.Status}.");
+
+            // And the eleven that did not move must stay quiet, or "reported" is just noise.
+            var quiet = 0;
+
+            for (var pod = 1; pod < pods.Count; pod++)
+            {
+                if (detector.Detect(pods[pod], times, options, double.NaN, common).Status
+                    == DetectionStatus.Anomalous)
+                {
+                    quiet++;
+                }
+            }
+
+            Assert.True(
+                quiet == 0,
+                $"{quiet} flat sibling(s) were reported alongside the diverging pod — one pod moving must "
+                + "not drag its peers into the finding.");
+        }
+
         private static int CountAnomalous(
             TrendDetector detector,
             IReadOnlyList<double[]> pods,

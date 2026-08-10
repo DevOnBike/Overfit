@@ -166,6 +166,94 @@ namespace DevOnBike.Overfit.Tests.Anomalies
         /// 12:00→12:20 and rises 100→160, so the hour it sits in must rise at three times that rate: 100 at
         /// 12:00 to 280 at 13:00.</para>
         /// </summary>
+        /// <summary>
+        /// **`AN-F1`, at the guard rather than at the detector.** A fleet climbing together, against a
+        /// history that does NOT predict the climb, must produce no per-pod finding — because the per-pod
+        /// trend is judged against the cross-peer component, which removes exactly what every replica shares.
+        ///
+        /// <para><b>This test exists because the fix had nothing protecting it.</b> Restoring the old
+        /// priority (`if (expectation.IsEmpty) { expectation = common; }`) was mutated into `RunTrend` on
+        /// 2026-08-10 and **nothing in the suite noticed** — not this class, not the whole `Anomalies`
+        /// filter. The other tests here cannot: their history always matches the climb, so the seasonal
+        /// reference explains it and the two references agree. The distinguishing case is a history that
+        /// does not explain what the fleet is doing.</para>
+        ///
+        /// <para>Measured at the detector with twelve pods: a +15% shared climb gives 0 findings against the
+        /// cross-peer reference and 12 against the seasonal one.</para>
+        /// </summary>
+        [Fact]
+        public void AFleetClimbingTogetherIsNotReportedPerPodEvenWhenHistoryDoesNotExplainIt()
+        {
+            var sink = new CapturingSink();
+
+            Guard(sink, history: FlatHistory()).RunCycle(RisingWindow(), WindowStart.AddMinutes(20));
+
+            var perPod = sink.Rows.FindAll(r => !r.Contains("(workload)", StringComparison.Ordinal));
+
+            Assert.True(
+                perPod.Count == 0,
+                "a movement every replica shares was reported against individual pods, which is the AN-F1 "
+                + "regression — the per-pod trend is judged against the cross-peer component precisely so "
+                + "that it is not:" + Environment.NewLine + sink.Detail);
+        }
+
+        /// <summary>
+        /// The control, and without it the test above is satisfied by a guard that reports nothing at all:
+        /// one replica diverging from a flat fleet must still be named, under the same history.
+        /// </summary>
+        [Fact]
+        public void OnePodDivergingFromAFlatFleetIsStillNamed()
+        {
+            var sink = new CapturingSink();
+
+            Guard(sink, history: FlatHistory()).RunCycle(OneDivergingPod(), WindowStart.AddMinutes(20));
+
+            Assert.Contains(
+                sink.Signals,
+                s => s == nameof(MetricIndex.RequestsPerSecond));
+        }
+
+        /// <summary>
+        /// A history saying "this workload sits at 100 at this hour" — which is what a week of quiet days
+        /// produces, and the case where the seasonal reference explains nothing about a fleet that has begun
+        /// to move together.
+        /// </summary>
+        private static MetricHistory FlatHistory()
+        {
+            var history = new MetricHistory();
+
+            for (var day = 1; day <= 3; day++)
+            {
+                history.Observe(Workload, MetricIndex.RequestsPerSecond, WindowStart.AddDays(-day), 100.0);
+                history.Observe(
+                    Workload, MetricIndex.RequestsPerSecond, WindowStart.AddDays(-day).AddHours(1), 100.0);
+            }
+
+            return history;
+        }
+
+        /// <summary>Three flat replicas and one that climbs — the shape the channel exists to catch.</summary>
+        private static MetricWindow OneDivergingPod()
+        {
+            var names = new List<string> { "pod-0", "pod-1", "pod-2", "pod-3" };
+            var window = new MetricWindow(names, 80, WindowStart, TimeSpan.FromSeconds(15));
+            var rng = new Random(20260810);
+
+            for (var pod = 0; pod < names.Count; pod++)
+            {
+                var rps = window.Series(pod, MetricIndex.RequestsPerSecond);
+
+                for (var i = 0; i < window.Length; i++)
+                {
+                    var climb = pod == 0 ? 100.0 + (60.0 * i / (window.Length - 1.0)) : 100.0;
+
+                    rps[i] = climb * (1.0 + ((rng.NextDouble() - 0.5) * 0.01));
+                }
+            }
+
+            return window;
+        }
+
         private static MetricHistory SeededHistory()
         {
             var history = new MetricHistory();

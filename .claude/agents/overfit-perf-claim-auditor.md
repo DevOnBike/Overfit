@@ -2,7 +2,7 @@
 name: overfit-perf-claim-auditor
 description: Audits a performance claim before it is believed or written down — finds the benchmark behind it and checks that the benchmark could have detected the effect at all. Use when a change, comment, doc or commit message asserts a speedup, a ratio, or a comparison against another engine. Read-only.
 tools: Read, Grep, Glob, Bash, mcp__overfit-navigator__find_references, mcp__overfit-navigator__find_implementations, mcp__overfit-navigator__find_callers, mcp__overfit-navigator__find_unused
-model: sonnet
+model: opus
 color: purple
 memory: project
 ---

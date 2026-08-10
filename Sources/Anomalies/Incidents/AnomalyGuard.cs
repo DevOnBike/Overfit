@@ -1301,13 +1301,27 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
 
                 if (CrossPeerBaseline.TryBuild(peers, common, new double[podCount]))
                 {
-                    // The cross-peer component says what the replicas are doing as a group right now, which
-                    // removes a difference BETWEEN them and nothing at all from a movement they all share.
-                    // Where history can supply the second, it is the better reference and wins.
-                    if (expectation.IsEmpty)
-                    {
-                        expectation = common;
-                    }
+                    // The cross-peer component wins for the PER-POD trends, and the priority used to be the
+                    // other way round. That is `AN-F1`, and it cost 11 -> 33 opened incidents on an
+                    // identical window.
+                    //
+                    // The two references answer different questions. `common` removes what the replicas are
+                    // doing together RIGHT NOW; `seasonal` removes what this workload usually does at this
+                    // hour. Judging a pod against the seasonal expectation therefore leaves every
+                    // common-mode movement inside its own series, so a fleet climbing together produces one
+                    // finding per pod. Measured 2026-08-10 at twelve pods: a +15% shared climb gives 0
+                    // findings against `common` and 12 against `seasonal`, while a flat fleet gives 0 for
+                    // both — the arm that would have refuted the explanation.
+                    //
+                    // They are not composed, and that was the wrong first instinct: both are point estimates
+                    // in the metric's own units, so adding them would double the signal's magnitude rather
+                    // than remove two effects.
+                    //
+                    // `RunCustomTrend` already had exactly this shape (`expectation = common` on success),
+                    // so this makes two structurally parallel methods agree rather than inventing a policy.
+                    // The WORKLOAD-level arm below is unchanged: judging the common component against the
+                    // seasonal expectation is the composition done correctly, one level up.
+                    expectation = common;
 
                     var verdict = _trend.Detect(common, times, options, double.NaN, seasonal);
 
@@ -1333,6 +1347,14 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
                 var level = common is not null ? Median(common) : MedianAcrossPods(window, metric);
 
                 _history.Observe(_workload, metric, from, level);
+            }
+
+            // Which reference the per-pod trends are about to use, made visible. Without this the fallback
+            // to seasonal is silent, and its consequence — one shared climb arriving as one finding per pod —
+            // looks like a fleet-wide fault rather than like the regime the guard is in.
+            if (common is null && !expectation.IsEmpty)
+            {
+                Telemetry.TrendSeasonalOnly();
             }
 
             for (var pod = 0; pod < podCount; pod++)
