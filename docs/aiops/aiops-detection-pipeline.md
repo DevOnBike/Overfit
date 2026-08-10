@@ -688,11 +688,31 @@ is correct.** That alone disqualified the guard from alerting, whatever its fals
 `Opened` in the cycle a problem first appears, `Ongoing` while it persists, `Resolved` once, when it closes.
 A consumer notifies on `Opened` and updates on the rest.
 
-**Matching is overlap of (subject, signal) pairs, not equality.** A real incident gains and loses findings
-constantly — a symptom crosses its threshold, a second pod joins, a marginal signal drops out. Requiring an
-identical group would open a fresh incident on each of those, which is the behaviour being removed. Jaccard
-against `MinOverlap`, default a third: the same bound that appears everywhere else here, because below it a
-group has more in common with something else than with itself.
+**Matching is the same PRIMARY subject. Subject overlap ranks the candidates; it does not veto.**
+
+> **Corrected 2026-08-10 (`AN-D10`). This section previously described matching as overlap of (subject,
+> signal) pairs against `MinOverlap`, and then as "same primary plus overlap" treating the overlap as a
+> gate. Both are behind the code**, which is `Sources/Anomalies/Incidents/IncidentTracker.cs:19-38`. The
+> pairs version is a refuted design, kept below as the measurement that killed it; the overlap veto was
+> removed after it cost a shadow run an incident at an overlap of **0.33 against a bar of 0.34** — the same
+> pod, the same fault, one hundredth short.
+
+A real incident gains and loses findings constantly — a symptom crosses its threshold, a second pod joins, a
+marginal signal drops out. Requiring an identical group would open a fresh incident on each of those. So the
+key is the incident's **centre**: if the primary subject is the same pod, the incident continues, **however
+much of the periphery came and went**. Overlap is still computed and still used, to choose between
+candidates when more than one qualifies.
+
+**Why lowering the bar was the wrong fix.** The bar was measuring the wrong thing. An incident's periphery is
+whatever the grouper attached this cycle, and that rotates by design — the same property that killed the
+(subject, signal) key below. Once the centre must be the same pod, a shrinking group is one incident getting
+better, not a different incident.
+
+**What removing the veto costs, stated rather than discovered later**: two unrelated problems on one pod are
+one incident. That is the same policy the grouper already applies within a single cycle, so it introduces no
+new behaviour. The immortality bug the veto was introduced alongside — a group about the healthy replicas
+inheriting the identity of one about the degraded replica at 0.75 overlap — is blocked by the primary-subject
+requirement instead, because those two groups do not share a centre.
 
 **Closing waits two cycles by default.** A finding sitting on its threshold flickers, and resolving on the
 first miss converts that flicker into resolve/open/resolve/open — the same storm in a different costume. The
@@ -720,9 +740,10 @@ the incident about the degraded replica covered all four pods. With that replica
 of four subjects — 0.75 overlap — and matched. It never resolved; it silently changed what it was about
 while keeping its identity, which is worse than opening a new one.
 
-**What works: the same primary subject, plus subject overlap.** The primary is "where to look first"; if that
-changed, an operator is looking at a different incident. Measured on the recorded window: one open while the
-fault is present, one resolve after it goes, no cycle both opening and closing.
+**What works: the same primary subject.** The primary is "where to look first"; if that changed, an operator
+is looking at a different incident. Measured on the recorded window: one open while the fault is present, one
+resolve after it goes, no cycle both opening and closing. Subject overlap survives as a **ranking** signal
+between competing candidates — see the correction at the top of this section for why it is not a gate.
 
 **The deeper finding, and it was not what it looked like.** The four-pod mega-incident was blamed on the
 grouper merging too much. Measured, that is wrong: `SameNamespace` is 0.25 against a `MinRelatedness` of

@@ -88,6 +88,14 @@ Two mistakes from the same hour, both cheap to repeat:
   offset was injected reported +26 MB/h; refitting from after it settled gave −3.94. Start the fit where the
   thing you are studying starts.
 
+  **Broken again the same day, twice, which is why it is written this emphatically.** A slope over the whole
+  window said +2.06 MB/h, over the last two hours −4.42, over the last hour −30.45 and over the last half
+  +0.61 — because a fleet-wide gen2 collection sat inside the longer windows. **A slope whose SIGN depends on
+  the window length is not a trend, it is a phase**, and the answer is to look at the shape, not to fit
+  another line. The same run then computed a range across the injection step and concluded the gap inherited
+  an oscillation it demonstrably did not (62.5 → 62.8 across the collection). Any statistic — slope, range,
+  maximum — computed across a known discontinuity describes the discontinuity.
+
 ### 5. No threshold without a measurement IN THE MECHANISM'S UNIT
 
 Measurement alone is not enough. On 2026-08-09 both bad thresholds *were* measured:
