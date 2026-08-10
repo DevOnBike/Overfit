@@ -12,7 +12,33 @@ do their work** — no domain analysis, no design, no code, no reviewing. The mo
 requirement means or how a kernel should be written, you have become a twelfth agent duplicating the eleven
 that already exist, and the gates stop meaning anything because the same reasoning is on both sides of them.
 
-## Step 0 — refuse to start if the box is an instrument
+## When to Use
+
+- A change that will cross more than one file, one assembly or the public API
+- Any work arriving as prose from outside the team, where scope is not yet obvious
+- When you want the process run properly rather than improvised — invoke it explicitly with
+  `/overfit-delivery`; it is not meant to trigger on its own
+- Before a release branch, so the conditional gates fire while there is still time to act on them
+
+## When Not to Use
+
+- A one-line fix, a rename, a comment correction. The pipeline costs more than the change
+- Anything the user asked you to do directly and immediately — running the chain is not a way to defer
+- To analyse the domain or write code. This skill manages process state and dispatches; it does neither
+- While a benchmark or a lab measurement is running (Step 0 refuses, and that refusal is the point)
+
+## Inputs
+
+| Input | Required | Description |
+|---|---|---|
+| The request | Yes | In the user's own words, not yet reworded into a plan |
+| Change class | Yes | Decided at Step 1 and said out loud — it selects which gates apply |
+| Plan file | Produced | One file in `docs/specs/`, written by the analyst and signed by the architect |
+| Machine state | Yes | Whether anything is measuring. Step 0 refuses to start if the box is an instrument |
+
+## Workflow
+
+### Step 0 — refuse to start if the box is an instrument
 
 **Before anything else**, check whether a measurement is running:
 
@@ -25,7 +51,7 @@ If either is true, **say so and stop before dispatching anything that builds** (
 architect, security, drift, packages — are still safe, so offer to run those and defer the rest. Do not
 quietly invalidate somebody's day of data to save a round trip.
 
-## Step 1 — classify, and say which class out loud
+### Step 1 — classify, and say which class out loud
 
 The class decides the path. **Getting this wrong in the cheap direction wastes hours; getting it wrong in the
 expensive direction ships an unreviewed change**, so state your classification and the evidence for it before
@@ -45,7 +71,7 @@ a file parser, or adding a dependency is never TRIVIAL**, however few lines it t
 
 If the class is genuinely ambiguous, ask the user. One question is cheaper than either error.
 
-## Step 2 — the full chain, and where it stops for a human
+### Step 2 — the full chain, and where it stops for a human
 
 ```
   overfit-analyst  ──▶ BLOCKING QUESTIONS ──▶ [ HUMAN ANSWERS ]
@@ -92,7 +118,7 @@ are the user's alone.
 - **Never dispatch the developer before the plan says `APPROVED`.** It is instructed to refuse, and forcing
   the point by re-prompting it is defeating your own gate.
 
-## Step 3 — the conditional gates, triggered by what actually changed
+### Step 3 — the conditional gates, triggered by what actually changed
 
 Read the diff, not the intent. Dispatch every gate whose trigger fires:
 
@@ -108,7 +134,7 @@ Read the diff, not the intent. Dispatch every gate whose trigger fires:
 **`overfit-find-bugs-game` is not a gate.** It is bounded exploration on a ten-minute clock and its coverage
 is heuristic. Use it deliberately on a neglected module, never as a required step.
 
-## Step 4 — the fix loop, with a bound
+### Step 4 — the fix loop, with a bound
 
 Findings go back to `overfit-developer`, which fixes them, and `overfit-reviewer` re-reviews. **Bound it at
 three rounds.** If findings survive three passes, stop and escalate to the user with what is still open and
@@ -118,7 +144,7 @@ disagreement.
 This repository bans unbounded loops in its own code and requires the bound to be named. The same discipline
 applies to a loop made of agents.
 
-## Step 5 — two gates, not one
+### Step 5 — two gates, not one
 
 **Do not run a release check on an ordinary pull request.** Not every merge to `main` needs a version bump,
 package metadata and a changelog entry, and blocking a routine change on those trains people to skip the gate.
@@ -180,3 +206,23 @@ open item rather than letting the plan quietly go stale at `PR_READY`.**
 - **Do not run two agents concurrently when both write to the same file.**
 - **Do not declare a gate passed that you did not run**, and do not present a skipped gate as a clean one.
 - **Do not commit, push, tag or run a mutating `gh` command.** Ever, including when everything is green.
+
+## Validation
+
+- [ ] Step 0 ran: nothing was measuring when the pipeline started
+- [ ] The change class was said out loud, and it selected the gates that actually ran
+- [ ] Exactly one plan file exists in `docs/specs/`, and the architect signed it before code was written
+- [ ] Every conditional gate that its trigger fired was dispatched, not skipped for time
+- [ ] The fix loop stayed inside its bound rather than running until green
+- [ ] The final report names which agents ran, what each found, and what was left undone
+
+## Common Pitfalls
+
+| Pitfall | Solution |
+|---|---|
+| Running the chain to look thorough | The pipeline costs more than a small change. Classify first and say the class out loud |
+| Developer starts before the plan is signed | The gate exists because an unsigned plan is a guess with a filename. Refuse |
+| A subagent's self-assessment read as evidence its output is sound | It is evidence about its *instructions*. Four agents once opened by acknowledging an answer nobody had given, and the worst offender reported "None this run" |
+| Relaying a finding without its source | Say which agent produced it. A finding without a source cannot be weighed |
+| Skipping `overfit-perf-claim-auditor` on a performance claim | It **owns** that verdict and must not be substituted for |
+| Treating the merge as the end | The conditional gates that matter most fire after it |

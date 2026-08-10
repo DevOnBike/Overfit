@@ -7,15 +7,68 @@ color: green
 
 # Prove the test can fail
 
+Compile a deliberate break of the behaviour under test, run the suite, and check the **named** test goes red.
+This is the only way to distinguish a test that passes from a test that *could have failed*.
+
+## Why a green suite is not evidence
+
 **A green suite says the tests pass. It does not say they could fail.** This repository has shipped an
 assertion satisfied by channels that existed before its subject did, a fixture whose value coincided with the
 fallback so both sides read 24, and a test whose fixture did not contain the pod it was making a claim about.
 All three were green. All three were found by mutation.
 
-## The procedure
+| Problem | Symptom | Consequence |
+|---|---|---|
+| Test cannot fail | Green under a mutation that breaks the behaviour | The behaviour is unprotected and nobody knows |
+| Assertion satisfied by something else | Asserts "any finding" where it means "this finding" | Passes on a neighbour's output, silent when the subject breaks |
+| Fixture coincides with the fallback | Expected value equals what the code returns when it does nothing | Both sides read the same for two different reasons |
+| Guard in the wrong place | Validation runs after the thing it guards | The check is visible in review and does nothing |
 
-Write this into the scratch file (your own `do-<agent>.py`) with the four constants
-substituted, and execute it as a single invocation.
+## When to Use
+
+- After writing any test whose failure matters — in the same task, not later
+- Before writing "pinned by a test" in a report, a commit message or a task row
+- On any anomaly (`AN-*`, `RS-*`, `PS-*`) task — step 7 of `docs/aiops/aiops-task-protocol.md` requires it
+- When a suite is green after a change you expected to be risky
+- When a test has never been observed failing and its subject has changed since
+
+## When Not to Use
+
+- To explore what a mutation does. **A mutation with no predicted victim is a fishing trip**, and a green
+  result from one tells you nothing you can act on
+- On a tree another agent or process is editing — a compile error may not be yours
+- For coverage questions (use `overfit-coverage-analysis`) or assertion shape (`overfit-assertion-quality`)
+- As a substitute for reading the code path. Mutation shows a test notices, not that the behaviour is right
+- When the question is "where should I look" rather than "does this hold" — `overfit-test-gap-analysis`
+  reasons about mutation points without paying for a build. Use it to rank targets, then mutate the survivors
+
+## Inputs
+
+| Input | Required | Description |
+|---|---|---|
+| Target file | Yes | The production `.cs` file whose behaviour will be broken |
+| Anchor | Yes | Exact source text to replace, including indentation. Must occur **exactly once** |
+| Mutated text | Yes | The replacement. Must compile — an invalid mutation is a harness bug, not a finding |
+| Expected victim | Yes | The **named** test that must go red. "Some test" is not a prediction |
+| Filter | Yes | `dotnet test --filter`, narrow enough to be fast and wide enough to contain the victim |
+
+## Workflow
+
+### Step 1: Predict the victim before writing anything
+
+Name the test that must fail, and why. This is what makes a green result a finding rather than a shrug.
+
+### Step 2: Choose what to break
+
+One behaviour that matters, not one line per file. The best targets are the ones where a wrong answer is
+silent: a gate that fails open instead of closed, a constant-time comparison replaced by `StartsWith`, a
+counter not cleared on recovery, a missing-data path returning `Healthy` instead of `InsufficientData`, a
+validator moved to after the allocation it guards.
+
+### Step 3: Write the harness into the scratch file
+
+`.claude/do.py`, or your own `do-<agent>.py`, with the five constants substituted. Execute it as the single
+invocation `python D:/Overfit/.claude/do.py`.
 
 ```python
 """One mutation, aimed at one named test."""
@@ -77,41 +130,39 @@ finally:
     print(f"--- restored byte-for-byte: {TARGET.read_text(encoding='utf-8') == original}")
 ```
 
-## The five guards, each of which has fired here
+### Step 4: Read the result
 
-1. **Refuse to start if the target already differs from `HEAD`.** A harness killed mid-run leaves the source
-   mutated; the next run then treats the mutated file as its baseline and cheerfully reports *restore
-   verified*.
-2. **Assert the anchor matches exactly once, and print the count.** On 2026-08-10 an anchor matched twice
-   because `RunCustomTrend` carries a line byte-identical to `RunTrend`'s. A separate run matched **zero**
-   times because a multi-line anchor did not account for CRLF — which would have read as "not caught" if the
-   count had not been printed.
-3. **Check the baseline is green first.** A mutation against a red baseline cannot distinguish "the test
-   caught it" from "it was already failing".
-4. **Separate "did not compile" from "not caught".** An invalid mutation is a mistake in the harness, not
-   evidence about the test, and by exit code alone they are identical. Also: if another agent is editing the
-   tree, a compile error may not be yours — re-check before diagnosing.
-5. **Restore in a `finally` and compare byte-for-byte.** Not "restored" — *verified* restored.
+| Outcome | Means |
+|---|---|
+| **Red, on the test you named** | The test can fail, for the reason you think. The only outcome that licenses *pinned by a test* |
+| **Red, on a different test** | Say which. It may be a better guard than the one you were checking, or the mutation changed more than you intended |
+| **Red, on several** | Often informative — a traversal mutation on `NR-4` reddened five, including both cycle tests, which showed those produce clean failures rather than hangs |
+| **GREEN** | **A finding, not a setback.** The behaviour is not covered. Report it; do not touch the harness until you understand why nothing noticed |
+| **Did not compile** | Your mutation is invalid. Not evidence about the test |
 
-## Reading the result
+### Step 5: Report it
 
-- **Red, on the test you named** — the test can fail, for the reason you think. This is the only outcome
-  that licenses the phrase *pinned by a test*.
-- **Red, on a different test** — say which. It may be a better guard than the one you were checking, or the
-  mutation changed more than you intended.
-- **GREEN — the important case, and it is a finding rather than a setback.** The behaviour is not covered.
-  Three times on 2026-08-10 a green mutation exposed something real: a test whose fixture did not contain the
-  pod it made a claim about; an `AN-F1` fix that **nothing in the entire `Anomalies` suite** protected,
-  because every existing test had a history matching the climb so the distinguishing case was never
-  exercised; and a signed plan whose mechanism could not fire at all. **Report it. Do not touch the harness
-  until you understand why nothing noticed.**
+The mutation result is a required section of an anomaly-task report and belongs in the task row: the
+mutation, the victim, and whether the restore was verified.
 
-## What to mutate
+## Validation
 
-One behaviour that matters, not one line per file. Aim each mutation at a **named** test and say which. The
-best targets are the ones where a wrong answer is silent: a gate that fails open instead of closed, a
-constant-time comparison replaced by `StartsWith`, a counter not cleared on recovery, a missing-data path
-returning `Healthy` instead of `InsufficientData`.
+- [ ] The victim was named **before** the run, not chosen from the output
+- [ ] The anchor matched exactly once, and the count was printed
+- [ ] The baseline was green before the mutation was applied
+- [ ] A compile error was distinguished from "not caught"
+- [ ] The restore was **verified** byte-for-byte, not merely attempted
+- [ ] A green mutation was reported as a finding rather than retried until it went red
 
-**Do not mutate to see what happens.** A mutation with no predicted victim is a fishing trip, and a green
-result from one tells you nothing you can act on.
+## Common Pitfalls
+
+| Pitfall | Solution |
+|---|---|
+| A harness killed mid-run leaves the source mutated | Guard 1 refuses to start when the target differs from `HEAD`. Without it the next run treats the mutated file as its baseline and reports *restore verified* |
+| Anchor matches twice | On 2026-08-10 an anchor matched twice because `RunCustomTrend` carries a line byte-identical to `RunTrend`'s. Print the count and stop |
+| Anchor matches zero times | A multi-line anchor that does not account for CRLF. It reads as "not caught" if the count is not printed |
+| Red baseline | Cannot distinguish "the test caught it" from "it was already failing" |
+| Treating a compile failure as a caught mutation | By exit code alone they are identical. Filter for `: error ` separately |
+| Assuming a broken guard hangs rather than reds | It can go either way. A cycle-detection guard was expected to hang under mutation and produced a clean red — check, do not assume |
+| Mutating until something goes red | That is fitting the harness to the answer. One prediction, one run, one verdict |
+| Calling a test weak because its assertion looks thin | Shape is not failability. Five `Assert.NotNull`-only tests in `CheckpointedModuleSegmentWalkTests` were reddened by mutation, and `overfit-assertion-quality`'s rubric calls them trivial. **This skill owns that verdict** |

@@ -30,6 +30,24 @@ references, and "commit the spec / test before commit" advice that violates Over
 acceptance. A two-line spec (objective + acceptance) is still fine for small things.
 
 
+## When Not to Use
+
+- A change confined to one file with no public surface — write it and let the reviewer catch what matters
+- Work already covered by a signed plan in `docs/specs/`. Two specs for one change is worse than none
+- A pure measurement question. State the mechanism and the unit instead (`overfit-anomalies-lab-window`)
+- Generic project scaffolding — that is `overfit-spec-driven-development`, and inside this repository this
+  skill supersedes it
+
+## Inputs
+
+| Input | Required | Description |
+|---|---|---|
+| Feature or change | Yes | What is being built, in the requester's words |
+| Execution path | Yes | Inference or training. The single most important line in the spec |
+| Verification oracle | Yes | Named **before** coding: parity target, FD gradient check, known-good output |
+| AOT reach | Yes | Whether the change is reachable from `Tests/AotSmokeTest` |
+| Allocation policy | Yes | Per-call, load-time or training. Decides which analyzer rules are errors |
+
 ## Who owns what — read this before using the workflow below
 
 **This skill is the shared FORMAT and CHECKLIST for a plan. It does not drive the change.** The phases below
@@ -201,10 +219,21 @@ baseline for any perf task. Re-run the task's verify before moving on.
 - "It builds green" used as proof — a green build says nothing about parity, allocations, or the AOT guard.
 - Reaching for a commit as the next step (that's the human's action, always).
 
-## Verification checklist
+## Validation
 
 - [ ] Spec saved to a file; execution path + verification oracle + AOT reach stated.
 - [ ] Boundaries block pasted and any project-specific Ask-first items called out.
 - [ ] Human reviewed and approved the spec and the plan.
 - [ ] Success criteria are specific and testable (parity threshold; perf = measured best-of-N both sides).
 - [ ] Ends at a clean/staged tree with the exact commit commands handed to the human.
+
+## Common Pitfalls
+
+| Pitfall | Solution |
+|---|---|
+| Naming the oracle after the code is written | Then it is fitted to what the code does. Name it in the spec, before |
+| Leaving the execution path implicit | Inference and training have different allocation policies; mixing them is the most common architectural mistake here |
+| Writing a second spec for a change already planned | One plan file per change. `docs/specs/` is the registry |
+| Assuming AOT reach | Check whether `Tests/AotSmokeTest` reaches it. Each new touched type widens verification and can surface latent trim warnings |
+| A success criterion only the author can check | Write it so somebody else can decide whether it holds |
+| Listing a git or GitHub step as a next action | Claude is read-only there. Name the exact command for the user instead |
