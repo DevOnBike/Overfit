@@ -7,6 +7,7 @@ using DevOnBike.Overfit.Anomalies.Contracts;
 using DevOnBike.Overfit.Anomalies.Incidents;
 using DevOnBike.Overfit.Anomalies.Incidents.Abstractions;
 using DevOnBike.Overfit.Anomalies.Monitoring.Abstractions;
+using DevOnBike.Overfit.Statistics;
 
 namespace DevOnBike.Overfit.Tests.Anomalies
 {
@@ -95,12 +96,92 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             Assert.Contains(sink.Messages, m => m.Contains("peers", StringComparison.Ordinal));
         }
 
+        /// <summary>
+        /// The same grace on a CUSTOM channel, which it did not cover until 2026-08-10 (`XC-9`).
+        ///
+        /// <para><b>Only `RunTrend` and `RunSilentPods` called `IsWarmingUp`</b> — mapped across every
+        /// detector method. So the trend family refused to judge a young pod on the thirteen built-in
+        /// channels and judged it on every custom one, with no reason recorded for the difference. On the
+        /// deployed configuration that is five channels, and a rollout creates twelve young pods at once.</para>
+        ///
+        /// <para>The measurement behind the grace does not care which enum a channel is keyed by: a fresh
+        /// replica climbs 13-17% of typical over its first 10-20 minutes at a Kendall tau of 0.70-0.94.</para>
+        /// </summary>
+        [Fact]
+        public void AFreshPodsClimbOnACustomChannelIsNotReportedEither()
+        {
+            var sink = new CapturingSink();
+            var guard = Guard(sink, created: T0.AddMinutes(18), custom: CustomBinding());
+
+            guard.RunCycle(ClimbingCustom(), T0.AddMinutes(20));
+
+            Assert.DoesNotContain(sink.Messages, m => m.Contains("rose by", StringComparison.Ordinal));
+        }
+
+        /// <summary>
+        /// The control, and it is what stops the test above passing because nothing was ever reported: the
+        /// identical climb on an established pod must still be caught on the same custom channel.
+        /// </summary>
+        [Fact]
+        public void TheSameCustomClimbOnAnEstablishedPodIsReported()
+        {
+            var sink = new CapturingSink();
+            var guard = Guard(sink, created: T0.AddHours(-6), custom: CustomBinding());
+
+            guard.RunCycle(ClimbingCustom(), T0.AddMinutes(20));
+
+            Assert.Contains(sink.Messages, m => m.Contains("rose by", StringComparison.Ordinal));
+        }
+
+        /// <summary>A custom channel shaped like the deployed ones: load-independent, its own trend floor.</summary>
+        private static CustomMetricBinding CustomBinding()
+        {
+            return new CustomMetricBinding(
+                Name: "GcCommittedBytes",
+                Source: "dotnet_gc_committed_bytes",
+                Kind: MetricSourceKind.Gauge,
+                SignalKind: PeerSignalKind.LoadIndependent,
+                Class: SignalClass.Resource,
+                MinAbsoluteGap: 1.089e6,
+                MinAbsoluteTrendChange: 1.089e6);
+        }
+
+        /// <summary>`Climbing()`, on a custom channel instead of a built-in one. Same shape, same noise.</summary>
+        private static MetricWindow ClimbingCustom()
+        {
+            var names = new List<string> { "pod-0", "pod-1", "pod-2", "pod-3" };
+            var window = new MetricWindow(
+                names, 80, T0, TimeSpan.FromSeconds(15), ["GcCommittedBytes"]);
+            var rng = new Random(20260810);
+
+            for (var pod = 0; pod < names.Count; pod++)
+            {
+                var series = window.Series(pod, "GcCommittedBytes");
+                var start = 40e6 * (1.0 + ((rng.NextDouble() - 0.5) * 0.02));
+
+                for (var i = 0; i < window.Length; i++)
+                {
+                    var phase = i / (double)(window.Length - 1);
+
+                    // Noise for the same reason as Climbing(): a noiseless ramp is rejected by the trend
+                    // detector's variance inflation, and the test would pass without the gate doing anything.
+                    series[i] = start * (1.0 + (0.15 * phase)) * (1.0 + ((rng.NextDouble() - 0.5) * 0.05));
+                }
+            }
+
+            return window;
+        }
+
         private static AnomalyGuard Guard(
-            CapturingSink sink, DateTimeOffset created, TimeSpan? grace = null)
+            CapturingSink sink,
+            DateTimeOffset created,
+            TimeSpan? grace = null,
+            CustomMetricBinding? custom = null)
         {
             return new AnomalyGuard(
                 new AnomalyGuardOptions
                 {
+                    CustomMetrics = custom is null ? [] : [custom.Value],
                     Namespace = "lab",
                     Workload = "svc",
                     PodTopology = new FakeTopology(created),

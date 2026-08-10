@@ -115,6 +115,35 @@ namespace DevOnBike.Overfit.Tests.Anomalies
         }
 
         /// <summary>
+        /// The deployed coverage binding produces the <b>smoothed</b> query, not the raw <c>up</c> gauge.
+        ///
+        /// <para><b>Parsing cleanly is not enough here, and the failure would be silent.</b> Drop the
+        /// <c>query</c> key and the entry is still valid — <c>kind: Ratio</c> renders <c>up{selector}</c>,
+        /// which returns a series for every pod, fills the channel, satisfies every coverage check, and
+        /// cannot produce a finding: the peer detector's size gate reads each member's median, and the
+        /// median of a <c>0</c>/<c>1</c> series is <c>1.0</c> for any pod above 50% coverage. A channel that
+        /// reports numbers and can never fire is the exact shape <c>InertChannel</c> was written for.</para>
+        /// </summary>
+        [Fact]
+        public void TheDeployedCoverageChannelQueriesTheAveragedUpSeries()
+        {
+            var file = JsonSerializer.Deserialize<AnomalyGuardConfigFile>(
+                EmbeddedGuardJsonText(),
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+            Assert.NotNull(file);
+
+            var queries = AnomalyGuardConfigReader.ReadMap(file, out _).CustomQueries();
+
+            Assert.True(
+                queries.TryGetValue("ScrapeCoverage", out var query),
+                $"the ConfigMap declares [{string.Join(", ", queries.Keys)}] and not ScrapeCoverage");
+
+            Assert.StartsWith("avg_over_time(", query, StringComparison.Ordinal);
+            Assert.Contains(PromqlCatalog.SelectorToken, query, StringComparison.Ordinal);
+        }
+
+        /// <summary>
         /// Pulls <c>guard.json</c> out of the ConfigMap's literal block. Hand-rolled rather than a YAML
         /// dependency: one block scalar at a known key is not worth a package, and the alternative is that
         /// nothing checks this at all.

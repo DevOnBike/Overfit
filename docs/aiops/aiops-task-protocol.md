@@ -105,6 +105,14 @@ structurally incapable of moving.
 
 ## Proving it
 
+**A test whose fixture does not contain its subject passes for the wrong reason, and only a mutation finds
+it.** On 2026-08-10 a test claiming "an unjudgeable cycle must not clear the counter" was green under the
+mutation that removes exactly that behaviour — because the pod under test was **absent from the cycle being
+tested**, so its counter was untouched whether the code existed or not. The code was right; the oracle was
+empty. **When a test asserts that state carries across an event, assert the subject is present in the
+event.** That is one line, and it is not covered by "prove the test can fail" — the test could fail, for a
+different reason than its own description claimed.
+
 ### 7. Run a mutation that should break the test
 
 If the test does not fail, the task is not finished.

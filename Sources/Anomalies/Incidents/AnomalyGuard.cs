@@ -968,6 +968,22 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
 
             for (var pod = 0; pod < podCount; pod++)
             {
+                // The same warm-up grace RunTrend applies, and its absence here was an omission rather than a
+                // decision — added 2026-08-10 (XC-9). The measurement behind WarmUpGrace does not care which
+                // enum a channel is keyed by: a fresh replica's series climbs 13-17% of typical over its
+                // first 10-20 minutes at a Kendall tau of 0.70-0.94, which is a textbook trend about nothing,
+                // and a floor large enough to swallow it is large enough to swallow a real leak.
+                //
+                // The peer families deliberately do NOT get this — see WarmUpGrace's own remarks: a replica
+                // differing from its peers right now is worth reporting whatever its age, and during a
+                // rollout every pod is young, so a peer-wide grace would blind the guard exactly when a bad
+                // version is going out. This is the trend family, which reads a history, and that is the
+                // whole distinction.
+                if (IsWarmingUp(window.Pods[pod], to))
+                {
+                    continue;
+                }
+
                 // Custom channels carry their own ceiling on the binding, since the per-metric table is
                 // indexed by MetricIndex and cannot hold a name the enum does not have.
                 var verdict = _trend.Detect(

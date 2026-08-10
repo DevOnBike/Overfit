@@ -622,6 +622,20 @@ knows C# symbols and nothing else. Use `Grep` for: text and prose, `.editorconfi
 and `.csproj`, YAML and Kubernetes manifests, JSON config, PromQL, file headers, TODO markers, and anything
 outside the compiled solution.
 
+**Run `find_references` on any mechanism a plan calls load-bearing, not only on a call-site question.**
+On 2026-08-10 a plan named an `InertChannel` collision as required-before-ship and described it as reported
+on every healthy deployment. `find_references` on `FloorCalibrator.InertChannels` returns eight hits: seven
+tests and one `<see cref>` — **zero production callers**. The defect is real in the type's output and is
+currently surfaced to nobody, which changes the priority without changing the fix. A certainty nobody
+resolved is worth resolving before it is acted on.
+
+**Run `find_references` on any mechanism a plan calls load-bearing, not only on a call-site question.**
+On 2026-08-10 a plan named an `InertChannel` collision as required-before-ship and described it as reported
+on every healthy deployment. `find_references` on `FloorCalibrator.InertChannels` returns eight hits: seven
+tests and one `<see cref>` — **zero production callers**. The defect is real in the type's output and is
+currently surfaced to nobody, which changes the priority without changing the fix. A certainty nobody
+resolved is worth resolving before it is acted on.
+
 **Say which tool established a claim** when the claim is load-bearing — "`find_references` returns three
 call sites" is checkable, "I searched and found one caller" is not.
 
