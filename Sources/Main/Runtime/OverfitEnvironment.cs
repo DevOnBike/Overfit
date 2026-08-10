@@ -151,6 +151,22 @@ namespace DevOnBike.Overfit.Runtime
         /// </summary>
         public const string DisableSpeculative = "OVERFIT_DISABLE_SPECULATIVE";
 
+        /// <summary>
+        /// Shared secret the anomaly guard requires on <c>POST /ack</c>, as
+        /// <c>Authorization: Bearer &lt;value&gt;</c>.
+        ///
+        /// <para><b>Unset means the endpoint is refused, not open.</b> <c>/ack</c> suppresses a finding for a
+        /// caller-chosen duration, so anyone who can reach the port can silence a real incident and leave
+        /// only a log line. The port is shared with the Prometheus scrape, and the `NetworkPolicy` written to
+        /// restrict it was **measured inert** on a Docker-Desktop-class cluster — no policy-capable CNI, and
+        /// a probe pod still reached the port with the policy applied. A control that depends on the
+        /// customer's CNI is not a control.</para>
+        ///
+        /// <para>Read once at startup. Rotating it needs a restart, which is the right trade for a process
+        /// that must not grow a configuration-reload path to hold one string.</para>
+        /// </summary>
+        public const string GuardAckToken = "OVERFIT_GUARD_ACK_TOKEN";
+
         // ── Third-party / host environment (not ours, but read by us) ─────────────
 
         /// <summary>Hugging Face API endpoint override for the model downloader.</summary>

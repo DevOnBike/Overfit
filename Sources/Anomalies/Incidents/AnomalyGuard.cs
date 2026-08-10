@@ -119,6 +119,20 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
         private readonly Dictionary<string, int> _silent = new(StringComparer.Ordinal);
 
         /// <summary>
+        /// How many consecutive cycles each pod has been a peer outlier, per persistence-gated custom channel.
+        ///
+        /// <para><b>Separate from <see cref="_silent"/> on purpose.</b> The two track different predicates —
+        /// reporting nothing at all, and standing apart from peers on a continuous value — and a pod can be in
+        /// either independently. Sharing one counter would mean a pod sliding from degraded into total silence
+        /// resets evidence that should carry forward, or the reverse.</para>
+        ///
+        /// <para>Not persisted across restarts, matching <see cref="_silent"/>: a restart re-earns its
+        /// cycles.</para>
+        /// </summary>
+        private readonly Dictionary<string, Dictionary<string, int>> _customBreach =
+            new(StringComparer.Ordinal);
+
+        /// <summary>
         /// Whether the current cycle falls inside a declared maintenance window. Held as a field rather than
         /// threaded through every detector: the answer is a property of the cycle, and passing it down five
         /// call layers to be read in one place would be worse than a field with a short life.
@@ -209,6 +223,12 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
 
             _history = options.MinimumHistoryDays > 0 ? history : null;
             _calibrator = calibrator;
+
+            // After the learned-state load and before anything reads a proposal, because a restored
+            // calibrator carries the accumulators of a previous run and would otherwise answer one question
+            // from them before being told which channels it must not answer for at all.
+            _calibrator.ExemptFromCalibration(options.NonCalibratedCustomChannels);
+
             Labels = learned.Labels;
             Suppressions = learned.Suppressions;
 
@@ -803,10 +823,104 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
 
             var kinds = Demote(findings, decisions);
 
+            HoldUntilPersistent(binding, pods, findings, result);
+
             pipeline.ObservePeerGroup(
                 binding.Name, result, findings, subjects, from, to, binding.Class, kinds);
 
             return result.Status != DetectionStatus.InsufficientData;
+        }
+
+        /// <summary>
+        /// Clears any deviation on a pod that has not been an outlier for
+        /// <see cref="AnomalyGuardOptions.SilentPodCycles"/> consecutive cycles on this channel, so the same
+        /// demotion <see cref="Demote"/> performs holds it back until it recurs.
+        ///
+        /// <para><b>Off unless the channel asks for it, and doing nothing is the default that matters.</b>
+        /// <see cref="CustomMetricBinding.RequirePersistence"/> is false for every channel that predates
+        /// this, so the five already on this path — <c>CpuPressure</c>, <c>LockContentions</c>,
+        /// <c>Exceptions</c>, <c>ActiveRequests</c>, <c>GcCommittedBytes</c> — return here immediately and
+        /// report exactly as they did.</para>
+        ///
+        /// <para><b>Why a channel would ask.</b> Scrape coverage dips for a moment on every pod that is
+        /// replaced, and a rollout replaces all of them; a same-cycle gate would therefore add a false
+        /// positive per replica per rollout to an incident rate that already fails <c>AN-A1</c>. The dip that
+        /// matters is the one still there next cycle.</para>
+        ///
+        /// <para><b>A cycle that reached no verdict is not evidence in either direction</b>, so it neither
+        /// advances nor clears a counter — the same reasoning that makes <see cref="RunSilentPods"/> drop its
+        /// counters rather than trust a roster nobody could confirm.</para>
+        /// </summary>
+        private void HoldUntilPersistent(
+            in CustomMetricBinding binding,
+            string[] pods,
+            PeerOutlierFinding[] findings,
+            in PeerOutlierResult result)
+        {
+            if (!binding.RequirePersistence || _options.SilentPodCycles <= 1)
+            {
+                return;
+            }
+
+            if (result.Status == DetectionStatus.InsufficientData)
+            {
+                return;
+            }
+
+            if (!_customBreach.TryGetValue(binding.Name, out var breaches))
+            {
+                breaches = new Dictionary<string, int>(pods.Length, StringComparer.Ordinal);
+                _customBreach[binding.Name] = breaches;
+            }
+
+            for (var i = 0; i < pods.Length; i++)
+            {
+                if (!findings[i].IsOutlier)
+                {
+                    // Matched its peers this cycle, which is evidence against the previous one meaning
+                    // anything. Removed rather than zeroed so the map does not grow one entry per pod that
+                    // has never deviated.
+                    breaches.Remove(pods[i]);
+
+                    continue;
+                }
+
+                var cycles = breaches.GetValueOrDefault(pods[i]) + 1;
+                breaches[pods[i]] = cycles;
+
+                if (cycles >= _options.SilentPodCycles)
+                {
+                    continue;
+                }
+
+                findings[i] = findings[i] with
+                {
+                    Deviation = PeerDeviation.None
+                };
+            }
+
+            // Bounded the same way RunSilentPods bounds its own counters, and with the same accepted cost: a
+            // pod that leaves the window and comes back re-earns its cycles. It can only leave by reporting
+            // nothing at all, which is the silent-pod check's case rather than this one.
+            if (breaches.Count <= pods.Length)
+            {
+                return;
+            }
+
+            var stale = new List<string>();
+
+            foreach (var pod in breaches.Keys)
+            {
+                if (!Contains(pods, pod))
+                {
+                    stale.Add(pod);
+                }
+            }
+
+            for (var i = 0; i < stale.Count; i++)
+            {
+                breaches.Remove(stale[i]);
+            }
         }
 
         private void RunCustomTrend(

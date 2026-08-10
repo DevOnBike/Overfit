@@ -316,6 +316,28 @@ namespace DevOnBike.Overfit.Anomalies.Contracts
         public IReadOnlyList<CustomMetricBinding> CustomMetrics { get; init; } = [];
 
         /// <summary>
+        /// Custom channels the floor calibrator observes and proposes nothing for, and that the inert-channel
+        /// check does not judge. Empty — the default — fits everything, which is the behaviour before this
+        /// existed.
+        ///
+        /// <para><b>The built-in equivalent is <c>PeerSignalCatalog.IsCountedEvent</c>, and a custom channel
+        /// had no way to say the same thing.</b> The rule it encodes: a quantity whose <i>scale</i> is
+        /// arbitrary can be calibrated from data, and a quantity whose <i>unit</i> is already the thing you
+        /// care about cannot. A restart counter is the built-in case; a channel that reads a constant 1.0
+        /// while healthy is the other one.</para>
+        ///
+        /// <para><b>Required for scrape coverage rather than merely advisable.</b> A healthy coverage channel
+        /// is constant at 1.0, so <c>FloorCalibrator.InertChannels()</c> finds <c>Min == Max</c> and
+        /// <c>InertChannel.IsConclusive</c> — which tests <c>Value != 0.0</c> unconditionally — reports the
+        /// working channel as a confirmed dead binding. Deterministically, on every healthy deployment, within
+        /// about a hundred minutes at twelve replicas.</para>
+        ///
+        /// <para>By name because <c>FloorCalibrator</c> never receives a <see cref="CustomMetricBinding"/> —
+        /// it discovers channels from the window — so a flag on the binding could not reach it.</para>
+        /// </summary>
+        public IReadOnlyList<string> NonCalibratedCustomChannels { get; init; } = [];
+
+        /// <summary>
         /// How old a saved incident may be and still be adopted after a restart.
         ///
         /// <para><b>A bound is required.</b> A guard restarted after a week would otherwise resurrect

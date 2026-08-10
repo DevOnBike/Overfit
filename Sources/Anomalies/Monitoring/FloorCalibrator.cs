@@ -92,6 +92,16 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
         /// out of there.</para>
         /// </summary>
         private readonly Dictionary<string, CustomChannel> _customChannels = new(StringComparer.Ordinal);
+
+        /// <summary>
+        /// Custom channels this calibrator observes and proposes nothing for — the name-keyed equivalent of
+        /// <see cref="PeerSignalCatalog.IsCountedEvent"/>, which only speaks for the built-in enum.
+        ///
+        /// <para>Empty by default. See <see cref="ExemptFromCalibration"/> for why the exemption is binary and
+        /// what happens to a channel that does not have it.</para>
+        /// </summary>
+        private HashSet<string> _notFittable = [];
+
         /// <summary>
         /// The last computed proposal, or null when an observation has invalidated it. Not thread-safe, like
         /// the rest of this type: one guard, one cycle at a time.
@@ -145,6 +155,42 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
         {
             _labels = labels;
             _cached = null;
+
+            foreach (var channel in _customChannels.Values)
+            {
+                channel.Cached = null;
+            }
+        }
+
+        /// <summary>
+        /// Names custom channels that are observed like every other one and proposed for by nobody, and that
+        /// <see cref="InertChannels"/> does not judge — the name-keyed equivalent of
+        /// <see cref="PeerSignalCatalog.IsCountedEvent"/>, which can only speak for the built-in enum.
+        ///
+        /// <para><b>By name rather than by a flag on the binding, because this type never sees a binding.</b>
+        /// <see cref="_customChannels"/> is discovered from <c>window.CustomChannels</c> — a channel's
+        /// configuration does not reach here and adding a path for it would mean threading
+        /// <c>CustomMetricBinding</c> through the learned-state load for one boolean.</para>
+        ///
+        /// <para><b>Both mechanisms or neither, and that is measured rather than cautious.</b> A channel that
+        /// is healthy at a constant ceiling — scrape coverage is 1.0 on every pod of a healthy fleet — folds
+        /// a peer gap of <c>|1.0 − 1.0| = 0</c> on every observation, so <see cref="Propose(string)"/>'s
+        /// <c>gapMax × 1.25</c> is exactly <b>0.0</b>: the value <c>MinAbsoluteGap</c> documents as "gate
+        /// off". Fitting it while healthy therefore achieves nothing at all. The first time it does move — the
+        /// fault the channel exists to report — that single event becomes the maximum, and the proposal
+        /// becomes 1.25× it, permanently raising the bar against every future fault of that size or smaller.
+        /// Useless before, harmful after; there is no state in which half of this is worth keeping.</para>
+        ///
+        /// <para>The observations are still accumulated and still readable, exactly as they are for a counted
+        /// event — how often peers differ on a channel is a real fact about the cluster even when it must not
+        /// become a floor.</para>
+        /// </summary>
+        /// <param name="channels">Channel names; null or empty restores the default of fitting everything.</param>
+        public void ExemptFromCalibration(IReadOnlyList<string>? channels)
+        {
+            _notFittable = channels is null
+                ? []
+                : new HashSet<string>(channels, StringComparer.Ordinal);
 
             foreach (var channel in _customChannels.Values)
             {
@@ -586,9 +632,13 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
             var changeMax = channel.TrendChanges.Count > 0 ? channel.TrendChanges.Max : 0.0;
             var stepMax = channel.LevelShifts.Count > 0 ? channel.LevelShifts.Max : 0.0;
 
-            var proposedGap = gapMax * Margin;
-            var proposedChange = changeMax * Margin;
-            var proposedStep = stepMax * Margin;
+            // Exempt channels are observed and reported like everything else, and proposed for by nobody —
+            // the same split the built-in path applies to a counted event. See ExemptFromCalibration.
+            var fittable = !_notFittable.Contains(custom);
+
+            var proposedGap = fittable ? gapMax * Margin : 0.0;
+            var proposedChange = fittable ? changeMax * Margin : 0.0;
+            var proposedStep = fittable ? stepMax * Margin : 0.0;
             var capped = Cap(custom, ref proposedGap, ref proposedChange, ref proposedStep);
 
             var proposal = new FloorProposal(
@@ -656,6 +706,17 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
             foreach (var pair in _customChannels)
             {
                 var channel = pair.Value;
+
+                // A channel whose healthy state IS a constant is not evidence of a dead binding, and this is
+                // the only place that can know the difference. Without the exemption a working scrape-coverage
+                // channel reads Min == Max == 1.0 and InertChannel.IsConclusive — which tests `Value != 0.0`
+                // unconditionally — reports it as a CONFIRMED defect on every healthy deployment. Not a
+                // borderline case: `Magnitudes.Count` advances once per pod per window, so at twelve replicas
+                // the default 240 observations arrive in twenty cycles, about a hundred minutes.
+                if (_notFittable.Contains(pair.Key))
+                {
+                    continue;
+                }
 
                 if (IsInert(channel.Observed, channel.Magnitudes.Count, minimumObservations))
                 {

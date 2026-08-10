@@ -99,7 +99,22 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
                     continue;
                 }
 
-                if (string.IsNullOrWhiteSpace(entry.Source))
+                var customQuery = entry.Query.Trim();
+
+                // The same check the Metrics loop above applies, and it was missing here — a custom entry
+                // could carry a query with no selector token and would have reported on every pod in the
+                // cluster. Unreachable until now only because the reader never read the field at all.
+                if (customQuery.Length > 0
+                    && !customQuery.Contains(PromqlCatalog.SelectorToken, StringComparison.Ordinal))
+                {
+                    found.Add($"CustomMetrics['{key}'].query does not contain "
+                              + PromqlCatalog.SelectorToken + " — without it the query ignores the namespace "
+                              + "and pod matchers and silently reports on the whole cluster.");
+
+                    continue;
+                }
+
+                if (string.IsNullOrWhiteSpace(entry.Source) && customQuery.Length == 0)
                 {
                     found.Add($"CustomMetrics['{key}'].source is blank.");
 
@@ -117,8 +132,23 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
                     MinAbsoluteGap: Quantity($"CustomMetrics['{key}'].minGap", entry.MinGap, found),
                     MinAbsoluteTrendChange:
                         Quantity($"CustomMetrics['{key}'].minTrendChange", entry.MinTrendChange, found),
+
+                    // Required by the peer-novelty gate and by nothing else, so it stays optional here and is
+                    // enforced where it is used: AnomalyGuard.RestoreNovelty refuses a zero. Reading it was
+                    // missing entirely until 2026-08-10 — the binding carried the property, the file could
+                    // not set it, and the gate had only ever been exercised with options assigned in code.
+                    MinAbsoluteGapChange:
+                        Quantity($"CustomMetrics['{key}'].minGapChange", entry.MinGapChange, found),
                     Quantile: entry.Quantile,
-                    Rule: BuildRule(key, entry, found)));
+                    Rule: BuildRule(key, entry, found),
+
+                    // Inherited from MetricEntry, so the JSON key has always parsed — and until 2026-08-10
+                    // this loop never looked at it, so it parsed into the DTO and was dropped. The same shape
+                    // as minGapChange one field along, with the halves reversed: there the field was missing,
+                    // here the reader was.
+                    Query: customQuery,
+                    RequirePersistence: entry.RequirePersistence,
+                    Calibrated: entry.Calibrated));
             }
 
             problems = found;

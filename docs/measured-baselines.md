@@ -156,3 +156,36 @@ magnitude too high.
   benchmark before the runtime.**
 - **A thermally-throttled or loaded box invalidates an A/B.** Detect it with a canary — re-measure an
   unchanged path; if it moved, the box did, not your change.
+- **Native-AOT publishes to the BASELINE instruction set unless told otherwise — no AVX2.** SIMD decode ran
+  **~6x slower** under AOT than under the JIT for this reason alone, and nothing in the build said so. Fixed
+  with `IlcInstructionSet=avx2` in `Cli.csproj`; `fma` and `x86-x64-v3` were rejected by ILCompiler. **Any
+  AOT-vs-JIT performance comparison is invalid until the instruction set is pinned**, and this is invisible
+  in the output.
+- **A parity failure is as likely to be the test's premise as the code's.** The Q4_K_M "parity bug" was a
+  **test-premise defect**: native Q4_K_M decode was correct all along, and the test was comparing against the
+  wrong reference. Fixed by comparing against an F32 dequantisation **of the same file**. Before debugging a
+  kernel against a parity failure, state what the reference is and why it is the right one.
+- **Code-coverage instrumentation makes this codebase 10x–900x slower.** `XPlat Code Coverage` instruments
+  the hot loops; on Linux CI that turned a fast suite into an unusable one. `coverlet.runsettings` excludes
+  `Ops`, `Kernels`, `Maths`, `Intrinsics`, `Autograd`, `Optimizers`, `Tensors` and `LanguageModels.Runtime`
+  — **always pass `--settings coverlet.runsettings`**, and remember a coverage figure quoted without it is a
+  different number. Related: finite-difference gradient tests need an absolute-difference floor (5e-4) near
+  zero, or they fail on values that are correctly tiny.
+- **Correctness tests do not notice a performance cliff.** Theil–Sen shipped with **66 correctness tests and
+  zero benchmarks** while hiding **8.1 ms per call, 99% of it inside `Sort()`**. For any algorithm that will
+  be called in a loop, the order is: working version → correctness tests **plus a benchmark as the
+  performance reference** → only then optimisation.
+
+## Platform and load-time results
+
+- **Peak RAM during load matters more than steady state on the low end.** Prefer *unpooled* buffers for
+  weights and keep scratch `byte[]` out of read paths — the target includes machines where the transient
+  peak, not the resident set, is what fails.
+- **`ValueStopwatch` instead of `Stopwatch`.** `Stopwatch.StartNew` and the constructor allocate; the ban is
+  surgical and the static `GetTimestamp`/`Frequency` remain allowed. Use `ValueStopwatch.StartNew` →
+  `GetElapsedTime`.
+- **ARM NEON `SDOT` on Android: correct and pointless — decode is dequant-bound, not dot-bound.** The port
+  was verified correct and produced no throughput gain, because the time is spent unpacking quantised
+  weights rather than in the dot product. ~3.8 tok/s for a 0.5B Q4_K model on a Motorola Edge 50 Fusion,
+  pure managed .NET-for-Android. **A negative result, recorded so the same port is not attempted again** —
+  and a reminder that the bottleneck's identity is a measurement, not an assumption.

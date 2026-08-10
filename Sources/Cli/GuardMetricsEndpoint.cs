@@ -7,8 +7,10 @@ using System.Globalization;
 using System.Net;
 using System.Text;
 using DevOnBike.Overfit.Anomalies.Contracts;
+using DevOnBike.Overfit.Anomalies.Hosting;
 using DevOnBike.Overfit.Anomalies.Incidents;
 using DevOnBike.Overfit.Anomalies.Monitoring;
+using DevOnBike.Overfit.Runtime;
 using Microsoft.Extensions.Logging;
 
 namespace DevOnBike.Overfit.Cli
@@ -250,6 +252,40 @@ namespace DevOnBike.Overfit.Cli
         /// <para>Query parameters: <c>id</c> (required), <c>kind</c> = <c>noise</c>|<c>real</c> (required),
         /// <c>for</c> = a duration like <c>7d</c>, <c>90m</c> (noise only), and <c>reason</c>.</para>
         /// </summary>
+        /// <summary>
+        /// The shared secret <c>POST /ack</c> requires, read once at startup.
+        ///
+        /// <para>Empty means none was configured, and <see cref="IsAuthorised"/> then refuses every call —
+        /// fail closed, because the endpoint's effect is to silence a finding.</para>
+        /// </summary>
+        private static string AckToken { get; } =
+            Environment.GetEnvironmentVariable(OverfitEnvironment.GuardAckToken)?.Trim() ?? string.Empty;
+
+        /// <summary>
+        /// Whether the caller presented the configured bearer token.
+        ///
+        /// <para><b>Fail closed on an unset secret.</b> An unauthenticated write endpoint that silences
+        /// incidents is worse than no endpoint: the guard keeps running, keeps looking healthy, and reports
+        /// nothing. The `NetworkPolicy` written to protect this port was measured **inert** on a
+        /// Docker-Desktop-class cluster — no policy-capable CNI, probe pod still reached it — so a control
+        /// that assumes the customer's CNI enforces policy is not a control.</para>
+        ///
+        /// <para><b>Compared in constant time.</b> A short-circuiting comparison over a secret leaks its
+        /// prefix to anyone who can time the response, and this endpoint is reachable by whoever can reach
+        /// the scrape port.</para>
+        ///
+        /// <para><c>/metrics</c>, <c>/healthz</c> and <c>/suppressions</c> are deliberately NOT behind this.
+        /// The first two are what Prometheus scrapes, and the third is the transparency guarantee — a mute
+        /// nobody can enumerate is indistinguishable from a detector that stopped working. That leaves the
+        /// mute list readable by anyone who reaches the port, which is a smaller exposure than a writable
+        /// one and is stated here rather than left to be discovered.</para>
+        /// </summary>
+        private static bool IsAuthorised(HttpListenerContext context)
+        {
+            return GuardAckAuthorization.IsAuthorised(
+                context.Request.Headers["Authorization"], AckToken);
+        }
+
         private void Acknowledge(HttpListenerContext context)
         {
             if (_guard is null)
@@ -265,6 +301,32 @@ namespace DevOnBike.Overfit.Cli
                 Write(context, 405, "text/plain; charset=utf-8",
                     "POST /ack?id=<n>&kind=noise|real&for=7d&reason=... — this changes what the guard "
                     + "reports, so it is not a GET\n");
+
+                return;
+            }
+
+            if (!IsAuthorised(context))
+            {
+                // 503 rather than 401 when no secret is configured, because the two are different problems
+                // and only one is the caller's: an operator holding a valid token needs to know the guard was
+                // never given one, and telling them "unauthorised" sends them hunting for their own mistake.
+                var configured = AckToken.Length > 0;
+
+                _logger.LogWarning(
+                    "Refused POST /ack from {Remote}: {Reason}. This request would have suppressed a finding.",
+                    context.Request.RemoteEndPoint?.Address,
+                    configured ? "bad or missing bearer token" : "no ack token configured on this guard");
+
+                Write(
+                    context,
+                    configured ? 401 : 503,
+                    "text/plain; charset=utf-8",
+                    configured
+                        ? "POST /ack requires `Authorization: Bearer <token>` matching this guard's "
+                          + OverfitEnvironment.GuardAckToken + "\n"
+                        : "POST /ack is disabled because " + OverfitEnvironment.GuardAckToken
+                          + " is not set on this guard. It suppresses findings for a caller-chosen "
+                          + "duration, so it refuses rather than serving unauthenticated writes\n");
 
                 return;
             }

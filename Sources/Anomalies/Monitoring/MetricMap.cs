@@ -86,8 +86,37 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
         public IReadOnlyList<CustomMetricBinding> Custom => _custom;
 
         /// <summary>
+        /// Names of the custom channels whose observations must not become a floor — the form
+        /// <c>AnomalyGuardOptions.NonCalibratedCustomChannels</c> takes, because <c>FloorCalibrator</c> is
+        /// keyed by name and never sees a binding.
+        /// </summary>
+        public IReadOnlyList<string> NonCalibratedChannels
+        {
+            get
+            {
+                var names = new List<string>();
+
+                for (var i = 0; i < _custom.Count; i++)
+                {
+                    if (!_custom[i].Calibrated)
+                    {
+                        names.Add(_custom[i].Name);
+                    }
+                }
+
+                return names;
+            }
+        }
+
+        /// <summary>
         /// PromQL for each custom metric, keyed by its reported name. Same wrapping rules as the known set,
-        /// so a gauge is summed by pod and a histogram keeps the pod label through the quantile.
+        /// so a gauge is summed by pod and a histogram keeps the pod label through the quantile — and, since
+        /// 2026-08-10, the same verbatim-wins-over-kind escape hatch.
+        ///
+        /// <para><b>The precedence is not implemented here.</b> <see cref="Build"/> already resolves it for
+        /// the built-in path, so the custom binding's own <see cref="CustomMetricBinding.Query"/> is handed to
+        /// the same method rather than branched on twice. Two copies of a precedence rule is how the built-in
+        /// path came to have an escape hatch the custom path did not.</para>
         /// </summary>
         public Dictionary<string, string> CustomQueries(
             string? selectorToken = null,
@@ -103,7 +132,7 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
 
                 queries[binding.Name] = Build(
                     new MetricBinding(MetricIndex.RequestsPerSecond, binding.Source, binding.Kind,
-                        binding.Quantile > 0.0 ? binding.Quantile : 0.95),
+                        binding.Quantile > 0.0 ? binding.Quantile : 0.95, binding.Query),
                     token,
                     range);
             }

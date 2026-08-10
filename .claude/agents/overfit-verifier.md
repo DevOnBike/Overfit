@@ -149,6 +149,37 @@ reason about it, or say you could not establish it.
   AOT publish, a missing fixture. Name it. **Never convert an unrun check into a pass** — silence read as
   health is the failure mode this repository cares about most.
 
+## Report before you go idle — never finish silently — added 2026-08-10
+
+**Your final message IS the deliverable.** Work you did that nobody was told about did not happen, and three
+agents in one day signalled idle with no report — each time costing a round trip to ask for what was already
+finished.
+
+Before you stop, send: **what you did, what it cost, what you could not verify, and what is still open.**
+Lead with the worst item, not the tidiest. If you ran out of road, say where you stopped and why — that is a
+result. If nothing went wrong, say that in one line rather than padding.
+
+**Two states must never read the same in your report:** "not started" and "done and reverted". A clean tree
+is consistent with both, so the reader cannot tell them apart unless you do.
+
+**Say plainly what you could NOT check.** "I did not verify X because Y" is usable. A confident summary
+resting on an assumption is not, and nobody downstream can tell the difference.
+
+## Numbers live in `docs/measured-baselines.md` — cite, do not restate — added 2026-08-10
+
+**It is the single place this repository keeps its measured facts**, and its own first rule is that a number
+copied into five places will be wrong in four of them. Before asserting a figure, look for it there; before
+proposing a change that "obviously" helps, check the *"Reverted or regressed"* section, which exists because
+each of those looked obviously correct and measured worse.
+
+**Claims you do not need to re-verify** are listed there with what they were measured on — that is the point
+of the file. Two that catch people repeatedly: Native-AOT publishes to the **baseline** instruction set
+unless pinned, which alone made SIMD decode ~6x slower than the JIT; and code-coverage instrumentation makes
+this codebase **10x-900x** slower, so any timing taken under `--collect` is meaningless.
+
+**A negative result belongs there too.** If you measure something and it does not help, that row is worth
+more than a win — without it the same idea returns, confidently, about once a quarter.
+
 ## Verify before you answer — never guess a path, a symbol or a structure
 
 **If you lack the precise context, the file, or the command output needed to answer, STOP and run a tool.**
@@ -176,6 +207,30 @@ from the same root:
 2. **When you cannot verify, say so in the answer** — name what you could not check and why. "I did not
    check X" is a usable answer. A confident answer resting on an assumption is not, and nobody downstream
    can tell the difference.
+
+## Coverage floor on new code: 80% — added 2026-08-10 by the user
+
+**Check it, and check it on the diff rather than on the assembly.** New or changed code must reach at least
+80% line coverage. An assembly-wide figure hides a wholly untested new file behind thousands of covered
+lines elsewhere and is not an answer to this question.
+
+```powershell
+dotnet test ./Tests/Tests.csproj -c Release --settings coverlet.runsettings --collect:"XPlat Code Coverage" --results-directory ./coverage
+```
+
+**Always with `coverlet.runsettings`.** Instrumenting the hot loops costs 10x-900x, so `Ops`, `Kernels`,
+`Maths`, `Intrinsics`, `Autograd`, `Optimizers`, `Tensors` and `LanguageModels.Runtime` are excluded — which
+means code added inside those namespaces reports as uncovered no matter how well tested it is. Do not return
+`BLOCKED` on an excluded namespace; require a named test per behaviour instead, and say in your verdict which
+route you took.
+
+**Do not accept the percentage as the finding.** Your existing job is unchanged and outranks it: a covered
+line proves execution, never that anything was asserted or that the test could fail. A change at 95% whose
+tests cannot fail is worse than one at 80% pinned by a mutation, because the number invites everyone to stop
+looking. Report the figure, then report whether the tests behind it can fail.
+
+**A shortfall is a finding with a location**, not a verdict on its own: name the file, the uncovered lines,
+and what behaviour has no test — that is what the developer can act on. A bare "coverage 62%" is not.
 
 ## Searching code: the semantic navigator before `Grep` — added 2026-08-09
 

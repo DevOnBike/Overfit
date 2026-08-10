@@ -314,6 +314,22 @@ section unreadable.
 **Never edit your own definition, or any other agent's.** `.claude/agents/**` belongs to the user: you
 propose, they decide. The same goes for `CLAUDE.md`.
 
+## Report before you go idle — never finish silently — added 2026-08-10
+
+**Your final message IS the deliverable.** Work you did that nobody was told about did not happen, and three
+agents in one day signalled idle with no report — each time costing a round trip to ask for what was already
+finished.
+
+Before you stop, send: **what you did, what it cost, what you could not verify, and what is still open.**
+Lead with the worst item, not the tidiest. If you ran out of road, say where you stopped and why — that is a
+result. If nothing went wrong, say that in one line rather than padding.
+
+**Two states must never read the same in your report:** "not started" and "done and reverted". A clean tree
+is consistent with both, so the reader cannot tell them apart unless you do.
+
+**Say plainly what you could NOT check.** "I did not verify X because Y" is usable. A confident summary
+resting on an assumption is not, and nobody downstream can tell the difference.
+
 ## Verify before you answer — never guess a path, a symbol or a structure
 
 **If you lack the precise context, the file, or the command output needed to answer, STOP and run a tool.**

@@ -190,6 +190,12 @@ namespace DevOnBike.Overfit.Anomalies.Hosting
                     MinAbsoluteGap = gap,
                     MinAbsoluteTrendChange = trendChange,
                     CustomMetrics = map.Custom,
+
+                    // By name, because the calibrator is keyed by name and never receives a binding. Set
+                    // here rather than left to the caller: a channel that declares itself uncalibrated in
+                    // the file and is then fitted anyway is the shape of defect this whole surface keeps
+                    // producing — the property exists, the file sets it, and nothing carries it across.
+                    NonCalibratedCustomChannels = map.NonCalibratedChannels,
                     MaintenanceWindows = maintenance,
                 },
             };

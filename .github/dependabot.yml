@@ -1,0 +1,115 @@
+# Dependency updates. Proposed 2026-08-10 to close the OpenSSF Scorecard `Dependency-Update-Tool`
+# gap — see docs/security/audit-openssf-scorecard-v5.5.0.md.
+#
+# Two things this file is deliberately NOT:
+#
+#   * It is not an auto-merge. Every bump arrives as a pull request a human reads. This repository
+#     pins four packages ON PURPOSE — three Roslyn assemblies that must match the SDK's own `csc`
+#     (bumping them reproduces CS9057 and SILENTLY DISABLES every OVERFIT analyzer while the build
+#     still succeeds) and Microsoft.Build.Framework, capped by the SDK. Those pins are documented in
+#     `ignore` below so Dependabot stops proposing what will always be rejected.
+#   * It is not a substitute for `overfit-packages-update`. That agent reads what actually changed
+#     between two versions and says how far to bump; this only says a newer version exists.
+#
+# `groups` matters here more than usual: this solution has 26 projects under central package
+# management, so an ungrouped weekly run opens a wall of near-identical PRs and the interesting one
+# is lost among them.
+
+version: 2
+
+updates:
+  # NuGet, via central package management. Directory.Packages.props is the single version list, so
+  # the root directory is the whole solution as far as Dependabot is concerned.
+  - package-ecosystem: nuget
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Warsaw
+    open-pull-requests-limit: 5
+    groups:
+      test-and-analyzers:
+        patterns:
+          - "xunit*"
+          - "Microsoft.NET.Test.*"
+          - "coverlet.*"
+          - "*Analyzers*"
+          - "DevSkim*"
+      microsoft-extensions:
+        patterns:
+          - "Microsoft.Extensions.*"
+      system:
+        patterns:
+          - "System.*"
+    ignore:
+      # Must match the SDK's own Roslyn. A newer one compiles, and every OVERFIT rule stops firing.
+      - dependency-name: "Microsoft.CodeAnalysis.CSharp"
+      - dependency-name: "Microsoft.CodeAnalysis.CSharp.Workspaces"
+      - dependency-name: "Microsoft.CodeAnalysis.Workspaces.MSBuild"
+      # Capped by the installed SDK's MSBuild; nothing exists between the pin and that ceiling.
+      - dependency-name: "Microsoft.Build.Framework"
+    commit-message:
+      prefix: "deps"
+    labels:
+      - dependencies
+
+  # GitHub Actions. This is the one that matters for supply chain: 27 of 28 `uses:` references are
+  # unpinned floating tags today, and `overthink-playstore.yml` hands a Play Console service-account
+  # JSON to one of them. Dependabot rewrites a pinned SHA when the tag moves, which is what makes
+  # pinning maintainable rather than a one-off chore.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Warsaw
+    open-pull-requests-limit: 5
+    groups:
+      actions:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: "ci"
+    labels:
+      - dependencies
+      - ci
+
+  # Base images. Each Dockerfile is its own ecosystem entry — Dependabot does not search recursively.
+  - package-ecosystem: docker
+    directory: /Sources/Cli
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: "docker"
+    labels:
+      - dependencies
+
+  - package-ecosystem: docker
+    directory: /Demo/LabWorkload
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: "docker"
+    labels:
+      - dependencies
+
+  - package-ecosystem: docker
+    directory: /Demo/LabLoadDriver
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: "docker"
+    labels:
+      - dependencies
+
+  - package-ecosystem: docker
+    directory: /Demo/LocalAgentAspNetDemo
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: "docker"
+    labels:
+      - dependencies

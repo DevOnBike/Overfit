@@ -2,6 +2,21 @@
 
 This directory contains scenario guides, benchmark notes and architecture documentation for Overfit.
 
+## Before you write or measure anything here
+
+Two documents carry the working knowledge that is otherwise only in somebody's head. Neither is optional
+for a first contribution.
+
+- [`code-patterns.md`](code-patterns.md) — how code is written in this repository: the hard rules a build
+  gate enforces and the `BOUND:` pragma that is the only way past them, how anything parsed from outside
+  the process must be bounded, the two execution paths and their ownership model, the measured preferences
+  that contradict the obvious answer, and what not to build at all. **This is not how a web or
+  line-of-business application is written**, and the difference is not taste — the library runs inside
+  somebody else's process, often ahead-of-time compiled, with no JIT to rescue it.
+- [`performance-discipline.md`](performance-discipline.md) — how a performance claim is earned: the four
+  ways a benchmark lies here, the table of measured changes that were **reverted**, and eleven rules
+  distilled from a session in which nine mechanism hypotheses were killed by measurement.
+
 ## Current focus
 
 The current branch adds the **in-process agentic stack** on top of the GGUF LLM runtime —

@@ -67,6 +67,27 @@ Partial precedent exists and should be consolidated rather than duplicated: `Gua
 (`Completed`/`Blind`/`Failed`) and `DiscoveryOutcome` (`Resolved`/`NotFound`/`Ambiguous`) carry the same
 distinction at the cycle and the binding level. What each change adds is the per-signal version.
 
+### 5b. A calibration window must be flat in the quantity being calibrated
+
+Choosing a window for the absence of injected faults is not enough, and on 2026-08-10 that nearly produced a
+useless number. `AN-D1`'s floor is a **change in the peer gap**; the window screened clean of faults, and the
+gap inside it was moving at −3.94 MB/h — about 31 MB over the ring it would be fitted across, which would
+have put the floor near 39 MB and blinded the channel to any leak smaller than that, against a 9.52 MB
+detection floor. Measured correctly, describing the wrong thing.
+
+**So: plot the calibrated quantity across the candidate window and require it flat, before fitting anything.**
+Absence of a fault is a statement about the population; flatness is a statement about the number you are
+about to set.
+
+Two mistakes from the same hour, both cheap to repeat:
+
+- **Do not screen a window with thresholds borrowed from a different measurement.** The CPU and latency
+  screens that chose this window flagged it contaminated; the memory gap was then verified undisturbed at
+  every flagged timestamp. A screen is only evidence about the quantity it screens.
+- **A trend fitted across a step measures the step.** Regressing the gap from a sample taken before the
+  offset was injected reported +26 MB/h; refitting from after it settled gave −3.94. Start the fit where the
+  thing you are studying starts.
+
 ### 5. No threshold without a measurement IN THE MECHANISM'S UNIT
 
 Measurement alone is not enough. On 2026-08-09 both bad thresholds *were* measured:
@@ -107,6 +128,22 @@ it is harder to notice there, because a harness incapable of a verdict and a hea
 identical output.
 
 Say what the harness could have detected before reporting what it did.
+
+**The sharpest version of this rule, and it has now caught three separate things: prove the mechanism can
+say `Anomalous` on a synthetic input of the intended shape BEFORE you trust any healthy-arm result.** A
+detector that is structurally silent and a cluster that is genuinely healthy produce identical output, so a
+healthy arm alone is compatible with a completely dead mechanism.
+
+On 2026-08-10 an `AN-D9` design passed every architecture check and was refuted by two lines in the file it
+delegated to: `PeerOutlierOptions.Balanced` requires **30 samples per peer**, and the plan fed the detector
+**one scalar per pod** — so every member was excluded and the verdict was `InsufficientData` every cycle,
+healthy or faulted. The obvious repair failed on a different gate: peer gaps are measured between **medians**,
+and the median of a 0/1 series is 1.0 for any pod above 50% coverage, so the verdict became `Healthy`. Both
+would have sailed through a healthy-arm acceptance test.
+
+So, concretely, before writing the code: **read the code the plan delegates to, find the gates the input has
+to clear, and quote them.** If you cannot show the intended input clearing every gate, the design is refuted
+and the task stops there — that is a result, not a setback.
 
 ### 9. Read the deployed state back out of the cluster
 

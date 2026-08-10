@@ -78,6 +78,78 @@ the simple register-blocked GEMM beat the cache-blocked one. **The structure of 
 decides, not the technique** — which is also why a technique that won in one kernel must not be extrapolated
 to another without its own measurement.
 
+## Eleven rules that survived a session of nine refuted hypotheses
+
+From the 2026-07-22 prefill work (249 → ~283 tok/s). **Nine mechanism hypotheses were killed by
+measurement, and every one of them sounded coherent beforehand.** These are what was left standing. They
+are transcribed here from a private note because knowledge that lives outside the repository cannot be read
+by anyone else.
+
+1. **Two identical arms in the table are the cheapest canary there is.** A tile sweep showed `Tiled` and
+   `Tiled_Cols8` — *the same configuration* — **21% apart**, with error bars of ±9%. Without that accidental
+   duplicate the whole table would have been believed. Put an identical arm in deliberately.
+
+2. **A one-armed measurement after a hot-path change is worthless.** A change in `attn_scores` "gave"
+   280 → 292 tok/s — while `attn_kv`, untouched, also moved 141 → 121 ms. That was the box drifting. ABAB
+   with untouched components as canaries gave an honest 1.01x.
+
+3. **An impossible ordering means a broken benchmark, not a discovery.** A probe showed 512-bit *slower*
+   than 256-bit. Cause: a helper with five vector parameters that the JIT declined to inline, so the
+   measurement was of the calling convention. Inlined, the effect vanished entirely.
+
+4. **`stackalloc` never reaches registers.** A roofline lost 2.8x to this — 0.79 instead of 2.19 TFLOP/s,
+   below a real matmul, which is impossible for a loop that touches no memory. Use named locals with
+   constant indices.
+
+5. **Ablation inside the real kernel beats a microbenchmark.** Flags that disable individual fragments
+   (`AblateF16Scales` and friends) give each part's share of an actual run; a microbenchmark measures the
+   scaffolding around it.
+
+6. **Never extrapolate a technique between kernels.** The same AVX-512 port gave **+13.8% in Q4_K and −20%
+   in Q6_K**. The same scale hoisting gave 13% in Q4_K and 2.6% in Q6_K where 13% was predicted. A wider
+   vector is not a property of the ISA — it is the ratio of broadcast cost to work done per broadcast, and
+   that is per kernel.
+
+7. **The ceiling has to match the instruction mix the code actually issues.** "78% of the float ceiling" came
+   from dividing logical MACs by the floating-point ceiling, while the kernel issues one `vpmaddubsw` per 32
+   MACs. Against the right ceiling it was 15%. See `PeakQ4KShape` in `MachineRooflineBenchmark`.
+
+8. **Compute throughput in the repo, not in a script.** A matmul formula applied to a quantisation benchmark
+   produced a fictitious 29.6 TFLOP/s. Hence `Sources/Main/Diagnostics/Throughput.cs` and a `WorkAmount`
+   declared next to the benchmark.
+
+9. **On this machine, cache blocking for streaming access does not work — three refutations in a row.** In
+   the conv GEMM path: K-blocking regressed; N-panel grouping gave 0.8%, under the noise; and "fit the
+   working set in 2 MB/core" showed **no cliff at all and a positive correlation** (A = 1152 KB → 658
+   GFLOP/s, 9216 KB → 737). The reason is hardware: 128 MB of V-cache, so data that "should" stream from
+   DRAM comes from L3. Goto/BLIS structure was designed for machines with sharp cache cliffs; this one has
+   none. **Do not propose another blocking scheme without re-measuring the throughput curve first.**
+
+10. **The cheapest measurement is the one you do not have to write.** The 2 MB/core hypothesis was settled by
+    an **existing** profiler — `ConvGemmPartProfileTests`, a `[LongFact]` flipped to `[Fact]` for twenty
+    minutes, zero blocking code written, unambiguous result. Before building a harness, check whether the
+    repository already has one that answers the question.
+
+11. **A controlled comparison inside one table beats a regression across the whole table.** conv9/10/11/12/13
+    have identical M, K and A and differ only in N — 737 vs 287 GFLOP/s. That isolates N as the causal
+    variable far harder than any fit across all layers. Look for pairs that differ in one parameter before
+    you start modelling.
+
+**What actually produced this session's gains**: one model that *predicted* — amortising fixed work per
+block, which got the scaling with tile width right and the end-to-end result within 0.6% — and not the ideas
+that sounded good.
+
+## Two more measured results worth not re-discovering
+
+- **`OverfitParallelFor` in decode, `Parallel.For` everywhere else.** A fair sustained benchmark:
+  `ForDecode` **455 µs / 0 B** against `Parallel.For` at **2059 µs / 925 KB** — 4.5x and allocation-free.
+  It does not generalise: migrating `Conv2D` to it measured **+13% MNIST wall time** and was reverted. The
+  decode spin-pool assumes dedicated cores, which decode has and a training epoch does not.
+- **Loop shape is not the lever; the declared type is.** `for` vs `foreach` over an array is ~2 ns and the
+  direction reverses with size. An interface costs **2.4x** (`foreach`) to **4.6x** (indexing) plus 32 B for
+  the enumerator. Monomorphism does **not** guarantee zero allocation — that refuted an earlier explanation
+  of my own. Do not "tidy" a `T[]` into `IReadOnlyList<T>`.
+
 ## The bar
 
 Never ship, claim or commit a perf win you have not measured on a stable box, best-of-N on **both** sides,

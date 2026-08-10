@@ -9,7 +9,8 @@ namespace DevOnBike.Overfit.Anomalies.Contracts
     ///     A single metric sample for one pod.
     ///     Readonly struct — zero allocations when passing through the pipeline.
     ///     Feature layout (must match <see cref="WriteFeatureVector" /> order):
-    ///     [0]  CpuUsageRatio          — rate / cpu_limit
+    ///     [0]  CpuUsageRatio          — CPU seconds per second, i.e. CORES. NOT a share of the limit,
+    ///                                   despite the name — see MetricUnits.Declared and AN-D13
     ///     [1]  CpuThrottleRatio       — throttled_periods / total_periods
     ///     [2]  MemoryWorkingSetBytes  — container_memory_working_set_bytes
     ///     [3]  OomEventsRate          — rate(container_oom_events_total, 1m)

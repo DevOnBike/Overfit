@@ -184,6 +184,37 @@ section unreadable.
 **Never edit your own definition, or any other agent's.** `.claude/agents/**` belongs to the user: you
 propose, they decide. The same goes for `CLAUDE.md`.
 
+## Report before you go idle — never finish silently — added 2026-08-10
+
+**Your final message IS the deliverable.** Work you did that nobody was told about did not happen, and three
+agents in one day signalled idle with no report — each time costing a round trip to ask for what was already
+finished.
+
+Before you stop, send: **what you did, what it cost, what you could not verify, and what is still open.**
+Lead with the worst item, not the tidiest. If you ran out of road, say where you stopped and why — that is a
+result. If nothing went wrong, say that in one line rather than padding.
+
+**Two states must never read the same in your report:** "not started" and "done and reverted". A clean tree
+is consistent with both, so the reader cannot tell them apart unless you do.
+
+**Say plainly what you could NOT check.** "I did not verify X because Y" is usable. A confident summary
+resting on an assumption is not, and nobody downstream can tell the difference.
+
+## Numbers live in `docs/measured-baselines.md` — cite, do not restate — added 2026-08-10
+
+**It is the single place this repository keeps its measured facts**, and its own first rule is that a number
+copied into five places will be wrong in four of them. Before asserting a figure, look for it there; before
+proposing a change that "obviously" helps, check the *"Reverted or regressed"* section, which exists because
+each of those looked obviously correct and measured worse.
+
+**Claims you do not need to re-verify** are listed there with what they were measured on — that is the point
+of the file. Two that catch people repeatedly: Native-AOT publishes to the **baseline** instruction set
+unless pinned, which alone made SIMD decode ~6x slower than the JIT; and code-coverage instrumentation makes
+this codebase **10x-900x** slower, so any timing taken under `--collect` is meaningless.
+
+**A negative result belongs there too.** If you measure something and it does not help, that row is worth
+more than a win — without it the same idea returns, confidently, about once a quarter.
+
 ## Verify before you answer — never guess a path, a symbol or a structure
 
 **If you lack the precise context, the file, or the command output needed to answer, STOP and run a tool.**

@@ -285,6 +285,15 @@ data:
           "minTrendChange": "0.00004",
           "ruleThreshold": "0.01",
           "ruleMinBreachFraction": 0.25
+        },
+        "ScrapeCoverage": {
+          "source": "up",
+          "kind": "Ratio",
+          "query": "avg_over_time(up{%selector%}[15m])",
+          "loadSensitive": false,
+          "class": "Symptom",
+          "requirePersistence": true,
+          "calibrated": false
         }
       }
     }
@@ -324,6 +333,26 @@ spec:
             - "20"
             - --metrics-port
             - "9469"
+          env:
+            # Shared secret for POST /ack, which suppresses a finding for a caller-chosen duration.
+            #
+            # `optional: true` on purpose, and it is not laxness: the endpoint FAILS CLOSED without this —
+            # /ack answers 503 and says why — so a missing Secret costs the acknowledge feature and nothing
+            # else. Making it required would stop the guard from starting over a feature most deployments
+            # never use, which trades a detector outage for a convenience.
+            #
+            # The NetworkPolicy below is NOT a substitute and was measured inert on this cluster: Docker
+            # Desktop carries no policy-capable CNI, and a probe pod in `lab` still reached :9469 with the
+            # policy applied. A control that depends on the customer's CNI is not a control.
+            #
+            #   kubectl -n lab create secret generic anomaly-guard-ack \
+            #     --from-literal=token="$(openssl rand -base64 32)"
+            - name: OVERFIT_GUARD_ACK_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: anomaly-guard-ack
+                  key: token
+                  optional: true
           ports:
             - name: metrics
               containerPort: 9469

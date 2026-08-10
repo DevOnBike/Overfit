@@ -113,6 +113,53 @@ namespace DevOnBike.Overfit.Tests.Anomalies
         }
 
         /// <summary>
+        /// A channel that declares itself uncalibrated in the file reaches the guard's options as a name.
+        ///
+        /// <para><b>The link this covers is the one that keeps breaking in this subsystem</b>: the property
+        /// exists, the file sets it, the binding carries it, and nothing hands it across. <c>FloorCalibrator</c>
+        /// is keyed by name and never sees a <c>CustomMetricBinding</c>, so the flag has to be translated
+        /// here or the exemption is configured and inert.</para>
+        ///
+        /// <para>Asserted alongside a calibrated channel, so a registration that exempted everything — or
+        /// nothing — fails rather than passing on a one-element list that happens to look right.</para>
+        /// </summary>
+        [Fact]
+        public void AnUncalibratedChannelReachesTheGuardOptionsByName()
+        {
+            var services = new ServiceCollection();
+
+            services.AddLogging();
+            services.AddOverfitAnomalyGuard(
+                new AnomalyGuardConfigFile
+                {
+                    Prometheus = "http://127.0.0.1:9090",
+                    Namespace = "lab",
+                    Workload = "lab-workload",
+                    PodRegex = "lab-workload-.*",
+                    CustomMetrics =
+                    {
+                        ["ScrapeCoverage"] = new AnomalyGuardConfigFile.CustomEntry
+                        {
+                            Source = "up",
+                            Kind = nameof(MetricSourceKind.Ratio),
+                            Query = "avg_over_time(up{%selector%}[15m])",
+                            Calibrated = false,
+                        },
+                        ["GcCommittedBytes"] = new AnomalyGuardConfigFile.CustomEntry
+                        {
+                            Source = "dotnet_gc_committed_bytes",
+                            Kind = nameof(MetricSourceKind.Gauge),
+                        },
+                    },
+                });
+
+            using var provider = services.BuildServiceProvider();
+            var options = provider.GetRequiredService<AnomalyGuardServiceOptions>();
+
+            Assert.Equal(["ScrapeCoverage"], options.Guard.NonCalibratedCustomChannels);
+        }
+
+        /// <summary>
         /// A syntactically valid target that nothing is listening on. Registration issues no query, and
         /// neither does resolution — the first request happens on the first cycle, which these tests never
         /// run.

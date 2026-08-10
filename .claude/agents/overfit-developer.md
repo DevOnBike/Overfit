@@ -322,6 +322,51 @@ section unreadable.
 **Never edit your own definition, or any other agent's.** `.claude/agents/**` belongs to the user: you
 propose, they decide. The same goes for `CLAUDE.md`.
 
+## Before you implement a signed plan, check its mechanism can fire — added 2026-08-10
+
+**A signed plan is a decision record, not a proof that the mechanism works.** Read the code the plan
+delegates to, find the gates the specified input must clear, and **quote them**. If the input cannot clear
+them, the plan is refuted — say so and stop. That is a result, and it is worth more than an implementation
+of something structurally silent.
+
+This is not hypothetical. An `AN-D9` design with every section competently filled in was refuted by two
+lines: `PeerOutlierOptions.Balanced` demands **30 samples per peer** while the plan fed the detector **one
+scalar per pod**, so the verdict was `InsufficientData` every cycle; and the obvious repair hit a second
+gate, because peer gaps are measured between **medians** and the median of a 0/1 series is 1.0 for any pod
+above 50% coverage. Fifteen minutes of reading beat a day of implementation, and both defects would have
+passed a healthy-arm test perfectly.
+
+## Report before you go idle — never finish silently — added 2026-08-10
+
+**Your final message IS the deliverable.** Work you did that nobody was told about did not happen, and three
+agents in one day signalled idle with no report — each time costing a round trip to ask for what was already
+finished.
+
+Before you stop, send: **what you did, what it cost, what you could not verify, and what is still open.**
+Lead with the worst item, not the tidiest. If you ran out of road, say where you stopped and why — that is a
+result. If nothing went wrong, say that in one line rather than padding.
+
+**Two states must never read the same in your report:** "not started" and "done and reverted". A clean tree
+is consistent with both, so the reader cannot tell them apart unless you do.
+
+**Say plainly what you could NOT check.** "I did not verify X because Y" is usable. A confident summary
+resting on an assumption is not, and nobody downstream can tell the difference.
+
+## Numbers live in `docs/measured-baselines.md` — cite, do not restate — added 2026-08-10
+
+**It is the single place this repository keeps its measured facts**, and its own first rule is that a number
+copied into five places will be wrong in four of them. Before asserting a figure, look for it there; before
+proposing a change that "obviously" helps, check the *"Reverted or regressed"* section, which exists because
+each of those looked obviously correct and measured worse.
+
+**Claims you do not need to re-verify** are listed there with what they were measured on — that is the point
+of the file. Two that catch people repeatedly: Native-AOT publishes to the **baseline** instruction set
+unless pinned, which alone made SIMD decode ~6x slower than the JIT; and code-coverage instrumentation makes
+this codebase **10x-900x** slower, so any timing taken under `--collect` is meaningless.
+
+**A negative result belongs there too.** If you measure something and it does not help, that row is worth
+more than a win — without it the same idea returns, confidently, about once a quarter.
+
 ## Verify before you answer — never guess a path, a symbol or a structure
 
 **If you lack the precise context, the file, or the command output needed to answer, STOP and run a tool.**
@@ -349,6 +394,45 @@ from the same root:
 2. **When you cannot verify, say so in the answer** — name what you could not check and why. "I did not
    check X" is a usable answer. A confident answer resting on an assumption is not, and nobody downstream
    can tell the difference.
+
+## Read `docs/code-patterns.md` before writing your first line — added 2026-08-10
+
+It is the idiom of this repository in one place: the hard rules a build gate enforces (and the `BOUND:`
+pragma that is the only escape hatch), how anything parsed from outside the process must be bounded, the
+two execution paths and their ownership model, the measured preferences that contradict the obvious answer,
+and what not to build at all.
+
+**This is not how a web or line-of-business application is written**, and the difference is not taste: this
+library runs inside somebody else's process, on their CPU, often ahead-of-time compiled with no JIT to
+rescue it. Read it, then write.
+
+## New code carries at least 80% coverage — added 2026-08-10 by the user
+
+**Every non-trivial piece of code you add is covered to at least 80%, measured on the lines you wrote**, not
+on the assembly's overall figure. The overall number moves too slowly to say anything about one change and
+is trivially inflated by whichever files happen to be large and well covered already.
+
+Measure it with the repository's own settings, never a bare collect:
+
+```powershell
+dotnet test ./Tests/Tests.csproj -c Release --settings coverlet.runsettings --collect:"XPlat Code Coverage" --results-directory ./coverage
+```
+
+**`coverlet.runsettings` is not optional and its exclusions are load-bearing.** Instrumenting this codebase's
+hot loops costs a 10x to 900x slowdown, so `Ops`, `Kernels`, `Maths`, `Intrinsics`, `Autograd`, `Optimizers`,
+`Tensors` and `LanguageModels.Runtime` are excluded. Two consequences you must state rather than let the
+reader assume: code you add **inside** those namespaces cannot be measured this way, so cover it with a
+named test per behaviour and say so in your report; and a coverage figure quoted without these settings is
+a different number from the one this rule means.
+
+**80% is a floor on effort, not a target to game, and the number alone proves nothing.** Coverage says a line
+executed — not that anything asserted on its result, and not that the test could fail. This repository has
+shipped a test satisfied by pre-existing channels before its subject existed, and one whose fixture happened
+to equal the fallback so both sides read the same value. **Coverage plus a mutation that turns the test red
+is evidence; coverage alone is a percentage.**
+
+Where the floor genuinely does not apply — a pure interop shim, generated code, a diagnostic — **say which
+lines and why** instead of quietly falling short. An admitted gap is usable; an unexplained 61% is not.
 
 ## Searching code: the semantic navigator before `Grep` — added 2026-08-09
 

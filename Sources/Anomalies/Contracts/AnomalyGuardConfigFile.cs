@@ -152,11 +152,49 @@ namespace DevOnBike.Overfit.Anomalies.Contracts
             /// <summary>Smallest trend change worth reporting, with a unit.</summary>
             public string MinTrendChange { get; set; } = string.Empty;
 
+            /// <summary>
+            /// Smallest change in this channel's PEER GAP worth treating as news, with a unit. Required by
+            /// the peer-novelty gate and by nothing else.
+            ///
+            /// <para><b>Added 2026-08-10 because the property existed and the file could not express it.</b>
+            /// <see cref="CustomMetricBinding.MinAbsoluteGapChange"/> was there, the reader never set it, and
+            /// nothing noticed — the novelty gate was proven in-process with options assigned in code, never
+            /// through the file a deployment actually loads. It is harmless while the gate is off and fatal
+            /// the day it is switched on, because <c>AnomalyGuard.RestoreNovelty</c> refuses a binding whose
+            /// value is zero. A feature that cannot be configured is not shipped, however well it is
+            /// tested.</para>
+            ///
+            /// <para>Distinct from <see cref="MinGap"/> on purpose: that one asks how large a difference
+            /// between replicas matters, this one asks how much that difference must MOVE before it is news
+            /// again. A pod 19 MB heavier than its peers since it started is not an event; the same pod
+            /// growing another 19 MB is.</para>
+            /// </summary>
+            public string MinGapChange { get; set; } = string.Empty;
+
             /// <summary>Optional absolute rule: the level, with a unit.</summary>
             public string RuleThreshold { get; set; } = string.Empty;
 
             /// <summary>Share of the window that must be at or above it, 0…1.</summary>
             public double RuleMinBreachFraction { get; set; } = 0.25;
+
+            /// <summary>
+            /// Whether a peer finding on this channel must recur before it is reported. False — the default —
+            /// is what every custom channel did before this existed.
+            ///
+            /// <para>How many cycles is not set here: it is <c>silentPodCycles</c>, so the two cannot drift
+            /// apart. See <see cref="CustomMetricBinding.RequirePersistence"/>.</para>
+            /// </summary>
+            public bool RequirePersistence
+            {
+                get; set;
+            }
+
+            /// <summary>
+            /// Whether a healthy period's observations of this channel may become a floor, and whether the
+            /// inert-channel check may judge it. True — the default — is what every custom channel did before
+            /// this existed. See <see cref="CustomMetricBinding.Calibrated"/>.
+            /// </summary>
+            public bool Calibrated { get; set; } = true;
         }
 
         /// <summary>One feature's absolute floors.</summary>
