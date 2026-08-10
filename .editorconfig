@@ -431,6 +431,36 @@ dotnet_diagnostic.OVERFIT034.severity = error
 dotnet_diagnostic.OVERFIT033.severity = error
 dotnet_diagnostic.OVERFIT034.severity = error
 
+# ── Reliability rules, armed on the OTHER assemblies that parse external input ────────────────────────
+# OVERFIT022/023/025/026/027/028/029/030 were error under [Sources/Main/**.cs] only. That scoping was never
+# a decision — the Tests and Benchmarks exclusions are written down and argued, these four projects were
+# simply not named. They take the same class of input the rules exist for: Anomalies parses Prometheus
+# exposition text, Server.AspNet and Mcp parse HTTP bodies and JSON-RPC frames, Cli reads files chosen by
+# whoever runs it. A stack overflow or an unbounded loop there kills the host process exactly as it would
+# in the library.
+#
+# MEASURED BEFORE ARMING, 2026-08-10: the backlog across all four projects and all eight rules is ZERO, so
+# this promotion costs nothing today and only binds what is written next. Two things had to be proved
+# before that zero was worth anything, because the first two attempts to measure it were wrong:
+#   * the rules RUN here — Directory.Build.props wires the analyzer into every project except
+#     Analyzers/Tests/AotSmokeTest/Benchmarks and the templates. Confirmed with a probe file carrying a
+#     `while (true)`: OVERFIT023 reported in Sources/Anomalies.
+#   * six of the eight sit at `suggestion` under [*.cs] and A BUILD DOES NOT PRINT SUGGESTIONS. The first
+#     sweep returned "0 sites" and was measuring the config's silence, not the code. Re-run with the
+#     severities raised, and the raise itself proved by the same probe reporting OVERFIT026.
+# The escape hatch is unchanged and is the point: a `#pragma warning disable` whose comment starts with
+# `BOUND:` and names what bounds the loop, the recursion or the allocation. If that sentence cannot be
+# written, the code is not safe and the pragma would be a lie.
+[Sources/{Anomalies,Server.AspNet,Mcp,Cli}/**.cs]
+dotnet_diagnostic.OVERFIT022.severity = error
+dotnet_diagnostic.OVERFIT023.severity = error
+dotnet_diagnostic.OVERFIT025.severity = error
+dotnet_diagnostic.OVERFIT026.severity = error
+dotnet_diagnostic.OVERFIT027.severity = error
+dotnet_diagnostic.OVERFIT028.severity = error
+dotnet_diagnostic.OVERFIT029.severity = error
+dotnet_diagnostic.OVERFIT030.severity = error
+
 # ── Source-generated files, by name ───────────────────────────────────────────────────────────────────
 # The System.Text.Json source generator emits its context under a path the [**/obj/**] section does not
 # match, so RS0030 fell through to its default Warning there. Directory.Build.props used to handle that by
