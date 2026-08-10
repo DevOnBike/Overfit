@@ -15,6 +15,7 @@ answer, this page says which file holds it.
 | What is this and should we run it? | [`aiops-business-case.md`](aiops-business-case.md) |
 | How does it work? | [`aiops-architecture.md`](aiops-architecture.md) |
 | What does it actually watch, and in what unit? | [`aiops-metrics-catalogue.md`](aiops-metrics-catalogue.md) |
+| Which failures will this catch? | [`aiops-coverage-map.md`](aiops-coverage-map.md) |
 | How do I add a metric? | [`aiops-adding-a-metric.md`](aiops-adding-a-metric.md) |
 | How is an `AN-*` / `RS-*` / `PS-*` task actually run? | [`aiops-task-protocol.md`](aiops-task-protocol.md) — the nine steps and the incident behind each; `CLAUDE.md` links here rather than repeating it |
 | What is broken right now? | [`docs/TASKS.md`](../TASKS.md) — **not a document in this directory.** `aiops-backlog.md` below is history and reasoning, not current status |
@@ -68,6 +69,11 @@ answer, this page says which file holds it.
   series, `MetricSourceKind`, the PromQL it actually becomes, unit, stack-neutral vs. .NET-specific, which
   detector families can act on it, its calibrated floor with the conditions it was measured under, and its
   known failure mode. Read this before binding a new deployment or trusting a number a channel reports.
+- [`aiops-coverage-map.md`](aiops-coverage-map.md) — the same information reorganised **per failure mode**
+  instead of per channel: OOM kill, memory leak, CPU throttling vs. starvation, hung requests, lock
+  contention, scrape saturation, a bad rollout, and so on, each marked detected (live-verified vs.
+  fixture-proven only), structurally undetectable, or uncovered today. Read this before answering "which
+  failures will this catch."
 - [`aiops-detection-pipeline.md`](aiops-detection-pipeline.md) — 1151 lines, the deepest thing here: how a
   metric becomes an incident, and the measurement behind every calibrated threshold. Read this before
   changing a threshold or a detector's arithmetic. **Known stale on one point, corrected by the file above**:

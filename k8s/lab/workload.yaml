@@ -77,13 +77,22 @@ spec:
               # 292 of 292 on one measured run. The guard cannot be shown to detect throttling on a cluster
               # where throttling cannot happen.
               #
-              # 200m is measured, not chosen. Healthy usage is 0.0018-0.0022 cores per pod with a
-              # three-hour peak of 0.0024, so this is 83x above anything a well replica does and will not
-              # throttle one. It is also low enough for the fault to reach: POST /fault/cpu?msPerRequest=250
-              # at the driver's ~0.8 rps per pod lands exactly on the limit, and 400 clears it outright.
-              cpu: 200m
-          # No CPU limit on purpose. CFS throttling is its own fault with its own signal, and mixing it in
-          # here would mean every CPU measurement carried a second explanation.
+              # ONE CORE, and the 200m it replaced was wrong in a way worth keeping written down.
+              #
+              # 200m was defended as "83x above the 0.0018-0.0022 cores a healthy pod uses". That
+              # arithmetic is right and answers the wrong question: **CFS throttles on bursts inside a
+              # 100 ms period**, so average cores is not the unit that governs throttling. A pod
+              # averaging 0.002 cores can still exhaust its slice inside one period and be throttled,
+              # and headroom measured against an average says nothing about whether that happens.
+              # Raised on 2026-08-09 after reading `SustainedThresholdOptions.ForCpuThrottling`, which
+              # states the mechanism.
+              #
+              # **The live cluster has carried `1` since that day and this file did not** — found
+              # 2026-08-10 by `overfit-analyst` reading the cluster while building the coverage map.
+              # Re-applying the old value would have silently restored a limit the CPU fault cannot
+              # reach: the fault is sized at 2500 ms/request against a one-core quota, and against
+              # 200m it is a different experiment with the same name.
+              cpu: "1"
           env:
             - name: LAB_ROLE
               value: member

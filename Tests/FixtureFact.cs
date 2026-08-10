@@ -158,23 +158,18 @@ namespace DevOnBike.Overfit.Tests
         /// <c>RedactionGatewayE2ETests</c>. Two copies of a locator is one copy away from two different
         /// answers.</para>
         /// </summary>
-        internal static string LocateOverfitCli()
+        internal static string? LocateOverfitCli()
         {
-            var directory = new DirectoryInfo(AppContext.BaseDirectory);
+            // Shared walk (XC-4), local policy: null means "no checkout, so no built CLI to find", which
+            // callers turn into a skip. Only the walk moved; everything below is this locator's own job.
+            var root = RepositoryPaths.TryFindRoot();
 
-            // BOUND: the walk is bounded by the filesystem depth of the test output directory; `Parent`
-            // reaches null at the drive root.
-            while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "Overfit.sln")))
-            {
-                directory = directory.Parent;
-            }
-
-            if (directory is null)
+            if (root is null)
             {
                 return null;
             }
 
-            var binaries = Path.Combine(directory.FullName, "Sources", "Cli", "bin");
+            var binaries = Path.Combine(root, "Sources", "Cli", "bin");
 
             if (!Directory.Exists(binaries))
             {
@@ -186,8 +181,7 @@ namespace DevOnBike.Overfit.Tests
             // i.e. on CI, silently, which is the exact class of failure this whole change is about.
             var name = OperatingSystem.IsWindows() ? "overfit.exe" : "overfit";
 
-            foreach (var candidate in Directory.EnumerateFiles(binaries, name,
-                         SearchOption.AllDirectories))
+            foreach (var candidate in Directory.EnumerateFiles(binaries, name, SearchOption.AllDirectories))
             {
                 return candidate;
             }

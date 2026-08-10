@@ -371,20 +371,22 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Retrieval
         // Walks up from the test output directory to the repository root (the folder holding Overfit.sln).
         private static string? FindDocsDirectory()
         {
-            var directory = new DirectoryInfo(AppContext.BaseDirectory);
+            // Shared walk (XC-4), local policy: null means "not in a checkout", which this test turns into a
+            // skip. Replacing it with RepositoryPaths.Root would convert that skip into a failure.
+            //
+            // The old copy stopped after 12 levels. That bound is not carried over and nothing is lost:
+            // `Parent` reaches null at the drive root, so the walk terminates either way, and a checkout
+            // nested deeper than twelve directories would have been silently unfindable.
+            var root = RepositoryPaths.TryFindRoot();
 
-            for (var depth = 0; depth < 12 && directory is not null; depth++)
+            if (root is null)
             {
-                if (File.Exists(Path.Combine(directory.FullName, "Overfit.sln")))
-                {
-                    var docs = Path.Combine(directory.FullName, "docs");
-                    return Directory.Exists(docs) ? docs : null;
-                }
-
-                directory = directory.Parent;
+                return null;
             }
 
-            return null;
+            var docs = Path.Combine(root, "docs");
+
+            return Directory.Exists(docs) ? docs : null;
         }
     }
 }

@@ -3,6 +3,8 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using DevOnBike.Overfit.Tests.TestSupport;
+
 namespace DevOnBike.Overfit.Tests
 {
     /// <summary>
@@ -114,21 +116,12 @@ namespace DevOnBike.Overfit.Tests
                 return file;
             }
 
-            var directory = new DirectoryInfo(AppContext.BaseDirectory);
+            var root = RepositoryPaths.TryFindRoot();
 
-            while (directory is not null)
-            {
-                if (File.Exists(Path.Combine(directory.FullName, "Overfit.sln")))
-                {
-                    return Path.Combine(directory.FullName, file);
-                }
-
-                directory = directory.Parent;
-            }
-
-            // No root found: return it unchanged so the caller reports "fixture not present" with the
-            // name it was given, rather than a path assembled from a guess.
-            return file;
+            // Shared walk (XC-4), local policy: no root found means the name is returned UNCHANGED, so the
+            // caller reports "fixture not present" with what it was given rather than with a path assembled
+            // from a guess. Neither throwing nor returning null would say that.
+            return root is null ? file : Path.Combine(root, file);
         }
 
     }

@@ -4,6 +4,7 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using System.Text.RegularExpressions;
+using DevOnBike.Overfit.Tests.TestSupport;
 
 namespace DevOnBike.Overfit.Tests.Diagnostics
 {
@@ -155,21 +156,12 @@ namespace DevOnBike.Overfit.Tests.Diagnostics
         /// </summary>
         private static string RepositoryRoot()
         {
-            var directory = new DirectoryInfo(AppContext.BaseDirectory);
-
-            while (directory is not null)
-            {
-                if (File.Exists(Path.Combine(directory.FullName, "Overfit.sln")))
-                {
-                    return directory.FullName;
-                }
-
-                directory = directory.Parent;
-            }
-
-            throw new InvalidOperationException(
-                $"could not find Overfit.sln above {AppContext.BaseDirectory}; this test reads the source "
-                + "tree, so it cannot run against a binary-only layout");
+            // The walk is shared (XC-4); the POLICY is not. This one fails loudly on purpose — see the
+            // remarks above — so it keeps its own message rather than inheriting RepositoryPaths.Root's.
+            return RepositoryPaths.TryFindRoot()
+                   ?? throw new InvalidOperationException(
+                       $"could not find Overfit.sln above {AppContext.BaseDirectory}; this test reads the "
+                       + "source tree, so it cannot run against a binary-only layout");
         }
     }
 }

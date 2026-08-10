@@ -7,11 +7,19 @@
     "",
     "A feature with no entry here is NOT a gap to paper over: its query is never issued and every cycle",
     "counts it blind, which the guard prints at startup. CpuThrottleRatio and ErrorRate are left out on",
-    "purpose so that list has something in it on the first run."
+    "purpose so that list has something in it on the first run.",
+    "",
+    "`workload` was MISSING here until 2026-08-10 (AN-F3), and blank is not neutral. Without it a",
+    "maintenance window naming a workload can never match, so an operator who declares one for a rollout",
+    "is paged during it anyway; and the incident tracker keys a pod-less subject on the workload, so every",
+    "deployment-level finding in the namespace collapses to \"overfit/\" — one identity shared by unrelated",
+    "problems, reported as a single continuing incident. Visible in the lab's own logs as `incident in lab/:`",
+    "with nothing after the slash. See AnomalyGuardConfigFile.Workload."
   ],
   "prometheus": "http://127.0.0.1:9090",
   "namespace": "overfit",
   "podRegex": "overfit-server-.*",
+  "workload": "overfit-server",
   "metrics": {
     "RequestsPerSecond": {
       "source": "overfit_chat_requests_total",

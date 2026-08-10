@@ -126,6 +126,30 @@ applies comes from `MetricHistory.TryExpectation`. `SeasonalBaseline` (the stati
 false/day on a 240-minute window) is referenced by `TrendDetector` and `MetricHistory` but is **not** what
 the guard consults per cycle. Wiring that path is a follow-on, not a blocker.
 
+### Kept deliberately, not scheduled — the learned live path (`AN-D11`, decided 2026-08-10)
+
+`Sources/Anomalies/Live/` — `LiveMonitoringPipeline` + `LiveMonitoringOptions`, 416 lines — is a **second
+execution path that never meets `AnomalyGuard.RunCycle` at runtime**. Measured: `find_references` returns
+seven hits, five inside its own two files and two in `LiveMonitoringPipelineTests`; there is no production
+consumer outside the folder, no CLI command constructs it, and it is in no manifest. It is reachable only
+from a test.
+
+**It is kept because it is intent, not residue.** It is the learned path the shipped guard does not use:
+Prometheus → `MetricSnapshot` per pod → `AdaptiveAnomalyMonitor` scoring with a **per-pod LoRA adapter** →
+alerting on raw GPT surprise in nats, with adapters persisted as `<pod>.lora.bin` and reloaded across pod
+restarts. The deployed guard is the four-family statistical cycle; this is the other product.
+
+**This entry exists because the code could not say which it was.** Every reader who found it had to
+re-derive whether it was a roadmap item nobody scheduled or dead weight, and the answer lived nowhere. That
+was the whole cost — not the 416 lines.
+
+**What keeping it obliges, and nothing enforces it today:** the pipeline consumes `MetricSnapshot`'s feature
+vector, so it is bound to the contract that `MetricIndex.Count` may exceed `MetricSnapshot.FeatureCount` and
+that the vector must not shift when a channel is added. Adding a channel is routine; breaking a consumer
+nobody runs is silent. **If this is still unscheduled when someone next adds a feature to the snapshot, that
+is the moment to revisit deleting it** — the alternative considered and rejected today was exactly that,
+on the ground that an unused learned path is maintenance and audit surface.
+
 ### Optional — valuable, not blocking
 
 | Item | Note |
