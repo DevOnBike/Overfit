@@ -48,7 +48,9 @@ namespace DevOnBike.Overfit.Analyzers
         private static readonly DiagnosticDescriptor Rule = new(
             DiagnosticId,
             title: "Array length computed by 32-bit multiplication",
-            messageFormat: "'{0}' sizes an array with 32-bit multiplication — on overflow it wraps silently to a too-small buffer, not an exception; widen one operand, e.g. '(long){1}'",
+            // No "e.g." — the interior period makes RS1032 read this as several sentences, the last of which
+            // does not end in one, and RS1032 is an ERROR under the AOT guard's TreatWarningsAsErrors.
+            messageFormat: "'{0}' sizes an array with 32-bit multiplication — on overflow it wraps silently to a too-small buffer, not an exception; widen one operand, such as '(long){1}'",
             category: "Reliability",
             defaultSeverity: DiagnosticSeverity.Warning,
             isEnabledByDefault: true,
