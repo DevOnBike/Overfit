@@ -1,0 +1,9 @@
+# Clock reads ONLY. This file deliberately does NOT carry the library's LINQ / Reflection /
+# Array.Copy bans: those exist for Native-AOT and hot-path reasons that apply to Sources/Main, and
+# LINQ is explicitly allowed outside it. Copying Main's list here would fail this project for
+# reasons that have nothing to do with the rule being added.
+P:System.DateTime.Now; Read the clock through IClock (DevOnBike.Overfit.Runtime) instead. A static clock read cannot be substituted in a test, so anything that stamps or measures with it is untestable at the values it ships with. For DURATIONS use ValueStopwatch, which is monotonic and allocation-free.
+P:System.DateTime.UtcNow; Read the clock through IClock (DevOnBike.Overfit.Runtime) instead. A static clock read cannot be substituted in a test, so anything that stamps or measures with it is untestable at the values it ships with. For DURATIONS use ValueStopwatch, which is monotonic and allocation-free.
+P:System.DateTime.Today; Read the clock through IClock (DevOnBike.Overfit.Runtime) instead. A static clock read cannot be substituted in a test, so anything that stamps or measures with it is untestable at the values it ships with. For DURATIONS use ValueStopwatch, which is monotonic and allocation-free.
+P:System.DateTimeOffset.Now; Read the clock through IClock (DevOnBike.Overfit.Runtime) instead. A static clock read cannot be substituted in a test, so anything that stamps or measures with it is untestable at the values it ships with. For DURATIONS use ValueStopwatch, which is monotonic and allocation-free.
+P:System.DateTimeOffset.UtcNow; Read the clock through IClock (DevOnBike.Overfit.Runtime) instead. A static clock read cannot be substituted in a test, so anything that stamps or measures with it is untestable at the values it ships with. For DURATIONS use ValueStopwatch, which is monotonic and allocation-free.

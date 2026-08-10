@@ -51,4 +51,12 @@
         </EmbeddedResource>
     </ItemGroup>
 
+
+    <ItemGroup>
+        <PackageReference Include="Microsoft.CodeAnalysis.BannedApiAnalyzers">
+            <PrivateAssets>all</PrivateAssets>
+            <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+        </PackageReference>
+        <AdditionalFiles Include="BannedSymbols.txt" />
+    </ItemGroup>
 </Project>

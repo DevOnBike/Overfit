@@ -586,7 +586,8 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
             }
 
             blind += RunCustom(
-                window, times, pipeline, from, to, recentFrom, recent, ref partial, ref unevaluable);
+                window, times, pipeline, from, to, recentFrom, recent, ref partial, ref unevaluable,
+                peerTrace);
 
             // AFTER every detector, and the position is the whole point rather than a tidying-up.
             //
@@ -704,7 +705,8 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
             DateTimeOffset recentFrom,
             int recent,
             ref int partial,
-            ref int unevaluable)
+            ref int unevaluable,
+            Action<PeerDecisionTrace>? peerTrace = null)
         {
             var blind = 0;
 
@@ -738,7 +740,7 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
                     }
                 }
 
-                unevaluable += RunCustomPeer(window, binding, pipeline, recentFrom, to, recent) ? 0 : 1;
+                unevaluable += RunCustomPeer(window, binding, pipeline, recentFrom, to, recent, peerTrace) ? 0 : 1;
                 RunCustomTrend(window, binding, times, pipeline, from, to);
             }
 
@@ -788,7 +790,8 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
             IncidentPipeline pipeline,
             DateTimeOffset from,
             DateTimeOffset to,
-            int recent)
+            int recent,
+            Action<PeerDecisionTrace>? peerTrace = null)
         {
             var podCount = window.Pods.Count;
             var peers = new List<PeerSeries>(podCount);
@@ -824,6 +827,40 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
 
             var decisions = Classify(
                 pods, findings, result, MetricIndex.Count, binding.Name, binding.MinAbsoluteGapChange, to);
+
+            // Emitted at the same point as RunPeer's — before the demotion — so a row means the same thing on
+            // both paths: what the COMPARISON found, with the gates as separate columns beside it.
+            //
+            // Absent here until 2026-08-10, and the asymmetry cost a measurement the same evening: the trace
+            // was released behind a flag to answer "which gate silenced this channel", pointed at a CUSTOM
+            // channel, and produced zero rows — because only RunPeer emitted. That is XC-11's shape exactly,
+            // one layer along: a diagnostic keyed to the built-in half, missing the half a client extends,
+            // which on the deployed lab is six channels.
+            //
+            // NOT yet shown: HoldUntilPersistent, a gate custom channels have and built-ins do not. A row
+            // whose Forwarded is true can still be held back by it one line below.
+            if (peerTrace is not null)
+            {
+                for (var i = 0; i < podCount; i++)
+                {
+                    peerTrace(new PeerDecisionTrace(
+                        binding.Name,
+                        result.Status,
+                        result.HighCount,
+                        result.LowCount,
+                        pods[i],
+                        findings[i].IsOutlier,
+                        findings[i].RelativeGap,
+                        findings[i].AbsoluteGap,
+                        findings[i].Comparison.EffectSize,
+                        findings[i].Comparison.PValueCandidateWorse,
+                        findings[i].UsableSamples,
+                        result.ExcludedCount,
+                        decisions is null ? NoveltyKind.New : decisions[i].Kind,
+                        decisions is null ? DetectionStatus.InsufficientData : decisions[i].Status,
+                        decisions is null || decisions[i].Forward || !findings[i].IsOutlier));
+                }
+            }
 
             var kinds = Demote(findings, decisions);
 

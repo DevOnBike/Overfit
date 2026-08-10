@@ -167,6 +167,20 @@ namespace DevOnBike.Overfit.Runtime
         /// </summary>
         public const string GuardAckToken = "OVERFIT_GUARD_ACK_TOKEN";
 
+        /// <summary>
+        /// Turns on the per-member peer-decision trace. Unset or empty is off; <c>1</c>, <c>true</c> or
+        /// <c>all</c> traces every channel; any other value is read as a channel name and traces only that one.
+        ///
+        /// <para><b>Why it exists.</b> "No finding" has five different causes that call for opposite fixes —
+        /// the rank test, the relative-gap gate, the absolute floor, too few usable samples, the novelty gate —
+        /// and only the individual gate values tell them apart. The trace carrying them was built with the
+        /// detector and, until 2026-08-10, was reachable only from three diagnostics in Tests: a channel that
+        /// went quiet in the cluster could not be told from one that had nothing to say. Measured that day on
+        /// a 20 MB injected leak, where MemoryWorkingSetBytes produced no peer finding while every gate the
+        /// author could read passed by 2.7x to 5.9x.</para>
+        /// </summary>
+        public const string GuardPeerTrace = "OVERFIT_GUARD_PEER_TRACE";
+
         // ── Third-party / host environment (not ours, but read by us) ─────────────
 
         /// <summary>Hugging Face API endpoint override for the model downloader.</summary>

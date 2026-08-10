@@ -59,4 +59,10 @@ as backing cross-checks/parity tests — those three ARE referenced (`Sources/Be
 from the central pin file — an orphaned pin isn't a security or build risk, but it's dead weight nobody will
 notice going stale.
 
+**RESOLVED 2026-08-10: the pin was removed.** Verified once more before deleting — `git grep -i torchsharp`
+returns the pin itself, this note, the role definition and two doc mentions of the *library* as something
+Overfit deliberately does not depend on; zero `PackageReference`. The role definition was corrected in the
+same change, because it had listed `TorchSharp-cpu` among the parity-test backers and that was the reason
+this looked like an oversight rather than dead weight. Nothing to flag on future surveys.
+
 See also [[test-only-packages]] for the cheap-bump bucket.

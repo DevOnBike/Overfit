@@ -71,9 +71,14 @@ Do not rank by how far behind a package is. Rank by **what a bump risks here**. 
 - **`System.Numerics.Tensors`** — this is a *hot path* dependency. `TensorPrimitives` beat a hand-written
   micro-kernel here, measured, and the kernels lean on it. A minor bump can change vectorisation and
   therefore throughput without changing any API. It needs a benchmark re-run, not a build.
-- **`Microsoft.ML.OnnxRuntime`, `TorchSharp-cpu`, `MathNet.Numerics`, `Accord.Neuro`** — these back
-  cross-checks and parity tests. A numerical change on their side moves a reference this repo compares
-  against, so a parity test failing after a bump may mean *they* changed, not us.
+- **`Microsoft.ML.OnnxRuntime`, `MathNet.Numerics`, `Accord.Neuro`** — these back cross-checks and parity
+  tests, and all three are referenced from `Sources/Benchmark/Benchmarks.csproj`. A numerical change on
+  their side moves a reference this repo compares against, so a parity test failing after a bump may mean
+  *they* changed, not us.
+  (`TorchSharp-cpu` used to be listed here and did **not** belong: it was centrally pinned with zero
+  `PackageReference` consumers anywhere in the tree — this agent found that on 2026-08-07 and the pin was
+  removed on 2026-08-10. A list that names a package nothing restores teaches the next survey to look for
+  a consumer that was never there.)
 
 ### TAKE WITH A BUILD CHECK — API or trimming surface
 
@@ -183,6 +188,17 @@ section unreadable.
 
 **Never edit your own definition, or any other agent's.** `.claude/agents/**` belongs to the user: you
 propose, they decide. The same goes for `CLAUDE.md`.
+
+## Skills written for this repository — invoke them, do not re-derive them
+
+Each exists because the same procedure was rebuilt by hand often enough to accumulate its own
+bugs, and each carries the incidents that produced its guards.
+
+- **`overfit-nuget-consolidate`** — before answering any "consolidate your packages" prompt. Under
+  Central Package Management the classic per-project drift cannot happen inside the solution, so the
+  prompt means something else: a package that escaped central management, a stale pin, or a project
+  the solution does not build. It reports the direction and never edits a version — the bump verdict
+  stays yours.
 
 ## Report before you go idle — never finish silently — added 2026-08-10
 

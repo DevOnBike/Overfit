@@ -44,6 +44,7 @@ namespace DevOnBike.Overfit.Anomalies.Hosting
         private const int CycleEventId = 5009;
         private const int FloorProposalEventId = 5010;
         private const int TopologyStaleEventId = 5006;
+        private const int PeerTraceEventId = 5011;
 
         private static readonly Action<ILogger, int, int, int, int, Exception?> _blind =
             LoggerMessage.Define<int, int, int, int>(
@@ -76,6 +77,7 @@ namespace DevOnBike.Overfit.Anomalies.Hosting
         // an absence of them is ambiguous between "nothing happened", "the guard was blind" and "the guard
         // was not running". A summary emitted every cycle makes the denominator explicit.
         private static readonly EventId CycleEvent = new(CycleEventId, "AnomalyGuardCycle");
+        private static readonly EventId PeerTraceEvent = new(PeerTraceEventId, "AnomalyGuardPeerTrace");
 
         private static readonly Action<ILogger, int, Exception?> _restored =
             LoggerMessage.Define<int>(
@@ -114,6 +116,15 @@ namespace DevOnBike.Overfit.Anomalies.Hosting
                 LogLevel.Error,
                 new EventId(CycleFailedEventId, "AnomalyGuardCycleFailed"),
                 "Anomaly guard cycle failed; skipping it and continuing.");
+
+        /// <summary>
+        /// Channel filter for the peer-decision trace, from <see cref="OverfitEnvironment.GuardPeerTrace"/>.
+        /// Null when the trace is off, empty when every channel is traced, otherwise the one channel asked for.
+        ///
+        /// <para>Read once, at construction: a flag re-read every cycle is a flag whose value nobody can state
+        /// while reading a log.</para>
+        /// </summary>
+        private readonly string? _peerTraceFilter;
 
         private readonly IClock _clock;
         private readonly AnomalyGuardServiceOptions _options;
@@ -197,6 +208,7 @@ namespace DevOnBike.Overfit.Anomalies.Hosting
             ArgumentNullException.ThrowIfNull(logger);
 
             _clock = clock ?? SystemClock.Instance;
+            _peerTraceFilter = ReadPeerTraceFilter();
 
             _options = options;
             _source = source;
@@ -285,6 +297,83 @@ namespace DevOnBike.Overfit.Anomalies.Hosting
                 // is the same read, one frame up.
                 await RunCycleAsync(_clock.UtcNow, stoppingToken).ConfigureAwait(false);
             }
+        }
+
+        /// <summary>
+        /// Reads <see cref="OverfitEnvironment.GuardPeerTrace"/> into a filter.
+        ///
+        /// <para>Null is off. Empty string means every channel. Anything else is a channel name, because the
+        /// question this trace answers is almost always about ONE channel — twelve pods times fourteen
+        /// channels is 168 rows a cycle, and an operator hunting one silent signal should not have to grep
+        /// past the other thirteen.</para>
+        /// </summary>
+        private static string? ReadPeerTraceFilter()
+        {
+            var raw = Environment.GetEnvironmentVariable(OverfitEnvironment.GuardPeerTrace)?.Trim();
+
+            if (string.IsNullOrEmpty(raw))
+            {
+                return null;
+            }
+
+            if (string.Equals(raw, "1", StringComparison.Ordinal)
+                || string.Equals(raw, "true", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(raw, "all", StringComparison.OrdinalIgnoreCase))
+            {
+                return string.Empty;
+            }
+
+            return raw;
+        }
+
+        /// <summary>
+        /// One line per peer comparison, carrying every gate separately.
+        ///
+        /// <para><b>Separately, because a single verdict cannot be acted on.</b> "No finding" has five causes
+        /// that call for opposite fixes: the rank test found no consistent difference, the relative gap was
+        /// under its gate, the absolute gap was under its floor, the member had too few usable samples, or the
+        /// novelty gate suppressed a real one. Lowering a floor when the rank test is what refused would be
+        /// the wrong fix applied confidently.</para>
+        ///
+        /// <para>Logged at Information rather than Debug: the flag is already the gate, and a diagnostic that
+        /// needs a second knob turned before it appears is one an operator gives up on.</para>
+        /// </summary>
+        private void LogPeerDecision(PeerDecisionTrace row)
+        {
+            if (_peerTraceFilter is not { } filter)
+            {
+                return;
+            }
+
+            if (filter.Length > 0 && !string.Equals(filter, row.Signal, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            // Fourteen fields against LoggerMessage.Define's six, and the same trade-off the cycle line
+            // documents: this runs only under an explicit flag, so the allocation is not worth splitting the
+            // row for. The placeholders still name the properties a structured sink records.
+            _logger.LogInformation(
+                PeerTraceEvent,
+                "peer-trace: signal={Signal} pod={Pod} status={Status} outlier={IsOutlier} "
+                + "relGap={RelativeGap} absGap={AbsoluteGap} effect={EffectSize} p={PValue} "
+                + "samples={UsableSamples} excluded={ExcludedPeers} high={High} low={Low} "
+                + "novelty={Novelty} noveltyStatus={NoveltyStatus} forwarded={Forwarded}",
+                row.Signal,
+                row.Pod,
+                row.Status,
+                row.IsOutlier,
+                row.RelativeGap,
+                row.AbsoluteGap,
+                row.EffectSize,
+                row.PValue,
+                row.UsableSamples,
+                row.ExcludedPeers,
+                row.High,
+                row.Low,
+                row.Novelty,
+                row.NoveltyStatus,
+                row.Forwarded);
         }
 
         /// <summary>
@@ -458,7 +547,12 @@ namespace DevOnBike.Overfit.Anomalies.Hosting
                     return GuardCycleOutcome.Blind;
                 }
 
-                var result = _guard.RunCycle(window, now);
+                // The trace is built only when the flag is on, so the ordinary path allocates no delegate and
+                // the guard takes the null branch it always did. Passing one unconditionally would make every
+                // cycle pay for a diagnostic nobody asked for.
+                var result = _peerTraceFilter is null
+                    ? _guard.RunCycle(window, now)
+                    : _guard.RunCycle(window, now, null, LogPeerDecision);
 
                 // Eight fields, and LoggerMessage.Define stops at six. Pre-compiling this would mean dropping
                 // two of them or splitting the line, and neither is worth it for a call that happens once per
