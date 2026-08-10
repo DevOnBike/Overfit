@@ -250,6 +250,21 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             var ffnActivation = (FeedForwardActivation)reader.ReadInt32();
             var tieWeights = reader.ReadInt32() != 0;
 
+            // Every dimension above came out of the file and every one of them sizes an allocation below —
+            // `new LayerWeightBuffers[nLayers]`, `new DecodeWeight[nHeads]`, four arrays on `nKvHeads`. Taken
+            // at face value they are allocation requests the file gets to choose the size of, and four bytes
+            // in this header can ask for more memory than the machine has.
+            //
+            // Found by OVERFIT038 on its first inventory. The 2026-08-02 hand sweep that produced that rule
+            // did NOT find this one: its window was a few lines and here the reads and their uses are thirty
+            // apart, which is exactly the distance a text scan cannot cross and local data flow can.
+            //
+            // Bounded against the file's own length rather than against zero, the same way WhisperGgmlLoader
+            // and RepackedWeightsFile are. The weights are F32, so the embedding alone needs
+            // vocabSize * dModel * 4 bytes and each layer needs at least its two attention norms — a declared
+            // shape needing more than the file holds is a malformed header, not a very large model.
+            RequireDeclaredShapeFitsInFile(reader, nLayers, dModel, nHeads, nKvHeads, vocabSize);
+
             var config = new GPT1Config
             {
                 NLayers = nLayers,
@@ -592,6 +607,65 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             => weight.F32Storage ?? throw new OverfitRuntimeException(
                 $"{context} requires F32-resident weights; this model was loaded with Q8_0 " +
                 "quantization. Operations on quantized weights are not supported.");
+
+        /// <summary>
+        /// Rejects a header whose declared shape cannot fit in the bytes that are left.
+        ///
+        /// <para><b>Against the file's own length, not merely against zero.</b> Positivity alone still lets a
+        /// four-byte field ask for two billion layers; the bytes remaining is the only bound the file cannot
+        /// lie about. All weights on this path are F32, so the embedding needs
+        /// <c>vocabSize * dModel * 4</c> bytes and each layer needs at least its two attention-norm vectors —
+        /// a lower bound, deliberately, because rejecting a valid model would be worse than accepting a
+        /// slightly generous one.</para>
+        ///
+        /// <para><c>nHeads</c> is checked separately and first: <c>dModel / nHeads</c> runs a few lines below,
+        /// so zero here is an uncatchable-looking <see cref="DivideByZeroException"/> out of a file parse
+        /// rather than a format error the caller can report.</para>
+        ///
+        /// <para>A non-seekable stream has no length to check against, so the shape check degrades to the
+        /// positivity checks and says so by omission rather than by pretending.</para>
+        /// </summary>
+        private static void RequireDeclaredShapeFitsInFile(
+            BinaryReader reader,
+            int nLayers,
+            int dModel,
+            int nHeads,
+            int nKvHeads,
+            int vocabSize)
+        {
+            if (nLayers <= 0 || dModel <= 0 || nHeads <= 0 || nKvHeads <= 0 || vocabSize <= 0)
+            {
+                throw new OverfitFormatException(
+                    $"Malformed header: layers={nLayers}, dModel={dModel}, heads={nHeads}, "
+                    + $"kvHeads={nKvHeads}, vocab={vocabSize}. Every dimension must be positive.");
+            }
+
+            if (nHeads > dModel)
+            {
+                throw new OverfitFormatException(
+                    $"Malformed header: {nHeads} attention heads over a model dimension of {dModel} "
+                    + "leaves a head dimension of zero.");
+            }
+
+            var stream = reader.BaseStream;
+
+            if (!stream.CanSeek)
+            {
+                return;
+            }
+
+            var remaining = stream.Length - stream.Position;
+            const long BytesPerFloat = 4;
+            var smallest = ((long)vocabSize * dModel + (long)nLayers * 2 * dModel) * BytesPerFloat;
+
+            if (smallest > remaining)
+            {
+                throw new OverfitFormatException(
+                    $"Header declares a shape needing at least {smallest} bytes of weights "
+                    + $"(vocab {vocabSize} x dModel {dModel}, {nLayers} layers) and only {remaining} "
+                    + "bytes remain in the file.");
+            }
+        }
 
         /// <summary>Reads a float tensor directly into a new TensorStorage.</summary>
         private static TensorStorage<float> ReadTensor(BinaryReader reader, int count)

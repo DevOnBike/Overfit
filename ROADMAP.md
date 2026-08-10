@@ -396,7 +396,7 @@ measurement already restarted three times in one day. In order:
      build, it silently fails to register the framework and the guard is simply absent. Verify by
      **experiment**: start a benchmark in the background, then run `dotnet test` and confirm it refuses with
      the mutex message; then stop the benchmark and confirm the suite runs again.
-4. ~~**The seven `OVERFIT024` sites.**~~ **Done 2026-08-03.** All four `WhisperGgmlLoader` counts are
+4. ~~**The seven `OVERFIT038` sites** (planned as `OVERFIT024`; that id was already taken).~~ **Done 2026-08-03.** All four `WhisperGgmlLoader` counts are
    bounded against the bytes remaining rather than a constant — no honest header asks for more data than it
    shipped, and a fixed ceiling would have to be either useless or wrong one day. `RepackedWeightsFile` and
    `LlamaLoRAAdapter` bound their record counts the same way. `ModelSerializer`'s ordering defect is the one
@@ -802,7 +802,7 @@ Asked, and the answer is no — because the set is enumerable and three quarters
 The fourth is the gap, and it matters here because the kernels use raw pointers deliberately. But a rule
 cannot be written for it directly: proving pointer safety in general is not something an analyser does. What
 *can* be checked is the thing that actually produces these faults — **a length or an offset taken from
-outside and used in address arithmetic without validation** — which is the same rule as `OVERFIT024` above,
+outside and used in address arithmetic without validation** — which is the same rule as `OVERFIT038` above,
 applied to pointers instead of to `new T[n]`.
 
 The general form the question suggests — flag every throw that might not be catchable — would find nothing,
@@ -835,8 +835,32 @@ every failure and read by nothing — literally this rule, broken in code writte
 whose whole job is to report that it could not write. **Gate it the way the `else` sweep was gated**: enable
 as `suggestion`, count the sites, read a sample, then promote per directory.
 
-**Rule 2, semantically — `OVERFIT024`, and the sweep has been run.** A value read from `BinaryReader.Read*`
-or a JSON parser must not size an allocation or bound a loop without passing through a validator.
+**Rule 2, semantically — `OVERFIT038`, BUILT 2026-08-10 and `error` in `Sources/Main`.** A value read from
+`BinaryReader.Read*` or a JSON parser must not size an allocation or bound a loop without passing through a
+validator. (Planned here as `OVERFIT024`; that id had already gone to the env-var rule.)
+
+**What the analyser found that the hand sweep below did not, which is the part worth keeping.** Running it
+over the tree reported 18 sites in `Sources/Main`, and the largest group was **not** in the seven:
+**13 of them were three unvalidated header fields in `CachedLlamaInferenceEngine.Load`** — `nLayers`,
+`nHeads`, `nKvHeads`, read at one line and sizing arrays thirty lines later. That distance is exactly what a
+text scan cannot cross and local data flow can; `nHeads = 0` was also a `DivideByZeroException` out of a file
+parse. Two more were `LoRAWeight.Load` feeding three file ints into a constructor that allocates on their
+product. All are now bounded against the bytes remaining, the house pattern.
+
+**Two corrections the inventory forced on the rule itself**, both invisible to its unit tests and found only
+by running it on real code:
+
+- **a read that does not return a number is not a count.** 13 of the first 30 hits were `while (reader.Read())`
+  — the standard JSON pull loop, whose `Read` returns `bool`. A third of the output was noise, which is the
+  ratio at which a rule gets suppressed wholesale rather than fixed.
+- **a measured length is not a declared one.** `JsonElement.GetArrayLength()` counts elements the parser has
+  already materialised, so it is bounded by the bytes that were accepted; a declared count is bounded by
+  nothing. `XgboostModelLoader`'s tree count was called a defect until this was separated.
+
+One site is pragma'd rather than fixed, and the reason is a measurement: `QwenTokenizer` grows its decoder to
+`new string[id + 1]` on an id from `tokenizer.json`, and the obvious bound `vocab.Count + added.Count` clears
+the real Qwen file by exactly **one** (22 added tokens, highest id 151 664 against 151 665). A bound that
+tight rejects any tokenizer with a gap in its added-token ids, and rejecting a valid model is worse.
 
 **Measured before writing the analyser, which is the only reason it is worth writing.** A text approximation
 of the rule was run over `Sources/` on 2026-08-02 — deliberately crude, and its own error rate is part of the

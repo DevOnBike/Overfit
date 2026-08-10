@@ -54,6 +54,17 @@ break a build.
 | `OVERFIT019` | Non-capturing lambda without the `static` keyword — `static` makes the no-capture contract enforced (a future accidental capture becomes a compile error). Shares the capture analysis with `OVERFIT004` via `OverfitPerfAnalysis.LambdaCapturesEnclosingState` | #46h | ✅ shipped |
 | `OVERFIT020` | A primitive-array parameter (`float[]`/`int[]`/`byte[]`/…) of a **private/internal**, non-async, non-iterator, non-ctor method that is only read/indexed and **provably does not escape** (no field/return/array-argument/lambda capture) → take a `ReadOnlySpan<T>` (or `Span<T>` if it writes elements) so callers pass arrays, slices or `stackalloc` without a copy. Intra-method escape analysis via `RegisterOperationBlockAction`; conservative (skips ctors/public surface so it never suggests breaking a stored-weights API) | span-friendly APIs | ✅ shipped |
 
+**This table stops at `OVERFIT020` and the family now runs to `OVERFIT038`.** The rules added since — the
+`else` ban, the two NASA reliability rules, the `stackalloc` pair, the async tier, the design guards and
+`OVERFIT038` below — are described where they are enforced rather than here:
+[`AnalyzerReleases.Unshipped.md`](AnalyzerReleases.Unshipped.md) carries one line each, `.editorconfig`
+carries the severity *and the reason for it per directory*, and each analyzer's own doc comment carries the
+incident that produced it. Backfilling this table is worth doing; duplicating those three is not.
+
+| Id | What it flags | Status |
+|---|---|---|
+| `OVERFIT038` | A count read from `BinaryReader` / `System.Text.Json` that sizes an array, a `stackalloc`, a counted read or a loop bound with **no validator between the read and the use** — the ordering is the rule, because a guard a few lines below reads as done to a human and is not. Excludes reads that are not numbers (`while (reader.Read())`) and lengths the parser measured rather than the file declared (`GetArrayLength`) | ✅ shipped 2026-08-10, `error` in `Sources/Main` |
+
 **Tier C — architectural (convention/attribute):**
 
 - **`[OverfitHotPath]` — SHIPPED 2026-06-13** (Roslyn's `[PerformanceSensitive]`, `#35`).

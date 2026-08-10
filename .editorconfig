@@ -178,6 +178,11 @@ dotnet_diagnostic.OVERFIT028.severity = suggestion
 dotnet_diagnostic.OVERFIT029.severity = suggestion
 dotnet_diagnostic.OVERFIT030.severity = suggestion
 
+# OVERFIT038 (externally-read count sizing an allocation or bounding a loop) — warning while the backlog is
+# swept, error in the library below. Held at warning outside Sources/Main because tests and demos read files
+# they wrote themselves, where the count is not an attacker's.
+dotnet_diagnostic.OVERFIT038.severity = warning
+
 # OVERFIT031 (redundant async state machine) — suggestion outside the library. Eliding changes when a
 # pre-await exception surfaces (synchronously, rather than inside the returned task), which is invisible to
 # a caller that awaits immediately and visible to one that stores the task. Outside Sources/Main that call
@@ -360,6 +365,17 @@ dotnet_diagnostic.OVERFIT026.severity = error
 # length), 3 rewritten by hand, 1 pragma'd where a 64-bit guard already proves the 32-bit product safe.
 # Demo/ and Server keep the global suggestion.
 dotnet_diagnostic.OVERFIT028.severity = error
+# OVERFIT038 — ERROR in the library. Backlog swept to zero from 18 sites, and the inventory is the reason
+# to trust the rule rather than its unit tests: 13 of them were three unvalidated header fields in
+# CachedLlamaInferenceEngine.Load, which the 2026-08-02 HAND sweep that motivated this rule did not find —
+# its window was a few lines and there the reads and their uses are thirty apart. 2 were LoRAWeight.Load
+# feeding three file ints straight into a constructor that allocates on their product. Both now bound the
+# declared shape against the bytes remaining, the house pattern. 1 is pragma'd in QwenTokenizer with the
+# measurement that stops the obvious bound going in (real Qwen: 22 added tokens, highest id 151 664 against
+# a 151 665 bound — a margin of one). 2 were the rule's own false positive, JsonElement.GetArrayLength,
+# which reports a count the parser already materialised rather than one the file declares; fixed in the
+# analyzer, not suppressed here.
+dotnet_diagnostic.OVERFIT038.severity = error
 # OVERFIT029 / OVERFIT030 (Async suffix / CancellationToken) — ERROR in the library, ZERO sites there.
 # 029: the single real hit was CachedLlamaSession.StreamGenerate, renamed to StreamGenerateAsync (19
 #      references, pre-1.0, so a rename beat a suppression).

@@ -50,7 +50,7 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
             // Every count below comes out of the file and sizes an allocation. Each is checked against the
             // bytes actually remaining, because a declared count that cannot fit is a malformed header
             // rather than a very large model — and taken at face value it is an allocation the file gets
-            // to choose the size of. This is OVERFIT024's shape, four times in one method.
+            // to choose the size of. This is OVERFIT038's shape, four times in one method.
             // ── mel filters ──
             var melRows = br.ReadInt32();
             var melCols = br.ReadInt32();
