@@ -45,6 +45,8 @@ namespace DevOnBike.Overfit.Anomalies.Hosting
         private const int FloorProposalEventId = 5010;
         private const int TopologyStaleEventId = 5006;
         private const int PeerTraceEventId = 5011;
+        private const int TrendTraceEventId = 5012;
+        private const int RuleTraceEventId = 5013;
 
         private static readonly Action<ILogger, int, int, int, int, Exception?> _blind =
             LoggerMessage.Define<int, int, int, int>(
@@ -78,6 +80,8 @@ namespace DevOnBike.Overfit.Anomalies.Hosting
         // was not running". A summary emitted every cycle makes the denominator explicit.
         private static readonly EventId CycleEvent = new(CycleEventId, "AnomalyGuardCycle");
         private static readonly EventId PeerTraceEvent = new(PeerTraceEventId, "AnomalyGuardPeerTrace");
+        private static readonly EventId TrendTraceEvent = new(TrendTraceEventId, "AnomalyGuardTrendTrace");
+        private static readonly EventId RuleTraceEvent = new(RuleTraceEventId, "AnomalyGuardRuleTrace");
 
         private static readonly Action<ILogger, int, Exception?> _restored =
             LoggerMessage.Define<int>(
@@ -297,6 +301,64 @@ namespace DevOnBike.Overfit.Anomalies.Hosting
                 // is the same read, one frame up.
                 await RunCycleAsync(_clock.UtcNow, stoppingToken).ConfigureAwait(false);
             }
+        }
+
+        /// <summary>
+        /// One line per trend decision. Carries the detector's own <c>Reason</c> sentence alongside the
+        /// numbers behind it, because that sentence is what an operator reads first and the numbers are what
+        /// they check it against.
+        ///
+        /// <para><c>warmingUp=True</c> is the row that did not exist before: a pod inside the grace is
+        /// skipped with a bare <c>continue</c>, so "tested and healthy" and "never tested" produced the same
+        /// silence — and during a rollout that is every pod at once.</para>
+        /// </summary>
+        private void LogTrendDecision(TrendDecisionTrace row)
+        {
+            if (_peerTraceFilter is not { } filter)
+            {
+                return;
+            }
+
+            if (filter.Length > 0 && !string.Equals(filter, row.Signal, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            _logger.LogInformation(
+                TrendTraceEvent,
+                "trend-trace: signal={Signal} pod={Pod} status={Status} warmingUp={WarmingUp} "
+                + "floor={FloorOverWindow} slope={SlopePerSecond} tau={KendallTau} p={PValue} "
+                + "autocorr={Autocorrelation} samples={SampleCount} seasonal={HasExpectation} "
+                + "reason={Reason}",
+                row.Signal, row.Pod, row.Status, row.WarmingUp, row.FloorOverWindow, row.SlopePerSecond,
+                row.KendallTau, row.PValue, row.Autocorrelation, row.SampleCount, row.HasExpectation,
+                row.Reason);
+        }
+
+        /// <summary>
+        /// One line per absolute-threshold decision. Both gates are separate columns: a window can be over
+        /// the threshold and still produce nothing because it was over it for too little of the window, and
+        /// those two call for opposite fixes.
+        /// </summary>
+        private void LogRuleDecision(RuleDecisionTrace row)
+        {
+            if (_peerTraceFilter is not { } filter)
+            {
+                return;
+            }
+
+            if (filter.Length > 0 && !string.Equals(filter, row.Signal, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            _logger.LogInformation(
+                RuleTraceEvent,
+                "rule-trace: signal={Signal} pod={Pod} status={Status} threshold={Threshold} "
+                + "minBreach={MinBreachFraction} breach={BreachFraction} breached={BreachedSamples} "
+                + "samples={UsableSamples} peak={PeakValue} median={MedianValue} reason={Reason}",
+                row.Signal, row.Pod, row.Status, row.Threshold, row.MinBreachFraction, row.BreachFraction,
+                row.BreachedSamples, row.UsableSamples, row.PeakValue, row.MedianValue, row.Reason);
         }
 
         /// <summary>
@@ -552,7 +614,8 @@ namespace DevOnBike.Overfit.Anomalies.Hosting
                 // cycle pay for a diagnostic nobody asked for.
                 var result = _peerTraceFilter is null
                     ? _guard.RunCycle(window, now)
-                    : _guard.RunCycle(window, now, null, LogPeerDecision);
+                    : _guard.RunCycle(
+                        window, now, null, LogPeerDecision, LogTrendDecision, LogRuleDecision);
 
                 // Eight fields, and LoggerMessage.Define stops at six. Pre-compiling this would mean dropping
                 // two of them or splitting the line, and neither is worth it for a call that happens once per

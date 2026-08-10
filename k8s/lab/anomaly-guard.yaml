@@ -323,24 +323,47 @@ spec:
       # whose whole job is to be reachable. Verified mounted before this was added: the running pod
       # carried `kube-api-access-…` at /var/run/secrets/kubernetes.io/serviceaccount.
       automountServiceAccountToken: false
+      # runAsNonRoot was deferred once on the grounds that the image runs as root — `Config.User` is empty
+      # and the entrypoint is `[dotnet /app/overfit.dll]`, a framework-dependent build rather than the
+      # chiselled Native-AOT image in Sources/Cli/Dockerfile. That reasoning was WRONG, and applying it is
+      # what showed it: a pod-level runAsUser OVERRIDES the image's user, so a root image is not an
+      # obstacle to running as somebody else. Applied 2026-08-11 — uid=1000(ubuntu), zero restarts.
+      #
+      # The real hazard was the PVC, and it needed checking rather than assuming, because "the cycle ran"
+      # is not "the state was written". `/state` is mode 777, so CREATING a file always succeeds; what
+      # would fail is a non-root process reopening the existing root-owned 0644 files, and that failure is
+      # silent from outside — the guard keeps cycling and quietly stops persisting the seasonal baseline
+      # and the floor calibration, which is the failure mode that looks like success.
+      #
+      # Verified across a full cycle instead: both files changed size and mtime under uid 1000
+      # (incidents.json 470 -> 436 B, learned-state.txt 421,849 -> 423,050 B) and are now owned
+      # ubuntu:ubuntu. Note fsGroup did NOT do this — it left the directory root:root — the files are
+      # rewritten rather than updated in place, so they take the writer's ownership. fsGroup is kept
+      # anyway: it is what makes a FRESH volume writable, and this one only works because of how the
+      # writes happen to be shaped.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
       containers:
         - name: guard
           image: overfit-guard:latest
           imagePullPolicy: Never
-          # Deliberately NOT set here, and each omission is a decision rather than an oversight:
+          # The pod-level securityContext above carries runAsNonRoot / runAsUser and why they are safe.
           #
-          #   runAsNonRoot / runAsUser — the image runs as ROOT. `docker image inspect` reports an empty
-          #     `Config.User` and an entrypoint of `[dotnet /app/overfit.dll]`, so this is a
-          #     framework-dependent build and not the chiselled Native-AOT image in Sources/Cli/Dockerfile
-          #     (which would have carried a non-root USER). Setting runAsNonRoot without fixing the image
-          #     is a CrashLoopBackOff, and fixing the image is a separate change.
-          #   readOnlyRootFilesystem — the .NET runtime writes under /tmp, so this needs an emptyDir
-          #     mounted there, and that combination cannot be trusted without applying it and watching the
-          #     pod come up.
+          # readOnlyRootFilesystem is now SET, and the reason it was deferred turned out to be checkable
+          # rather than a judgement call. Measured inside the running pod before applying it: the only
+          # writes anywhere on the root filesystem are three files in /tmp, and they are not "the runtime
+          # writing scratch" — they are the .NET diagnostics IPC endpoints, `clr-debug-pipe-1-N-in/out`
+          # and `dotnet-diagnostic-1-N-socket`, created at startup. `find / -xdev -newer /app` turned up
+          # nothing else outside /tmp, /state and /config; /etc/hosts, /etc/resolv.conf and /.dockerenv
+          # are kubelet bind-mounts, not root-fs writes, and are unaffected by this flag.
           #
-          # Both are in XC-12's row with what has to be verified before they go in. What is below is the
-          # subset that cannot change how the process starts.
+          # So an emptyDir at /tmp is exactly the required surface, and losing it on restart costs
+          # nothing: those sockets are recreated on every start and hold no state.
           securityContext:
+            readOnlyRootFilesystem: true
             allowPrivilegeEscalation: false
             capabilities:
               drop:
@@ -388,6 +411,10 @@ spec:
               readOnly: true
             - name: state
               mountPath: /state
+            # Required by readOnlyRootFilesystem above: the .NET diagnostics IPC endpoints are created
+            # here at startup and the process cannot start without a writable /tmp.
+            - name: tmp
+              mountPath: /tmp
           resources:
             requests:
               cpu: 100m
@@ -395,6 +422,10 @@ spec:
             limits:
               memory: 512Mi
       volumes:
+        # Diagnostics sockets only — recreated on every start, so emptyDir is the correct lifetime here
+        # in a way it is NOT for /state below.
+        - name: tmp
+          emptyDir: {}
         - name: config
           configMap:
             name: anomaly-guard-config

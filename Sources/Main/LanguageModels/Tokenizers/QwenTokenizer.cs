@@ -124,6 +124,24 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
             }
 
             // ── Special tokens ─────────────────────────────────────────────
+            //
+            // The decoder is grown to `id + 1` at 8 bytes an entry, and `id` is a number chosen by whoever
+            // wrote tokenizer.json — so a declared 2^31-1 is a 16 GB allocation request the caller cannot
+            // catch. Bounded here against the FILE'S OWN LENGTH, the same way the binary loaders bound a
+            // declared count: a token cannot be encoded in fewer than a few bytes of JSON, so the document
+            // cannot describe more ids than it has room for.
+            //
+            // Four bytes is a deliberate under-estimate of the floor, not a guess at the typical: the real
+            // Qwen tokenizer measures **46.4 bytes per token** (7,031,645 B for 151,665 tokens), so the bound
+            // clears its highest id by **11.6x** and caps the allocation at 14 MB whatever the file claims.
+            //
+            // The obvious bound — `vocab.Count + added.Count` — was measured and REJECTED: on that same file
+            // it clears the highest added id by exactly ONE (151,664 against 151,665), so any tokenizer with
+            // a single gap in its added-token ids would be refused. Rejecting a valid model is worse than the
+            // allocation this guards against.
+            const long MinBytesPerToken = 4;
+            var maxDecoderEntries = stream.Length / MinBytesPerToken;
+
             var specialTokens = new Dictionary<string, int>();
             if (root.TryGetProperty("added_tokens", out var added))
             {
@@ -131,28 +149,21 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
                 {
                     var content = tok.GetProperty("content").GetString()!;
                     var id = tok.GetProperty("id").GetInt32();
+
+                    if (id < 0 || id + 1L > maxDecoderEntries)
+                    {
+                        throw new OverfitFormatException(
+                            $"'{jsonPath}' declares added token id {id}, which would size the decoder at "
+                            + $"{id + 1L} entries. The file is {stream.Length} bytes and a token needs at "
+                            + $"least {MinBytesPerToken}, so it cannot describe more than {maxDecoderEntries} "
+                            + "ids.");
+                    }
+
                     specialTokens[content] = id;
                     // Extend decoder if needed
                     if (id >= decoder.Length)
                     {
-                        // OVERFIT038, and it is a REAL finding left open on purpose rather than suppressed on
-                        // principle: `id` comes out of tokenizer.json and `new string[id + 1]` is 8 bytes per
-                        // entry, so a declared id of 2^31-1 asks for 16 GB.
-                        //
-                        // What stops it going in today is that the obvious bound is too tight to ship, and
-                        // that was MEASURED rather than assumed. On the real Qwen tokenizer
-                        // (C:\qwen3b\tokenizer.json, 2026-08-10): vocab 151 643 entries, 22 added tokens,
-                        // highest added id 151 664 against a `vocab.Count + added.Count` bound of 151 665 —
-                        // a margin of ONE. Any tokenizer with a single gap in its added-token ids would be
-                        // rejected by that bound, and rejecting a valid model is worse than this.
-                        //
-                        // The bound that would work is the house one used by the binary loaders — against
-                        // the document's own byte length, since a token entry cannot cost fewer than a few
-                        // bytes of JSON — and it needs the document length threaded to here, which this
-                        // method does not have. Tracked as its own task.
-#pragma warning disable OVERFIT038 // BOUND: not yet established — see the measurement above; tracked separately
                         var extended = new string[id + 1];
-#pragma warning restore OVERFIT038
                         decoder.AsSpan().CopyTo(extended);
                         decoder = extended;
                     }

@@ -419,13 +419,15 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
             MetricWindow window,
             DateTimeOffset observedAt,
             Action<IncidentMatchTrace>? trace = null,
-            Action<PeerDecisionTrace>? peerTrace = null)
+            Action<PeerDecisionTrace>? peerTrace = null,
+            Action<TrendDecisionTrace>? trendTrace = null,
+            Action<RuleDecisionTrace>? ruleTrace = null)
         {
             ArgumentNullException.ThrowIfNull(window);
 
             lock (_gate)
             {
-                return RunCycleCore(window, observedAt, trace, peerTrace);
+                return RunCycleCore(window, observedAt, trace, peerTrace, trendTrace, ruleTrace);
             }
         }
 
@@ -525,7 +527,9 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
             MetricWindow window,
             DateTimeOffset observedAt,
             Action<IncidentMatchTrace>? trace,
-            Action<PeerDecisionTrace>? peerTrace)
+            Action<PeerDecisionTrace>? peerTrace,
+            Action<TrendDecisionTrace>? trendTrace = null,
+            Action<RuleDecisionTrace>? ruleTrace = null)
         {
 
             var pipeline = new IncidentPipeline
@@ -558,7 +562,7 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
             var recent = RecentSamples(window);
             var recentFrom = window.End - (window.Step * (recent - 1));
 
-            RunRules(window, pipeline, recentFrom, to, recent);
+            RunRules(window, pipeline, recentFrom, to, recent, ruleTrace);
             RunSilentPods(window, pipeline, from, to);
             PruneNovelty();
 
@@ -582,12 +586,12 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
                 }
 
                 unevaluable += RunPeer(window, metric, pipeline, recentFrom, to, recent, peerTrace) ? 0 : 1;
-                RunTrend(window, metric, times, pipeline, from, to);
+                RunTrend(window, metric, times, pipeline, from, to, trendTrace);
             }
 
             blind += RunCustom(
                 window, times, pipeline, from, to, recentFrom, recent, ref partial, ref unevaluable,
-                peerTrace);
+                peerTrace, trendTrace);
 
             // AFTER every detector, and the position is the whole point rather than a tidying-up.
             //
@@ -706,7 +710,8 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
             int recent,
             ref int partial,
             ref int unevaluable,
-            Action<PeerDecisionTrace>? peerTrace = null)
+            Action<PeerDecisionTrace>? peerTrace = null,
+            Action<TrendDecisionTrace>? trendTrace = null)
         {
             var blind = 0;
 
@@ -741,7 +746,7 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
                 }
 
                 unevaluable += RunCustomPeer(window, binding, pipeline, recentFrom, to, recent, peerTrace) ? 0 : 1;
-                RunCustomTrend(window, binding, times, pipeline, from, to);
+                RunCustomTrend(window, binding, times, pipeline, from, to, trendTrace);
             }
 
             return blind;
@@ -970,7 +975,8 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
             double[] times,
             IncidentPipeline pipeline,
             DateTimeOffset from,
-            DateTimeOffset to)
+            DateTimeOffset to,
+            Action<TrendDecisionTrace>? trendTrace = null)
         {
             var podCount = window.Pods.Count;
             var trendFloor = TrendFloor(binding);
@@ -1022,6 +1028,11 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
                 // whole distinction.
                 if (IsWarmingUp(window.Pods[pod], to))
                 {
+                    trendTrace?.Invoke(new TrendDecisionTrace(
+                        binding.Name, window.Pods[pod], DetectionStatus.InsufficientData,
+                        true, trendFloor, 0, 0, 0, 0, 0,
+                        !expectation.IsEmpty, "inside the warm-up grace; no trend test ran"));
+
                     continue;
                 }
 
@@ -1033,6 +1044,12 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
                     options,
                     binding.SaturationLimit,
                     expectation);
+
+                trendTrace?.Invoke(new TrendDecisionTrace(
+                    binding.Name, window.Pods[pod], verdict.Status, false, trendFloor,
+                    verdict.SlopePerSecond, verdict.KendallTau, verdict.PValue,
+                    verdict.Autocorrelation, verdict.SampleCount,
+                    !expectation.IsEmpty, verdict.Reason));
 
                 pipeline.Observe(
                     Subject(window.Pods[pod]), binding.Name, verdict, from, to,
@@ -1048,7 +1065,8 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
             IncidentPipeline pipeline,
             DateTimeOffset from,
             DateTimeOffset to,
-            int recent)
+            int recent,
+            Action<RuleDecisionTrace>? ruleTrace = null)
         {
             for (var r = 0; r < _options.Rules.Count; r++)
             {
@@ -1058,6 +1076,19 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
                 {
                     var verdict = _rule.Evaluate(
                         Tail(window.Series(pod, profile.Metric), recent), profile.Options);
+
+                    ruleTrace?.Invoke(new RuleDecisionTrace(
+                        profile.Metric.ToString(),
+                        window.Pods[pod],
+                        verdict.Status,
+                        profile.Options.Threshold,
+                        profile.Options.MinBreachFraction,
+                        verdict.BreachFraction,
+                        verdict.BreachedSamples,
+                        verdict.UsableSamples,
+                        verdict.PeakValue,
+                        verdict.MedianValue,
+                        verdict.Reason));
 
                     pipeline.ObserveRule(
                         Subject(window.Pods[pod]), profile.Metric.ToString(), verdict, from, to);
@@ -1312,7 +1343,8 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
             double[] times,
             IncidentPipeline pipeline,
             DateTimeOffset from,
-            DateTimeOffset to)
+            DateTimeOffset to,
+            Action<TrendDecisionTrace>? trendTrace = null)
         {
             var podCount = window.Pods.Count;
             var options = _options.Trend with
@@ -1402,6 +1434,13 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
             {
                 if (IsWarmingUp(window.Pods[pod], to))
                 {
+                    // Traced before the skip. A bare `continue` leaves "no finding" and "never tested"
+                    // looking identical, and during a rollout that is every pod at once.
+                    trendTrace?.Invoke(new TrendDecisionTrace(
+                        metric.ToString(), window.Pods[pod], DetectionStatus.InsufficientData,
+                        true, options.MinAbsoluteChangeOverWindow, 0, 0, 0, 0, 0,
+                        !expectation.IsEmpty, "inside the warm-up grace; no trend test ran"));
+
                     continue;
                 }
 
@@ -1421,6 +1460,12 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
                     options,
                     AnomalyGuardOptions.LimitFor(_options.SaturationLimit, metric),
                     expectation);
+
+                trendTrace?.Invoke(new TrendDecisionTrace(
+                    metric.ToString(), window.Pods[pod], verdict.Status, false,
+                    options.MinAbsoluteChangeOverWindow, verdict.SlopePerSecond, verdict.KendallTau,
+                    verdict.PValue, verdict.Autocorrelation, verdict.SampleCount,
+                    !expectation.IsEmpty, verdict.Reason));
 
                 pipeline.Observe(
                     Subject(window.Pods[pod]), metric.ToString(), verdict, from, to,
