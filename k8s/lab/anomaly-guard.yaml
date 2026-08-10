@@ -317,10 +317,36 @@ spec:
       labels:
         app.kubernetes.io/name: anomaly-guard
     spec:
+      # The guard talks to Prometheus over HTTP and to nothing else — the pod roster it uses for the
+      # silent-pod check comes from kube-state-metrics THROUGH Prometheus, not from the Kubernetes API.
+      # So a mounted service-account token is a credential with no corresponding use, sitting in a pod
+      # whose whole job is to be reachable. Verified mounted before this was added: the running pod
+      # carried `kube-api-access-…` at /var/run/secrets/kubernetes.io/serviceaccount.
+      automountServiceAccountToken: false
       containers:
         - name: guard
           image: overfit-guard:latest
           imagePullPolicy: Never
+          # Deliberately NOT set here, and each omission is a decision rather than an oversight:
+          #
+          #   runAsNonRoot / runAsUser — the image runs as ROOT. `docker image inspect` reports an empty
+          #     `Config.User` and an entrypoint of `[dotnet /app/overfit.dll]`, so this is a
+          #     framework-dependent build and not the chiselled Native-AOT image in Sources/Cli/Dockerfile
+          #     (which would have carried a non-root USER). Setting runAsNonRoot without fixing the image
+          #     is a CrashLoopBackOff, and fixing the image is a separate change.
+          #   readOnlyRootFilesystem — the .NET runtime writes under /tmp, so this needs an emptyDir
+          #     mounted there, and that combination cannot be trusted without applying it and watching the
+          #     pod come up.
+          #
+          # Both are in XC-12's row with what has to be verified before they go in. What is below is the
+          # subset that cannot change how the process starts.
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
           args:
             - anomaly-guard
             - --config
