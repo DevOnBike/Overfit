@@ -715,11 +715,24 @@ exceeded.
 | `HuggingFaceBpeTokenizer` (2 sites) | `MaxPreTokenizerDepth`, checked on entry, throws catchably | proved |
 | `TokenSampler` sift-down | descends one heap level per call, `<= log2(n)` | proved, structurally |
 | `PartialSort` quicksort | recurses into the smaller half only, `<= log2(n)` | proved, structurally |
-| `CheckpointedModule.FindNonDeterministic` | "a handful of levels at most" | **assumed** |
+| `CheckpointedModule.FindNonDeterministic` | ~~"a handful of levels at most"~~ | **was assumed — FIXED 2026-08-10 (`NR-4`), the exemption is gone** |
 
 The one lapse was written the same afternoon the rule was being praised, which is the useful part of the
 result: the discipline holds across code written by many hands over months, and broke in the code written
 while admiring it.
+
+**Closed 2026-08-10 (`NR-4`), and the fix carries a lesson the audit did not anticipate.** The prescription
+above — "the fix is an explicit stack on the heap" — is **necessary and not sufficient**. An explicit stack
+turns the overflow into an infinite *loop*: a hang rather than a crash, which is harder to diagnose precisely
+because nothing happens, and the reason `OVERFIT023` exists alongside `OVERFIT022`. What terminates a cyclic
+graph is the **ancestor set**, not the stack; `s.Add(s)` is legal to build because `Sequential.Add` only
+null-checks, so this was reachable and not hypothetical.
+
+The second half is subtler and nearly shipped as a regression: **"on the current path" is not "seen
+before"**. A first version used one global visited set and threw on any repeat, which rejects
+`s.Add(relu); s.Add(relu)` — one stateless instance at two positions, a legal model. It passed every other
+test written for the fix. Both halves are now pinned, and the second by reproducing the naive design as a
+mutation: it fails exactly the two shared-instance tests and nothing else.
 
 **The other half of the audit, which was not the question but is the larger risk.** A stack overflow is the
 product of depth and frame size, and `OVERFIT026` guards the second. No method in the tree carries both an

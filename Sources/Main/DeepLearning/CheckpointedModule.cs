@@ -65,35 +65,96 @@ namespace DevOnBike.Overfit.DeepLearning
         /// <summary>
         /// The first layer in <paramref name="module"/> that draws randomness on the forward path, or null.
         ///
-        /// <para>Structural rather than exhaustive: it recognises this project's dropout layers and looks one
-        /// composition level down through <see cref="Sequential"/>, which is the shape a checkpointed segment
-        /// actually has. A custom module that draws internally is not detectable from here, which is what
+        /// <para>Structural rather than exhaustive: it recognises this project's dropout layers and walks down
+        /// through <see cref="Sequential"/>, which is the shape a checkpointed segment actually has. A custom
+        /// module that draws internally is not detectable from here, which is what
         /// <c>allowNonDeterministic</c> documents rather than hides.</para>
+        ///
+        /// <para><b>Iterative with a visited set, and both halves are load-bearing.</b> This was recursion
+        /// under a <c>#pragma warning disable OVERFIT022</c> whose stated bound — "Sequential nesting, which a
+        /// caller builds explicitly and is a handful of levels at most" — was an assumption about how the API
+        /// gets used, not a proof. <c>Sequential.Add</c> null-checks its argument and nothing else, so
+        /// <c>s.Add(s)</c> compiles, runs, and takes the host process down with a
+        /// <c>StackOverflowException</c> that .NET cannot catch: no exception to report, no stack trace, no
+        /// log line, and Overfit runs inside somebody else's application.
+        ///
+        /// <b>An explicit stack alone would have made that worse.</b> It converts the overflow into an
+        /// infinite loop — a hang, which is harder to diagnose than a crash precisely because nothing happens,
+        /// and the reason <c>OVERFIT023</c> exists alongside <c>OVERFIT022</c>. The visited set is what
+        /// terminates a cycle; the stack only moves the growth off the call stack. A cycle is then an
+        /// <see cref="ArgumentException"/> the caller can catch.</para>
+        ///
+        /// <para><b>A cycle is "on the current path", not "seen before", and the difference is a regression
+        /// this nearly shipped.</b> The first version of this fix used one global visited set and threw on any
+        /// repeat — which rejects <c>s.Add(relu); s.Add(relu)</c>, a legal model that reuses one stateless
+        /// instance at two positions. Only a container reached while it is still an ancestor of the walk is a
+        /// cycle, so the walk carries the ancestor set explicitly; a separate <c>finished</c> set stops a
+        /// shared sub-model being re-walked once per position.</para>
         /// </summary>
         private static string? FindNonDeterministic(IModule module)
         {
             if (module is DropoutLayer or Dropout2DLayer)
             {
-                #pragma warning disable RS0030 // AOT-safe: the layer's own type name for a diagnostic message; no metadata is looked up.
+#pragma warning disable RS0030 // AOT-safe: the layer's own type name for a diagnostic message; no metadata is looked up.
                 return module.GetType().Name;
-                #pragma warning restore RS0030
+#pragma warning restore RS0030
             }
 
-            if (module is not Sequential sequential)
+            if (module is not Sequential root)
             {
                 return null;
             }
 
-            for (var i = 0; i < sequential.Modules.Count; i++)
-            {
-#pragma warning disable OVERFIT022 // Bounded: recursion follows Sequential nesting, which a caller builds explicitly and is a handful of levels at most.
-                var offender = FindNonDeterministic(sequential.Modules[i]);
-#pragma warning restore OVERFIT022
+            // `path` is the set of containers between the root and where the walk currently is — the
+            // iterative spelling of "what is on the call stack". `finished` keeps a shared sub-model from
+            // being walked once per position, which is what stops a wide DAG costing exponential time.
+            var path = new HashSet<IModule>(ReferenceEqualityComparer.Instance) { root };
+            var finished = new HashSet<IModule>(ReferenceEqualityComparer.Instance);
+            var frames = new Stack<(Sequential Node, int Index)>();
+            frames.Push((root, 0));
 
-                if (offender is not null)
+            while (frames.Count > 0)
+            {
+                var (node, index) = frames.Pop();
+
+                if (index >= node.Modules.Count)
                 {
-                    return offender;
+                    path.Remove(node);
+                    finished.Add(node);
+
+                    continue;
                 }
+
+                // Resumed at the next child when this frame comes back up, so the walk is depth-first in
+                // model order and reports the FIRST offending layer — which is what the constructor's message
+                // claims and what a caller reads as "the one to move".
+                frames.Push((node, index + 1));
+
+                var child = node.Modules[index];
+
+                if (child is DropoutLayer or Dropout2DLayer)
+                {
+#pragma warning disable RS0030 // AOT-safe: the layer's own type name for a diagnostic message; no metadata is looked up.
+                    return child.GetType().Name;
+#pragma warning restore RS0030
+                }
+
+                if (child is not Sequential nested || finished.Contains(nested))
+                {
+                    continue;
+                }
+
+                if (!path.Add(nested))
+                {
+                    throw new ArgumentException(
+                        "The segment contains a cycle: a Sequential contains itself, directly or through "
+                        + "another Sequential. Sequential.Add accepts any module, so a graph like s.Add(s) is "
+                        + "legal to build, and walking it would otherwise recurse until the process is "
+                        + "terminated by a StackOverflowException that .NET cannot catch.",
+                        nameof(module));
+                }
+
+                frames.Push((nested, 0));
             }
 
             return null;
