@@ -1,6 +1,8 @@
 ---
 name: overfit-anomalies-lab-config-drift
 description: Compare what the repository says about the anomaly-guard lab against what the cluster is actually running — ConfigMap bindings, custom channels, container resources, applied-but-uncommitted fixes — and report the divergence in both directions. Use before trusting any claim of the form "the guard watches X" or "the limit is Y", before a measurement whose premise is a config value, and after any change applied with kubectl. Read-only; it never applies anything.
+model: sonnet
+color: blue
 ---
 
 # What the repo says versus what the cluster runs

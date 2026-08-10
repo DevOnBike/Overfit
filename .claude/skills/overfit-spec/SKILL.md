@@ -1,6 +1,8 @@
 ---
 name: overfit-spec
-description: Spec-driven development for the Overfit engine. Use when starting a new feature, model/op/kernel/loader/runtime change, or any change touching multiple files — writes an Overfit-native spec (architecture path, AOT / zero-alloc / parity gates, git-read-only boundary) and a gated plan BEFORE coding. Prefer this over the generic spec-driven-development skill inside this repo.
+description: Spec-driven development for the Overfit engine. Use when starting a new feature, model/op/kernel/loader/runtime change, or any change touching multiple files — writes an Overfit-native spec (architecture path, AOT / zero-alloc / parity gates, git-read-only boundary) and a gated plan BEFORE coding. Prefer this over the generic overfit-spec-driven-development skill inside this repo.
+model: opus
+color: blue
 ---
 
 # Overfit Spec-Driven Development
@@ -13,7 +15,7 @@ expensive mistakes are architectural (mixing the inference and training paths), 
 `float[][]`), and epistemic (shipping a perf "win" that was never measured). The spec exists to
 catch those *before* the diff, and to end every change at a **clean/staged tree** — never a commit.
 
-This is the repo-specific counterpart to the generic `spec-driven-development` skill. When they
+This is the repo-specific counterpart to the generic `overfit-spec-driven-development` skill. When they
 disagree, **this one wins inside Overfit** (the generic one has web examples, dangling skill
 references, and "commit the spec / test before commit" advice that violates Overfit's git boundary).
 
@@ -47,7 +49,7 @@ execution path, the verification oracle, the AOT reach, the allocation policy. D
 process that advances phases on its own: if this skill and the agent chain both think they are driving,
 neither gate means anything.
 
-There is also a generic `spec-driven-development` skill in this repository whose scope overlaps this one.
+There is also a generic `overfit-spec-driven-development` skill in this repository whose scope overlaps this one.
 **Inside Overfit, this file wins** — the generic one carries web examples and advice that violates the git
 boundary here.
 

@@ -1,7 +1,7 @@
 ---
 description: List every site an OVERFIT analyzer rule flags, with its source line
 argument-hint: <rule id, e.g. OVERFIT026>
-allowed-tools: Write, Edit, Bash(python D:/Overfit/.claude/do.py)
+allowed-tools: Write, Edit, Bash(python .claude/do-sweep.py)
 ---
 
 Inventory every place rule `$1` fires across the solution, so the backlog can be judged before the rule
@@ -11,7 +11,7 @@ Most OVERFIT rules sit at `suggestion` while their backlog is swept, and a plain
 suggestions. So: raise the rule to `warning` in `.editorconfig`, build, collect, **restore the file in a
 `finally`** — an interrupted run must not leave the severity changed.
 
-Write this into `D:\Overfit\.claude\do.py` (substituting the rule id) and execute it:
+Write this into `.claude\do-sweep.py` (substituting the rule id) and execute it:
 
 ```python
 """Inventory one OVERFIT rule across the solution, with the source line for each site."""

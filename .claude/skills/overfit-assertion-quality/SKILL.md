@@ -1,14 +1,16 @@
 ---
 name: overfit-assertion-quality
-description: "Analyzes the variety and depth of assertions across test suites in any language. Use when the user asks to evaluate assertion quality, find shallow testing, identify assertion-free tests (no assertions or only trivial ones like Assert.IsNotNull / expect(x).toBeTruthy() / assert x is not None), flag self-referential or tautological assertions (output equals input on identity/round-trip operations), measure assertion coverage diversity, or audit whether tests verify different facets of correctness. Produces metrics and actionable recommendations. Polyglot: .NET (MSTest/xUnit/NUnit/TUnit), Python (pytest/unittest), TS/JS (Jest/Vitest/Mocha/Jasmine/node:test), Java (JUnit/TestNG), Go, Ruby (RSpec/Minitest), Rust, Swift (XCTest/Swift Testing), Kotlin (JUnit/Kotest), PowerShell (Pester), C++ (GoogleTest/Catch2/doctest). DO NOT USE FOR: writing new tests (use code-testing-agent, or writing-mstest-tests for MSTest), anti-patterns like flakiness or duplication (use test-anti-patterns), fixing assertions."
+description: "Analyzes the variety and depth of assertions across test suites in any language. Use when the user asks to evaluate assertion quality, find shallow testing, identify assertion-free tests (no assertions or only trivial ones like Assert.IsNotNull / expect(x).toBeTruthy() / assert x is not None), flag self-referential or tautological assertions (output equals input on identity/round-trip operations), measure assertion coverage diversity, or audit whether tests verify different facets of correctness. Produces metrics and actionable recommendations. Polyglot: .NET (MSTest/xUnit/NUnit/TUnit), Python (pytest/unittest), TS/JS (Jest/Vitest/Mocha/Jasmine/node:test), Java (JUnit/TestNG), Go, Ruby (RSpec/Minitest), Rust, Swift (XCTest/Swift Testing), Kotlin (JUnit/Kotest), PowerShell (Pester), C++ (GoogleTest/Catch2/doctest). DO NOT USE FOR: writing new tests (use code-testing-agent, or writing-mstest-tests for MSTest), anti-patterns like flakiness or duplication (use overfit-test-anti-patterns), fixing assertions."
 license: MIT
+model: sonnet
+color: yellow
 ---
 
 # Assertion Diversity Analysis
 
 Analyze test code in any supported language to measure how varied and meaningful the assertions are. Produce a metrics report that reveals whether tests verify different facets of correctness — not just "output equals X" but also structure, exceptions, state transitions, side effects, and invariants.
 
-> **Language-specific guidance**: Call the `test-analysis-extensions` skill to discover available extension files, then read the file matching the target codebase's language and framework (e.g., `dotnet.md` for .NET, `python.md` for pytest, `typescript.md` for Jest, `go.md` for the standard `testing` package). You MUST read the relevant extension file before classifying assertions, because assertion APIs differ significantly across frameworks.
+> **Language-specific guidance**: Call the `overfit-test-analysis-extensions` skill to discover available extension files, then read the file matching the target codebase's language and framework (e.g., `dotnet.md` for .NET, `python.md` for pytest, `typescript.md` for Jest, `go.md` for the standard `testing` package). You MUST read the relevant extension file before classifying assertions, because assertion APIs differ significantly across frameworks.
 
 ## Why Assertion Diversity Matters
 
@@ -34,7 +36,7 @@ Low assertion diversity signals shallow testing. Tests may pass while bugs hide 
 ## When Not to Use
 
 - User wants to write new tests (use `code-testing-agent` for any language, or `writing-mstest-tests` for MSTest specifically)
-- User wants to detect anti-patterns beyond assertions (use `test-anti-patterns`)
+- User wants to detect anti-patterns beyond assertions (use `overfit-test-anti-patterns`)
 - User wants to fix or rewrite assertions (help them directly)
 - User asks about code coverage percentages (out of scope — this analyzes assertion quality, not line coverage)
 
@@ -49,7 +51,7 @@ Low assertion diversity signals shallow testing. Tests may pass while bugs hide 
 
 ### Step 1: Detect language and load extension
 
-Identify the target codebase's language and test framework. Call the `test-analysis-extensions` skill and read the matching extension file (e.g., `extensions/dotnet.md` for .NET, `extensions/python.md` for pytest, `extensions/typescript.md` for Jest/Vitest, `extensions/go.md` for Go). The extension file lists the framework-specific assertion APIs you will classify in Step 3.
+Identify the target codebase's language and test framework. Call the `overfit-test-analysis-extensions` skill and read the matching extension file (e.g., `extensions/dotnet.md` for .NET, `extensions/python.md` for pytest, `extensions/typescript.md` for Jest/Vitest, `extensions/go.md` for Go). The extension file lists the framework-specific assertion APIs you will classify in Step 3.
 
 ### Step 2: Gather the test code
 

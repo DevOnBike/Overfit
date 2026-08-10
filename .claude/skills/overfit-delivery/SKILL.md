@@ -1,6 +1,8 @@
 ---
 name: overfit-delivery
 description: Runs a change through this repository's full delivery pipeline — classify, analyse, design, implement, verify, review, gate — dispatching the overfit-* agents in the right order and enforcing the gates between them. Invoke explicitly with /overfit-delivery when you want the process run properly rather than improvised; it is not meant to trigger on its own. It manages process state and never analyses the domain or writes code itself.
+model: opus
+color: blue
 ---
 
 # Overfit delivery pipeline

@@ -1,6 +1,8 @@
 ---
 name: overfit-mutate
 description: Break the behaviour a test claims to protect and prove the test notices, with the five guards that stop a mutation lying — refuse a dirty target, require the anchor to match exactly once, check the baseline is green, separate "did not compile" from "not caught", and verify the restore byte-for-byte. Use after writing any test whose failure matters, and whenever somebody says a change is "pinned by a test". Not anomaly-specific; it applies to any C# test in this repository.
+model: opus
+color: green
 ---
 
 # Prove the test can fail
@@ -12,7 +14,7 @@ All three were green. All three were found by mutation.
 
 ## The procedure
 
-Write this into the scratch file (`.claude/do.py`, or your own `do-<agent>.py`) with the four constants
+Write this into the scratch file (your own `do-<agent>.py`) with the four constants
 substituted, and execute it as a single invocation.
 
 ```python

@@ -1,6 +1,8 @@
 ---
 name: overfit-anomalies-lab-two-arms
 description: Verify a detector with two arms — healthy quiet and faulted loud — after first proving each arm is CAPABLE of a verdict. Prove the mechanism can say Anomalous on a synthetic input of the intended shape BEFORE trusting any healthy-arm result, and quote the gates the input must clear. Use for any change to what the anomaly guard detects; a fixture proves the code path, an injected fault proves the chain.
+model: opus
+color: yellow
 ---
 
 # Both arms, and each one capable of a verdict

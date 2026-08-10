@@ -1,6 +1,8 @@
 ---
 name: overfit-anomalies-lab-window
 description: Open, screen and close a calibration window on the anomaly-guard lab — choose a window that is clean of faults AND flat in the quantity being calibrated, state the premise before measuring, and refuse any statistic computed across a known discontinuity. Use before fitting any floor or threshold from lab data. Most of its rules exist because they were broken while writing it.
+model: opus
+color: yellow
 ---
 
 # A calibration window, and the four ways it lies
