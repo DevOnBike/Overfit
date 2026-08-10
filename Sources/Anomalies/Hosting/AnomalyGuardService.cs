@@ -495,6 +495,31 @@ namespace DevOnBike.Overfit.Anomalies.Hosting
                         silentButBound++;
                         _blindMetric(_logger, metric.ToString(), null);
                     }
+
+                    // The custom channels, which this loop walked past until 2026-08-10 (XC-9's sibling,
+                    // XC-11). The built-in half was well built and its comment argues the case exactly —
+                    // "the names are the whole actionable part" — and then the loop was keyed on MetricIndex,
+                    // so a client's own channels were counted in `blind=N` and never named. That is the half
+                    // of the system a client is most likely to extend, and on the lab it is already five
+                    // channels.
+                    //
+                    // No unbound case to skip here: a custom channel exists BECAUSE somebody wrote a binding
+                    // for it, so every silent one is actionable by definition. The built-ins need that check
+                    // only because the enum carries members no deployment has bound.
+                    var custom = _options.Guard.CustomMetrics;
+
+                    for (var c = 0; c < custom.Count; c++)
+                    {
+                        var name = custom[c].Name;
+
+                        if (window.PodsReporting(name) > 0)
+                        {
+                            continue;
+                        }
+
+                        silentButBound++;
+                        _blindMetric(_logger, name, null);
+                    }
                 }
 
                 // Fires on the actionable count, not the total. `blind=N` on the cycle line above still
