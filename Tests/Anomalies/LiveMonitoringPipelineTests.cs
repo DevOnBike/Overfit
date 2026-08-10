@@ -91,7 +91,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
                     },
                 };
 
-                await using (var pipeline = LiveMonitoringPipeline.CreateForTest(model, source, options, sink))
+                await using (var pipeline = LiveMonitoringPipeline.CreateForTest(model, source, options, clock: null, sink))
                 {
                     await pipeline.RunAsync(cts.Token);
 

@@ -10,6 +10,7 @@ using DevOnBike.Overfit.Anomalies.Monitoring;
 using DevOnBike.Overfit.Anomalies.Monitoring.Abstractions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using DevOnBike.Overfit.Runtime;
 
 namespace DevOnBike.Overfit.Anomalies.Hosting
 {
@@ -114,6 +115,7 @@ namespace DevOnBike.Overfit.Anomalies.Hosting
                 new EventId(CycleFailedEventId, "AnomalyGuardCycleFailed"),
                 "Anomaly guard cycle failed; skipping it and continuing.");
 
+        private readonly IClock _clock;
         private readonly AnomalyGuardServiceOptions _options;
         private readonly IMetricWindowSource _source;
         private readonly IRefreshablePodTopology? _topology;
@@ -186,12 +188,15 @@ namespace DevOnBike.Overfit.Anomalies.Hosting
             IRefreshablePodTopology? topology = null,
             IIncidentStore? store = null,
             ILearnedStateStore? learnedState = null,
-            MetricMap? metricMap = null)
+            MetricMap? metricMap = null,
+            IClock? clock = null)
         {
             ArgumentNullException.ThrowIfNull(options);
             ArgumentNullException.ThrowIfNull(source);
             ArgumentNullException.ThrowIfNull(sink);
             ArgumentNullException.ThrowIfNull(logger);
+
+            _clock = clock ?? SystemClock.Instance;
 
             _options = options;
             _source = source;
@@ -278,7 +283,7 @@ namespace DevOnBike.Overfit.Anomalies.Hosting
                 // The one wall-clock read in this subsystem's cycle path, and it lives here rather than
                 // inside the cycle so a caller replaying history can name a different moment. Live behaviour
                 // is the same read, one frame up.
-                await RunCycleAsync(DateTimeOffset.UtcNow, stoppingToken).ConfigureAwait(false);
+                await RunCycleAsync(_clock.UtcNow, stoppingToken).ConfigureAwait(false);
             }
         }
 

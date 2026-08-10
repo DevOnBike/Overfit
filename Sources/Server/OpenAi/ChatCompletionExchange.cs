@@ -7,6 +7,7 @@ using System.Text.Json;
 using DevOnBike.Overfit.Diagnostics;
 using DevOnBike.Overfit.LanguageModels;
 using DevOnBike.Overfit.LanguageModels.Contracts;
+using DevOnBike.Overfit.Runtime;
 
 namespace DevOnBike.Overfit.Server.OpenAi
 {
@@ -40,7 +41,8 @@ namespace DevOnBike.Overfit.Server.OpenAi
             string modelName,
             string systemMessage,
             IOpenAiResponseSink sink,
-            IChatExchangeObserver? observer = null)
+            IChatExchangeObserver? observer = null,
+            IClock? clock = null)
         {
             ArgumentNullException.ThrowIfNull(client);
             ArgumentNullException.ThrowIfNull(sink);
@@ -61,7 +63,7 @@ namespace DevOnBike.Overfit.Server.OpenAi
             var (sampling, maxTokens) = OpenAiChatMapping.BuildSampling(req);
             var options = new GenerationOptions(maxTokens, maxContextLength: 8192, sampling, stopOnEndOfTextToken: true);
             var id = "chatcmpl-" + Guid.NewGuid().ToString("N");
-            var ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            var ts = (clock ?? SystemClock.Instance).UtcNow.ToUnixTimeSeconds();
 
             ITokenConstraint? constraint;
             try

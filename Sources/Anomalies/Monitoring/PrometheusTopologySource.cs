@@ -6,6 +6,7 @@
 using System.Text.Json;
 using DevOnBike.Overfit.Anomalies.Contracts;
 using DevOnBike.Overfit.Anomalies.Monitoring.Abstractions;
+using DevOnBike.Overfit.Runtime;
 
 namespace DevOnBike.Overfit.Anomalies.Monitoring
 {
@@ -39,6 +40,7 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
             PropertyNameCaseInsensitive = true,
         };
 
+        private readonly IClock _clock;
         private readonly IPrometheusQuerySelector _selector;
         private readonly string _peerGroupLabel;
         private readonly string _baseUrl;
@@ -68,11 +70,13 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
             string prometheusBaseUrl,
             IPrometheusQuerySelector selector,
             HttpClient? httpClient = null,
-            string peerGroupLabel = "")
+            string peerGroupLabel = "",
+            IClock? clock = null)
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(prometheusBaseUrl);
             ArgumentNullException.ThrowIfNull(selector);
 
+            _clock = clock ?? SystemClock.Instance;
             _baseUrl = prometheusBaseUrl.TrimEnd('/');
             _selector = selector;
             _peerGroupLabel = peerGroupLabel ?? string.Empty;
@@ -277,7 +281,7 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
                 // Stamped here and nowhere else — every other exit from this method leaves the previous
                 // snapshot in place, and a timestamp that moved with them would describe an attempt rather
                 // than a list.
-                LastRefreshed = DateTimeOffset.UtcNow;
+                LastRefreshed = _clock.UtcNow;
 
                 return resolved.Count;
             }

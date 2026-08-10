@@ -9,6 +9,7 @@ using DevOnBike.Overfit.Anomalies.Monitoring;
 using DevOnBike.Overfit.Anomalies.Monitoring.Abstractions;
 using DevOnBike.Overfit.Anomalies.Rules;
 using DevOnBike.Overfit.Statistics;
+using DevOnBike.Overfit.Runtime;
 
 namespace DevOnBike.Overfit.Anomalies.Incidents
 {
@@ -36,6 +37,7 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
     /// </summary>
     public sealed class AnomalyGuard
     {
+        private readonly IClock _clock;
         private readonly AnomalyGuardOptions _options;
         private readonly IIncidentSink _sink;
         private readonly IIncidentStore? _store;
@@ -201,11 +203,13 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
             IncidentTrackingOptions tracking,
             IIncidentStore? store = null,
             DateTimeOffset? restoredAt = null,
-            IIncidentStore? historyStore = null)
+            IIncidentStore? historyStore = null,
+            IClock? clock = null)
         {
             ArgumentNullException.ThrowIfNull(options);
             ArgumentNullException.ThrowIfNull(sink);
 
+            _clock = clock ?? SystemClock.Instance;
             _options = options;
             _sink = sink;
             _store = store;
@@ -264,7 +268,7 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
                 var saved = IncidentStateFormat.Read(store.Load(), out var nextId);
 
                 RestoredIncidents = _tracker.Restore(
-                    saved, nextId, restoredAt ?? DateTimeOffset.UtcNow, options.MaxRestoredIncidentAge);
+                    saved, nextId, restoredAt ?? _clock.UtcNow, options.MaxRestoredIncidentAge);
             }
 
             // After both loads, and reached even when there is no incident store, because the learned-state

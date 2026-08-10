@@ -41,6 +41,7 @@ namespace DevOnBike.Overfit.Cli
     /// </summary>
     internal sealed class GuardMetricsEndpoint : IDisposable
     {
+        private readonly IClock _clock;
         private readonly HttpListener _listener = new();
         private readonly GuardTelemetry _telemetry;
         private readonly AnomalyGuard? _guard;
@@ -48,8 +49,9 @@ namespace DevOnBike.Overfit.Cli
         private readonly CancellationTokenSource _stopping = new();
 
         private GuardMetricsEndpoint(
-            GuardTelemetry telemetry, AnomalyGuard? guard, ILogger logger, string prefix)
+            GuardTelemetry telemetry, AnomalyGuard? guard, ILogger logger, string prefix, IClock? clock)
         {
+            _clock = clock ?? SystemClock.Instance;
             _telemetry = telemetry;
             _guard = guard;
             _logger = logger;
@@ -66,7 +68,8 @@ namespace DevOnBike.Overfit.Cli
         /// is what a host that does not want a write endpoint gets.
         /// </param>
         public static GuardMetricsEndpoint? TryStart(
-            GuardTelemetry telemetry, ILogger logger, int port, AnomalyGuard? guard = null)
+            GuardTelemetry telemetry, ILogger logger, int port, AnomalyGuard? guard = null,
+            IClock? clock = null)
         {
             ArgumentNullException.ThrowIfNull(telemetry);
             ArgumentNullException.ThrowIfNull(logger);
@@ -80,12 +83,12 @@ namespace DevOnBike.Overfit.Cli
             // URL reservation on Windows and none on Linux, so a developer box falls back to loopback rather
             // than losing the endpoint entirely — and is told, because "metrics work on my machine and not in
             // the cluster" is the wrong lesson to learn later.
-            if (TryBind(telemetry, guard, logger, $"http://+:{port}/") is { } wide)
+            if (TryBind(telemetry, guard, logger, $"http://+:{port}/", clock) is { } wide)
             {
                 return wide;
             }
 
-            if (TryBind(telemetry, guard, logger, $"http://127.0.0.1:{port}/") is { } local)
+            if (TryBind(telemetry, guard, logger, $"http://127.0.0.1:{port}/", clock) is { } local)
             {
                 logger.LogWarning(
                     "Guard metrics are bound to LOOPBACK only on port {Port} — binding all interfaces needs a "
@@ -106,9 +109,9 @@ namespace DevOnBike.Overfit.Cli
         }
 
         private static GuardMetricsEndpoint? TryBind(
-            GuardTelemetry telemetry, AnomalyGuard? guard, ILogger logger, string prefix)
+            GuardTelemetry telemetry, AnomalyGuard? guard, ILogger logger, string prefix, IClock? clock)
         {
-            var endpoint = new GuardMetricsEndpoint(telemetry, guard, logger, prefix);
+            var endpoint = new GuardMetricsEndpoint(telemetry, guard, logger, prefix, clock);
 
             try
             {
@@ -221,7 +224,7 @@ namespace DevOnBike.Overfit.Cli
                 return;
             }
 
-            var now = DateTimeOffset.UtcNow;
+            var now = _clock.UtcNow;
             var active = _guard.ActiveSuppressions(now);
             var text = new StringBuilder();
 
@@ -374,7 +377,7 @@ namespace DevOnBike.Overfit.Cli
                     isReal ? OperatorLabelKind.Real : OperatorLabelKind.Noise,
                     mute,
                     query["reason"] ?? string.Empty,
-                    DateTimeOffset.UtcNow);
+                    _clock.UtcNow);
 
                 _logger.LogWarning(
                     "Operator acknowledged incident {Incident} as {Kind}: {Outcome}", id, kindText, echo);

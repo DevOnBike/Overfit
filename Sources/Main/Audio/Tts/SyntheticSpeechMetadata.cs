@@ -4,6 +4,7 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using System.Globalization;
+using DevOnBike.Overfit.Runtime;
 
 namespace DevOnBike.Overfit.Audio.Tts
 {
@@ -61,8 +62,16 @@ namespace DevOnBike.Overfit.Audio.Tts
                 ? $"generatedBy=Overfit; synthetic=true; voice={VoiceProfileId ?? "-"}; createdUtc={CreatedUtc}"
                 : string.Empty;
 
-        /// <summary>Convenience: a marker stamped with the current UTC time.</summary>
-        public static SyntheticSpeechMetadata ForNow(string? voiceProfileId)
-            => new(voiceProfileId, DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture));
+        /// <summary>
+        /// A marker stamped with the current UTC time, read from <paramref name="clock"/>.
+        ///
+        /// <para>The clock is a parameter because this stamp is the only mutable thing in an otherwise
+        /// deterministic artefact: a test that asserts on a watermarked file cannot pin its bytes while the
+        /// timestamp comes from the wall clock. Callers that have no reason to care pass nothing and get
+        /// <see cref="SystemClock"/>.</para>
+        /// </summary>
+        public static SyntheticSpeechMetadata ForNow(string? voiceProfileId, IClock? clock = null)
+            => new(voiceProfileId,
+                (clock ?? SystemClock.Instance).UtcNow.ToString("O", CultureInfo.InvariantCulture));
     }
 }

@@ -11,6 +11,7 @@ using DevOnBike.Overfit.Anomalies.Monitoring;
 using DevOnBike.Overfit.Anomalies.Monitoring.Abstractions;
 using DevOnBike.Overfit.DeepLearning;
 using GptTrainingConfig = DevOnBike.Overfit.Anomalies.Training.GptTrainingConfig;
+using DevOnBike.Overfit.Runtime;
 
 namespace DevOnBike.Overfit.Anomalies.Live
 {
@@ -39,6 +40,7 @@ namespace DevOnBike.Overfit.Anomalies.Live
     /// </summary>
     public sealed class LiveMonitoringPipeline : IAsyncDisposable
     {
+        private readonly IClock _clock;
         private readonly IRawMetricSource _source;
         private readonly GPT1Model _model;
         private readonly AdaptiveAnomalyMonitor _monitor;
@@ -53,8 +55,10 @@ namespace DevOnBike.Overfit.Anomalies.Live
             GPT1Model model,
             AdaptiveAnomalyMonitor monitor,
             LiveMonitoringOptions options,
-            IAlertSink[] sinks)
+            IAlertSink[] sinks,
+            IClock? clock = null)
         {
+            _clock = clock ?? SystemClock.Instance;
             _source = source;
             _model = model;
             _monitor = monitor;
@@ -123,6 +127,7 @@ namespace DevOnBike.Overfit.Anomalies.Live
             GPT1Model model,
             IRawMetricSource source,
             LiveMonitoringOptions options,
+            IClock? clock,
             params IAlertSink[] sinks)
         {
             ArgumentNullException.ThrowIfNull(model);
@@ -131,7 +136,7 @@ namespace DevOnBike.Overfit.Anomalies.Live
             ArgumentNullException.ThrowIfNull(options.Adaptation);
 
             var monitor = new AdaptiveAnomalyMonitor(model, options.Adaptation);
-            return new LiveMonitoringPipeline(source, model, monitor, options, sinks);
+            return new LiveMonitoringPipeline(source, model, monitor, options, sinks, clock);
         }
 
         /// <summary>Pods the monitor currently recommends adapting (sustained false-positive pressure).</summary>
@@ -154,7 +159,7 @@ namespace DevOnBike.Overfit.Anomalies.Live
             {
                 try
                 {
-                    var scrapeTime = DateTime.UtcNow;
+                    var scrapeTime = _clock.UtcNow.UtcDateTime;
                     var series = await _source.ReadAsync(ct).ConfigureAwait(false);
                     var snapshots = ConvertToSnapshots(series, scrapeTime);
 

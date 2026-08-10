@@ -48,7 +48,8 @@ namespace DevOnBike.Overfit.Server.AspNet.Services
             string systemMessage,
             SentenceEmbedder? embedder,
             OrpheusVoiceEngine? tts,
-            ServerMetrics metrics)
+            ServerMetrics metrics,
+            IClock? clock = null)
         {
             _pool = pool ?? throw new ArgumentNullException(nameof(pool));
             _modelName = modelName;
@@ -56,7 +57,7 @@ namespace DevOnBike.Overfit.Server.AspNet.Services
             _embedder = embedder;
             _tts = tts;
             _metrics = metrics ?? throw new ArgumentNullException(nameof(metrics));
-            _created = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            _created = (clock ?? SystemClock.Instance).UtcNow.ToUnixTimeSeconds();
 
             // The chat exchange takes ONE observer; metrics always record, the phase trace joins only when
             // OVERFIT_SERVER_TRACE=1.

@@ -11,6 +11,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using System.Diagnostics.CodeAnalysis;
+using DevOnBike.Overfit.Runtime;
 
 namespace DevOnBike.Overfit.Anomalies.Hosting
 {
@@ -138,11 +139,16 @@ namespace DevOnBike.Overfit.Anomalies.Hosting
         /// <param name="file">The client's configuration, already read.</param>
         /// <param name="options">Cadence, window and tracking; the defaults are the measured ones.</param>
         /// <param name="onProblem">One line per configuration entry that could not be used.</param>
+        /// <param name="clock">
+        /// The clock the initial history range is anchored to. Read ONCE below: the previous code called
+        /// <c>DateTime.UtcNow</c> twice, so the range's two ends came from two different instants.
+        /// </param>
         public static IServiceCollection AddOverfitAnomalyGuard(
             this IServiceCollection services,
             AnomalyGuardConfigFile file,
             AnomalyGuardServiceOptions? options = null,
-            Action<string>? onProblem = null)
+            Action<string>? onProblem = null,
+            IClock? clock = null)
         {
             ArgumentNullException.ThrowIfNull(services);
             ArgumentNullException.ThrowIfNull(file);
@@ -158,12 +164,14 @@ namespace DevOnBike.Overfit.Anomalies.Hosting
                 Report(windowProblems, onProblem);
             }
 
+            var now = (clock ?? SystemClock.Instance).UtcNow.UtcDateTime;
+
             var prometheus = PrometheusHistoricalSourceConfig.ForOverfitServer(
                 file.Prometheus,
                 podRegex: file.PodRegex,
                 namespaceName: file.Namespace,
-                rangeStart: DateTime.UtcNow.AddMinutes(-20),
-                rangeEnd: DateTime.UtcNow,
+                rangeStart: now.AddMinutes(-20),
+                rangeEnd: now,
                 step: TimeSpan.FromSeconds(15)) with
             {
                 // The client's mapping replaces the built-in templates entirely. An unmapped feature gets an

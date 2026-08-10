@@ -7,6 +7,7 @@ using System.Collections.Concurrent;
 using System.Threading.Channels;
 using DevOnBike.Overfit.Anomalies.Alerting.Abstractions;
 using DevOnBike.Overfit.Anomalies.Contracts;
+using DevOnBike.Overfit.Runtime;
 
 namespace DevOnBike.Overfit.Anomalies.Alerting
 {
@@ -32,11 +33,13 @@ namespace DevOnBike.Overfit.Anomalies.Alerting
     /// </summary>
     public sealed class AlertEngine : IAsyncDisposable
     {
+        private readonly IClock _clock;
         private readonly AlertEngineConfig _config;
         private readonly Task _consumer;
         private readonly CancellationTokenSource _cts = new();
 
-        // Per-pod last-alert timestamp stored as UTC ticks for lock-free compare
+        // Per-pod last-alert timestamp stored as UTC ticks for lock-free compare, read from _clock so a
+        // replay measures the cooldown against the data's timeline rather than the machine's.
         private readonly ConcurrentDictionary<string, long> _lastAlertTicks = new();
 
         // Bounded channel isolates the hot-path from slow sinks.
@@ -52,8 +55,30 @@ namespace DevOnBike.Overfit.Anomalies.Alerting
         /// <param name="sinks">One or more alert sinks. Must not be empty.</param>
         /// <exception cref="ArgumentException">When sinks is empty.</exception>
         public AlertEngine(AlertEngineConfig config, params IAlertSink[] sinks)
+            : this(config, SystemClock.Instance, sinks)
         {
+        }
+
+        /// <param name="config">Engine configuration. Pass null for defaults.</param>
+        /// <param name="clock">
+        /// The clock the cooldown and the alert timestamp are measured against.
+        ///
+        /// <para><b>Injected because the cooldown cannot otherwise be tested at the duration it ships
+        /// with.</b> The default is five minutes; the only expiry test this class had reconfigured it to
+        /// 30 ms and slept 60 ms, so the shipped value was never exercised and the test raced the box.</para>
+        ///
+        /// <para><b>And because a replay is not the wall clock.</b> The guard feeds recorded history through
+        /// <c>RunCycleAsync(DateTimeOffset)</c> — a day of data in seconds of real time. An engine reading
+        /// <c>DateTime.UtcNow</c> would suppress every alert after the first for the whole replay and stamp
+        /// each one with the time the replay ran, not the time the incident happened.</para>
+        /// </param>
+        /// <param name="sinks">One or more alert sinks. Must not be empty.</param>
+        public AlertEngine(AlertEngineConfig config, IClock clock, params IAlertSink[] sinks)
+        {
+            ArgumentNullException.ThrowIfNull(clock);
             ArgumentNullException.ThrowIfNull(sinks);
+
+            _clock = clock;
 
             if (sinks.Length == 0)
             {
@@ -145,7 +170,7 @@ namespace DevOnBike.Overfit.Anomalies.Alerting
                 PodName = podName,
                 AnomalyScore = anomalyScore,
                 ReconstructionMse = reconstructionMse,
-                DetectedAt = DateTime.UtcNow,
+                DetectedAt = _clock.UtcNow.UtcDateTime,
                 Severity = anomalyScore >= _config.CriticalThreshold ? AlertSeverity.Critical : AlertSeverity.Warning
             };
 
@@ -200,13 +225,13 @@ namespace DevOnBike.Overfit.Anomalies.Alerting
                 return false;
             }
 
-            var elapsed = TimeSpan.FromTicks(DateTime.UtcNow.Ticks - lastTicks);
+            var elapsed = TimeSpan.FromTicks(_clock.UtcNow.UtcTicks - lastTicks);
             return elapsed < _config.CooldownDuration;
         }
 
         private void RecordAlertTime(string podName)
         {
-            _lastAlertTicks[podName] = DateTime.UtcNow.Ticks;
+            _lastAlertTicks[podName] = _clock.UtcNow.UtcTicks;
         }
     }
 
