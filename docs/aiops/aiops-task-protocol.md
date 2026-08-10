@@ -144,7 +144,7 @@ Two things to be strict about:
 - **A rule in a file is weaker than a gate in code.** On the day this was written, the only two things that
   actually caught anything were a parity test and a mutation harness, not paragraphs. When a note is worth
   keeping, say whether it can become a test rather than a sentence — and when it is a helper rather than a
-  rule, it belongs in `.claude/lab.py`, written once.
+  rule, it belongs in `Scripts/lab.py`, written once.
 - **An agent's own account of its run is evidence about its instructions, never evidence that its output is
   sound.** One reported "the instructions worked as intended" in a run where it had failed.
 

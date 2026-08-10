@@ -91,23 +91,30 @@ goes into `.claude/do.py` and is executed as the single invocation `python D:/Ov
 (It was `run.py` until 2026-08-07; the allow-list in `settings.json` still carries the old name in a few
 redundant entries, which are harmless because `Bash(python *)` covers both.)
 
-**The scratch file is scratch; the lab helpers are not — `.claude/lab.py`.** Anything that drives the
+**The scratch file is scratch; the lab helpers are not — `Scripts/lab.py`.** Anything that drives the
 anomaly-guard lab (run kubectl, query Prometheus, find the guard or workload pods, inject a fault, replay a
 window, run the suite) is written there once and imported:
 
 ```python
 import sys
-sys.path.insert(0, r"D:\Overfit\.claude")
+sys.path.insert(0, r"D:\Overfit\Scripts")
 from lab import kubectl, prom, guard_pod, workload_pods, inject, replay_signals, suite
 ```
 
 **Written on 2026-08-09 because re-pasting is how a defect propagates.** Every scratch script had its own
 copy of the same four helpers, and each copy carried the previous copy's bugs: the broken unpacking
 `_, target, _ = kubectl(...)` — which returns two values — was pasted three times in one evening and failed
-three times. Two more that the module now gets right once: `guard_pod()` is read **fresh** rather than before
-a rollout, because reading the name first and the log after tails a dead pod and shows nothing, which reads
-as "no cycles" and is really "wrong pod"; and `apply_and_read_back` exists because `kubectl apply` reports
-success for a field it dropped.
+three times. Three more the module now gets right once: `guard_pod()` returns the **live** pod, because right
+after a rollout the terminating one is still listed and its log is empty, which reads as "no cycles" and is
+really "wrong pod"; `utc()` converts with `calendar.timegm`, because `mktime - timezone` is an hour out under
+DST and made one arm scan a different window than the replay it was checking; and `apply_and_read_back`
+exists because `kubectl apply` reports success for a field it dropped.
+
+**It lives under `Scripts/`, not `.claude/`, and that is the point.** The first version was written into
+`.claude/`, which `.gitignore` excludes wholesale, and was gone by the next morning — after which an agent
+re-derived the port-forward helpers by hand from `run_two_hour_check.py`, which is precisely the
+paste-propagation the file exists to prevent. A helper that must survive cannot live somewhere version
+control is not looking.
 
 **This applies to the main session AND to subagents, but through different files.** The main session uses
 `.claude/do.py`; each agent in `.claude/agents/**` uses its own `.claude/do-<agent-name>.py`, declared in its
@@ -131,7 +138,7 @@ Practical consequences, each of which has already gone wrong at least once:
   identical to the other one.
 - **`do.py` is scratch.** It is rewritten for each task and is gitignored — never put anything in it
   that needs to survive, and never treat its current contents as documentation of anything. What needs to
-  survive goes to `.claude/lab.py`.
+  survive goes to `Scripts/lab.py`.
 - **Filter the output in Python, not with `grep`/`sed`.** `dotnet build` on this solution emits far more
   than fits in a reply; print only errors, the diagnostics you asked for, and the test summary line. When
   a test fails, print the **test name** — twice now a real failure has been lost because the filter kept
