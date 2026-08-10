@@ -258,7 +258,16 @@ def inject(pod, path, hold_seconds=0, port=18300):
 
     **Timeouts are generous on purpose.** A pod pinned at its CPU quota cannot answer in 15
     seconds, and a `/fault/clear` that times out leaves the fault running.
+
+    `path` is normalised, so "clear", "/clear" and "/fault/clear" all reach the same endpoint.
+    Before that, `inject(pod, "clear")` built `http://127.0.0.1:18300clear` and died inside
+    urllib with `nonnumeric port` — a stack trace that says nothing about the actual mistake.
     """
+    path = path if path.startswith("/") else "/" + path
+
+    if not path.startswith("/fault"):
+        path = "/fault" + path
+
     forward = subprocess.Popen(
         ["kubectl", "-n", NAMESPACE, "port-forward", f"pod/{pod}", f"{port}:8080"],
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,

@@ -276,9 +276,8 @@ namespace DevOnBike.Overfit.Server
             // ── Audit (counts only — never the values). Recorded once per request, before the body streams back. ──
             if (matches.Count > 0)
             {
-                audit.Record(new RedactionAuditRecord(
+                audit.Record(new RedactionAuditEntry(
                     Guid.NewGuid().ToString("N"),
-                    DateTimeOffset.UtcNow,
                     matches.Count,
                     counts));
             }
@@ -678,8 +677,8 @@ namespace DevOnBike.Overfit.Server
                 counts[match.Category] = counts.GetValueOrDefault(match.Category) + 1;
             }
 
-            audit.Record(new RedactionAuditRecord(
-                Guid.NewGuid().ToString("N"), DateTimeOffset.UtcNow, matches.Count, counts));
+            audit.Record(new RedactionAuditEntry(
+                Guid.NewGuid().ToString("N"), matches.Count, counts));
         }
 
         // Refuses a request whose payload carried a Block-policy category: 403, audit the blocked category, no forward.
@@ -690,8 +689,8 @@ namespace DevOnBike.Overfit.Server
             {
                 blockCounts["BLOCKED:" + category] = 1;
             }
-            audit.Record(new RedactionAuditRecord(
-                Guid.NewGuid().ToString("N"), DateTimeOffset.UtcNow, blockedCategories.Count, blockCounts));
+            audit.Record(new RedactionAuditEntry(
+                Guid.NewGuid().ToString("N"), blockedCategories.Count, blockCounts));
 
             WriteText(ctx.Response, StatusCodes.Status403Forbidden,
                 $"Request refused by the redaction gateway: it contains forbidden category(ies) "

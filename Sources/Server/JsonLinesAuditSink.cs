@@ -6,6 +6,7 @@
 using System.Globalization;
 using System.Text;
 using DevOnBike.Overfit.Redaction;
+using DevOnBike.Overfit.Runtime;
 
 namespace DevOnBike.Overfit.Server
 {
@@ -17,12 +18,21 @@ namespace DevOnBike.Overfit.Server
     /// </summary>
     public sealed class JsonLinesAuditSink : IRedactionAuditSink, IDisposable
     {
+        private readonly IClock _clock;
         private readonly StreamWriter _writer;
         private readonly Lock _gate = new();
 
-        public JsonLinesAuditSink(string path)
+        /// <param name="path">The file to append to.</param>
+        /// <param name="clock">
+        /// Supplies the instant every line is stamped with. Injected because this sink is the one place the
+        /// gateway's audit trail reads a clock at all, and an audit line whose timestamp cannot be pinned
+        /// cannot be asserted on.
+        /// </param>
+        public JsonLinesAuditSink(string path, IClock? clock = null)
         {
             ArgumentException.ThrowIfNullOrEmpty(path);
+
+            _clock = clock ?? SystemClock.Instance;
 
             var stream = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.Read);
             _writer = new StreamWriter(stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false))
@@ -31,9 +41,14 @@ namespace DevOnBike.Overfit.Server
             };
         }
 
-        public void Record(RedactionAuditRecord record)
+        public void Record(in RedactionAuditEntry entry)
         {
-            ArgumentNullException.ThrowIfNull(record);
+            ArgumentNullException.ThrowIfNull(entry.RequestId);
+            ArgumentNullException.ThrowIfNull(entry.CategoryCounts);
+
+            // The stamp happens HERE, once, from an injected clock — see IRedactionAuditSink for why.
+            var record = new RedactionAuditRecord(
+                entry.RequestId, _clock.UtcNow, entry.TotalRedactions, entry.CategoryCounts);
 
             var sb = new StringBuilder(128);
             sb.Append("{\"timestamp\":\"").Append(record.Timestamp.ToString("o", CultureInfo.InvariantCulture)).Append('"');
