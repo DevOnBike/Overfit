@@ -44,3 +44,4 @@ OVERFIT035 | Design | Error | Two Schemas/*.json files map to the same generated
 OVERFIT036 | Design | Error | Schema file name cannot become a C# identifier
 OVERFIT037 | Design | Warning | Comment is not in English — comments here carry measurements and rejected designs, not only description
 OVERFIT038 | Reliability | Warning | Count read from a file sizes an allocation, a counted read or a loop with no bound checked in between — the validator must run BEFORE the first use
+OVERFIT039 | Reliability | Warning | Blocking on a task (.GetAwaiter().GetResult(), .Result, Task.Wait()) — under a saturated pool the waiter and the continuation deadlock silently
