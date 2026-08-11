@@ -233,7 +233,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             }
 
             var d = (float)BitConverter.UInt16BitsToHalf(
-                BinaryPrimitives.ReadUInt16LittleEndian(q4kBlock[..2]));
+                BinaryPrimitives.ReadUInt16LittleEndian(q4kBlock.Slice(0, 2)));
             var dmin = (float)BitConverter.UInt16BitsToHalf(
                 BinaryPrimitives.ReadUInt16LittleEndian(q4kBlock.Slice(2, 2)));
 
@@ -935,7 +935,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
                         // ── Decode the weight super-block ONCE (hoisted out of the rows loop). ──
                         var d = (float)BitConverter.UInt16BitsToHalf(
-                            BinaryPrimitives.ReadUInt16LittleEndian(block[..2]));
+                            BinaryPrimitives.ReadUInt16LittleEndian(block.Slice(0, 2)));
                         var dmin = (float)BitConverter.UInt16BitsToHalf(
                             BinaryPrimitives.ReadUInt16LittleEndian(block.Slice(2, 2)));
                         GgmlDequant.UnpackQ4_KScalesMins(block.Slice(4, 12), scales, mins);

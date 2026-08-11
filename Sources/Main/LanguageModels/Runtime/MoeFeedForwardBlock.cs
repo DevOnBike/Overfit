@@ -105,12 +105,12 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
             // Router: logits[e] = hidden · routerWeight[:, e]
             SingleTokenProjectionKernel.ProjectParallel(
-                hidden[..DModel], routerWeight, [], _routerLogits, DModel, ExpertCount);
+                hidden.Slice(0, DModel), routerWeight, [], _routerLogits, DModel, ExpertCount);
 
             var k = MoeRouter.SelectTopK(_routerLogits, ExpertUsedCount, _selectedExperts, _selectedWeights, _normalizeWeights);
 
             // Combine only the selected experts, weighted by the renormalised router probabilities.
-            output[..DModel].Clear();
+            output.Slice(0, DModel).Clear();
             for (var i = 0; i < k; i++)
             {
                 var e = _selectedExperts[i];

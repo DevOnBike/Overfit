@@ -144,30 +144,14 @@ namespace DevOnBike.Overfit.Analyzers
         /// Whether the expression is a task. <b>This is the whole rule.</b> Name-matching would flag every
         /// <c>SemaphoreSlim.Wait()</c> in the decode loop, and a rule with false positives on correct code
         /// gets suppressed wholesale rather than obeyed.
+        ///
+        /// <para>The body moved to <see cref="AwaitableType"/> on 2026-08-11 when OVERFIT046 needed the same
+        /// gate. Shared rather than copied: two analyzers disagreeing about what a task is would be a defect
+        /// nothing tests for, because each one's own tests would still pass.</para>
         /// </summary>
         private static bool IsAwaitable(SyntaxNodeAnalysisContext context, ExpressionSyntax expression)
         {
-            var type = context.SemanticModel.GetTypeInfo(expression, context.CancellationToken).Type;
-
-            if (type is null)
-            {
-                return false;
-            }
-
-            for (var current = type; current is not null; current = current.BaseType)
-            {
-                var name = current.OriginalDefinition.ToDisplayString();
-
-                if (name is "System.Threading.Tasks.Task"
-                    or "System.Threading.Tasks.Task<TResult>"
-                    or "System.Threading.Tasks.ValueTask"
-                    or "System.Threading.Tasks.ValueTask<TResult>")
-                {
-                    return true;
-                }
-            }
-
-            return false;
+            return AwaitableType.IsAwaitable(context.SemanticModel, expression, context.CancellationToken);
         }
 
         private static void Report(SyntaxNodeAnalysisContext context, SyntaxNode node, string what)

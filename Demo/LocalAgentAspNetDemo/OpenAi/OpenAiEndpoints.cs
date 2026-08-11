@@ -51,7 +51,7 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.OpenAi
                     });
                 }
 
-                var last = req.Messages[^1];
+                var last = req.Messages[req.Messages.Count - 1];
                 if (!string.Equals(last.Role, "user", StringComparison.OrdinalIgnoreCase))
                 {
                     return Results.BadRequest(new
@@ -120,7 +120,7 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.OpenAi
                     ctx.Response.Headers.ContentType = "text/event-stream";
                     ctx.Response.Headers.CacheControl = "no-cache";
                     var bodyControl = ctx.Features.Get<IHttpBodyControlFeature>();
-                    if (bodyControl is not null)
+                    if (bodyControl != null)
                     {
                         bodyControl.AllowSynchronousIO = true;
                     }

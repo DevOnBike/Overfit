@@ -51,9 +51,9 @@ namespace DevOnBike.Overfit.Audio
             Check(ref failures, report.MelDistanceDtw <= maxMelDistanceDtw,
                 "mel distance (DTW)", report.MelDistanceDtw, "<=", maxMelDistanceDtw, null);
 
-            if (failures is not null)
+            if (failures != null)
             {
-                var prefix = label is null ? "Audio quality gate failed" : $"Audio quality gate '{label}' failed";
+                var prefix = label == null ? "Audio quality gate failed" : $"Audio quality gate '{label}' failed";
                 throw new AudioQualityException($"{prefix}: {failures}(actual: {report})");
             }
 
@@ -69,7 +69,7 @@ namespace DevOnBike.Overfit.Audio
             }
 
             failures ??= new StringBuilder();
-            var u = unit is null ? string.Empty : " " + unit;
+            var u = unit == null ? string.Empty : " " + unit;
             failures.Append(CultureInfo.InvariantCulture,
                 $"{metric} {actual:0.0000}{u} not {op} {threshold:0.0000}{u}; ");
         }

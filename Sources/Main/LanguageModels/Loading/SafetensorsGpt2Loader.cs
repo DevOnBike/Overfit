@@ -46,11 +46,11 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
 
         public static GPT1Model Load(ISafetensorsSource reader, GPT1Config config)
         {
-            if (reader is null)
+            if (reader == null)
             {
                 throw new ArgumentNullException(nameof(reader));
             }
-            if (config is null)
+            if (config == null)
             {
                 throw new ArgumentNullException(nameof(config));
             }

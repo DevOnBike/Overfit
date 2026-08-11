@@ -80,7 +80,7 @@ namespace DevOnBike.Overfit.Analyzers
         {
             var method = (MethodDeclarationSyntax)context.Node;
 
-            if (method.Body is null && method.ExpressionBody is null)
+            if (method.Body == null && method.ExpressionBody == null)
             {
                 return;
             }
@@ -94,7 +94,7 @@ namespace DevOnBike.Overfit.Analyzers
 
             var declared = context.SemanticModel.GetDeclaredSymbol(method, context.CancellationToken);
 
-            if (declared is null || ReturnsAwaitable(declared.ReturnType))
+            if (declared == null || ReturnsAwaitable(declared.ReturnType))
             {
                 return;
             }
@@ -252,7 +252,7 @@ namespace DevOnBike.Overfit.Analyzers
 
         private static bool IsInsideNestedFunction(SyntaxNode node, SyntaxNode body)
         {
-            for (var current = node.Parent; current is not null && current != body; current = current.Parent)
+            for (var current = node.Parent; current != null && current != body; current = current.Parent)
             {
                 if (current is LambdaExpressionSyntax
                     or AnonymousMethodExpressionSyntax

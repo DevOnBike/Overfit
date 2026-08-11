@@ -146,9 +146,9 @@ namespace DevOnBike.Overfit.Statistics
             using var scratch = new PooledBuffer<double>(2 * rawTotal, clearMemory: false);
             using var boundsBuffer = new PooledBuffer<int>((2 * peers.Count) + 1, clearMemory: false);
 
-            var pooled = scratch.Span[..rawTotal];
-            var workspace = scratch.Span[rawTotal..];
-            var bounds = boundsBuffer.Span[..(peers.Count + 1)];
+            var pooled = scratch.Span.Slice(0, rawTotal);
+            var workspace = scratch.Span.Slice(rawTotal);
+            var bounds = boundsBuffer.Span.Slice(0, peers.Count + 1);
             var map = boundsBuffer.Span.Slice(peers.Count + 1, peers.Count);
 
             var written = Normalise(peers, kind, pooled, bounds);
@@ -178,16 +178,16 @@ namespace DevOnBike.Overfit.Statistics
             using var summaryBuffer = new PooledBuffer<double>(3 * comparable, clearMemory: false);
             using var rawBuffer = new PooledBuffer<PeerDeviation>(comparable, clearMemory: true);
 
-            var medians = summaryBuffer.Span[..comparable];
+            var medians = summaryBuffer.Span.Slice(0, comparable);
             var gaps = summaryBuffer.Span.Slice(comparable, comparable);
             var absolute = summaryBuffer.Span.Slice(2 * comparable, comparable);
-            var rawDeviations = rawBuffer.Span[..comparable];
+            var rawDeviations = rawBuffer.Span.Slice(0, comparable);
 
             for (var i = 0; i < comparable; i++)
             {
-                var span = pooled[bounds[i]..bounds[i + 1]];
+                var span = pooled.Slice(bounds[i], bounds[i + 1] - bounds[i]);
                 span.CopyTo(workspace);
-                medians[i] = MedianSelector.MedianInPlace(workspace[..span.Length]);
+                medians[i] = MedianSelector.MedianInPlace(workspace.Slice(0, span.Length));
             }
 
             var departures = MeasureGaps(medians, gaps, absolute, workspace, options.MinRelativeGap);
@@ -206,11 +206,11 @@ namespace DevOnBike.Overfit.Statistics
                 var end = bounds[i + 1];
 
                 // The rest of the group: everything before this peer, then everything after it.
-                pooled[..start].CopyTo(workspace);
-                pooled[end..written].CopyTo(workspace[start..]);
+                pooled.Slice(0, start).CopyTo(workspace);
+                pooled.Slice(end, written - end).CopyTo(workspace.Slice(start));
 
-                var rest = workspace[..(start + (written - end))];
-                var peer = pooled[start..end];
+                var rest = workspace.Slice(0, start + (written - end));
+                var peer = pooled.Slice(start, end - start);
 
                 // The size gate never changes which direction the rank test found, only whether that direction
                 // is worth reporting — so the raw verdict is kept alongside as the evidence for "this group has
@@ -532,7 +532,7 @@ namespace DevOnBike.Overfit.Statistics
                 var start = bounds[source];
                 var length = bounds[source + 1] - start;
 
-                pooled.Slice(start, length).CopyTo(pooled[packed..]);
+                pooled.Slice(start, length).CopyTo(pooled.Slice(packed));
                 packed += length;
                 bounds[i + 1] = packed;
             }
@@ -583,7 +583,7 @@ namespace DevOnBike.Overfit.Statistics
                     written++;
                 }
 
-                absolute[i] = Math.Abs(medians[i] - MedianSelector.MedianInPlace(scratch[..written]));
+                absolute[i] = Math.Abs(medians[i] - MedianSelector.MedianInPlace(scratch.Slice(0, written)));
             }
 
             if (minimumGap <= 0.0)
@@ -607,12 +607,12 @@ namespace DevOnBike.Overfit.Statistics
                     written++;
                 }
 
-                var centre = MedianSelector.MedianInPlace(scratch[..written]);
+                var centre = MedianSelector.MedianInPlace(scratch.Slice(0, written));
                 gaps[i] = RelativeGap(medians[i], centre);
             }
 
             medians.CopyTo(scratch);
-            var groupCentre = MedianSelector.MedianInPlace(scratch[..n]);
+            var groupCentre = MedianSelector.MedianInPlace(scratch.Slice(0, n));
 
             // A group centred on zero has no relative scale, so "how many members sit relatively far from it"
             // has no answer — and the answer must be none, not all.

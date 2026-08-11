@@ -34,7 +34,7 @@ namespace DevOnBike.Overfit.Tests.Adapters
             ]);
 
             Assert.Equal("Paris", response.Text);
-            Assert.Equal(ChatRole.Assistant, response.Messages[^1].Role);
+            Assert.Equal(ChatRole.Assistant, response.Messages[response.Messages.Count - 1].Role);
             Assert.Equal("test-model", response.ModelId);
             Assert.NotNull(response.Usage);
             Assert.Equal(5, response.Usage!.OutputTokenCount);   // "Paris" = 5 char-tokens

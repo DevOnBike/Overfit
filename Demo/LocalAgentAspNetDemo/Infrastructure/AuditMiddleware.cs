@@ -86,7 +86,7 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.Infrastructure
                 var auth = request.Headers.Authorization.ToString();
                 if (auth.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
                 {
-                    key = auth["Bearer ".Length..];
+                    key = auth.Substring("Bearer ".Length);
                 }
             }
 
@@ -95,7 +95,7 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.Infrastructure
                 return "anonymous";
             }
 
-            return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(key.Trim())))[..8].ToLowerInvariant();
+            return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(key.Trim()))).Substring(0, 8).ToLowerInvariant();
         }
     }
 }

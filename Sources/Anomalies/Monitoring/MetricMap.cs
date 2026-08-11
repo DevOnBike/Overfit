@@ -57,7 +57,7 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
                 _bound[index] = true;
             }
 
-            if (custom is null)
+            if (custom == null)
             {
                 return;
             }

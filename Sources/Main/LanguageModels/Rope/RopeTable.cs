@@ -53,7 +53,7 @@ namespace DevOnBike.Overfit.LanguageModels.Rope
                 throw new ArgumentOutOfRangeException(nameof(headDimension), "headDimension must be positive and even.");
             }
             ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(theta, 0f);
-            if (freqFactors is not null && freqFactors.Length != headDimension / 2)
+            if (freqFactors != null && freqFactors.Length != headDimension / 2)
             {
                 throw new ArgumentException(
                     $"freqFactors length ({freqFactors.Length}) must equal head_dim/2 ({headDimension / 2}).", nameof(freqFactors));
@@ -114,12 +114,12 @@ namespace DevOnBike.Overfit.LanguageModels.Rope
             {
                 // freq_i = 1 / (theta ^ (2i / headDim)), optionally llama3-rescaled.
                 var freq = 1f / MathF.Pow(Theta, 2f * i / HeadDimension);
-                if (_scaling is not null)
+                if (_scaling != null)
                 {
                     freq = _scaling.Apply(freq);
                 }
                 // Phi-3 longrope: divide each dim's base frequency by its per-dim factor.
-                if (_freqFactors is not null)
+                if (_freqFactors != null)
                 {
                     freq /= _freqFactors[i];
                 }

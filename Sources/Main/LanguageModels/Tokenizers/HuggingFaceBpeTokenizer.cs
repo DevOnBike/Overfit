@@ -171,7 +171,7 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
 
             foreach (var id in tokens)
             {
-                if (id < 0 || id >= _decoder.Length || _decoder[id] is null)
+                if (id < 0 || id >= _decoder.Length || _decoder[id] == null)
                 {
                     continue;
                 }
@@ -272,14 +272,14 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
             {
                 if (m.Index > pos)
                 {
-                    result.Add((text[pos..m.Index], false));
+                    result.Add((text.Substring(pos, m.Index - pos), false));
                 }
                 result.Add((m.Value, true));
                 pos = m.Index + m.Length;
             }
             if (pos < text.Length)
             {
-                result.Add((text[pos..], false));
+                result.Add((text.Substring(pos), false));
             }
             return result;
         }
@@ -369,7 +369,7 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
                     left = parts.Length == 2 ? parts[0] : null;
                     right = parts.Length == 2 ? parts[1] : null;
                 }
-                if (left is not null && right is not null
+                if (left != null && right != null
                     && vocab.TryGetValue(left, out var a) && vocab.TryGetValue(right, out var b))
                 {
                     ranks[(a, b)] = rank++;
@@ -451,7 +451,7 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
 #pragma warning disable OVERFIT022 // Bounded: MaxPreTokenizerDepth checked immediately above; throws catchably.
                     var found = FindSplitPattern(child, depth + 1);
 #pragma warning restore OVERFIT022
-                    if (found is not null)
+                    if (found != null)
                     {
                         return found;
                     }
@@ -511,7 +511,7 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
         {
             string? eosText = null, unkText = null;
 
-            if (dir is not null)
+            if (dir != null)
             {
                 var cfgPath = Path.Combine(dir, "tokenizer_config.json");
 
@@ -559,7 +559,7 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
 
         private static int ResolveId(string? token, Dictionary<string, int> specialTokens, Dictionary<string, int> vocab, int fallback)
         {
-            if (token is null)
+            if (token == null)
             {
                 return fallback;
             }

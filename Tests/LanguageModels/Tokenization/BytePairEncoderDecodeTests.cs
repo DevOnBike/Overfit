@@ -65,7 +65,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Tokenization
 
             var withGarbage = new int[ids.Length + 1];
             ids.CopyTo(withGarbage, 0);
-            withGarbage[^1] = int.MaxValue;
+            withGarbage[withGarbage.Length - 1] = int.MaxValue;
 
             Assert.Equal("Hello", tokenizer.Decode(withGarbage));
         }

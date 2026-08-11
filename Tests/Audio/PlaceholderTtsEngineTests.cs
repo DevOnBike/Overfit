@@ -34,9 +34,14 @@ namespace DevOnBike.Overfit.Tests.Audio
             Assert.Equal(0, sink.Count);
         }
 
-        private sealed class CountingSink(int sampleRate) : IAudioSink
+        private sealed class CountingSink : IAudioSink
         {
-            public int SampleRate { get; } = sampleRate;
+            public CountingSink(int sampleRate)
+            {
+                SampleRate = sampleRate;
+            }
+
+            public int SampleRate { get; }
             public int Count
             {
                 get; private set;

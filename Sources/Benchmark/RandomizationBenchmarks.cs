@@ -44,7 +44,7 @@ namespace Benchmarks
                 buffer[i] = rnd.NextSingle();
             }
 
-            return buffer[^1];
+            return buffer[buffer.Length - 1];
         }
 
         [Benchmark]
@@ -57,14 +57,14 @@ namespace Benchmarks
                 buffer[i] = Random.Shared.NextSingle();
             }
 
-            return buffer[^1];
+            return buffer[buffer.Length - 1];
         }
 
         [Benchmark]
         public float VectorizedPRNG_Fill()
         {
             _vectorized.Fill(_buffer);
-            return _buffer[^1];
+            return _buffer[_buffer.Length - 1];
         }
     }
 }

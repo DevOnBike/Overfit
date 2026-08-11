@@ -73,8 +73,8 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             }
 
             Array.Sort(perRun);
-            _out.WriteLine($"=== Gemma-2-2B Q4_K_M [{label}]: min {perRun[0]:F2} | median {perRun[Runs / 2]:F2} | max {perRun[^1]:F2} tok/s, {bytesPerTok} B/tok ===");
-            Assert.True(perRun[^1] > 0);
+            _out.WriteLine($"=== Gemma-2-2B Q4_K_M [{label}]: min {perRun[0]:F2} | median {perRun[Runs / 2]:F2} | max {perRun[perRun.Length - 1]:F2} tok/s, {bytesPerTok} B/tok ===");
+            Assert.True(perRun[perRun.Length - 1] > 0);
         }
 
         private static long DecodeFixed(

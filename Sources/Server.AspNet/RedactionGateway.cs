@@ -252,7 +252,7 @@ namespace DevOnBike.Overfit.Server
             HttpClient http)
         {
             var req = JsonSerializer.Deserialize(ctx.Request.Body, OpenAiJsonContext.Default.ChatCompletionRequest);
-            if (req is null)
+            if (req == null)
             {
                 WriteText(ctx.Response, StatusCodes.Status400BadRequest, "invalid request body");
                 return;
@@ -312,7 +312,7 @@ namespace DevOnBike.Overfit.Server
             if (matches.Count > 0 && upstreamResponse.IsSuccessStatusCode)
             {
                 var response = JsonSerializer.Deserialize(responseJson, OpenAiJsonContext.Default.ChatCompletionResponse);
-                if (response is not null)
+                if (response != null)
                 {
                     RestoreResponse(response, matches);
                     responseJson = JsonSerializer.Serialize(response, OpenAiJsonContext.Default.ChatCompletionResponse);
@@ -375,7 +375,7 @@ namespace DevOnBike.Overfit.Server
             var scanners = scanResponses ? new Dictionary<int, StreamingResponseScanner>() : null;
 
             string? line;
-            while ((line = reader.ReadLine()) is not null)
+            while ((line = reader.ReadLine()) != null)
             {
                 if (!line.StartsWith("data:", StringComparison.Ordinal))
                 {
@@ -390,7 +390,7 @@ namespace DevOnBike.Overfit.Server
                 {
                     // Release any held-back tails before closing the stream, then audit what the scanner masked.
                     FlushStreams(output, scanners, restorers);
-                    if (scanners is not null)
+                    if (scanners != null)
                     {
                         AuditStreamScanned(audit, scanners);
                     }
@@ -433,7 +433,7 @@ namespace DevOnBike.Overfit.Server
                 return payload;
             }
 
-            if (chunk is null)
+            if (chunk == null)
             {
                 return payload;
             }
@@ -445,7 +445,7 @@ namespace DevOnBike.Overfit.Server
                     continue;
                 }
 
-                if (scanners is not null)
+                if (scanners != null)
                 {
                     if (!scanners.TryGetValue(choice.Index, out var scanner))
                     {
@@ -479,7 +479,7 @@ namespace DevOnBike.Overfit.Server
                 var restorer = pair.Value;
                 var tail = string.Empty;
 
-                if (scanners is not null && scanners.TryGetValue(pair.Key, out var scanner))
+                if (scanners != null && scanners.TryGetValue(pair.Key, out var scanner))
                 {
                     tail = restorer.Push(scanner.Flush());
                 }
@@ -672,7 +672,7 @@ namespace DevOnBike.Overfit.Server
         private static void ForwardResponseHeaders(HttpResponseMessage upstream, HttpResponse client)
         {
             CopyResponseHeaders(upstream.Headers, client);
-            if (upstream.Content is not null)
+            if (upstream.Content != null)
             {
                 CopyResponseHeaders(upstream.Content.Headers, client);
             }

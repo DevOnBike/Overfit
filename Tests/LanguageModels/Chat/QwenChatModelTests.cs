@@ -48,7 +48,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Chat
             Assert.Equal(reply, streamed.ToString());          // stream == return
             Assert.DoesNotContain("<|im_end|>", reply);        // ChatML terminator suppressed
             Assert.Equal(3, model.Chat.History.Count);         // system + user + assistant
-            Assert.Equal("assistant", model.Chat.History[^1].Role);
+            var history = model.Chat.History;
+
+            Assert.Equal("assistant", history[history.Count - 1].Role);
             Assert.Contains("Paris", reply, StringComparison.OrdinalIgnoreCase);
         }
     }

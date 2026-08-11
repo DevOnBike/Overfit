@@ -296,7 +296,7 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
 
             var overrides = selector.QueryOverrides;
 
-            if (overrides is not null && overrides.TryGetValue(metric, out var configured))
+            if (overrides != null && overrides.TryGetValue(metric, out var configured))
             {
                 return string.IsNullOrWhiteSpace(configured) ? string.Empty : configured;
             }

@@ -64,17 +64,17 @@ namespace DevOnBike.Overfit.LanguageModels.Chat
             ObjectDisposedException.ThrowIf(_disposed, this);
 
             var written = Decode(tokenizer, tokens);
-            var text = _current.Span[..written];
+            var text = _current.Span.Slice(0, written);
 
             if (written <= _previousLength
-                || !text[.._previousLength].SequenceEqual(_previous.Span[.._previousLength]))
+                || !text.Slice(0, _previousLength).SequenceEqual(_previous.Span.Slice(0, _previousLength)))
             {
                 delta = default;
 
                 return false;
             }
 
-            delta = text[_previousLength..];
+            delta = text.Slice(_previousLength);
 
             // Swap rather than copy: the buffer just decoded into becomes the reference for the next token,
             // and the old reference becomes the scratch. One assignment instead of copying the whole reply

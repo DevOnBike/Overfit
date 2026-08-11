@@ -137,7 +137,7 @@ namespace DevOnBike.Overfit.Analyzers
             // a build output that reorders itself defeats incremental compilation and pollutes diffs.
             foreach (var (name, body) in schemas.Sort(static (a, b) => string.CompareOrdinal(a.Name, b.Name)))
             {
-                if (body is null)
+                if (body == null)
                 {
                     continue;
                 }

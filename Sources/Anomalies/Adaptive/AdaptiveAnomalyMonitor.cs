@@ -75,7 +75,7 @@ namespace DevOnBike.Overfit.Anomalies.Adaptive
 
         /// <summary>True if the pod currently has a per-pod adapter loaded.</summary>
         public bool IsAdapted(string podName) =>
-            _pods.TryGetValue(podName, out var s) && s.Adapter is not null;
+            _pods.TryGetValue(podName, out var s) && s.Adapter != null;
 
         /// <summary>Pods the monitor recommends adapting.</summary>
         public IReadOnlyList<string> PodsNeedingAdaptation()
@@ -172,7 +172,7 @@ namespace DevOnBike.Overfit.Anomalies.Adaptive
 
             state.FalsePositiveStreak = elevatedNotCritical ? state.FalsePositiveStreak + 1 : 0;
 
-            if (state.Adapter is null
+            if (state.Adapter == null
                 && state.FalsePositiveStreak >= _policy.AdaptAfterStreak
                 && state.Benign.Count >= _policy.MinBenignWindow)
             {

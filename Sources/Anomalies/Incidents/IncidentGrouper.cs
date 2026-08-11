@@ -100,9 +100,9 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
             using var startBuffer = new PooledBuffer<long>(n, clearMemory: false);
             using var endBuffer = new PooledBuffer<long>(n, clearMemory: false);
 
-            var parent = parentBuffer.Span[..n];
-            var componentStart = startBuffer.Span[..n];
-            var componentEnd = endBuffer.Span[..n];
+            var parent = parentBuffer.Span.Slice(0, n);
+            var componentStart = startBuffer.Span.Slice(0, n);
+            var componentEnd = endBuffer.Span.Slice(0, n);
 
             for (var i = 0; i < n; i++)
             {
@@ -165,7 +165,7 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
 
             // Ascending, then walked backwards: strongest link first, which is what keeps a weak link from
             // deciding the shape of a group that a strong one would have formed differently.
-            weights[..edges].Sort(pairs[..edges]);
+            weights.Slice(0, edges).Sort(pairs.Slice(0, edges));
 
             var maxSpanTicks = options.MaxIncidentSpan.Ticks;
 

@@ -48,7 +48,7 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.Observability
             var line = JsonSerializer.Serialize(record, Json);
             _logger.LogInformation("audit {Audit}", line);
 
-            if (_writer is null)
+            if (_writer == null)
             {
                 return;
             }

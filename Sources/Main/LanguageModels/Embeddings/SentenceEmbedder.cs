@@ -135,7 +135,7 @@ namespace DevOnBike.Overfit.LanguageModels.Embeddings
         public void EmbedQuery(string text, Span<float> destination)
         {
             ArgumentNullException.ThrowIfNull(text);
-            EmbedRaw(_queryPrefix is null ? text : _queryPrefix + text, destination);
+            EmbedRaw(_queryPrefix == null ? text : _queryPrefix + text, destination);
         }
 
         /// <summary>Encodes <paramref name="text"/> with the configured retrieval-side passage prefix prepended.</summary>
@@ -150,7 +150,7 @@ namespace DevOnBike.Overfit.LanguageModels.Embeddings
         public void EmbedPassage(string text, Span<float> destination)
         {
             ArgumentNullException.ThrowIfNull(text);
-            EmbedRaw(_passagePrefix is null ? text : _passagePrefix + text, destination);
+            EmbedRaw(_passagePrefix == null ? text : _passagePrefix + text, destination);
         }
 
         private void EmbedRaw(string text, Span<float> destination)

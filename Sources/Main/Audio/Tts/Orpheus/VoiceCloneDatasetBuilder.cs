@@ -219,7 +219,7 @@ namespace DevOnBike.Overfit.Audio.Tts.Orpheus
             }
             if (dot > 0 && dot < s.Length && (s[dot] == '.' || s[dot] == ')'))
             {
-                s = s[(dot + 1)..].Trim();
+                s = s.Substring(dot + 1).Trim();
             }
             return s;
         }
@@ -236,7 +236,7 @@ namespace DevOnBike.Overfit.Audio.Tts.Orpheus
             {
                 return File.ReadAllText(txt).Trim();
             }
-            if (whisper is null)
+            if (whisper == null)
             {
                 return string.Empty;
             }
@@ -248,7 +248,7 @@ namespace DevOnBike.Overfit.Audio.Tts.Orpheus
         {
             var buffer = new int[_tokenizer.CountTokens(text)];
             var n = _tokenizer.Encode(text, buffer);
-            return n == buffer.Length ? buffer : buffer[..n];
+            return n == buffer.Length ? buffer : buffer.AsSpan(0, n).ToArray();
         }
 
         // <custom_token_0> must be a single token; <custom_token_1> must be the next id (contiguous audio range).

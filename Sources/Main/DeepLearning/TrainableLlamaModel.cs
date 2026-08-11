@@ -191,7 +191,7 @@ namespace DevOnBike.Overfit.DeepLearning
 
             var normed = TensorMath.RmsNorm(graph, h, _finalNormGamma, _eps);
             var logits = graph.FrozenQuantizedLinear(normed, _lmHead); // [T, vocab]
-            return _lmHeadLora is null ? logits : graph.Add(logits, _lmHeadLora.Apply(graph, normed));
+            return _lmHeadLora == null ? logits : graph.Add(logits, _lmHeadLora.Apply(graph, normed));
         }
 
         /// <summary>Greedy autoregressive generation from a prompt (no KV cache — recomputes the full
@@ -488,7 +488,7 @@ namespace DevOnBike.Overfit.DeepLearning
             float[]? a = null, bb = null;
             var rank = 0;
             var outDim = nHeads * dHead;
-            if (lora is not null)
+            if (lora != null)
             {
                 a = lora.A.DataView.AsSpan().ToArray();
                 bb = lora.B.DataView.AsSpan().ToArray();
@@ -502,7 +502,7 @@ namespace DevOnBike.Overfit.DeepLearning
                 {
                     baseHeads[h].DequantizeRow(jj, buf.AsSpan(jj * dModel, dModel));
                 }
-                if (lora is not null)
+                if (lora != null)
                 {
                     OverfitParallel.For(0, dHead, jj =>
                     {
@@ -531,7 +531,7 @@ namespace DevOnBike.Overfit.DeepLearning
         {
             float[]? a = null, bb = null;
             var rank = 0;
-            if (lora is not null)
+            if (lora != null)
             {
                 a = lora.A.DataView.AsSpan().ToArray();
                 bb = lora.B.DataView.AsSpan().ToArray();
@@ -545,7 +545,7 @@ namespace DevOnBike.Overfit.DeepLearning
                 {
                     baseHeads[h].DequantizeRow(o, buf.AsSpan(o * dHead, dHead));
                 }
-                if (lora is not null)
+                if (lora != null)
                 {
                     OverfitParallel.For(0, dModel, o =>
                     {
@@ -575,7 +575,7 @@ namespace DevOnBike.Overfit.DeepLearning
             {
                 baseW.DequantizeRow(o, buf.AsSpan(o * inDim, inDim));
             }
-            if (lora is not null)
+            if (lora != null)
             {
                 var a = lora.A.DataView.AsSpan().ToArray();
                 var bb = lora.B.DataView.AsSpan().ToArray();
@@ -611,7 +611,7 @@ namespace DevOnBike.Overfit.DeepLearning
             DequantMatVec.Run(normed, _lmHead, logits);
 
             // LM-head LoRA: logits += (normed·A)·B. Small (rank·vocab); kept sequential.
-            if (_lmHeadLora is not null)
+            if (_lmHeadLora != null)
             {
                 var rank = _lmHeadLora.Rank;
                 var a = _lmHeadLora.A.DataView.AsReadOnlySpan();
@@ -756,7 +756,7 @@ namespace DevOnBike.Overfit.DeepLearning
             Span<float> tmp = tmpLength <= 256 ? stackalloc float[tmpLength] : tmpBuffer.Span;
 #pragma warning restore OVERFIT026
             tmp.Clear();
-            if (_lmHeadLora is not null)
+            if (_lmHeadLora != null)
             {
                 var a = _lmHeadLora.A.DataView.AsReadOnlySpan();
                 for (var i = 0; i < _dModel; i++)
@@ -781,7 +781,7 @@ namespace DevOnBike.Overfit.DeepLearning
             {
                 _lmHead.DecodeRow(o, row);
                 var logit = TensorPrimitives.Dot(row, normed);
-                if (_lmHeadLora is not null)
+                if (_lmHeadLora != null)
                 {
                     for (var r = 0; r < tmp.Length; r++)
                     {
@@ -814,7 +814,7 @@ namespace DevOnBike.Overfit.DeepLearning
                 }
             }
             yield return _finalNormGamma;
-            if (_lmHeadLora is not null)
+            if (_lmHeadLora != null)
             {
                 yield return _lmHeadLora.A;
                 yield return _lmHeadLora.B;
@@ -951,7 +951,7 @@ namespace DevOnBike.Overfit.DeepLearning
                 var off = t * vocab;
                 var row = data.Slice(off, vocab);
                 var gradRow = grad.Slice(off, vocab);
-                var probsRow = probsM[..vocab];
+                var probsRow = probsM.Slice(0, vocab);
 
                 var rowMax = TensorPrimitives.Max(row);
                 TensorPrimitives.Subtract(row, rowMax, probsRow);
@@ -984,7 +984,7 @@ namespace DevOnBike.Overfit.DeepLearning
                 var off = t * vocab;
                 var row = data.Slice(off, vocab);
                 var gradRow = grad.Slice(off, vocab);
-                var probsRow = probs[..vocab];
+                var probsRow = probs.Slice(0, vocab);
 
                 var max = TensorPrimitives.Max(row);
                 TensorPrimitives.Subtract(row, max, probsRow);   // probs = row − max

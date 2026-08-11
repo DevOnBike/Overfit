@@ -66,9 +66,14 @@ namespace DevOnBike.Overfit.Tests.Audio
         }
 
         // Model-free engine: emits a short ramp per character — enough to exercise the streaming sink + contract.
-        private sealed class RampTtsEngine(int sampleRate) : ITextToSpeechEngine
+        private sealed class RampTtsEngine : ITextToSpeechEngine
         {
-            public int SampleRate { get; } = sampleRate;
+            public RampTtsEngine(int sampleRate)
+            {
+                SampleRate = sampleRate;
+            }
+
+            public int SampleRate { get; }
 
             public void Synthesize(ReadOnlySpan<char> text, VoiceProfile voice, IAudioSink output, TtsOptions options)
             {

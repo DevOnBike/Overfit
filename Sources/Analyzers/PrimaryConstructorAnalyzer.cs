@@ -71,7 +71,7 @@ namespace DevOnBike.Overfit.Analyzers
             }
 
             if (context.Node is not TypeDeclarationSyntax declaration
-                || declaration.ParameterList is null)
+                || declaration.ParameterList == null)
             {
                 return;
             }

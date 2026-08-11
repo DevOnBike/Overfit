@@ -204,7 +204,7 @@ namespace DevOnBike.Overfit.Autograd
 
         public bool BackwardProfileEnabled
         {
-            get => _opTicks is not null;
+            get => _opTicks != null;
             set
             {
                 if (value)
@@ -221,7 +221,7 @@ namespace DevOnBike.Overfit.Autograd
 
         public IReadOnlyList<BackwardOpProfile> GetBackwardOpProfile()
         {
-            if (_opTicks is null || _opCount2 is null)
+            if (_opTicks == null || _opCount2 == null)
             {
                 return [];
             }
@@ -240,7 +240,7 @@ namespace DevOnBike.Overfit.Autograd
 
         public void ResetBackwardProfile()
         {
-            if (_opTicks is null || _opCount2 is null)
+            if (_opTicks == null || _opCount2 == null)
             {
                 return;
             }
@@ -288,7 +288,7 @@ namespace DevOnBike.Overfit.Autograd
 
         private void ExecuteBackward(in TapeOp op)
         {
-            if (_opTicks is null)
+            if (_opTicks == null)
             {
                 ExecuteBackwardInner(in op);
                 return;

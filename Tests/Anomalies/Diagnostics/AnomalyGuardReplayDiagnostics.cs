@@ -280,8 +280,10 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
 
             if (starts.Count > 0)
             {
+                var lastStart = starts[starts.Count - 1];
+
                 report.Append(CultureInfo.InvariantCulture,
-                    $"first window starts {starts[0]:u}, last {starts[^1]:u}, span {(starts[^1] - starts[0]).TotalHours:F2} h\n");
+                    $"first window starts {starts[0]:u}, last {lastStart:u}, span {(lastStart - starts[0]).TotalHours:F2} h\n");
             }
 
             _output.WriteLine(report.ToString());
@@ -410,7 +412,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
             var p95 = sorted[Math.Min(sorted.Count - 1, (int)(sorted.Count * 0.95))];
 
             return string.Create(CultureInfo.InvariantCulture,
-                $"{label} min {sorted[0]:F0}   p50 {p50:F0}   p95 {p95:F0}   max {sorted[^1]:F0}\n");
+                $"{label} min {sorted[0]:F0}   p50 {p50:F0}   p95 {p95:F0}   max {sorted[sorted.Count - 1]:F0}\n");
         }
 
         private static int Setting(string name, int fallback)

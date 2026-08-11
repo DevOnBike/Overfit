@@ -126,7 +126,7 @@ namespace DevOnBike.Overfit.LanguageModels.Retrieval
             }
 
             using var scoreBuffer = new PooledBuffer<float>(Count, clearMemory: true);
-            var scores = scoreBuffer.Span[..Count];
+            var scores = scoreBuffer.Span.Slice(0, Count);
 
             var averageLength = (float)((double)_totalTokens / Count);
             var scored = new HashSet<int>();
@@ -187,7 +187,7 @@ namespace DevOnBike.Overfit.LanguageModels.Retrieval
 
             var buffer = new VectorMatch[capacity];
             var written = Search(query, buffer);
-            return written == buffer.Length ? buffer : buffer[..written];
+            return written == buffer.Length ? buffer : buffer.AsSpan(0, written).ToArray();
         }
 
         /// <summary>

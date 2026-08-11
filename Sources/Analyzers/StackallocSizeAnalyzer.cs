@@ -179,7 +179,7 @@ namespace DevOnBike.Overfit.Analyzers
 
         private static int SizeOf(ITypeSymbol? type)
         {
-            if (type is null)
+            if (type == null)
             {
                 return 0;
             }

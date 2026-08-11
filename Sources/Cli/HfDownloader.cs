@@ -96,7 +96,7 @@ namespace DevOnBike.Overfit.Cli
                 throw new OverfitRuntimeException($"Repo '{repo}' has no .gguf files.");
             }
 
-            if (explicitFile is not null)
+            if (explicitFile != null)
             {
                 foreach (var g in ggufs)
                 {
@@ -109,7 +109,7 @@ namespace DevOnBike.Overfit.Cli
                 throw new OverfitRuntimeException($"No .gguf matching '{explicitFile}' in '{repo}'. Available:\n  " + string.Join("\n  ", ggufs));
             }
 
-            if (pattern is not null)
+            if (pattern != null)
             {
                 foreach (var g in ggufs)
                 {
@@ -335,7 +335,7 @@ namespace DevOnBike.Overfit.Cli
             }
 
             var actual = Convert.ToHexString(hasher.GetHashAndReset()).ToLowerInvariant();
-            if (expectedSha256 is not null)
+            if (expectedSha256 != null)
             {
                 if (!string.Equals(actual, expectedSha256, StringComparison.OrdinalIgnoreCase))
                 {
@@ -345,12 +345,12 @@ namespace DevOnBike.Overfit.Cli
                         $"  expected: {expectedSha256}\n  actual:   {actual}");
                 }
 
-                Console.WriteLine($"  sha256 verified  {actual[..16]}...");
+                Console.WriteLine($"  sha256 verified  {actual.Substring(0, 16)}...");
             }
 
-            if (!(expectedSha256 is not null))
+            if (expectedSha256 == null)
             {
-                Console.WriteLine($"  sha256 {actual[..16]}...  (HF metadata unavailable — not verified)");
+                Console.WriteLine($"  sha256 {actual.Substring(0, 16)}...  (HF metadata unavailable — not verified)");
             }
 
             File.Move(tmp, destPath, overwrite: true);

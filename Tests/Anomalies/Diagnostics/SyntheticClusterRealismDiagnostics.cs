@@ -256,7 +256,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
                 }
 
                 medians.Add(median);
-                ranges.Add((finite[^1] - finite[0]) / median);
+                ranges.Add((finite[finite.Count - 1] - finite[0]) / median);
                 iqrs.Add((Quantile(finite, 0.75) - Quantile(finite, 0.25)) / median);
             }
 
@@ -273,7 +273,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
 
             return new Profile(
                 medians.Count,
-                (medians[^1] - medians[0]) / centre,
+                (medians[medians.Count - 1] - medians[0]) / centre,
                 Quantile(ranges, 0.5),
                 Quantile(iqrs, 0.5));
         }

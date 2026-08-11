@@ -74,12 +74,12 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
             ArgumentNullException.ThrowIfNull(template);
 
             _template = template;
-            _ownsHttpClient = httpClient is null;
+            _ownsHttpClient = httpClient == null;
             _http = httpClient ?? new HttpClient { Timeout = template.HttpTimeout };
 
             var usable = new List<KeyValuePair<string, string>>();
 
-            if (customQueries is not null)
+            if (customQueries != null)
             {
                 foreach (var (name, query) in customQueries)
                 {

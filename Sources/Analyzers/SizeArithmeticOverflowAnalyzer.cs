@@ -100,7 +100,7 @@ namespace DevOnBike.Overfit.Analyzers
                 }
 
                 var product = FindNarrowProduct(context, size, size.SpanStart);
-                if (product is null)
+                if (product == null)
                 {
                     continue;
                 }
@@ -119,7 +119,7 @@ namespace DevOnBike.Overfit.Analyzers
         /// </summary>
         private static bool IsInCheckedContext(SyntaxNode node)
         {
-            for (var current = node.Parent; current is not null; current = current.Parent)
+            for (var current = node.Parent; current != null; current = current.Parent)
             {
                 if (current.IsKind(SyntaxKind.CheckedExpression) || current.IsKind(SyntaxKind.CheckedStatement))
                 {

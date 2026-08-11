@@ -116,7 +116,7 @@ namespace DevOnBike.Overfit.LanguageModels.Skills.Evaluation
             // An unusable reply (commonly: the judge rambled and the JSON was truncated) must NOT be reported as
             // Low/clean — that is the same falsely-reassuring result this whole check exists to prevent. Say
             // Unknown and explain.
-            if (reply.Error is not null && Filled(rubric) == 0 && Filled(assertions) == 0)
+            if (reply.Error != null && Filled(rubric) == 0 && Filled(assertions) == 0)
             {
                 return new OverfittingResult(
                     0.0, OverfittingSeverity.Unknown, [], [],
@@ -203,7 +203,7 @@ namespace DevOnBike.Overfit.LanguageModels.Skills.Evaluation
                     var i = Index(el);
                     // A first pass wins over a repair pass, and an out-of-range index is dropped rather than
                     // trusted — the judge is not allowed to invent items.
-                    if (i < 0 || i >= rubric.Length || rubric[i] is not null)
+                    if (i < 0 || i >= rubric.Length || rubric[i] != null)
                     {
                         continue;
                     }
@@ -217,7 +217,7 @@ namespace DevOnBike.Overfit.LanguageModels.Skills.Evaluation
                 foreach (var el in aa.EnumerateArray())
                 {
                     var i = Index(el);
-                    if (i < 0 || i >= assertions.Length || assertions[i] is not null)
+                    if (i < 0 || i >= assertions.Length || assertions[i] != null)
                     {
                         continue;
                     }
@@ -241,7 +241,7 @@ namespace DevOnBike.Overfit.LanguageModels.Skills.Evaluation
             List<int>? onlyRubric,
             List<int>? onlyChecks)
         {
-            var repair = onlyRubric is not null || onlyChecks is not null;
+            var repair = onlyRubric != null || onlyChecks != null;
 
             var sb = new StringBuilder(Framing.Length + skill.Length + 1024);
             sb.Append(Framing);
@@ -281,7 +281,7 @@ namespace DevOnBike.Overfit.LanguageModels.Skills.Evaluation
             var wrote = false;
             for (var i = 0; i < items.Count; i++)
             {
-                if (only is not null && !only.Contains(i))
+                if (only != null && !only.Contains(i))
                 {
                     continue;
                 }
@@ -301,7 +301,7 @@ namespace DevOnBike.Overfit.LanguageModels.Skills.Evaluation
             for (var i = 0; i < cases.Count; i++)
             {
                 var declared = cases[i].ExpectedChecks;
-                if (declared is null)
+                if (declared == null)
                 {
                     continue;
                 }
@@ -326,7 +326,7 @@ namespace DevOnBike.Overfit.LanguageModels.Skills.Evaluation
             var missing = new List<int>();
             for (var i = 0; i < slots.Length; i++)
             {
-                if (slots[i] is null)
+                if (slots[i] == null)
                 {
                     missing.Add(i);
                 }
@@ -367,7 +367,7 @@ namespace DevOnBike.Overfit.LanguageModels.Skills.Evaluation
             var n = 0;
             for (var i = 0; i < slots.Length; i++)
             {
-                if (slots[i] is not null)
+                if (slots[i] != null)
                 {
                     n++;
                 }

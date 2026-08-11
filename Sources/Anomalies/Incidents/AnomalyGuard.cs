@@ -253,7 +253,7 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
             // points at the detector rather than at the configuration that caused it.
             if (_workload.Length == 0
                 && _calendar.HasWorkloadScopedWindow
-                && options.PodTopology is null)
+                && options.PodTopology == null)
             {
                 throw new ArgumentException(
                     "A maintenance window names a workload, but no workload is configured and there is no "
@@ -263,7 +263,7 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
                     nameof(options));
             }
 
-            if (store is not null)
+            if (store != null)
             {
                 var saved = IncidentStateFormat.Read(store.Load(), out var nextId);
 
@@ -367,7 +367,7 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
         {
             StateError = _store?.LastError ?? _historyStore?.LastError;
 
-            if (StateError is not null)
+            if (StateError != null)
             {
                 Telemetry.StateWriteFailed();
             }
@@ -661,7 +661,7 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
             // one: an operator told twice is annoyed, an operator never told is unprotected.
             _store?.Save(IncidentStateFormat.Write(_tracker.Snapshot(), _tracker.NextId));
 
-            if (_historyStore is not null)
+            if (_historyStore != null)
             {
                 // Forgotten before saving, so a workload that was deleted stops costing storage on the next
                 // restart rather than being carried for ever by a store that only ever grows.
@@ -858,7 +858,7 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
             //
             // NOT yet shown: HoldUntilPersistent, a gate custom channels have and built-ins do not. A row
             // whose Forwarded is true can still be held back by it one line below.
-            if (peerTrace is not null)
+            if (peerTrace != null)
             {
                 for (var i = 0; i < podCount; i++)
                 {
@@ -875,9 +875,9 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
                         findings[i].Comparison.PValueCandidateWorse,
                         findings[i].UsableSamples,
                         result.ExcludedCount,
-                        decisions is null ? NoveltyKind.New : decisions[i].Kind,
-                        decisions is null ? DetectionStatus.InsufficientData : decisions[i].Status,
-                        decisions is null || decisions[i].Forward || !findings[i].IsOutlier));
+                        decisions == null ? NoveltyKind.New : decisions[i].Kind,
+                        decisions == null ? DetectionStatus.InsufficientData : decisions[i].Status,
+                        decisions == null || decisions[i].Forward || !findings[i].IsOutlier));
                 }
             }
 
@@ -1188,7 +1188,7 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
 
                 // BEFORE the demotion below, because the trace's job is to say what the comparison found
                 // and the gate is a separate column on the same row — see PeerDecisionTrace.Novelty.
-                if (peerTrace is not null)
+                if (peerTrace != null)
                 {
                     for (var i = 0; i < cohort.Count; i++)
                     {
@@ -1205,9 +1205,9 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
                             findings[i].Comparison.PValueCandidateWorse,
                             findings[i].UsableSamples,
                             result.ExcludedCount,
-                            decisions is null ? NoveltyKind.New : decisions[i].Kind,
-                            decisions is null ? DetectionStatus.InsufficientData : decisions[i].Status,
-                            decisions is null || decisions[i].Forward || !findings[i].IsOutlier));
+                            decisions == null ? NoveltyKind.New : decisions[i].Kind,
+                            decisions == null ? DetectionStatus.InsufficientData : decisions[i].Status,
+                            decisions == null || decisions[i].Forward || !findings[i].IsOutlier));
                     }
                 }
 
@@ -1239,7 +1239,7 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
             double minAbsoluteGapChange,
             DateTimeOffset at)
         {
-            if (_novelty is null || result.Status != DetectionStatus.Anomalous)
+            if (_novelty == null || result.Status != DetectionStatus.Anomalous)
             {
                 return null;
             }
@@ -1260,7 +1260,7 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
 
                 var createdAt = CreatedAt(pods[i]);
 
-                decisions[i] = channel is null
+                decisions[i] = channel == null
                     ? _novelty.Observe(
                         pods[i], createdAt, metric, findings[i].AbsoluteGap, at, minAbsoluteGapChange)
                     : _novelty.Observe(
@@ -1278,7 +1278,7 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
         /// <returns>Per-member classification for the pipeline, or null when the gate is off.</returns>
         private NoveltyKind[]? Demote(PeerOutlierFinding[] findings, NoveltyDecision[]? decisions)
         {
-            if (decisions is null)
+            if (decisions == null)
             {
                 return null;
             }
@@ -1329,7 +1329,7 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
         /// </summary>
         private void PruneNovelty()
         {
-            if (_novelty is null || _options.PodTopology is not IPodRoster roster)
+            if (_novelty == null || _options.PodTopology is not IPodRoster roster)
             {
                 return;
             }
@@ -1429,9 +1429,9 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
             // predict from its name. The level comes from the common component when there is one and from
             // the pods' own medians when there is not; the two are close, and a slightly coarser baseline
             // beats no baseline by a distance.
-            if (!_declaredAbnormal && _history is not null)
+            if (!_declaredAbnormal && _history != null)
             {
-                var level = common is not null ? Median(common) : MedianAcrossPods(window, metric);
+                var level = common != null ? Median(common) : MedianAcrossPods(window, metric);
 
                 _history.Observe(_workload, metric, from, level);
             }
@@ -1439,7 +1439,7 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
             // Which reference the per-pod trends are about to use, made visible. Without this the fallback
             // to seasonal is silent, and its consequence — one shared climb arriving as one finding per pod —
             // looks like a fleet-wide fault rather than like the regime the guard is in.
-            if (common is null && !expectation.IsEmpty)
+            if (common == null && !expectation.IsEmpty)
             {
                 Telemetry.TrendSeasonalOnly();
             }
@@ -1510,7 +1510,7 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
         /// </summary>
         private ReadOnlySpan<double> Seasonal(MetricIndex metric, MetricWindow window, DateTimeOffset from)
         {
-            if (_history is null || _options.MinimumHistoryDays <= 0)
+            if (_history == null || _options.MinimumHistoryDays <= 0)
             {
                 return ReadOnlySpan<double>.Empty;
             }
@@ -1813,7 +1813,7 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
 
         /// <summary>The last <paramref name="samples"/> observations, or all of them if there are fewer.</summary>
         private static ReadOnlySpan<double> Tail(ReadOnlySpan<double> series, int samples)
-            => samples >= series.Length ? series : series[^samples..];
+            => samples >= series.Length ? series : series.Slice(series.Length - samples);
 
         /// <summary>
         /// The last <paramref name="samples"/> of a signal, as memory over the window's own storage.
@@ -1824,7 +1824,7 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
         /// replica per signal, made whether or not anything came of them.</para>
         /// </summary>
         private static ReadOnlyMemory<double> TailMemory(ReadOnlyMemory<double> series, int samples)
-            => samples >= series.Length ? series : series[^samples..];
+            => samples >= series.Length ? series : series.Slice(series.Length - samples);
 
         /// <summary>
         /// The cohort this pod may be compared within, from the topology. Empty when nothing was declared,
@@ -1894,7 +1894,7 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
 
                 if (secondLast > 0)
                 {
-                    return pod[..secondLast];
+                    return pod.Substring(0, secondLast);
                 }
             }
 

@@ -74,7 +74,7 @@ namespace DevOnBike.Overfit.Demo.QLoRAFineTune
                         Console.Write($"\r  epoch {epoch + 1}/{epochs}  step {step,4}  loss {loss,8:F4}   ");
                     }
                 });
-                Console.WriteLine($"\n  done: loss {history[0]:F3} -> {history[^1]:F4} over {history.Count} steps ({sw.Elapsed.TotalMinutes:F1} min)");
+                Console.WriteLine($"\n  done: loss {history[0]:F3} -> {history[history.Count - 1]:F4} over {history.Count} steps ({sw.Elapsed.TotalMinutes:F1} min)");
 
                 var savePath = Path.ChangeExtension(textPath, ".lora");
                 tuner.SaveAdapter(savePath);

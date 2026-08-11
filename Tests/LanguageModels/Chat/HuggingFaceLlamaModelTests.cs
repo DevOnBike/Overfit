@@ -115,7 +115,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Chat
 
             // Structural only — we don't control which Llama variant (base vs instruct) is dropped.
             Assert.False(string.IsNullOrWhiteSpace(reply), "Chat produced no text.");
-            Assert.Equal("assistant", model.Chat.History[^1].Role);
+            var history = model.Chat.History;
+
+            Assert.Equal("assistant", history[history.Count - 1].Role);
         }
     }
 }

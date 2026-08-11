@@ -89,7 +89,7 @@ namespace DevOnBike.Overfit.Analyzers
                 }
             }
 
-            if (names.Count > 1 && second is not null)
+            if (names.Count > 1 && second != null)
             {
                 context.ReportDiagnostic(
                     Diagnostic.Create(Rule, second, names.Count, string.Join(", ", names)));

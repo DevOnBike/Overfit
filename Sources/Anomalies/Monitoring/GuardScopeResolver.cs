@@ -77,7 +77,7 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
             {
                 var entry = file.Scopes[i];
 
-                if (entry is null)
+                if (entry == null)
                 {
                     problems.Add($"scopes[{i}] is null and was skipped.");
 

@@ -111,7 +111,7 @@ return 0;
 static string Trim(string s)
 {
     var t = s.Replace('\n', ' ').Trim();
-    return t.Length <= 80 ? t : t[..80] + "…";
+    return t.Length <= 80 ? t : t.Substring(0, 80) + "…";
 }
 
 // Deterministic check: the answer must be short (the skill's whole point).

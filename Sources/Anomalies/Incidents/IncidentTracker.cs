@@ -350,7 +350,7 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
 
                 for (var o = 0; o < _open.Count; o++)
                 {
-                    if (trace is not null && !_open[o].MatchedThisCycle)
+                    if (trace != null && !_open[o].MatchedThisCycle)
                     {
                         var unconstrained = Overlap(_left, _open[o].Keys);
 
@@ -410,7 +410,7 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
                     continue;
                 }
 
-                if (trace is not null)
+                if (trace != null)
                 {
                     trace(new IncidentMatchTrace(
                         _leftPrimary,

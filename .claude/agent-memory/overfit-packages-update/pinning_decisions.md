@@ -15,39 +15,35 @@ All four verified directly against `Directory.Packages.props` comments + live ch
   only, added 2026-08-06) — held at the *same* 5.0.0 as above, but for a different reason: MSBuildWorkspace loads the
   OVERFIT analyzers out of each project, so the navigator is an analyzer **host**; a host newer than the SDK's Roslyn
   diverges from what `dotnet build` actually ran. Not a compiler-load-failure risk like the CSharp pin, a host/target-drift risk.
-- **`Microsoft.Build.Framework` @ 18.0.2** (`Tools/SemanticNavigator`, compile-time only via `ExcludeAssets="runtime"`) —
-  must be `<=` the SDK's own MSBuild (else `MissingMethodException` at runtime), and must NOT be the 17.11.31 that
-  `Workspaces.MSBuild` 5.0.0 resolves transitively (carries GHSA-w3q9-fxm7-j8fq, a Linux temp-dir DoS affecting the
-  Microsoft.Build family across several 17.x preview ranges — confirmed via OSV 2026-08-06, 18.0.2 is outside every
-  affected range). Verified 2026-08-06: `dotnet msbuild -version` on SDK 10.0.110 → **18.0.11**. NuGet has no published
-  version between 18.0.2 and 18.0.11 (next after 18.0.2 is 18.3.3, already too high) — so 18.0.2 remains the *highest*
-  version satisfying both constraints simultaneously. Re-check after every SDK bump; a newer SDK may open a window
-  nothing currently fills.
-- **`OpenTelemetry.Exporter.Prometheus.AspNetCore` @ 1.15.3-beta.1** — no stable release has ever been published for
-  this package (confirmed via its own CHANGELOG.md, 2026-08-06); every version on NuGet, including the current latest
-  (1.17.0-beta.1 as of 2026-08-06/07). This is [[opentelemetry-prometheus-beta-status]] — treat the version
-  number as a hint to re-check, not the answer.
+- **`Microsoft.Build.Framework`** — bumped from 18.0.2 to **18.8.2 on 2026-08-11**, deliberately ABOVE the SDK's own
+  MSBuild (still 18.0.11 as of that date — confirmed via `dotnet msbuild -version`), which looks like it violates the
+  old "must be `<=` the SDK's MSBuild" rule. It was tested rather than reasoned about: the navigator calls no
+  `Microsoft.Build.Framework` API directly (only `MSBuildLocator` and Roslyn's `MSBuildWorkspace`, pinned separately),
+  so there is no call site a newer reference could resolve to missing API — `measure` (all 26 projects, 1667 docs) and
+  `refs`/`impls` verified correct on 18.8.2. **Not exercised**: `callers`, `unused`, `serve` verbs. `Microsoft.NET.StringTools`
+  must move in lockstep (same `ExcludeAssets="runtime" PrivateAssets="all"` shape) or MSBuildLocator's own MSBL001 gate
+  fails the build — this is why the two pins are adjacent in `Directory.Packages.props`.
+  **2026-08-11 re-check**: newest is now **18.9.6** (was 18.3.3 on 2026-08-06, grew fast). Still `<=`-vacuous by the
+  same reasoning, but the specific verb battery above (and MSBL001) needs re-running before taking it — this is a
+  "take with a build check", not a rubber stamp, precisely because the old easy proxy (version `<=` SDK) no longer
+  applies and the real constraint (no API call resolves to something missing) has to be checked by hand each time.
+- **`OpenTelemetry.Exporter.Prometheus.AspNetCore` — REMOVED, 2026-08-10 (task `XC-6`).** No longer in
+  `Directory.Packages.props`; zero `OpenTelemetry.*` `PackageReference`/`PackageVersion` anywhere in the tree
+  (verified 2026-08-11: grepped every `.csproj`, the only two hits are prose comments in `Tests.csproj` and
+  `LocalAgent.AspNet.csproj` explaining what the demo does instead — no actual reference). This closes the
+  1449-day-beta investigation below; nothing left to decide.
 
-**This one is no longer a "decide deliberately, from scratch" item — it already has a deep, dated investigation.**
-`docs/specs/guard-telemetry-meter-plan.md`, section "C0 resolved — no new library is needed" (coordinator,
-2026-08-06): 33 published versions, 0 stable, prerelease since 2022-08-18 (1449 days at time of writing),
-while the rest of the OTel suite shipped stable 1.17.0 the same day (verified independently 2026-08-07: `OpenTelemetry`,
-`OpenTelemetry.Api`, `.Exporter.OpenTelemetryProtocol`, `.Exporter.Console/.InMemory/.Zipkin`, `.Extensions.Hosting/.Propagators`
-all hit stable 1.17.0 on 2026-07-16, same day as Prometheus's 1.17.0-beta.1). The doc's conclusion: **the product does
-not need this package at all** — `/metrics` scrape is already served by this repo's own hand-rolled, tested,
-dependency-free Prometheus renderer (`Sources/Anomalies/Monitoring/GuardTelemetry.cs`), and if a customer ever wants
-to push to their own OTel collector, the stable `OpenTelemetry.Exporter.OpenTelemetryProtocol` (stable since
-2021-02-10) reads off the same `Meter` with no Prometheus-specific reflection.
-**Sole current consumer is `Demo/LocalAgentAspNetDemo` (non-AOT demo, not the shipped `overfit` CLI)** — confirmed
-by grep 2026-08-07, only file referencing the package. `Directory.Build.targets`'s `OVERFITPRERELEASE` guard is
-now live (added since the 2026-08-06 investigation) and its accept-list is deliberately empty — **the guard
-currently fires a warning on every `Sources/Main` build** (verified by building Main 2026-08-07), because nobody
-has yet either accepted this pin with a reason/date or migrated the demo off it. This is not a stale warning to
-silence; it is the guard doing exactly what it was built for. Three live choices for the user, unchanged since
-2026-08-06: accept it explicitly (add an `OverfitAcceptedPrerelease` entry — hard to justify given the C0
-finding), migrate `Demo/LocalAgentAspNetDemo` onto the stable OTLP exporter, or drop Prometheus-export from the
-demo entirely. Don't re-run the C0 investigation from scratch — it's already done; only check whether anything
-has changed (a stable release appearing, or the demo already migrated).
+**Superseded by the removal above, kept for history.** `docs/specs/guard-telemetry-meter-plan.md`, section "C0
+resolved — no new library is needed" (2026-08-06) found 33 published versions, 0 stable ever, prerelease since
+2022-08-18, while the rest of the OTel suite shipped stable 1.17.0 the same day; sole consumer was
+`Demo/LocalAgentAspNetDemo`; the product's own hand-rolled Prometheus renderer already covers `/metrics`. That
+finding is presumably why `XC-6` removed the pin rather than accepting or migrating it.
+
+**`OVERFITPRERELEASE` guard now fires zero times** — verified 2026-08-11 by building `Sources/Main/Main.csproj -c
+Release` directly (not just grepping the accept-list): build succeeded, only pre-existing OVERFIT006/OVERFIT041
+warnings, no `OVERFITPRERELEASE` line. **Zero prerelease pins remain in `Directory.Packages.props`** as of this
+date — re-check this fresh each survey rather than assuming it stays true, since a prerelease pin is exactly the
+kind of thing that creeps back in one dependency at a time.
 
 Also noticed 2026-08-07: **`TorchSharp-cpu` is centrally pinned in `Directory.Packages.props` (0.106.0) but has
 zero `<PackageReference>` consumers anywhere in the solution** (grepped every `.csproj`, case-insensitive — only

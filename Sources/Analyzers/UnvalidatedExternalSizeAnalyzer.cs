@@ -189,7 +189,7 @@ namespace DevOnBike.Overfit.Analyzers
         {
             var loop = (ForStatementSyntax)context.Node;
 
-            if (loop.Condition is null)
+            if (loop.Condition == null)
             {
                 return;
             }
@@ -233,7 +233,7 @@ namespace DevOnBike.Overfit.Analyzers
 
             var body = EnclosingBody(sink);
 
-            if (body is null)
+            if (body == null)
             {
                 return;
             }
@@ -299,7 +299,7 @@ namespace DevOnBike.Overfit.Analyzers
 
                 var initializer = InitializerOf(body, name);
 
-                if (initializer is null)
+                if (initializer == null)
                 {
                     continue;
                 }
@@ -407,7 +407,7 @@ namespace DevOnBike.Overfit.Analyzers
         /// <summary>Whether the branch leaves — a guard that only logs is not a bound.</summary>
         private static bool Escapes(SyntaxNode? statement)
         {
-            if (statement is null)
+            if (statement == null)
             {
                 return false;
             }
@@ -425,7 +425,7 @@ namespace DevOnBike.Overfit.Analyzers
 
         private static bool Mentions(SyntaxNode? node, string name)
         {
-            if (node is null)
+            if (node == null)
             {
                 return false;
             }
@@ -485,7 +485,7 @@ namespace DevOnBike.Overfit.Analyzers
             {
                 var owner = method.ContainingType?.ToDisplayString();
 
-                if (owner is not null && UntrustedReaderTypes.Contains(owner))
+                if (owner != null && UntrustedReaderTypes.Contains(owner))
                 {
                     return name.StartsWith("Read", StringComparison.Ordinal)
                         || name.StartsWith("Get", StringComparison.Ordinal);
@@ -507,7 +507,7 @@ namespace DevOnBike.Overfit.Analyzers
         {
             var type = context.SemanticModel.GetTypeInfo(invocation, context.CancellationToken).Type;
 
-            if (type is null || type.TypeKind == TypeKind.Error)
+            if (type == null || type.TypeKind == TypeKind.Error)
             {
                 return true;
             }
@@ -540,7 +540,7 @@ namespace DevOnBike.Overfit.Analyzers
         {
             SyntaxNode? outermost = null;
 
-            for (var current = node.Parent; current is not null; current = current.Parent)
+            for (var current = node.Parent; current != null; current = current.Parent)
             {
                 if (current is BlockSyntax or ArrowExpressionClauseSyntax)
                 {

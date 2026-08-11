@@ -33,7 +33,7 @@ namespace DevOnBike.Overfit.Anomalies.Neuro
         public static int GenomeSize(int inputs, int hidden) => (hidden * inputs) + hidden + hidden + 1;
 
         /// <summary>The evolved alert threshold — the last gene. Scores at or above it are anomalies.</summary>
-        public static float Threshold(ReadOnlySpan<float> genome) => genome[^1];
+        public static float Threshold(ReadOnlySpan<float> genome) => genome[genome.Length - 1];
 
         /// <summary>
         /// Anomaly score in [0,1] for one feature window. tanh hidden layer, logistic output — both bounded, so a
@@ -45,7 +45,7 @@ namespace DevOnBike.Overfit.Anomalies.Neuro
         /// <param name="hidden">Hidden unit count.</param>
         public static float Score(ReadOnlySpan<float> genome, ReadOnlySpan<float> features, int inputs, int hidden)
         {
-            var w1 = genome[..(hidden * inputs)];
+            var w1 = genome.Slice(0, hidden * inputs);
             var b1 = genome.Slice(hidden * inputs, hidden);
             var w2 = genome.Slice((hidden * inputs) + hidden, hidden);
 

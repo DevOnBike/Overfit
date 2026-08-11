@@ -32,7 +32,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
 
         public SequentialChunkReadStream(IEnumerable<byte[]> chunks)
         {
-            if (chunks is null)
+            if (chunks == null)
             {
                 throw new ArgumentNullException(nameof(chunks));
             }

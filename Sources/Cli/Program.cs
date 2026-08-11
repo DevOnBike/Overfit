@@ -660,7 +660,7 @@ catch (OverfitException ex)
     Console.Error.WriteLine($"error: {ex.Message}");
 
     // Inner exceptions usually carry the actionable detail (the HTTP failure under a load error, etc.).
-    for (var inner = ex.InnerException; inner is not null; inner = inner.InnerException)
+    for (var inner = ex.InnerException; inner != null; inner = inner.InnerException)
     {
         Console.Error.WriteLine($"  caused by: {inner.Message}");
     }

@@ -124,7 +124,7 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
             // would have to be written directly to the population buffer, and the subsequent
             // Mutate call would read its own newly-written output as "parent" — which is the
             // wrong semantics (Mutate expects an unrelated parent, not the crossover child).
-            if (crossoverOperator is not null)
+            if (crossoverOperator != null)
             {
                 _crossoverScratch1 = new float[parameterCount];
                 _crossoverScratch2 = new float[parameterCount];
@@ -278,7 +278,7 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
         {
             var rankingFitness = _workspace.Fitness.GetView().AsReadOnlySpan();
 
-            if (_fitnessShaper is not null)
+            if (_fitnessShaper != null)
             {
                 var shapedFitness = _workspace.ShapedFitness.GetView().AsSpan();
                 _fitnessShaper.Shape(rankingFitness, shapedFitness);
@@ -372,7 +372,7 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
                 throw new OverfitRuntimeException("Elite set cannot be empty.");
             }
 
-            if (_crossoverOperator is null)
+            if (_crossoverOperator == null)
             {
                 CreateChildrenMutationOnly(currentPopulation, nextPopulation, eliteIndices);
                 return;

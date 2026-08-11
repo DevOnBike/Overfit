@@ -69,7 +69,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         public ReadOnlySpan<float> Bv => _bv.AsReadOnlySpan();
         private static TensorStorage<float> CreateStorage(float[]? source)
         {
-            if (source is null || source.Length == 0)
+            if (source == null || source.Length == 0)
             {
                 return new TensorStorage<float>(0);
             }

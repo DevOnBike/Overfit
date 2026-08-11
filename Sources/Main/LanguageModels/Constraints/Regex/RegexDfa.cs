@@ -313,7 +313,7 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints.Regex
                 {
                     chain = Append(chain, p);
                 }
-                if (chain is null)
+                if (chain == null)
                 {
                     var s = NewState();   // {0} → epsilon
                     return new Fragment(s, s);
@@ -323,7 +323,7 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints.Regex
 
             private Fragment Append(Fragment? chain, Fragment next)
             {
-                if (chain is null)
+                if (chain == null)
                 {
                     return next;
                 }

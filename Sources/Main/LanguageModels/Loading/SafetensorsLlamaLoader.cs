@@ -55,11 +55,11 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         /// </summary>
         public static CachedLlamaInferenceEngine Load(ISafetensorsSource source, GPT1Config config, bool quantize = true)
         {
-            if (source is null)
+            if (source == null)
             {
                 throw new ArgumentNullException(nameof(source));
             }
-            if (config is null)
+            if (config == null)
             {
                 throw new ArgumentNullException(nameof(config));
             }

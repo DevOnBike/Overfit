@@ -157,7 +157,7 @@ namespace DevOnBike.Overfit.Anomalies.Hosting
             var (gap, trendChange, stepChange) = AnomalyGuardConfigReader.ReadThresholds(file, out var floorProblems);
             var maintenance = AnomalyGuardConfigReader.ReadMaintenance(file, out var windowProblems);
 
-            if (onProblem is not null)
+            if (onProblem != null)
             {
                 Report(mapProblems, onProblem);
                 Report(floorProblems, onProblem);

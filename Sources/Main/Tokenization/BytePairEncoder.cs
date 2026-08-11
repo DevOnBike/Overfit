@@ -149,18 +149,18 @@ namespace DevOnBike.Overfit.Tokenization
 
                 if ((uint)id < (uint)_idToToken.Length)
                 {
-                    byteCount += ToBytes(_idToToken[id], byteBuffer.Span[byteCount..]);
+                    byteCount += ToBytes(_idToToken[id], byteBuffer.Span.Slice(byteCount));
                 }
             }
 
-            var pending = byteBuffer.Span[..byteCount];
+            var pending = byteBuffer.Span.Slice(0, byteCount);
             var charCount = Encoding.UTF8.GetCharCount(pending);
 
             using var chars = new PooledBuffer<char>(charCount, clearMemory: false);
 
             Encoding.UTF8.GetChars(pending, chars.Span);
 
-            return chars.Span[..charCount].ToString();
+            return chars.Span.Slice(0, charCount).ToString();
         }
 
         /// <summary>
@@ -334,8 +334,8 @@ namespace DevOnBike.Overfit.Tokenization
                     continue;
                 }
 
-                var left = line[..split];
-                var right = line[(split + 1)..];
+                var left = line.Substring(0, split);
+                var right = line.Substring(split + 1);
 
                 ranks[(left, right)] = rank;
                 rank++;
@@ -351,14 +351,14 @@ namespace DevOnBike.Overfit.Tokenization
                 Encoding.UTF8.GetMaxByteCount(token.Length) + 1, clearMemory: false);
 
             var count = ToBytes(token, bytes.Span);
-            var pending = bytes.Span[..count];
+            var pending = bytes.Span.Slice(0, count);
             var charCount = Encoding.UTF8.GetCharCount(pending);
 
             using var chars = new PooledBuffer<char>(charCount, clearMemory: false);
 
             Encoding.UTF8.GetChars(pending, chars.Span);
 
-            return chars.Span[..charCount].ToString();
+            return chars.Span.Slice(0, charCount).ToString();
         }
 
         /// <summary>
@@ -393,7 +393,7 @@ namespace DevOnBike.Overfit.Tokenization
                     continue;
                 }
 
-                count += Encoding.UTF8.GetBytes(token.AsSpan(i, 1), destination[count..]);
+                count += Encoding.UTF8.GetBytes(token.AsSpan(i, 1), destination.Slice(count));
             }
 
             return count;
@@ -422,7 +422,7 @@ namespace DevOnBike.Overfit.Tokenization
 
             for (var b = 0; b < 256; b++)
             {
-                if (result[b] is null)
+                if (result[b] == null)
                 {
                     result[b] = ((char)(256 + n)).ToString();
                     n++;

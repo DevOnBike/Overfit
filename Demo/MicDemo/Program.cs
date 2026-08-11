@@ -49,7 +49,7 @@ namespace DevOnBike.Overfit.Demo.MicConsole
             {
                 Console.Write("Press Enter to record (or 'q' + Enter to quit): ");
                 var line = Console.ReadLine();
-                if (line is not null && line.Trim().Equals("q", StringComparison.OrdinalIgnoreCase))
+                if (line != null && line.Trim().Equals("q", StringComparison.OrdinalIgnoreCase))
                 {
                     break;
                 }

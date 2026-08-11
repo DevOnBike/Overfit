@@ -77,7 +77,7 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.Rag
         private float[] Center(float[] vector)
         {
             var mean = _embeddingMean;
-            if (mean is null)
+            if (mean == null)
             {
                 return vector;
             }
@@ -145,7 +145,7 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.Rag
 
                 // Fast path: a persisted index whose sources + hashes exactly match → reload, no embedding.
                 var summaryFromCache = TryReloadFromCache(cachePath, dim, hashByName, files.Length);
-                if (summaryFromCache is not null)
+                if (summaryFromCache != null)
                 {
                     return summaryFromCache;
                 }
@@ -225,7 +225,7 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.Rag
 
             // Model-embedding mode needs the corpus mean restored, or query centering would be wrong.
             var mean = _useModelEmbeddings ? LoadMean(cachePath, dim) : null;
-            if (_useModelEmbeddings && mean is null)
+            if (_useModelEmbeddings && mean == null)
             {
                 _logger.LogWarning("RAG index cache is missing its mean vector; rebuilding.");
                 return null;
@@ -254,7 +254,7 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.Rag
             try
             {
                 store.Save(cachePath);
-                if (mean is null)
+                if (mean == null)
                 {
                     if (File.Exists(meanPath))
                     {
@@ -262,7 +262,7 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.Rag
                     }
                 }
 
-                if (!(mean is null))
+                if (mean != null)
                 {
                     using var stream = new FileStream(meanPath, FileMode.Create, FileAccess.Write);
                     using var writer = new BinaryWriter(stream);
@@ -322,7 +322,7 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.Rag
             {
                 ObjectDisposedException.ThrowIf(_disposed, this);
 
-                if (_store is null || _store.Count == 0)
+                if (_store == null || _store.Count == 0)
                 {
                     throw new InvalidOperationException(
                         "No documents are indexed yet. POST /documents/index first.");
@@ -394,7 +394,7 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.Rag
             {
                 ObjectDisposedException.ThrowIf(_disposed, this);
 
-                if (_store is null || _store.Count == 0)
+                if (_store == null || _store.Count == 0)
                 {
                     throw new InvalidOperationException("No documents are indexed yet. POST /documents/index first.");
                 }
@@ -493,7 +493,7 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.Rag
 
         private SentenceEmbedder GetEmbedder()
         {
-            if (_embedder is not null)
+            if (_embedder != null)
             {
                 return _embedder;
             }
@@ -604,7 +604,7 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.Rag
             }
 
             var oneLine = text.Replace("\r\n", " ").Replace('\n', ' ').Trim();
-            return oneLine.Length <= maxChars ? oneLine : oneLine[..maxChars].TrimEnd() + "…";
+            return oneLine.Length <= maxChars ? oneLine : oneLine.Substring(0, maxChars).TrimEnd() + "…";
         }
 
         public void Dispose()

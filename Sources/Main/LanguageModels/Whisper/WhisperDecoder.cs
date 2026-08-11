@@ -286,7 +286,7 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
             var selfStride = maxLen * n;
 
             var s = _reuseState;
-            if (s is null || s.NCtx != nCtx || s.MaxLen != maxLen)
+            if (s == null || s.NCtx != nCtx || s.MaxLen != maxLen)
             {
                 var scoreLen = Math.Max(nCtx, maxLen);
 #pragma warning disable OVERFIT001 // Decode-state scratch allocated once per (reused) State — _reuseState keeps it across streaming steps; the per-token Step is allocation-free.

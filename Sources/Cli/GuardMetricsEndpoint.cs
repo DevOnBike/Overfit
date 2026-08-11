@@ -48,6 +48,23 @@ namespace DevOnBike.Overfit.Cli
         private readonly ILogger _logger;
         private readonly CancellationTokenSource _stopping = new();
 
+        /// <summary>
+        /// The serving loop, held rather than discarded.
+        ///
+        /// <para><b>It was <c>_ = ServeAsync()</c>, and that is a silent hole rather than a style point.</b>
+        /// <c>CS4014</c> is an error repo-wide, but an explicit discard satisfies it — so the one guard that
+        /// exists for an unawaited task does not fire here, and a terminal failure of this loop went to a
+        /// task object nobody held. An unobserved exception has not crashed the process since .NET 4.5: the
+        /// endpoint would stop serving, the process would keep running, and nothing anywhere would say so.
+        /// That is the guard's own observability channel failing in exactly the shape the rest of this
+        /// subsystem is built to make loud.</para>
+        ///
+        /// <para><b>Observed, not awaited</b>, because there is nothing to await it from:
+        /// <see cref="TryBind"/> is synchronous and this loop is meant to run until <see cref="Dispose"/>,
+        /// so awaiting it at the call site would hang the guard at startup instead of starting it.</para>
+        /// </summary>
+        private Task? _serving;
+
         private GuardMetricsEndpoint(
             GuardTelemetry telemetry, AnomalyGuard? guard, ILogger logger, string prefix, IClock? clock)
         {
@@ -124,7 +141,7 @@ namespace DevOnBike.Overfit.Cli
                 return null;
             }
 
-            _ = endpoint.ServeAsync();
+            endpoint._serving = endpoint.ServeAsync();
 
             return endpoint;
         }
@@ -139,35 +156,86 @@ namespace DevOnBike.Overfit.Cli
             }
 
             _listener.Close();
+
+            // Reading the loop's terminal state back instead of dropping it. ServeAsync now catches
+            // everything, so a faulted task here means its own handler failed — rare, and still better as
+            // one logged line than as nothing. Not awaited: this method is what ends that loop, so waiting
+            // on it here is waiting on itself.
+            if (_serving is { IsFaulted: true })
+            {
+                _logger.LogError(
+                    _serving.Exception, "Guard metrics serving loop ended in an unhandled fault.");
+            }
+
             _stopping.Dispose();
         }
 
+        /// <summary>
+        /// Accepts and answers scrapes until the endpoint is disposed.
+        ///
+        /// <para><b>Every exit is a logged one.</b> The two handlers below used to leave a gap between them:
+        /// anything from <see cref="Respond"/> that was not a transport fault escaped the loop, faulted the
+        /// returned task and — because that task was discarded — vanished. The reachable case is not
+        /// hypothetical. <c>Suppressions</c> and <c>Acknowledge</c> read the guard's own state from this
+        /// thread while a cycle mutates it on another, and every type in that subsystem documents itself as
+        /// "not thread-safe: one guard, one cycle at a time". A <c>Collection was modified</c> is an
+        /// <see cref="InvalidOperationException"/>, which matched neither filter.
+        /// <c>_guard.ActiveSuppressions</c> is not inside any <c>try</c> at all, and
+        /// <c>_guard.Acknowledge</c> is wrapped for <see cref="ArgumentException"/> only.</para>
+        ///
+        /// <para><b>An unexpected request failure no longer ends the channel.</b> One malformed scrape or
+        /// one unlucky interleaving used to kill metrics permanently for the life of the process. It is
+        /// logged at <c>Error</c> — not <c>Debug</c>, which is where a client hanging up mid-write belongs —
+        /// and the loop continues.</para>
+        /// </summary>
         private async Task ServeAsync()
         {
-            // #pragma BOUND: exits when Dispose cancels the token or stops the listener, which makes
-            // GetContextAsync throw — there is no other path out and no way to spin.
-            while (!_stopping.IsCancellationRequested)
+            try
             {
-                HttpListenerContext context;
+                // #pragma BOUND: exits when Dispose cancels the token or stops the listener, which makes
+                // GetContextAsync throw — there is no other path out and no way to spin.
+                while (!_stopping.IsCancellationRequested)
+                {
+                    HttpListenerContext context;
 
-                try
-                {
-                    context = await _listener.GetContextAsync().ConfigureAwait(false);
-                }
-                catch (Exception ex) when (ex is HttpListenerException or ObjectDisposedException)
-                {
-                    return;
-                }
+                    try
+                    {
+                        context = await _listener.GetContextAsync().ConfigureAwait(false);
+                    }
+                    catch (Exception ex) when (ex is HttpListenerException or ObjectDisposedException)
+                    {
+                        return;
+                    }
 
-                try
-                {
-                    Respond(context);
+                    try
+                    {
+                        Respond(context);
+                    }
+                    catch (Exception ex) when (ex is HttpListenerException or ObjectDisposedException or IOException)
+                    {
+                        // A scrape that hung up mid-write is the client's business, not a reason to stop serving.
+                        _logger.LogDebug(ex, "Guard metrics request failed.");
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(
+                            ex,
+                            "Guard metrics request failed unexpectedly and the endpoint kept serving. This is "
+                            + "not a transport fault, so it is a defect in the endpoint or a concurrent read "
+                            + "of guard state.");
+                    }
                 }
-                catch (Exception ex) when (ex is HttpListenerException or ObjectDisposedException or IOException)
-                {
-                    // A scrape that hung up mid-write is the client's business, not a reason to stop serving.
-                    _logger.LogDebug(ex, "Guard metrics request failed.");
-                }
+            }
+            catch (Exception ex)
+            {
+                // The backstop. Nothing above should reach here, and if something does, the endpoint is
+                // finished: the process keeps running, the listener stops being served, and a scrape then
+                // hangs until it times out. Said loudly because from outside it is indistinguishable from a
+                // healthy guard with nothing to report — see the class remarks on `absent()`.
+                _logger.LogError(
+                    ex,
+                    "Guard metrics endpoint has STOPPED serving and will not recover; the guard itself "
+                    + "continues. 'This guard has stopped' is no longer detectable from its own metrics.");
             }
         }
 
@@ -216,7 +284,7 @@ namespace DevOnBike.Overfit.Cli
         /// </summary>
         private void Suppressions(HttpListenerContext context)
         {
-            if (_guard is null)
+            if (_guard == null)
             {
                 Write(context, 501, "text/plain; charset=utf-8",
                     "this host serves metrics only; no guard was supplied to the endpoint\n");
@@ -294,7 +362,7 @@ namespace DevOnBike.Overfit.Cli
 
         private void Acknowledge(HttpListenerContext context)
         {
-            if (_guard is null)
+            if (_guard == null)
             {
                 Write(context, 501, "text/plain; charset=utf-8",
                     "this host serves metrics only; no guard was supplied to the endpoint\n");
@@ -403,8 +471,8 @@ namespace DevOnBike.Overfit.Cli
                 return false;
             }
 
-            var unit = text[^1];
-            var number = text[..^1];
+            var unit = text[text.Length - 1];
+            var number = text.Substring(0, text.Length - 1);
 
             if (!double.TryParse(number, NumberStyles.Float, CultureInfo.InvariantCulture, out var amount)
                 || amount <= 0.0)

@@ -136,11 +136,11 @@ namespace DevOnBike.OverfitChat
             // so it works out of the box; we only enter chat once it's ready.
             ShowWelcome();
             var last = Prefs.GetString("last_model_path", null);
-            if (last is null || !System.IO.File.Exists(last))
+            if (last == null || !System.IO.File.Exists(last))
             {
                 last = _modelPaths.Count > 0 ? _modelPaths[0] : null;
             }
-            if (last is not null)
+            if (last != null)
             {
                 var path = last;
                 SetWelcomeLoading("loading…");
@@ -480,7 +480,7 @@ namespace DevOnBike.OverfitChat
         {
             _samplingMode = mode;
             var client = _client;
-            if (client is null)
+            if (client == null)
             {
                 return;
             }
@@ -594,7 +594,7 @@ namespace DevOnBike.OverfitChat
             {
                 return;
             }
-            if (_client is null)
+            if (_client == null)
             {
                 Toast.MakeText(this, "Model is still loading…", ToastLength.Short)!.Show();
                 return;
@@ -704,7 +704,7 @@ namespace DevOnBike.OverfitChat
             _input.Alpha = enabled ? 1f : 0.55f;
             _send.Enabled = enabled;
             _send.Alpha = enabled ? 1f : 0.45f;
-            if (_mic is not null)
+            if (_mic != null)
             {
                 _mic.Enabled = enabled;
                 _mic.Alpha = enabled ? 1f : 0.45f;
@@ -912,7 +912,7 @@ namespace DevOnBike.OverfitChat
 
         private void SetWelcomeLoading(string status)
         {
-            if (_modelSelectField is null)
+            if (_modelSelectField == null)
             {
                 return;
             }
@@ -925,7 +925,7 @@ namespace DevOnBike.OverfitChat
 
         private void SetWelcomeError(string message)
         {
-            if (_modelSelectField is null)
+            if (_modelSelectField == null)
             {
                 return;
             }
@@ -982,7 +982,7 @@ namespace DevOnBike.OverfitChat
         // Fired 30s after the last activity: free the model and send the user back to model select.
         private void UnloadIfIdle()
         {
-            if (_busy || _client is null)
+            if (_busy || _client == null)
             {
                 return;
             }
@@ -1061,11 +1061,11 @@ namespace DevOnBike.OverfitChat
         // no point showing a voice button that can't transcribe.
         private void UpdateMicVisibility()
         {
-            if (_mic is null)
+            if (_mic == null)
             {
                 return;
             }
-            var show = VoiceInputEnabled && WhisperModelPath() is not null;
+            var show = VoiceInputEnabled && WhisperModelPath() != null;
             _mic.Visibility = show ? ViewStates.Visible : ViewStates.Gone;
         }
 
@@ -1084,7 +1084,7 @@ namespace DevOnBike.OverfitChat
             }
 
             // No speech model yet → offer to add one (no network, nothing bundled).
-            if (WhisperModelPath() is null)
+            if (WhisperModelPath() == null)
             {
                 PromptAddWhisperModel();
                 return;
@@ -1253,7 +1253,7 @@ namespace DevOnBike.OverfitChat
         {
             _micPulse?.Cancel();
             _micPulse = null;
-            if (_mic is not null)
+            if (_mic != null)
             {
                 _mic.ScaleX = 1f;
                 _mic.ScaleY = 1f;
@@ -1449,7 +1449,7 @@ namespace DevOnBike.OverfitChat
 
         private void EnableChatBackHandling()
         {
-            if (!OperatingSystem.IsAndroidVersionAtLeast(33) || _backCallback is not null)
+            if (!OperatingSystem.IsAndroidVersionAtLeast(33) || _backCallback != null)
             {
                 return;
             }

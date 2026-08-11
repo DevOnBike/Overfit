@@ -70,7 +70,7 @@ namespace DevOnBike.Overfit.LanguageModels.Chat
             _template = template ?? throw new ArgumentNullException(nameof(template));
 
             var stops = new List<string>();
-            if (stopSequences is not null)
+            if (stopSequences != null)
             {
                 foreach (var s in stopSequences)
                 {
@@ -151,7 +151,7 @@ namespace DevOnBike.Overfit.LanguageModels.Chat
             Action<string>? onText = null,
             ITokenConstraint? constraint = null)
         {
-            if (userMessage is null)
+            if (userMessage == null)
             {
                 throw new ArgumentNullException(nameof(userMessage));
             }
@@ -176,7 +176,7 @@ namespace DevOnBike.Overfit.LanguageModels.Chat
             Action<string>? onText = null,
             ITokenConstraint? constraint = null)
         {
-            if (userMessage is null)
+            if (userMessage == null)
             {
                 throw new ArgumentNullException(nameof(userMessage));
             }
@@ -318,7 +318,7 @@ namespace DevOnBike.Overfit.LanguageModels.Chat
             // Hoisted out of the condition: the speculative session is needed inside the branch, and a
             // second (negated) test could not re-introduce a pattern variable in the same scope.
             var spec = _session as CachedLlamaSession;
-            var useSpeculative = constraint is null && spec is not null && spec.CanSpeculate && !DisableSpeculative;
+            var useSpeculative = constraint == null && spec != null && spec.CanSpeculate && !DisableSpeculative;
 
             if (useSpeculative)
             {

@@ -348,7 +348,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             bool copyToKey,
             bool copyToValue)
         {
-            if (cache is null)
+            if (cache == null)
             {
                 throw new ArgumentNullException(nameof(cache));
             }

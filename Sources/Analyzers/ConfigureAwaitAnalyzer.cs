@@ -91,7 +91,7 @@ namespace DevOnBike.Overfit.Analyzers
         {
             var statement = (UsingStatementSyntax)context.Node;
 
-            if (statement.AwaitKeyword.IsKind(SyntaxKind.None) || statement.Expression is null)
+            if (statement.AwaitKeyword.IsKind(SyntaxKind.None) || statement.Expression == null)
             {
                 return;
             }
@@ -195,7 +195,7 @@ namespace DevOnBike.Overfit.Analyzers
         {
             var type = context.SemanticModel.GetTypeInfo(expression, context.CancellationToken).Type;
 
-            if (type is null || type.TypeKind == TypeKind.Error)
+            if (type == null || type.TypeKind == TypeKind.Error)
             {
                 // An unresolved type is not evidence of anything. Staying silent keeps the rule from turning
                 // an unrelated compile error into a page of spurious diagnostics.

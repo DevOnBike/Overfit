@@ -200,7 +200,7 @@ namespace DevOnBike.Overfit.DeepLearning
             int batchSize,
             int seqLen)
         {
-            if (graph is null)
+            if (graph == null)
             {
                 throw new ArgumentNullException(nameof(graph));
             }
@@ -287,7 +287,7 @@ namespace DevOnBike.Overfit.DeepLearning
         /// </summary>
         public float[] GenerateLogits(int[] tokenIds)
         {
-            if (tokenIds is null)
+            if (tokenIds == null)
             {
                 throw new ArgumentNullException(nameof(tokenIds));
             }
@@ -328,7 +328,7 @@ namespace DevOnBike.Overfit.DeepLearning
         /// </summary>
         public int[] Generate(int[] promptTokenIds, int maxNewTokens)
         {
-            if (promptTokenIds is null)
+            if (promptTokenIds == null)
             {
                 throw new ArgumentNullException(nameof(promptTokenIds));
             }
@@ -380,7 +380,7 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public void Save(BinaryWriter writer)
         {
-            if (writer is null)
+            if (writer == null)
             {
                 throw new ArgumentNullException(nameof(writer));
             }
@@ -403,7 +403,7 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public void Load(BinaryReader reader)
         {
-            if (reader is null)
+            if (reader == null)
             {
                 throw new ArgumentNullException(nameof(reader));
             }
@@ -570,11 +570,11 @@ namespace DevOnBike.Overfit.DeepLearning
             // QLoRA: the output hook owns the whole head (FrozenQuantizedLinear(flat) + LoRA(flat)).
             // Nested ternaries keep this lazy — resolving the head weight eagerly would invoke
             // LMHeadWeightProvider (which records graph nodes) even when the output hook is in charge.
-            var flatLogits = LMHeadOutputProvider is not null
+            var flatLogits = LMHeadOutputProvider != null
                 ? LMHeadOutputProvider(graph, flat)
                 : graph.Linear(
                     flat,
-                    LMHeadWeightProvider is not null ? LMHeadWeightProvider(graph) : (_lmHeadNode ??= LMHead.AsNode()),
+                    LMHeadWeightProvider != null ? LMHeadWeightProvider(graph) : (_lmHeadNode ??= LMHead.AsNode()),
                     bias);
 
             return graph.Reshape(

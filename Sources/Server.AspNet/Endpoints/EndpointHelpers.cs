@@ -22,7 +22,7 @@ namespace DevOnBike.Overfit.Server.AspNet.Endpoints
         public static void EnableSynchronousIO(HttpContext ctx)
         {
             var bodyControl = ctx.Features.Get<IHttpBodyControlFeature>();
-            if (bodyControl is not null)
+            if (bodyControl != null)
             {
                 bodyControl.AllowSynchronousIO = true;
             }

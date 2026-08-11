@@ -47,13 +47,14 @@ namespace DevOnBike.Overfit.Server.OpenAi
             ArgumentNullException.ThrowIfNull(client);
             ArgumentNullException.ThrowIfNull(sink);
 
-            if (req is null || req.Messages is not { Count: > 0 })
+            if (req == null || req.Messages is not { Count: > 0 })
             {
                 WriteError(sink, 400, "'messages' is required and must be non-empty.");
                 return;
             }
 
-            var last = req.Messages[^1];
+            var messages = req.Messages;
+            var last = messages[messages.Count - 1];
             if (!string.Equals(last.Role, "user", StringComparison.OrdinalIgnoreCase))
             {
                 WriteError(sink, 400, "the last message must have role 'user'.");
@@ -78,7 +79,7 @@ namespace DevOnBike.Overfit.Server.OpenAi
 
             try
             {
-                var replayStarted = observer is null ? default : ValueStopwatch.StartNew();
+                var replayStarted = observer == null ? default : ValueStopwatch.StartNew();
                 OpenAiChatMapping.ReplayHistory(client.Chat, req.Messages);
                 observer?.OnHistoryReplayed(req.Messages.Count, replayStarted.GetElapsedTime().TotalMilliseconds);
 
@@ -147,13 +148,13 @@ namespace DevOnBike.Overfit.Server.OpenAi
             sink.BeginEventStream();
             WriteChunk(sink, id, ts, modelName, new OpenAiMessage { Role = "assistant" }, finishReason: null);
 
-            var sendStarted = observer is null ? default : ValueStopwatch.StartNew();
+            var sendStarted = observer == null ? default : ValueStopwatch.StartNew();
             var firstDelta = true;
 
             client.Chat.Send(userContent, in options,
                 onText: delta =>
                 {
-                    if (observer is not null && firstDelta)
+                    if (observer != null && firstDelta)
                     {
                         firstDelta = false;
                         observer.OnFirstToken(sendStarted.GetElapsedTime().TotalMilliseconds);

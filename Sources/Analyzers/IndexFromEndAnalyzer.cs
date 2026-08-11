@@ -33,6 +33,14 @@ namespace DevOnBike.Overfit.Analyzers
     /// <para>The replacement is <c>x[x.Length - 1]</c> for arrays and lists, <c>x[x.Count - 1]</c>, or a
     /// named local where the expression is long. XOR is untouched: <c>a ^ b</c> is a binary operator and a
     /// different syntax node, so <c>_checksum ^= ids[ids.Length - 1]</c> stays legal.</para>
+    ///
+    /// <para><b><c>Sources/Analyzers</c> cannot accrue a site for this rule</b>, and that is a structural
+    /// guarantee rather than an observation about today's code. It targets <c>netstandard2.0</c> — alone in
+    /// this solution — whose reference set contains no <c>System.Index</c>, so <c>x[^1]</c> does not compile
+    /// there at all; verified by compiling one, which fails with <c>CS0518</c> naming the missing predefined
+    /// type. <c>LangVersion</c> is <c>latest</c>, so the compiler accepts the syntax and then fails on the
+    /// absent supporting type, which is why the error does not mention the target framework. "Zero sites"
+    /// and "cannot have sites" are the same output and different facts; this is the second.</para>
     /// </summary>
     [DiagnosticAnalyzer(LanguageNames.CSharp)]
     public sealed class IndexFromEndAnalyzer : DiagnosticAnalyzer

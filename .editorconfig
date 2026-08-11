@@ -417,6 +417,61 @@ dotnet_diagnostic.OVERFIT022.severity = error
 dotnet_diagnostic.OVERFIT023.severity = error
 dotnet_diagnostic.OVERFIT900.severity = error
 
+# ── OVERFIT040-045 — the async/readability set added 2026-08-11 ───────────────────────────────────────
+#
+# RATCHET, as OVERFIT021 and OVERFIT025/026 did before them. Backlog measured at introduction, whole
+# solution / of which Sources:
+#   OVERFIT040 (sync method with an async sibling)        184 / 142
+#   OVERFIT041 (defaulted CancellationToken)               58 /  56
+#   OVERFIT042 (index from end, x[^1])                     52 /  46
+#   OVERFIT043 (range operator, x[1..])                   394 / 378
+#   OVERFIT044 (null pattern, is null / is not null)      808 / 734
+#   OVERFIT045 (primary constructor on class or struct)     8 /   4
+#
+# Those counts are grep-wide, and a severity set here does NOT reach all of them. The analyzer is wired
+# centrally in Directory.Build.props:59-69 with an exclusion list, so it never runs in Analyzers, Tests,
+# AotSmokeTest, Benchmarks, DevOnBike.Overfit.Templates or OverfitChat — measured 2026-08-11 by building
+# Sources/Analyzers with 38 live OVERFIT044 sites in it and getting zero diagnostics. Two of those
+# exclusions are decisions rather than gaps (test code is exempt from style rules; benchmarks deliberately
+# write the slow shape next to the fast one), and Analyzers cannot ever be covered because it would
+# reference itself. Read the "whole solution" column as the size of the READING preference and the Sources
+# column as the size of what any escalation below can actually lock.
+#
+# 041, 042 and 045 are being swept to zero, after which they escalate here — they carry no severity line
+# yet and sit at their default Warning until that sweep lands. 043 and 044 stay at suggestion while their
+# backlog is worked down — 1202 sites between them, and a rule that cannot be obeyed today is a warning
+# that trains people to ignore the channel, which is the failure the prerelease accept-list note in
+# Directory.Build.targets describes.
+#
+# OVERFIT040 stays at suggestion globally and is raised only where threads are a scarce resource. In
+# Sources/Main most of its hits are one-shot model and config loading, where synchronous IS correct: a
+# GGUF reader is not improved by returning a task. Raising it there would make the rule lie.
+dotnet_diagnostic.OVERFIT040.severity = suggestion
+dotnet_diagnostic.OVERFIT043.severity = suggestion
+dotnet_diagnostic.OVERFIT044.severity = suggestion
+
+# ── OVERFIT046 — task discarded with `_ =`, added 2026-08-11 ──────────────────────────────────────────
+#
+# NOT part of the 040-045 set above and not a readability rule: it closes a MEASURED hole in CS4014, which
+# Directory.Build.props promotes to error. CS4014 fires on `Work();` and is silent on `_ = Work();` —
+# compiled both in one file, one diagnostic across the two. So a one-character edit opts out of a build
+# error and nothing watched it.
+#
+# `error` is the intended end state and the reason it is NOT set here yet is a count, not a doubt. The rule
+# was designed against 2 known sites; inventorying the whole tree before shipping found 6, because the first
+# census covered Sources/ only and Demo is NOT on the exclusion list. It is now 5: Cli/GuardMetricsEndpoint
+# was fixed while this rule was being written — it assigns the serve loop to a field instead of discarding
+# it — which removed the one site that was a defect rather than a decision.
+#
+# The remaining 5 are Server.AspNet (1), Demo/LabLoadDriver (1), Demo/LabWorkload (3), and ALL FIVE are
+# deliberate fire-and-forget that already observe their own exceptions: the load driver's SendAsync is
+# wrapped end to end in a catch that counts the failure, and each LabWorkload body logs from a catch. So all
+# five take a pragma naming the reason and NONE is better fixed. That leaves the rule with no live defect to
+# catch, which is the OVERFIT027 posture — error at zero sites, as a tripwire on a shape that has already
+# produced one real defect here. Promoting before the five pragmas land would red-build three projects at
+# once, so it ships at warning and this line becomes `error` in the change that lands the last pragma.
+dotnet_diagnostic.OVERFIT046.severity = warning
+
 # ── OVERFIT033 / OVERFIT034 — the two MSBuild guards, now analyzers ───────────────────────────────────
 #
 # Both replace RoslynCodeTaskFactory tasks that lived as embedded C# inside Main.csproj and Anomalies.csproj

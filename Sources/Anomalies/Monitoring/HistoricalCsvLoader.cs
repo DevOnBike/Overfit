@@ -65,7 +65,7 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
             ArgumentNullException.ThrowIfNull(reader);
 
             var header = reader.ReadLine();
-            if (header is null)
+            if (header == null)
             {
                 throw new OverfitFormatException("CSV file is empty — no header row found.");
             }
@@ -75,7 +75,7 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
             skippedRows = 0;
 
             string? line;
-            while ((line = reader.ReadLine()) is not null)
+            while ((line = reader.ReadLine()) != null)
             {
                 if (string.IsNullOrWhiteSpace(line))
                 {

@@ -142,7 +142,7 @@ namespace DevOnBike.Overfit.Extensions.AI
         public object? GetService(Type serviceType, object? serviceKey = null)
         {
             ArgumentNullException.ThrowIfNull(serviceType);
-            if (serviceKey is null && serviceType == typeof(ChatClientMetadata))
+            if (serviceKey == null && serviceType == typeof(ChatClientMetadata))
             {
                 return _metadata;
             }
@@ -211,7 +211,7 @@ namespace DevOnBike.Overfit.Extensions.AI
                 _session.AddUser(text);   // user / tool / unknown → user turn
             }
 
-            return messages[^1].Text ?? string.Empty;
+            return messages[messages.Count - 1].Text ?? string.Empty;
         }
     }
 }

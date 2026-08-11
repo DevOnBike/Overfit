@@ -182,7 +182,7 @@ namespace DevOnBike.Overfit.Cli
             {
                 var name = element.GetString();
 
-                if (name is not null)
+                if (name != null)
                 {
                     names.Add(name);
                 }

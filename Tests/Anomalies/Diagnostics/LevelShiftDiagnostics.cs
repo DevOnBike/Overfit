@@ -78,7 +78,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
             }
 
             var verdict = new TrendDetector().Detect(common, times, TrendOptions.Balanced);
-            var windowSeconds = times[^1] - times[0];
+            var windowSeconds = times[times.Length - 1] - times[0];
 
             var half = Samples / 2;
             var comparison = MannWhitneyComparer.Instance.Compare(

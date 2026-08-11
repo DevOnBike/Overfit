@@ -321,7 +321,7 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
         {
             var strip = model != "gpt2" && addSpacePrefix && text.Length > 0 && text[0] == ' ';
 
-            return strip ? text[1..] : text;
+            return strip ? text.Slice(1) : text;
         }
 
         /// <summary>
@@ -388,14 +388,14 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
 
                 // The space marker is substituted while copying rather than by piece.Replace(...), which
                 // allocated a string for every non-byte token on every call.
-                var pieceChars = pieceBuffer.Span[..piece.Length];
+                var pieceChars = pieceBuffer.Span.Slice(0, piece.Length);
 
                 for (var c = 0; c < piece.Length; c++)
                 {
                     pieceChars[c] = piece[c] == SpaceMarker ? ' ' : piece[c];
                 }
 
-                byteCount += Encoding.UTF8.GetBytes(pieceChars, bytes[byteCount..]);
+                byteCount += Encoding.UTF8.GetBytes(pieceChars, bytes.Slice(byteCount));
             }
 
             Flush(ref text, bytes, ref byteCount);
@@ -408,13 +408,13 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
                 return;
             }
 
-            var pending = bytes[..byteCount];
+            var pending = bytes.Slice(0, byteCount);
             var charCount = Encoding.UTF8.GetCharCount(pending);
 
             using var chars = new PooledBuffer<char>(charCount, clearMemory: false);
 
             Encoding.UTF8.GetChars(pending, chars.Span);
-            text.Append(chars.Span[..charCount]);
+            text.Append(chars.Span.Slice(0, charCount));
 
             byteCount = 0;
         }
@@ -681,7 +681,7 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
                         {
                             if (pos > segStart)
                             {
-                                result.Add((text[segStart..pos], false, -1));
+                                result.Add((text.Substring(segStart, pos - segStart), false, -1));
                             }
                             result.Add((candidate, true, _tokenToId[candidate]));
                             pos += len;
@@ -696,7 +696,7 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
             }
             if (segStart < text.Length)
             {
-                result.Add((text[segStart..], false, -1));
+                result.Add((text.Substring(segStart), false, -1));
             }
             return result;
         }
@@ -712,8 +712,8 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
                 {
                     continue;
                 }
-                var left = merges[i][..sp];
-                var right = merges[i][(sp + 1)..];
+                var left = merges[i].Substring(0, sp);
+                var right = merges[i].Substring(sp + 1);
                 if (_tokenToId.TryGetValue(left, out var a) && _tokenToId.TryGetValue(right, out var b))
                 {
                     ranks.TryAdd((a, b), rank++);

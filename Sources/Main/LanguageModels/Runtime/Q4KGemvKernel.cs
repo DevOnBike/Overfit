@@ -445,10 +445,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                         // Pre-decoded when the caller hoisted the F16 widening out of the tile loop; the values
                         // are identical either way, so the two paths are bit-identical.
                         var decodedAt = ds + (((long)x * nb) + b) * DecodedScalesPerBlock;
-                        var colScale = ds is not null
+                        var colScale = ds != null
                             ? Vector256.Load(decodedAt)
                             : AblateF16Scales ? Vector256.Create(1f) : LoadF16x8Rearrange(blk, deltamask);
-                        var colDmin = ds is not null
+                        var colDmin = ds != null
                             ? Vector256.Load(decodedAt + 8)
                             : AblateF16Scales ? Vector256.Create(0f) : LoadF16x8(blk + 16);
 
@@ -575,7 +575,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     // Two stores rather than one with a zero vector: `x + 0f` rewrites -0.0 to +0.0,
                     // which would break the bit-identity the no-bias path is pinned to. The branch is
                     // per output-group, not per column, and is perfectly predicted.
-                    if (bs is null)
+                    if (bs == null)
                     {
                         for (var c = 0; c < cols; c++)
                         {
@@ -584,7 +584,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                         }
                     }
 
-                    if (bs is not null)
+                    if (bs != null)
                     {
                         // Same 8 bias floats for every column - hoisted out of the column loop.
                         var biasVec = Vector256.Load(bs + x * 8);
@@ -718,10 +718,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                         var blk = bptr + (long)b * BlockKx8Bytes;
                         var decodedAt = ds + (((long)x * nb) + b) * DecodedScalesPerBlock;
 
-                        var colScale256 = ds is not null
+                        var colScale256 = ds != null
                             ? Vector256.Load(decodedAt)
                             : LoadF16x8Rearrange(blk, deltamask);
-                        var colDmin256 = ds is not null
+                        var colDmin256 = ds != null
                             ? Vector256.Load(decodedAt + 8)
                             : LoadF16x8(blk + 16);
 
@@ -903,7 +903,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
             // Two stores rather than adding a zero vector: `x + 0f` rewrites -0.0 to +0.0 and would break the
             // bit-identity the no-bias path is pinned to.
-            if (bs is null)
+            if (bs == null)
             {
                 value.Store(o + (long)column * outputSize + x * 8);
                 return;

@@ -45,7 +45,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             // ── train model A on the new fact ──
             using var modelA = TrainableLlamaModel.FromEngine(engine, loraRank: 8, rng: new Random(7), maxSeqLen: 128, loraOnLmHead: true);
             var ids = tok.Encode(passage);
-            var input = ids[..^1];
+            var input = ids[..(ids.Length - 1)];
             var target = ids[1..];
             var trainable = ToList(modelA.TrainableParameters());
             using (var opt = new Adam(trainable, learningRate: 0.002f) { WeightDecay = 0f, Epsilon = 1e-4f })

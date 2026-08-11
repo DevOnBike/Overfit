@@ -132,7 +132,7 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
                 : null;
 
             var novelty = noveltyStart >= 0
-                ? state[(noveltyStart + PeerNoveltySection.Length)..]
+                ? state.Substring(noveltyStart + PeerNoveltySection.Length)
                 : string.Empty;
 
             var calibrator = FloorCalibrator.Read(calibration, trendOptions);
@@ -154,7 +154,7 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
         {
             var end = until > from ? until : state.Length;
 
-            return state[from..end];
+            return state.Substring(from, end - from);
         }
     }
 }

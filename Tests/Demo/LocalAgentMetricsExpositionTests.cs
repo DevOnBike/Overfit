@@ -79,7 +79,7 @@ namespace DevOnBike.Overfit.Tests.Demo
 
                 // The +Inf bucket is the last one and must equal _count, or the histogram is internally
                 // inconsistent and quantile queries over it return nonsense.
-                Assert.Equal(count, buckets[^1]);
+                Assert.Equal(count, buckets[buckets.Count - 1]);
             }
         }
 

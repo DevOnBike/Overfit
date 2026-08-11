@@ -95,7 +95,7 @@ namespace DevOnBike.Overfit.Onnx
                         // Test the out-value rather than the `hasInitializer` bool: routed through a separate
                         // variable the compiler loses the link to initTensor's null state (CS8601), which the
                         // AOT guard promotes to an error. Same condition, analysable.
-                        if (!hasSlot && initTensor is not null)
+                        if (!hasSlot && initTensor != null)
                         {
                             // Relabels a CONSTANT: a folded/deduplicated weight or bias routed to its
                             // consumer under a new name (e.g. torch's constant-folding aliases equal biases

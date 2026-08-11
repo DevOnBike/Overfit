@@ -224,7 +224,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
                 var times = gaps.Times.ToArray();
                 var values = gaps.Gaps.ToArray();
                 var result = detector.Detect(values, times, options);
-                var span = times[^1] - times[0];
+                var span = times[times.Length - 1] - times[0];
 
                 byChannel.TryAdd(gaps.Signal, []);
                 byChannel[gaps.Signal].Add(new Fit(

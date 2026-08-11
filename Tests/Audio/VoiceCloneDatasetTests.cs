@@ -38,7 +38,7 @@ namespace DevOnBike.Overfit.Tests.Audio
 
             // Prompt prefix + audio tokens + end token; audio tokens recover the codes via the decode bridge.
             Assert.True(ex.PromptLength > 0);
-            Assert.Equal(tokenizer.EndOfTextTokenId, ex.InputIds[^1]);
+            Assert.Equal(tokenizer.EndOfTextTokenId, ex.InputIds[ex.InputIds.Length - 1]);
 
             var audioCount = ex.InputIds.Length - ex.PromptLength - 1;
             var decoded = new int[audioCount];

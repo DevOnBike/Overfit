@@ -28,6 +28,15 @@ namespace DevOnBike.Overfit.Analyzers
     /// <c>Slice</c>, so <c>array[1..]</c> becomes <c>array.AsSpan(1)</c> when a span will do and
     /// <c>array.Skip</c> is unavailable here because LINQ is banned in <c>Sources/Main</c>. That difference
     /// is why this cannot be a blind find-and-replace.</para>
+    ///
+    /// <para><b><c>Sources/Analyzers</c> cannot accrue a site for this rule</b>, and that is a structural
+    /// guarantee rather than an observation about today's code. It targets <c>netstandard2.0</c> — alone in
+    /// this solution — whose reference set contains neither <c>System.Index</c> nor <c>System.Range</c>, so
+    /// a range expression does not compile there at all; verified by compiling <c>s[1..]</c>, which fails
+    /// with two <c>CS0518</c> errors naming both missing predefined types. <c>LangVersion</c> is
+    /// <c>latest</c>, so the compiler accepts the syntax and then fails on the absent supporting types,
+    /// which is why the error does not mention the target framework. "Zero sites" and "cannot have sites"
+    /// are the same output and different facts; this is the second.</para>
     /// </summary>
     [DiagnosticAnalyzer(LanguageNames.CSharp)]
     public sealed class RangeExpressionAnalyzer : DiagnosticAnalyzer

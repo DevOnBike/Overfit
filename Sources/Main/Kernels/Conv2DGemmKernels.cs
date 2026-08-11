@@ -227,23 +227,39 @@ namespace DevOnBike.Overfit.Kernels
             }
         }
 
-        private readonly unsafe struct Im2ColCtx(
-            float* input, float* cols,
-            int inChannels, int inputH, int inputW, int kernelSize,
-            int padding, int stride, int outH, int outW, int n)
+        private readonly unsafe struct Im2ColCtx
         {
-            public readonly float* Input = input;
-            public readonly float* Cols = cols;
-            public readonly int InChannels = inChannels;
-            public readonly int InputH = inputH;
-            public readonly int InputW = inputW;
-            public readonly int KernelSize = kernelSize;
-            public readonly int Padding = padding;
-            public readonly int Stride = stride;
-            public readonly int OutH = outH;
-            public readonly int OutW = outW;
-            public readonly int N = n;
-            public readonly int KRows = inChannels * kernelSize * kernelSize;
+            public Im2ColCtx(
+                float* input, float* cols,
+                int inChannels, int inputH, int inputW, int kernelSize,
+                int padding, int stride, int outH, int outW, int n)
+            {
+                Input = input;
+                Cols = cols;
+                InChannels = inChannels;
+                InputH = inputH;
+                InputW = inputW;
+                KernelSize = kernelSize;
+                Padding = padding;
+                Stride = stride;
+                OutH = outH;
+                OutW = outW;
+                N = n;
+                KRows = inChannels * kernelSize * kernelSize;
+            }
+
+            public readonly float* Input;
+            public readonly float* Cols;
+            public readonly int InChannels;
+            public readonly int InputH;
+            public readonly int InputW;
+            public readonly int KernelSize;
+            public readonly int Padding;
+            public readonly int Stride;
+            public readonly int OutH;
+            public readonly int OutW;
+            public readonly int N;
+            public readonly int KRows;
         }
 
         // C[M,N] = A[M,K] @ B[K,N], parallelised over N-panels (each worker packs its 8-col B panel and sweeps M

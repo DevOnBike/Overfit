@@ -38,7 +38,7 @@ namespace DevOnBike.Overfit.Audio
             var byteRate = sampleRate * blockAlign;
             var dataBytes = samples.Length * bytesPerSample;     // mono → always even
 
-            var infoChunk = infoComment is null ? [] : BuildInfoList(infoComment);
+            var infoChunk = infoComment == null ? [] : BuildInfoList(infoComment);
 
             // RIFF size = "WAVE"(4) + fmt(8+16) + LIST(infoChunk) + data(8 + dataBytes).
             var riffSize = 4 + (8 + 16) + infoChunk.Length + (8 + dataBytes);

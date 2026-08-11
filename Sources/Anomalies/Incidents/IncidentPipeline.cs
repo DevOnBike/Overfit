@@ -105,7 +105,7 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
         private bool IsMuted(
             in IncidentSubject subject, string signal, DateTimeOffset at, double magnitude = double.NaN)
         {
-            if (Suppressor is null || !Suppressor.IsSuppressed(subject, signal, at, magnitude))
+            if (Suppressor == null || !Suppressor.IsSuppressed(subject, signal, at, magnitude))
             {
                 return false;
             }

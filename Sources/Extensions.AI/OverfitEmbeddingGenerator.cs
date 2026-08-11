@@ -72,7 +72,7 @@ namespace DevOnBike.Overfit.Extensions.AI
         public object? GetService(Type serviceType, object? serviceKey = null)
         {
             ArgumentNullException.ThrowIfNull(serviceType);
-            if (serviceKey is null && serviceType == typeof(EmbeddingGeneratorMetadata))
+            if (serviceKey == null && serviceType == typeof(EmbeddingGeneratorMetadata))
             {
                 return _metadata;
             }

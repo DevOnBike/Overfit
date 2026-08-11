@@ -177,7 +177,7 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
                 return false;
             }
 
-            present[..count].Sort();
+            present.Slice(0, count).Sort();
 
             summary = new HistorySummary(
                 count,

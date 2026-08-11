@@ -103,7 +103,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
                 + "against it is flat) while `seasonal` rises towards one finding per pod.\n");
 
             var flat = rows[0];
-            var biggest = rows[^1];
+            var biggest = rows[rows.Count - 1];
 
             report.Append(CultureInfo.InvariantCulture,
                 $"\nflat: common={flat.Common} seasonal={flat.Seasonal} (must match)\n"

@@ -115,7 +115,7 @@ namespace DevOnBike.Overfit.Ops
                 var n = Math.Min(SiLUTile, len - offset);
                 var x = input.Slice(offset, n);
                 var y = output.Slice(offset, n);
-                var s = sBuf[..n];
+                var s = sBuf.Slice(0, n);
 
                 TensorPrimitives.Sigmoid(x, s);     // s = σ(x)
                 TensorPrimitives.Multiply(x, s, y); // y = x · σ(x)
@@ -141,8 +141,8 @@ namespace DevOnBike.Overfit.Ops
                 var x = input.Slice(offset, n);
                 var dO = gradOutput.Slice(offset, n);
                 var dI = gradInput.Slice(offset, n);
-                var s = sBuf[..n];
-                var t = tmpBuf[..n];
+                var s = sBuf.Slice(0, n);
+                var t = tmpBuf.Slice(0, n);
 
                 TensorPrimitives.Sigmoid(x, s);     // s = σ(x)
 

@@ -287,9 +287,10 @@ namespace DevOnBike.Overfit.Anomalies.Live
                 }
 
                 var idx = MetricTypeIdToFeatureIndex(s.MetricTypeId);
-                if (idx >= 0 && s.Samples.Count > 0)
+                var samples = s.Samples;
+                if (idx >= 0 && samples.Count > 0)
                 {
-                    features[idx] = s.Samples[^1].Value;
+                    features[idx] = samples[samples.Count - 1].Value;
                 }
             }
 

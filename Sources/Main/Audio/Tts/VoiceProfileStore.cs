@@ -71,8 +71,8 @@ namespace DevOnBike.Overfit.Audio.Tts
                 {
                     continue;
                 }
-                var key = line[..eq];
-                var value = line[(eq + 1)..];
+                var key = line.Substring(0, eq);
+                var value = line.Substring(eq + 1);
                 switch (key)
                 {
                     case "id":
@@ -133,7 +133,7 @@ namespace DevOnBike.Overfit.Audio.Tts
             {
                 if (line.StartsWith("id=", StringComparison.Ordinal))
                 {
-                    return line[3..];
+                    return line.Substring(3);
                 }
             }
             return Path.GetFileNameWithoutExtension(manifestPath);

@@ -668,7 +668,7 @@ namespace DevOnBike.Overfit.Evolutionary.Runtime
 
             // Annotate the activity span with the headline numbers so distributed traces
             // are useful even without metric backend.
-            if (activity is not null)
+            if (activity != null)
             {
                 activity.SetTag("iteration", metrics.Iteration);
                 activity.SetTag("batch_size", BatchSize);

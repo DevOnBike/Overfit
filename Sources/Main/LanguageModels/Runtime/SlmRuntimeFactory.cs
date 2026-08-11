@@ -23,7 +23,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             GPT1Model model,
             SlmRuntimeMode mode = SlmRuntimeMode.Cached)
         {
-            if (model is null)
+            if (model == null)
             {
                 throw new ArgumentNullException(nameof(model));
             }
@@ -38,7 +38,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
         public static SlmRuntimeHandle CreateLegacyGpt1(GPT1Model model)
         {
-            if (model is null)
+            if (model == null)
             {
                 throw new ArgumentNullException(nameof(model));
             }
@@ -54,7 +54,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
         public static SlmRuntimeHandle CreateCachedGpt1(GPT1Model model)
         {
-            if (model is null)
+            if (model == null)
             {
                 throw new ArgumentNullException(nameof(model));
             }

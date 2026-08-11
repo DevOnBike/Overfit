@@ -115,7 +115,7 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
 
             var state = Resolve(pod, createdAt);
 
-            if (state is null)
+            if (state == null)
             {
                 return NoveltyDecision.Unknown;
             }
@@ -129,7 +129,7 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
 
             var series = state.Builtin[index];
 
-            if (series is null)
+            if (series == null)
             {
                 series = new GapSeries(_options.RetainedCyclesPerSeries);
                 state.Builtin[index] = series;
@@ -169,7 +169,7 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
 
             var state = Resolve(pod, createdAt);
 
-            if (state is null)
+            if (state == null)
             {
                 return NoveltyDecision.Unknown;
             }
@@ -311,7 +311,7 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
 
             // The reuse check the ADR requires: a name the cluster still knows, carrying a different creation
             // time, is a different pod wearing an old name.
-            if (roster is not null
+            if (roster != null
                 && roster.TryGetValue(pod, out var current)
                 && current != createdAt)
             {
@@ -341,7 +341,7 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
 
             if (key.Length > 1 && key[0] == CustomMarker)
             {
-                state.Custom[LearnedStateText.Unescape(key[1..])] = series;
+                state.Custom[LearnedStateText.Unescape(key.Substring(1))] = series;
 
                 return;
             }

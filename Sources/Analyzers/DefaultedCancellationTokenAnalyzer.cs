@@ -76,14 +76,14 @@ namespace DevOnBike.Overfit.Analyzers
         {
             var parameter = (ParameterSyntax)context.Node;
 
-            if (parameter.Default is null)
+            if (parameter.Default == null)
             {
                 return;
             }
 
             var symbol = context.SemanticModel.GetDeclaredSymbol(parameter, context.CancellationToken);
 
-            if (symbol is null
+            if (symbol == null
                 || symbol.Type.ToDisplayString() != "System.Threading.CancellationToken")
             {
                 return;

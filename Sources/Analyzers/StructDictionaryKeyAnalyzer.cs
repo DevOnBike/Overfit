@@ -57,7 +57,7 @@ namespace DevOnBike.Overfit.Analyzers
 
             var kind = CollectionKind(type);
 
-            if (kind is null)
+            if (kind == null)
             {
                 return;
             }
@@ -103,7 +103,7 @@ namespace DevOnBike.Overfit.Analyzers
 
         private static bool HasComparerParameter(IMethodSymbol? ctor)
         {
-            if (ctor is null)
+            if (ctor == null)
             {
                 return false;
             }

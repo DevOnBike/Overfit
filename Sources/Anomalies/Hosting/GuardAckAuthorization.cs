@@ -50,7 +50,7 @@ namespace DevOnBike.Overfit.Anomalies.Hosting
                 return false;
             }
 
-            var presented = Encoding.UTF8.GetBytes(header[Scheme.Length..].Trim());
+            var presented = Encoding.UTF8.GetBytes(header.Substring(Scheme.Length).Trim());
             var expected = Encoding.UTF8.GetBytes(expectedToken.Trim());
 
             // FixedTimeEquals is length-safe: it returns false for differing lengths without branching on

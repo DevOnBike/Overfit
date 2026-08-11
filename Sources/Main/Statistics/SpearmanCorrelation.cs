@@ -117,7 +117,7 @@ namespace DevOnBike.Overfit.Statistics
             using var scratch = new PooledBuffer<double>(3 * n, clearMemory: false);
             using var order = new PooledBuffer<int>(n, clearMemory: false);
 
-            var ranksFirst = scratch.Span[..n];
+            var ranksFirst = scratch.Span.Slice(0, n);
             var ranksSecond = scratch.Span.Slice(n, n);
             var keys = scratch.Span.Slice(2 * n, n);
 
@@ -261,8 +261,8 @@ namespace DevOnBike.Overfit.Statistics
                 return 0;
             }
 
-            var sortedKeys = keys[..kept];
-            sortedKeys.Sort(order[..kept]);
+            var sortedKeys = keys.Slice(0, kept);
+            sortedKeys.Sort(order.Slice(0, kept));
 
             var index = 0;
             while (index < kept)
@@ -375,7 +375,7 @@ namespace DevOnBike.Overfit.Statistics
                 return CorrelationResult.Undecidable(Math.Max(overlap, 0));
             }
 
-            var ranksFirst = scratch[..n];
+            var ranksFirst = scratch.Slice(0, n);
             var ranksSecond = scratch.Slice(n, n);
             var keys = scratch.Slice(2 * n, n);
 
@@ -402,10 +402,10 @@ namespace DevOnBike.Overfit.Statistics
                 return CorrelationResult.Undecidable(kept);
             }
 
-            RankInPlace(ranksFirst[..kept], keys[..kept], order[..kept]);
-            RankInPlace(ranksSecond[..kept], keys[..kept], order[..kept]);
+            RankInPlace(ranksFirst.Slice(0, kept), keys.Slice(0, kept), order.Slice(0, kept));
+            RankInPlace(ranksSecond.Slice(0, kept), keys.Slice(0, kept), order.Slice(0, kept));
 
-            var rho = PearsonOnRanks(ranksFirst[..kept], ranksSecond[..kept]);
+            var rho = PearsonOnRanks(ranksFirst.Slice(0, kept), ranksSecond.Slice(0, kept));
 
             if (double.IsNaN(rho))
             {

@@ -203,7 +203,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
             var slash = key.LastIndexOf('/');
             var tail = slash >= 0 ? key[(slash + 1)..] : key;
 
-            return tail.Length <= 8 ? tail : tail[^8..];
+            return tail.Length <= 8 ? tail : tail[(tail.Length - 8)..];
         }
 
         private static int Setting(string name, int fallback)

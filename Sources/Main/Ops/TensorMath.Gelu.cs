@@ -143,8 +143,8 @@ namespace DevOnBike.Overfit.Ops
                 var n = Math.Min(GeluTile, len - offset);
                 var x = input.Slice(offset, n);
                 var y = output.Slice(offset, n);
-                var inner = innerBuf[..n];
-                var tanh = tanhBuf[..n];
+                var inner = innerBuf.Slice(0, n);
+                var tanh = tanhBuf.Slice(0, n);
 
                 // inner = sqrt2pi * x * (1 + c * x²)
                 TensorPrimitives.Multiply(x, x, inner);                 // inner = x²
@@ -187,9 +187,9 @@ namespace DevOnBike.Overfit.Ops
                 var x = input.Slice(offset, n);
                 var dO = gradOutput.Slice(offset, n);
                 var dI = gradInput.Slice(offset, n);
-                var inner = innerBuf[..n];
-                var tanh = tanhBuf[..n];
-                var f = factor[..n];
+                var inner = innerBuf.Slice(0, n);
+                var tanh = tanhBuf.Slice(0, n);
+                var f = factor.Slice(0, n);
 
                 // inner = sqrt2pi · (x + c·x³)   AND   f = sqrt2pi · (1 + 3·c·x²)
                 TensorPrimitives.Multiply(x, x, inner);                 // inner = x²

@@ -156,8 +156,10 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
             var sorted = new List<double>(finals);
             sorted.Sort();
 
+            var worst = sorted[sorted.Count - 1];
+
             report.Append($"\nfinal scores: best {sorted[0]:F4}, median {sorted[sorted.Count / 2]:F4}, "
-                          + $"worst {sorted[^1]:F4}, spread {sorted[^1] - sorted[0]:F4}\n");
+                          + $"worst {worst:F4}, spread {worst - sorted[0]:F4}\n");
 
             // The spread across restarts is only meaningful next to what descending achieves at all: if the
             // landscape's ruggedness is small compared to the improvement one descent buys, a population

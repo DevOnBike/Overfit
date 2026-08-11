@@ -21,13 +21,13 @@ namespace DevOnBike.Overfit.Server.OpenAi
         /// <summary>The embedded <c>openapi.yaml</c> contract, read once and cached.</summary>
         public static string Yaml()
         {
-            if (_yaml is not null)
+            if (_yaml != null)
             {
                 return _yaml;
             }
 
             using var stream = typeof(OpenApiDocument).Assembly.GetManifestResourceStream("openapi.yaml");
-            if (stream is null)
+            if (stream == null)
             {
                 _yaml = "openapi: 3.0.3\ninfo:\n  title: Overfit\n  version: '1.0.0'\npaths: {}\n";
                 return _yaml;

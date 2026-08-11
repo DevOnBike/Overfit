@@ -51,7 +51,7 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
                 }
             }
 
-            var number = span[..(span.Length - suffix)].Trim();
+            var number = span.Slice(0, span.Length - suffix).Trim();
 
             if (!double.TryParse(number, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed))
             {

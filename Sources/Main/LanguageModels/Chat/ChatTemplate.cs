@@ -59,7 +59,7 @@ namespace DevOnBike.Overfit.LanguageModels.Chat
         /// </summary>
         public string Render(IReadOnlyList<ChatMessage> messages, bool addGenerationPrompt = true)
         {
-            if (messages is null)
+            if (messages == null)
             {
                 throw new ArgumentNullException(nameof(messages));
             }
@@ -121,13 +121,13 @@ namespace DevOnBike.Overfit.LanguageModels.Chat
                 var m = messages[i];
                 if (m.Role == "system")
                 {
-                    pendingSystem = pendingSystem is null ? m.Content : pendingSystem + "\n\n" + m.Content;
+                    pendingSystem = pendingSystem == null ? m.Content : pendingSystem + "\n\n" + m.Content;
                     continue;
                 }
 
                 if (m.Role == "user")
                 {
-                    var content = pendingSystem is null ? m.Content : pendingSystem + "\n\n" + m.Content;
+                    var content = pendingSystem == null ? m.Content : pendingSystem + "\n\n" + m.Content;
                     pendingSystem = null;
                     sb.Append("[INST] ").Append(content).Append(" [/INST]");
                     continue;

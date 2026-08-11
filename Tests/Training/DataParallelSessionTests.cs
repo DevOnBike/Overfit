@@ -58,8 +58,10 @@ namespace DevOnBike.Overfit.Tests.Training
             // Broadcast (run in the ctor) copied the master's perturbed weights into every replica.
             foreach (var replica in session.Replicas)
             {
-                Assert.Equal(0.1234f, replica.Parameters[0].DataSpan[0], 5);
-                Assert.Equal(0.1234f, replica.Parameters[0].DataSpan[^1], 5);
+                var data = replica.Parameters[0].DataSpan;
+
+                Assert.Equal(0.1234f, data[0], 5);
+                Assert.Equal(0.1234f, data[data.Length - 1], 5);
             }
 
             // Step delegates to the trainer: workers clear their grads, so the averaged master grad is

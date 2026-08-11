@@ -124,9 +124,9 @@ namespace DevOnBike.Overfit.Statistics
             // alongside a parallel "which sample did this come from" array. That removes the payload from the
             // sort and the allocation from the call — though measurement says the payload was worth only ~5%,
             // and the real win came later, from replacing the sort itself (see SortInto).
-            var sortedBaseline = scratch[..n1];
+            var sortedBaseline = scratch.Slice(0, n1);
             var sortedCandidate = scratch.Slice(n1, n2);
-            var spare = scratch[(n1 + n2)..];
+            var spare = scratch.Slice(n1 + n2);
 
             SortInto(baseline, sortedBaseline, spare);
             SortInto(candidate, sortedCandidate, spare);
@@ -339,7 +339,7 @@ namespace DevOnBike.Overfit.Statistics
                 return;
             }
 
-            RadixSortInto(source, destination, MemoryMarshal.Cast<double, ulong>(spare)[..source.Length]);
+            RadixSortInto(source, destination, MemoryMarshal.Cast<double, ulong>(spare).Slice(0, source.Length));
         }
 
         /// <summary>
@@ -353,7 +353,7 @@ namespace DevOnBike.Overfit.Statistics
 
             // The sorted keys are built in the destination's own memory, reinterpreted as ulong; `spare` is
             // only the alternate half of the ping-pong.
-            var primary = MemoryMarshal.Cast<double, ulong>(destination)[..n];
+            var primary = MemoryMarshal.Cast<double, ulong>(destination).Slice(0, n);
 
             // Eight byte histograms, 8 KB, from the pool rather than the stack.
             //

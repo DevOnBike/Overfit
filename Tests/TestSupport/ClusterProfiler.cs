@@ -190,7 +190,7 @@ namespace DevOnBike.Overfit.Tests.TestSupport
                     continue;
                 }
 
-                var range = finite[^1] - finite[0];
+                var range = finite[finite.Count - 1] - finite[0];
 
                 ranges.Add(range / median);
                 iqrs.Add((Quantile(finite, 0.75) - Quantile(finite, 0.25)) / median);

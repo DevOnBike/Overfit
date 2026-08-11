@@ -111,7 +111,7 @@ namespace DevOnBike.Overfit.Server.AspNet.Services
 
         public void Embed(EmbeddingsRequest? request, IOpenAiResponseSink sink, CancellationToken cancellationToken)
         {
-            if (_embedder is null)
+            if (_embedder == null)
             {
                 WriteError(sink, 501, "embeddings are not served — start with an embedding model "
                     + "(e.g. 'overfit serve <model> --embed-model <dir>').");
@@ -132,7 +132,7 @@ namespace DevOnBike.Overfit.Server.AspNet.Services
 
         public void Synthesize(SpeechRequest? request, IOpenAiResponseSink sink, CancellationToken cancellationToken)
         {
-            if (_tts is null)
+            if (_tts == null)
             {
                 WriteError(sink, 501, "text-to-speech is not served — start with a TTS model "
                     + "(e.g. 'overfit serve <model> --tts-model <orpheus.gguf> --tts-snac <dir>').");

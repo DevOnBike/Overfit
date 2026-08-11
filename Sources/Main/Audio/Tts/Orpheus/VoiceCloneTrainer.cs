@@ -127,8 +127,12 @@ namespace DevOnBike.Overfit.Audio.Tts.Orpheus
                             + "clips or raise maxSeqLen (costs RAM — the logits arena is ~7·T·vocab).");
                     }
 
-                    var input = ex.InputIds[..^1];
-                    var targets = ex.InputIds[1..];
+                    var inputIds = ex.InputIds;
+                    // Both are COPIES, and for `targets` that is load-bearing rather than incidental: the
+                    // masking loop below writes into it, the same example is replayed on every epoch, and a
+                    // span over ex.InputIds would carry epoch 1's masking into epoch 2.
+                    var input = inputIds.AsSpan(0, inputIds.Length - 1).ToArray();
+                    var targets = inputIds.AsSpan(1).ToArray();
                     // Mask predictions that fall inside the prompt: position i predicts InputIds[i+1]; train only
                     // where i+1 ≥ PromptLength (the audio-token continuation + end token). Trained targets are also
                     // shifted into the restricted output range (logits cover [_outputStart, _outputStart+_vocab)).

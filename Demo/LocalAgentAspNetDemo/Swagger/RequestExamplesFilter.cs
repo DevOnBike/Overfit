@@ -14,17 +14,24 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.Swagger
     /// can open an endpoint, hit "Try it out" → "Execute" and get a meaningful result without typing
     /// anything. Examples are keyed by route, so the two endpoints that share a request shape
     /// (<c>/chat</c> and <c>/chat/json</c>) still each show a payload tailored to what they do.
-    /// When <paramref name="polish"/> is set (the Bielik preset, via <c>ExamplesLanguage: "pl"</c>) the
+    /// When <c>polish</c> is set (the Bielik preset, via <c>ExamplesLanguage: "pl"</c>) the
     /// examples are in Polish, so the pre-filled requests match the loaded model's language.
     /// </summary>
-    internal sealed class RequestExamplesFilter(bool polish = false) : IOperationFilter
+    internal sealed class RequestExamplesFilter : IOperationFilter
     {
+        private readonly bool _polish;
+
+        public RequestExamplesFilter(bool polish = false)
+        {
+            _polish = polish;
+        }
+
         public void Apply(OpenApiOperation operation, OperationFilterContext context)
         {
             var route = context.ApiDescription.RelativePath?.Trim('/');
-            var example = polish ? PolishExample(route) : EnglishExample(route);
+            var example = _polish ? PolishExample(route) : EnglishExample(route);
 
-            if (example is null || operation.RequestBody?.Content is null)
+            if (example == null || operation.RequestBody?.Content == null)
             {
                 return;
             }

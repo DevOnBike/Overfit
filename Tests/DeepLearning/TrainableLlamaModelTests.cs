@@ -39,7 +39,7 @@ namespace DevOnBike.Overfit.Tests.DeepLearning
 
             // Fixed learnable sequence; inputs = seq[0..T-1], targets = next token seq[1..T].
             var seq = new[] { 3, 17, 42, 5, 31, 8, 20, 14, 9, 2, 45, 11, 27, 6, 33, 19, 1, 40, 12, 25, 7, 38, 16, 4, 29 };
-            var input = seq[..^1];
+            var input = seq[..(seq.Length - 1)];
             var target = seq[1..];
 
             using var opt = new Adam(ToList(model.TrainableParameters()), learningRate: 0.01f) { WeightDecay = 0f };
@@ -110,7 +110,7 @@ namespace DevOnBike.Overfit.Tests.DeepLearning
         {
             using var model = BuildTinyModel(seed: 23);
             var seq = new[] { 9, 2, 30, 15, 6, 41, 18, 3, 27, 11, 38, 5, 22, 14, 1, 35, 7 };
-            var input = seq[..^1];
+            var input = seq[..(seq.Length - 1)];
             var target = seq[1..];
 
             using var opt = new Adam(ToList(model.TrainableParameters()), learningRate: 0.01f) { WeightDecay = 0f };
@@ -138,7 +138,7 @@ namespace DevOnBike.Overfit.Tests.DeepLearning
         public void SaveLoadAdapter_RoundTrips_PreservesFineTune()
         {
             var seq = new[] { 9, 2, 30, 15, 6, 41, 18, 3, 27, 11, 38, 5, 22, 14, 1, 35, 7, 19, 44 };
-            var input = seq[..^1];
+            var input = seq[..(seq.Length - 1)];
             var target = seq[1..];
 
             // Model A: train it to overfit the sequence.
@@ -214,7 +214,7 @@ namespace DevOnBike.Overfit.Tests.DeepLearning
         {
             using var model = BuildTinyModel(seed: 71);
             var seq = new[] { 7, 22, 3, 41, 16, 9, 30, 2, 25, 11, 38, 5, 19, 14, 1, 33 };
-            var input = seq[..^1];
+            var input = seq[..(seq.Length - 1)];
             var target = seq[1..];
 
             // Train so the next-token distribution is decisive (argmax stable → exact token match).

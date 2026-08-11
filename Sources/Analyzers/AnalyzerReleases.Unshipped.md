@@ -51,3 +51,4 @@ OVERFIT042 | Design | Warning | Index-from-end operator (x[^1]) — a readabilit
 OVERFIT043 | Design | Warning | Range operator (x[1..]) — a readability decision; use Slice/Substring/AsSpan
 OVERFIT044 | Design | Warning | Null pattern (is null / is not null) — a readability decision; use == null / != null
 OVERFIT045 | Design | Warning | Primary constructor on a class or struct — write an ordinary constructor; positional records are exempt
+OVERFIT046 | Reliability | Warning | Task discarded with '_ =' — an explicit discard silently opts out of CS4014 (an error repo-wide), so the task's exceptions are never observed

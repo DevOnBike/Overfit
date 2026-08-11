@@ -44,7 +44,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 return ArgMax(logits);
             }
 
-            if (random is null)
+            if (random == null)
             {
                 throw new ArgumentNullException(nameof(random));
             }
@@ -69,7 +69,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
             var count = SelectSurvivors(logits, in options, temperature, indexScratch, scoreScratch);
             return SampleFromPreparedScores(
-                indexScratch[..count], scoreScratch[..count], temperature, random);
+                indexScratch.Slice(0, count), scoreScratch.Slice(0, count), temperature, random);
         }
 
         /// <summary>
@@ -96,7 +96,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                         var k = options.TopK > 0 && options.TopK < logits.Length ? options.TopK : logits.Length;
                         var afterK = SelectTopK(logits, k, indexScratch, scoreScratch);
                         return options.TopP < 1f
-                            ? NucleusFromSorted(scoreScratch[..afterK], options.TopP, temperature)
+                            ? NucleusFromSorted(scoreScratch.Slice(0, afterK), options.TopP, temperature)
                             : afterK;
                     }
 
@@ -397,7 +397,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             }
 
             var cap = Math.Min(n, NucleusPartialCap);
-            PartialSortDescendingInPlace(indexScratch[..n], scoreScratch[..n], n, cap);
+            PartialSortDescendingInPlace(indexScratch.Slice(0, n), scoreScratch.Slice(0, n), n, cap);
 
             var cumulative = 0.0;
             var count = 0;
@@ -451,7 +451,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 var p = Math.Exp((logits[i] - max) * inverseTemperature) / sum;
                 scoreScratch[i] = (float)(-Math.Abs(-Math.Log(p) - entropy));
             }
-            SortDescending(indexScratch[..n], scoreScratch[..n]);
+            SortDescending(indexScratch.Slice(0, n), scoreScratch.Slice(0, n));
 
             var cumulative = 0.0;
             var count = 0;
@@ -583,7 +583,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
             PrepareAllScores(logits, indexScratch, scoreScratch);
             var cap = Math.Min(n, NucleusPartialCap);
-            PartialSortDescendingInPlace(indexScratch[..n], scoreScratch[..n], n, cap);
+            PartialSortDescendingInPlace(indexScratch.Slice(0, n), scoreScratch.Slice(0, n), n, cap);
 
             // The top `cap` logits are now sorted descending; walk their cumulative probability.
             var cumulative = 0.0;
@@ -607,8 +607,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             ReadOnlySpan<float> logits, float topP, float temperature, Span<int> indexScratch, Span<float> scoreScratch)
         {
             PrepareAllScores(logits, indexScratch, scoreScratch);
-            SortDescending(indexScratch[..logits.Length], scoreScratch[..logits.Length]);
-            return NucleusFromSorted(scoreScratch[..logits.Length], topP, temperature);
+            SortDescending(indexScratch.Slice(0, logits.Length), scoreScratch.Slice(0, logits.Length));
+            return NucleusFromSorted(scoreScratch.Slice(0, logits.Length), topP, temperature);
         }
 
         private static int NucleusFromSorted(
@@ -711,7 +711,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 }
             }
 
-            return tokenIndexes[^1];
+            return tokenIndexes[tokenIndexes.Length - 1];
         }
 
         // Arranges the k highest-scored elements into [0, k) in DESCENDING score order (elements beyond k are
@@ -721,7 +721,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         {
             if (k >= count)
             {
-                SortDescending(indexes[..count], scores[..count]);
+                SortDescending(indexes.Slice(0, count), scores.Slice(0, count));
                 return;
             }
 
@@ -739,7 +739,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     SiftDownMin(indexes, scores, k, 0);
                 }
             }
-            SortDescending(indexes[..k], scores[..k]);
+            SortDescending(indexes.Slice(0, k), scores.Slice(0, k));
         }
 
         private static void SiftDownMin(Span<int> indexes, Span<float> scores, int length, int root)

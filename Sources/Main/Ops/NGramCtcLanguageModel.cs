@@ -80,7 +80,7 @@ namespace DevOnBike.Overfit.Ops
             ArgumentNullException.ThrowIfNull(sequences);
             foreach (var sequence in sequences)
             {
-                if (sequence is not null)
+                if (sequence != null)
                 {
                     Train(sequence);
                 }

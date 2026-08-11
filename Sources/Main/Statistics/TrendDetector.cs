@@ -127,7 +127,7 @@ namespace DevOnBike.Overfit.Statistics
 
             using var series = new PooledBuffer<double>((hasExpectation ? 3 : 2) * raw, clearMemory: false);
 
-            var times = series.Span[..raw];
+            var times = series.Span.Slice(0, raw);
             var observations = series.Span.Slice(raw, raw);
 
             // The residual is what gets tested; the original series still supplies the scale the materiality
@@ -165,8 +165,8 @@ namespace DevOnBike.Overfit.Statistics
                     count);
             }
 
-            times = times[..count];
-            observations = observations[..count];
+            times = times.Slice(0, count);
+            observations = observations.Slice(0, count);
 
             var pairs = count * (count - 1) / 2;
             using var slopeBuffer = new PooledBuffer<double>(pairs, clearMemory: false);
@@ -350,7 +350,7 @@ namespace DevOnBike.Overfit.Statistics
                 kept++;
             }
 
-            return kept == 0 ? double.NaN : MedianSelector.MedianInPlace(finite.Span[..kept]);
+            return kept == 0 ? double.NaN : MedianSelector.MedianInPlace(finite.Span.Slice(0, kept));
         }
 
         /// <summary>
@@ -481,7 +481,7 @@ namespace DevOnBike.Overfit.Statistics
                 return 0.0;
             }
 
-            return Math.Max(Math.Abs(sorted[0]), Math.Abs(sorted[^1]));
+            return Math.Max(Math.Abs(sorted[0]), Math.Abs(sorted[sorted.Length - 1]));
         }
 
         /// <summary>Median of an already-sorted span.</summary>
@@ -647,7 +647,7 @@ namespace DevOnBike.Overfit.Statistics
             var message =
                 $"Series {moving} by {size} across {window:g} (tau {tau:F2}, lag-1 autocorrelation {autocorrelation:F2}).";
 
-            if (timeToLimit is null)
+            if (timeToLimit == null)
             {
                 return message;
             }

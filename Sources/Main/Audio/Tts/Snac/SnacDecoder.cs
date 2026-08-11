@@ -49,7 +49,7 @@ namespace DevOnBike.Overfit.Audio.Tts.Snac
             var latent = _cfg.LatentDim;
             var cbDim = _cfg.CodebookDim;
             // The stride-1 (finest) level sets the latent length; all levels upsample to it.
-            frames = codes[^1].Length;
+            frames = codes[codes.Length - 1].Length;
             var zq = new float[(long)latent * frames];
 
             for (var i = 0; i < codes.Length; i++)

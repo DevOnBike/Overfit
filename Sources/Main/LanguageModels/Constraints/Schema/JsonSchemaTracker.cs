@@ -307,7 +307,7 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints.Schema
                 return false;
             }
             var name = trie.GetCompleteName(_trieNodeIndex);
-            if (name is null)
+            if (name == null)
             {
                 return false;
             }

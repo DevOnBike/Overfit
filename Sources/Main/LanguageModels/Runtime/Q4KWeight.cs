@@ -170,7 +170,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             // building thread wrote into it.
             var built = Volatile.Read(ref _built);
 
-            if (built is not null)
+            if (built != null)
             {
                 return built;
             }
@@ -179,7 +179,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             {
                 built = _built;
 
-                if (built is null)
+                if (built == null)
                 {
                     built = Q4KRepack.RepackMatrix(BlockSpan, OutputSize, InputSize);
 

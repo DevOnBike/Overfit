@@ -64,7 +64,7 @@ namespace DevOnBike.Overfit.DeepLearning
         {
             foreach (var a in new[] { Q, K, V, O, Gate, Up, Down })
             {
-                if (a is not null)
+                if (a != null)
                 {
                     yield return a.A;
                     yield return a.B;

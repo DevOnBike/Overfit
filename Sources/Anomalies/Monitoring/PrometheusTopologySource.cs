@@ -80,7 +80,7 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
             _baseUrl = prometheusBaseUrl.TrimEnd('/');
             _selector = selector;
             _peerGroupLabel = peerGroupLabel ?? string.Empty;
-            _ownsHttpClient = httpClient is null;
+            _ownsHttpClient = httpClient == null;
             _http = httpClient ?? new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
         }
 
@@ -255,7 +255,7 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
                         ? owner
                         : string.Empty;
 
-                    var peerGroup = peerGroupOf is not null
+                    var peerGroup = peerGroupOf != null
                                     && peerGroupOf.TryGetValue(pod, out var declared)
                         ? declared
                         : string.Empty;

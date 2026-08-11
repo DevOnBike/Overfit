@@ -76,7 +76,7 @@ namespace DevOnBike.Overfit.Licensing
 
         private static void WriteMessage(string message, ConsoleColor color)
         {
-            if (MessageSink is not null)
+            if (MessageSink != null)
             {
                 try
                 {

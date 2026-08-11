@@ -62,7 +62,7 @@ namespace DevOnBike.Overfit.Data.Prepare
 
             if (_fitted)
             {
-                if (_keptIndices is null)
+                if (_keptIndices == null)
                 {
                     return context;
                 }

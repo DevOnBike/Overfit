@@ -97,8 +97,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Chat
                 emitted.Append(Advance(detokenizer, tokenizer));
             }
 
-            Assert.Equal(steps[^1], emitted.ToString());
-            Assert.Equal(steps[^1].Length, detokenizer.StableLength);
+            var lastStep = steps[steps.Length - 1];
+
+            Assert.Equal(lastStep, emitted.ToString());
+            Assert.Equal(lastStep.Length, detokenizer.StableLength);
         }
 
         /// <summary>

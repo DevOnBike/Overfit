@@ -89,7 +89,7 @@ namespace DevOnBike.Overfit.DeepLearning
         public AutogradNode Forward(ComputationGraph? graph, AutogradNode input)
         {
             _kernelsNode ??= Kernels.AsNode();
-            if (Bias is not null)
+            if (Bias != null)
             {
                 _biasNode ??= Bias.AsNode();
             }
@@ -102,7 +102,7 @@ namespace DevOnBike.Overfit.DeepLearning
             _inferenceGraph ??= new ComputationGraph(checked(_channels * _outH * _outW * 4 + 1024));
             _inferenceGraph.Reset();
             _kernelsNode ??= Kernels.AsNode();
-            if (Bias is not null)
+            if (Bias != null)
             {
                 _biasNode ??= Bias.AsNode();
             }
@@ -118,7 +118,7 @@ namespace DevOnBike.Overfit.DeepLearning
         public IEnumerable<AutogradNode> Parameters()
         {
             yield return Kernels.AsNode();
-            if (Bias is not null)
+            if (Bias != null)
             {
                 yield return Bias.AsNode();
             }
@@ -127,7 +127,7 @@ namespace DevOnBike.Overfit.DeepLearning
         public IEnumerable<Parameter> TrainableParameters()
         {
             yield return Kernels;
-            if (Bias is not null)
+            if (Bias != null)
             {
                 yield return Bias;
             }
@@ -146,8 +146,8 @@ namespace DevOnBike.Overfit.DeepLearning
             {
                 bw.Write(v);
             }
-            bw.Write(Bias is not null ? 1 : 0);
-            if (Bias is not null)
+            bw.Write(Bias != null ? 1 : 0);
+            if (Bias != null)
             {
                 foreach (var v in Bias.DataReadOnlySpan)
                 {
@@ -182,7 +182,7 @@ namespace DevOnBike.Overfit.DeepLearning
 
             if (!hasBias)
             {
-                if (Bias is not null)
+                if (Bias != null)
                 {
                     throw new OverfitFormatException(
                         "This depthwise layer has a bias and the file carries none. Reading on would leave "

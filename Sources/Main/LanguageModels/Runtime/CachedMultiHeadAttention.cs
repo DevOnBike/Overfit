@@ -471,7 +471,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         {
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(rows);
 
-            if (rope is not null)
+            if (rope != null)
             {
                 throw new OverfitRuntimeException("Batched prefill does not support RoPE yet (F32/GPT-2 path only).");
             }
@@ -809,7 +809,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 }
                 for (var n = 0; n < rows; n++)
                 {
-                    if (rope is not null)
+                    if (rope != null)
                     {
                         RopeKernel.Apply(kg.Span.Slice(n * headDim, headDim), rope, basePosition + n + ropeBase);
                     }
@@ -865,7 +865,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     {
                         QkNormKernel.Apply(qh.Span, weights.QkNormQ, rows, headDim);
                     }
-                    if (rope is not null)
+                    if (rope != null)
                     {
                         for (var n = 0; n < rows; n++)
                         {

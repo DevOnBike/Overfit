@@ -115,7 +115,7 @@ namespace DevOnBike.Overfit.Tests.Server
                 var frames = body.Split("\n\n", StringSplitOptions.RemoveEmptyEntries);
                 Assert.Contains("\"content\":\"po\"", body);
                 Assert.Contains("\"content\":\"ng\"", body);
-                Assert.EndsWith("data: [DONE]", frames[^1].Trim());
+                Assert.EndsWith("data: [DONE]", frames[frames.Length - 1].Trim());
             }
         }
 

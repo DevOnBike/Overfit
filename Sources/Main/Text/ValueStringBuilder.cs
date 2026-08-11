@@ -85,7 +85,7 @@ namespace DevOnBike.Overfit.Text
         /// the returned span then points at memory that has gone back to the pool, which is the classic way
         /// to read another request's characters. Take the span, use it, do not store it.
         /// </summary>
-        public readonly ReadOnlySpan<char> AsSpan() => _chars[.._position];
+        public readonly ReadOnlySpan<char> AsSpan() => _chars.Slice(0, _position);
 
         public void Append(char value)
         {
@@ -104,14 +104,14 @@ namespace DevOnBike.Overfit.Text
                 Grow(value.Length);
             }
 
-            value.CopyTo(_chars[_position..]);
+            value.CopyTo(_chars.Slice(_position));
             
             _position += value.Length;
         }
 
         public void Append(string? value)
         {
-            if (value is not null)
+            if (value != null)
             {
                 Append(value.AsSpan());
             }
@@ -141,7 +141,7 @@ namespace DevOnBike.Overfit.Text
                 return false;
             }
 
-            _chars[.._position].CopyTo(destination);
+            _chars.Slice(0, _position).CopyTo(destination);
             written = _position;
 
             return true;
@@ -159,7 +159,7 @@ namespace DevOnBike.Overfit.Text
         /// </summary>
         public override string ToString()
         {
-            var result = _chars[.._position].ToString();
+            var result = _chars.Slice(0, _position).ToString();
 
             Dispose();
 
@@ -196,7 +196,7 @@ namespace DevOnBike.Overfit.Text
 
             var replacement = new PooledBuffer<char>(capacity, clearMemory: false);
 
-            _chars[.._position].CopyTo(replacement.Span);
+            _chars.Slice(0, _position).CopyTo(replacement.Span);
 
             var previous = _pooled;
 

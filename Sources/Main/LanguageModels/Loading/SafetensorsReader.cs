@@ -44,7 +44,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
 
         public SafetensorsReader(Stream stream, bool ownsStream = false)
         {
-            if (stream is null)
+            if (stream == null)
             {
                 throw new ArgumentNullException(nameof(stream));
             }
@@ -235,7 +235,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             while (done < count)
             {
                 var n = (int)Math.Min(chunk, count - done);
-                var slice = buf[..(n * 4)];
+                var slice = buf.Slice(0, n * 4);
                 _stream.ReadExactly(slice);
                 for (var i = 0; i < n; i++)
                 {
@@ -255,7 +255,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             while (done < count)
             {
                 var n = (int)Math.Min(chunk, count - done);
-                var slice = buf[..(n * 2)];
+                var slice = buf.Slice(0, n * 2);
                 _stream.ReadExactly(slice);
                 for (var i = 0; i < n; i++)
                 {
@@ -276,7 +276,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             while (done < count)
             {
                 var n = (int)Math.Min(chunk, count - done);
-                var slice = buf[..(n * 2)];
+                var slice = buf.Slice(0, n * 2);
                 _stream.ReadExactly(slice);
                 for (var i = 0; i < n; i++)
                 {

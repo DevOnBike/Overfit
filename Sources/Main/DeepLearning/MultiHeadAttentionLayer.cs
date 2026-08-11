@@ -205,12 +205,12 @@ namespace DevOnBike.Overfit.DeepLearning
             ComputationGraph? graph,
             AutogradNode input)
         {
-            if (graph is null)
+            if (graph == null)
             {
                 throw new ArgumentNullException(nameof(graph));
             }
 
-            if (input is null)
+            if (input == null)
             {
                 throw new ArgumentNullException(nameof(input));
             }
@@ -361,7 +361,7 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public void Save(BinaryWriter writer)
         {
-            if (writer is null)
+            if (writer == null)
             {
                 throw new ArgumentNullException(nameof(writer));
             }
@@ -385,7 +385,7 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public void Load(BinaryReader reader)
         {
-            if (reader is null)
+            if (reader == null)
             {
                 throw new ArgumentNullException(nameof(reader));
             }
@@ -521,7 +521,7 @@ namespace DevOnBike.Overfit.DeepLearning
             // LoRA hook present: build W_eff = W(frozen) + A@B fresh on this graph
             // (never cached — it lives only for this forward). Otherwise use the
             // cached plain parameter node.
-            if (provider is not null)
+            if (provider != null)
             {
                 return provider(graph);
             }

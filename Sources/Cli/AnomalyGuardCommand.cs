@@ -64,7 +64,7 @@ namespace DevOnBike.Overfit.Cli
                 return 1;
             }
 
-            if (file is null)
+            if (file == null)
             {
                 Console.Error.WriteLine($"{configPath} is empty.");
 
@@ -182,7 +182,7 @@ namespace DevOnBike.Overfit.Cli
             using var metrics = GuardMetricsEndpoint.TryStart(
                 service.Telemetry, logger, metricsPort, service.Guard);
 
-            if (metrics is not null)
+            if (metrics != null)
             {
                 logger.LogInformation(
                     "serving guard metrics on :{Port}/metrics — alert on "

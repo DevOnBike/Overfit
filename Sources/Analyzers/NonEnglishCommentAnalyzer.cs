@@ -91,7 +91,7 @@ namespace DevOnBike.Overfit.Analyzers
 
                 var reason = Classify(trivia.ToString());
 
-                if (reason is null)
+                if (reason == null)
                 {
                     continue;
                 }

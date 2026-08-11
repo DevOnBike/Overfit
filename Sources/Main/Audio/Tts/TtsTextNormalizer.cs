@@ -87,7 +87,7 @@ namespace DevOnBike.Overfit.Audio.Tts
             {
                 _lexicon[word] = say;
             }
-            if (extraLexicon is not null)
+            if (extraLexicon != null)
             {
                 foreach (var kv in extraLexicon)
                 {
@@ -145,7 +145,7 @@ namespace DevOnBike.Overfit.Audio.Tts
             {
                 i++;
             }
-            var word = text[start..i];
+            var word = text.Substring(start, i - start);
             sb.Append(_lexicon.TryGetValue(word, out var say) ? say : word);
             return i;
         }
@@ -176,7 +176,7 @@ namespace DevOnBike.Overfit.Audio.Tts
                 fracEnd = i;
             }
 
-            var intPart = text[start..(fracStart < 0 ? i : fracStart - 1)].Replace(",", string.Empty);
+            var intPart = text.Substring(start, (fracStart < 0 ? i : fracStart - 1) - start).Replace(",", string.Empty);
             // Capture: the second test must not re-run TryParse (it would redeclare `intValue` and parse twice).
             var parsed = long.TryParse(intPart, out var intValue);
 

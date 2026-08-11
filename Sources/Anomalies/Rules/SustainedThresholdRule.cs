@@ -111,7 +111,7 @@ namespace DevOnBike.Overfit.Anomalies.Rules
                     kept);
             }
 
-            var median = MedianSelector.MedianInPlace(usable[..kept]);
+            var median = MedianSelector.MedianInPlace(usable.Slice(0, kept));
             var fraction = (double)breached / kept;
 
             if (fraction < options.MinBreachFraction)

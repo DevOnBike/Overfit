@@ -41,7 +41,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Chat
             Assert.False(string.IsNullOrWhiteSpace(reply), "Chat produced no text.");
             Assert.DoesNotContain("<|im_end|>", reply);
             Assert.Contains("Paris", reply, StringComparison.OrdinalIgnoreCase);
-            Assert.Equal("assistant", model.Chat.History[^1].Role);
+            var history = model.Chat.History;
+
+            Assert.Equal("assistant", history[history.Count - 1].Role);
         }
     }
 }

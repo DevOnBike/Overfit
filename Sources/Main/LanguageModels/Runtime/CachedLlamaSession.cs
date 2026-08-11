@@ -133,7 +133,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         public bool SlidingWindowEnabled => _slidingWindow;
 
         /// <summary>This RoPE-capable session supports sliding-window eviction (<see cref="ISlmSession"/>).</summary>
-        public bool SupportsSlidingWindow => _rope is not null;
+        public bool SupportsSlidingWindow => _rope != null;
 
         /// <summary>
         /// Enables sliding-window KV eviction (RoPE models only): once the cache fills,
@@ -146,7 +146,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         public void EnableSlidingWindow(int evictBlock = 0)
         {
             ThrowIfDisposed();
-            if (_rope is null)
+            if (_rope == null)
             {
                 throw new OverfitRuntimeException(
                     "Sliding-window eviction requires a RoPE model; learned absolute-position models cannot slide without re-embedding.");
@@ -380,7 +380,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             // Prefill below re-establishes it; dropping it first means no window where it could be believed.
             _promptLogitsPosition = -1;
             _cache.TruncateTo(reusable);
-            Prefill(promptTokens[reusable..]);
+            Prefill(promptTokens.Slice(reusable));
             return reusable;
         }
 
@@ -474,7 +474,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             // Hand the token over before the pass that prepares the NEXT logits, so a streaming caller can
             // put it on the wire a full weight-pass earlier — and can tell us the answer is finished, in
             // which case that pass is pure waste and is skipped.
-            if (onSampled is not null && onSampled(token))
+            if (onSampled != null && onSampled(token))
             {
                 DecodeProfiler.EndToken();
                 return token;
@@ -684,7 +684,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
             // Early emit: t0 comes from logits we already hold, so it can reach the client before the verify
             // forward. If the caller says the answer ends here, the entire verify is wasted work — skip it.
-            if (onSampled is not null && onSampled(t0))
+            if (onSampled != null && onSampled(t0))
             {
                 committed[0] = t0;
                 return 1;
@@ -734,7 +734,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 #pragma warning disable OVERFIT026 // BOUND: maxDraft is validated to [1, MaxSpeculativeDraft] directly above.
             Span<int> draft = stackalloc int[maxDraft];
 #pragma warning restore OVERFIT026
-            if (drafter is not null)
+            if (drafter != null)
             {
                 // Draft-MODEL path: always propose (a model predicts, so the echo-detection gate doesn't
                 // apply); the drafter keeps its own KV in lockstep via Sync at the commit points below.
@@ -743,13 +743,13 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     dn = drafter.Draft(t0, draft);
                 }
             }
-            if (drafter is null && canSpeculate && (!gated || probe))
+            if (drafter == null && canSpeculate && (!gated || probe))
             {
 #pragma warning disable OVERFIT001 // exact-length contract: PromptLookupDrafter.Draft reads anchor.Length; tiny per-step array
                 var anchor = new int[history.Length + 1];
 #pragma warning restore OVERFIT001
                 history.CopyTo(anchor);
-                anchor[^1] = t0;
+                anchor[anchor.Length - 1] = t0;
                 dn = PromptLookupDrafter.Draft(anchor, draft, ngramMin, ngramMax);
             }
 
@@ -1010,7 +1010,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             }
 
             Reset();
-            var dst = destination[..d];
+            var dst = destination.Slice(0, d);
             dst.Clear();
 
             for (var i = 0; i < tokens.Length; i++)
@@ -1032,12 +1032,12 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 // option, and it is public API.
                 if (pooling == EmbeddingPooling.Cls && i == 0)
                 {
-                    h[..d].CopyTo(dst);
+                    h.Slice(0, d).CopyTo(dst);
                 }
 
                 if (pooling == EmbeddingPooling.LastToken && i == tokens.Length - 1)
                 {
-                    h[..d].CopyTo(dst);
+                    h.Slice(0, d).CopyTo(dst);
                 }
             }
 

@@ -131,7 +131,7 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
         {
             ArgumentNullException.ThrowIfNull(signal);
 
-            if (_calibrator is null)
+            if (_calibrator == null)
             {
                 return 0.0;
             }
@@ -150,7 +150,7 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
         {
             var explicitly = AnomalyGuardOptions.FloorFor(configured, metric);
 
-            if (explicitly > 0.0 || _calibrator is null)
+            if (explicitly > 0.0 || _calibrator == null)
             {
                 return explicitly;
             }

@@ -86,7 +86,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
                     var history = tuner.FineTune(
                         corpus, steps: 300, contextLength: contextSnapshots * tps, learningRate: 1e-2f);
 
-                    _output.WriteLine($"LoRA fine-tune loss: {history[0]:F4} -> {history[^1]:F4}");
+                    _output.WriteLine($"LoRA fine-tune loss: {history[0]:F4} -> {history[history.Count - 1]:F4}");
 
                     tuner.Save(loraPath);
                 }

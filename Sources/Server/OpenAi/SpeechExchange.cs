@@ -23,7 +23,7 @@ namespace DevOnBike.Overfit.Server.OpenAi
             ArgumentNullException.ThrowIfNull(tts);
             ArgumentNullException.ThrowIfNull(sink);
 
-            if (req is null || string.IsNullOrWhiteSpace(req.Input))
+            if (req == null || string.IsNullOrWhiteSpace(req.Input))
             {
                 WriteError(sink, 400, "'input' is required.");
                 return;

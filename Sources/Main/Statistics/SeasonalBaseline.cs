@@ -114,7 +114,7 @@ namespace DevOnBike.Overfit.Statistics
                 // and false claim.
                 expectation[i] = kept == 0
                     ? double.NaN
-                    : MedianSelector.MedianInPlace(samples[..kept]);
+                    : MedianSelector.MedianInPlace(samples.Slice(0, kept));
             }
 
             return true;

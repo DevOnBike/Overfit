@@ -56,7 +56,7 @@ namespace DevOnBike.Overfit.Onnx
                 {
                     var initializer = model.Graph.Initializers[i];
 
-                    if (initializer.ExternalData is null)
+                    if (initializer.ExternalData == null)
                     {
                         continue;
                     }

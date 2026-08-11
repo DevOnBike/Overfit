@@ -53,8 +53,8 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             }
 
             Array.Sort(perRun);
-            _out.WriteLine($"=== Phi-3.5-mini Q4_K_M decode: min {perRun[0]:F2} | median {perRun[Runs / 2]:F2} | max {perRun[^1]:F2} tok/s ===");
-            Assert.True(perRun[^1] > 0);
+            _out.WriteLine($"=== Phi-3.5-mini Q4_K_M decode: min {perRun[0]:F2} | median {perRun[Runs / 2]:F2} | max {perRun[perRun.Length - 1]:F2} tok/s ===");
+            Assert.True(perRun[perRun.Length - 1] > 0);
         }
 
         private static long DecodeFixed(

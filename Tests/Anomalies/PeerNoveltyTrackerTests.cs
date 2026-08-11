@@ -107,7 +107,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             var tracker = new PeerNoveltyTracker(Options);
             var decisions = Feed(tracker, 24, cycle => 9_900_000.0 + (400_000.0 * cycle));
 
-            var last = decisions[^1];
+            var last = decisions[decisions.Count - 1];
 
             Assert.Equal(NoveltyKind.New, last.Kind);
             Assert.Equal(DetectionStatus.Anomalous, last.Status);
@@ -130,7 +130,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
         {
             var tracker = new PeerNoveltyTracker(Options);
             var decisions = Feed(tracker, 24, cycle => 19_900_000.0 - (400_000.0 * cycle));
-            var last = decisions[^1];
+            var last = decisions[decisions.Count - 1];
 
             Assert.Equal(NoveltyKind.Standing, last.Kind);
             Assert.Equal(DetectionStatus.Anomalous, last.Status);
@@ -148,7 +148,8 @@ namespace DevOnBike.Overfit.Tests.Anomalies
         public void ARestartUnderTheSameNameDiscardsTheHistory()
         {
             var tracker = new PeerNoveltyTracker(Options);
-            var before = Feed(tracker, 24, _ => 9_900_000.0)[^1];
+            var settled = Feed(tracker, 24, _ => 9_900_000.0);
+            var before = settled[settled.Count - 1];
 
             Assert.Equal(NoveltyKind.Standing, before.Kind);
 
@@ -181,7 +182,9 @@ namespace DevOnBike.Overfit.Tests.Anomalies
         {
             var tracker = new PeerNoveltyTracker(Options);
 
-            Assert.Equal(NoveltyKind.Standing, Feed(tracker, 24, _ => 9_900_000.0)[^1].Kind);
+            var settled = Feed(tracker, 24, _ => 9_900_000.0);
+
+            Assert.Equal(NoveltyKind.Standing, settled[settled.Count - 1].Kind);
 
             var reverted = -1;
 

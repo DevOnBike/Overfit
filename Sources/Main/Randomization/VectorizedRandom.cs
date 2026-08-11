@@ -193,7 +193,7 @@ namespace DevOnBike.Overfit.Randomization
 
                 v.CopyTo(tail);
 
-                tail[..(destination.Length - i)].CopyTo(destination[i..]);
+                tail.Slice(0, destination.Length - i).CopyTo(destination.Slice(i));
             }
         }
 

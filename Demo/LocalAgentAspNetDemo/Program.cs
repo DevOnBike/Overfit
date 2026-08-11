@@ -164,7 +164,7 @@ namespace DevOnBike.Overfit.Demo.LocalAgent
             //   /readyz  = readiness — the model is loaded and the host can serve (loaded eagerly at startup).
             app.MapGet("/healthz", () => Results.Ok(new { status = "live" }));
             app.MapGet("/readyz", (OverfitClient client) =>
-                client is not null
+                client != null
                     ? Results.Ok(new
                     {
                         status = "ready"

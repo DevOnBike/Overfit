@@ -55,7 +55,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
 
         public GgufReader(Stream stream)
         {
-            if (stream is null)
+            if (stream == null)
             {
                 throw new ArgumentNullException(nameof(stream));
             }
@@ -140,7 +140,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         /// </summary>
         public void LoadTensorAsF32(GgufTensorInfo info, Span<float> destination)
         {
-            if (info is null)
+            if (info == null)
             {
                 throw new ArgumentNullException(nameof(info));
             }
@@ -158,35 +158,35 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             switch (info.Type)
             {
                 case GgmlType.F32:
-                    ReadF32(destination[..(int)elementCount]);
+                    ReadF32(destination.Slice(0, (int)elementCount));
                     return;
 
                 case GgmlType.F16:
-                    ReadF16ToF32(destination[..(int)elementCount]);
+                    ReadF16ToF32(destination.Slice(0, (int)elementCount));
                     return;
 
                 case GgmlType.BF16:
-                    ReadBF16ToF32(destination[..(int)elementCount]);
+                    ReadBF16ToF32(destination.Slice(0, (int)elementCount));
                     return;
 
                 case GgmlType.Q8_0:
-                    ReadQ8_0ToF32(destination[..(int)elementCount]);
+                    ReadQ8_0ToF32(destination.Slice(0, (int)elementCount));
                     return;
 
                 case GgmlType.Q4_K:
-                    ReadQ4_KToF32(destination[..(int)elementCount]);
+                    ReadQ4_KToF32(destination.Slice(0, (int)elementCount));
                     return;
 
                 case GgmlType.Q6_K:
-                    ReadQ6_KToF32(destination[..(int)elementCount]);
+                    ReadQ6_KToF32(destination.Slice(0, (int)elementCount));
                     return;
 
                 case GgmlType.Q5_0:
-                    ReadQ5_0ToF32(destination[..(int)elementCount]);
+                    ReadQ5_0ToF32(destination.Slice(0, (int)elementCount));
                     return;
 
                 case GgmlType.Q5_K:
-                    ReadQ5_KToF32(destination[..(int)elementCount]);
+                    ReadQ5_KToF32(destination.Slice(0, (int)elementCount));
                     return;
 
                 default:
@@ -210,7 +210,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         /// </summary>
         public void LoadTensorQ8_0Raw(GgufTensorInfo info, Span<sbyte> quants, Span<float> scales)
         {
-            if (info is null)
+            if (info == null)
             {
                 throw new ArgumentNullException(nameof(info));
             }
@@ -288,7 +288,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         /// </summary>
         public void LoadTensorQ4_KRaw(GgufTensorInfo info, Span<byte> destination)
         {
-            if (info is null)
+            if (info == null)
             {
                 throw new ArgumentNullException(nameof(info));
             }
@@ -314,7 +314,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             }
 
             _stream.Seek(_dataStart + (long)info.Offset, SeekOrigin.Begin);
-            _stream.ReadExactly(destination[..byteCount]);
+            _stream.ReadExactly(destination.Slice(0, byteCount));
         }
 
         /// <summary>
@@ -327,7 +327,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         /// </summary>
         public void LoadTensorQ6_KRaw(GgufTensorInfo info, Span<byte> destination)
         {
-            if (info is null)
+            if (info == null)
             {
                 throw new ArgumentNullException(nameof(info));
             }
@@ -353,7 +353,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             }
 
             _stream.Seek(_dataStart + (long)info.Offset, SeekOrigin.Begin);
-            _stream.ReadExactly(destination[..byteCount]);
+            _stream.ReadExactly(destination.Slice(0, byteCount));
         }
 
         /// <summary>Reads a metadata value or returns the default if the key is absent.</summary>
@@ -583,7 +583,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             var read = 0;
             while (read < bytes.Length)
             {
-                var n = _stream.Read(bytes[read..]);
+                var n = _stream.Read(bytes.Slice(read));
                 if (n == 0)
                 {
                     throw new EndOfStreamException("Unexpected EOF reading tensor data.");
@@ -766,7 +766,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         /// </summary>
         internal void LoadQ5RegionAsF32(GgufTensorInfo info, long elementOffset, Span<float> dst)
         {
-            if (info is null)
+            if (info == null)
             {
                 throw new ArgumentNullException(nameof(info));
             }

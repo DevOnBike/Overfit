@@ -149,7 +149,7 @@ namespace Benchmarks
                 _targetIds);
 
             _checksum ^= _inputIds[0];
-            _checksum ^= _targetIds[^1];
+            _checksum ^= _targetIds[_targetIds.Length - 1];
 
             return _checksum;
         }

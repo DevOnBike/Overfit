@@ -114,7 +114,7 @@ namespace DevOnBike.Overfit.Statistics
 
                 expectation[i] = reporting < MinimumPeers
                     ? double.NaN
-                    : MedianSelector.MedianInPlace(scratch[..reporting]);
+                    : MedianSelector.MedianInPlace(scratch.Slice(0, reporting));
             }
 
             return true;

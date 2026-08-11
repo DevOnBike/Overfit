@@ -69,7 +69,7 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
             }
 
             using var scratch = new PooledBuffer<IncidentLogRecord>(needed, clearMemory: false);
-            var rows = scratch.Span[..needed];
+            var rows = scratch.Span.Slice(0, needed);
             var written = 0;
 
             for (var i = 0; i < incidents.Count; i++)

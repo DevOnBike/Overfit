@@ -88,13 +88,13 @@ namespace DevOnBike.Overfit.Audio.Tts.Orpheus
             {
                 return false;
             }
-            var rest = text[(start + CustomTokenPrefix.Length)..];
+            var rest = text.Slice(start + CustomTokenPrefix.Length);
             var end = rest.IndexOf('>');
             if (end <= 0)
             {
                 return false;
             }
-            return int.TryParse(rest[..end], out number);
+            return int.TryParse(rest.Slice(0, end), out number);
         }
 
         /// <summary>

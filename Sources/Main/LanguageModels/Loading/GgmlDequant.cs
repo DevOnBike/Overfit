@@ -106,7 +106,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             }
 
             var d = (float)BitConverter.UInt16BitsToHalf(
-                BinaryPrimitives.ReadUInt16LittleEndian(block144[..2]));
+                BinaryPrimitives.ReadUInt16LittleEndian(block144.Slice(0, 2)));
             var dmin = (float)BitConverter.UInt16BitsToHalf(
                 BinaryPrimitives.ReadUInt16LittleEndian(block144.Slice(2, 2)));
 
@@ -169,7 +169,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                     $"dst must be exactly {SuperBlockElements} floats.", nameof(dst256));
             }
 
-            var ql = block210[..128];
+            var ql = block210.Slice(0, 128);
             var qh = block210.Slice(128, 64);
             var sc = block210.Slice(192, 16);
             var d = (float)BitConverter.UInt16BitsToHalf(
@@ -234,7 +234,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             }
 
             var d = (float)BitConverter.UInt16BitsToHalf(
-                BinaryPrimitives.ReadUInt16LittleEndian(block22[..2]));
+                BinaryPrimitives.ReadUInt16LittleEndian(block22.Slice(0, 2)));
             var qh = BinaryPrimitives.ReadUInt32LittleEndian(block22.Slice(2, 4));
             var qs = block22.Slice(6, 16);
 
@@ -278,7 +278,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             }
 
             var d = (float)BitConverter.UInt16BitsToHalf(
-                BinaryPrimitives.ReadUInt16LittleEndian(block176[..2]));
+                BinaryPrimitives.ReadUInt16LittleEndian(block176.Slice(0, 2)));
             var dmin = (float)BitConverter.UInt16BitsToHalf(
                 BinaryPrimitives.ReadUInt16LittleEndian(block176.Slice(2, 2)));
 

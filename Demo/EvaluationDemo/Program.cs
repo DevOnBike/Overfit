@@ -80,7 +80,7 @@ foreach (var (label, answer) in new[] { ("GOOD answer", goodAnswer), ("BAD answe
         foreach (var metric in result.Metrics.Values)
         {
             var value = metric is NumericMetric numeric ? numeric.Value?.ToString("0.#") ?? "n/a" : "n/a";
-            var interpretation = metric.Interpretation is null
+            var interpretation = metric.Interpretation == null
                 ? ""
                 : $"  [{metric.Interpretation.Rating}{(metric.Interpretation.Failed ? " / FAILED" : "")}]";
             Console.WriteLine($"  {metric.Name,-14} {value}/5{interpretation}");
@@ -99,18 +99,26 @@ Console.WriteLine("All scoring above ran in-process on the local CPU — no clou
 return 0;
 
 static string Truncate(string s, int max)
-    => s.Length <= max ? s : s[..max] + "…";
+    => s.Length <= max ? s : s.Substring(0, max) + "…";
 
 namespace DevOnBike.Overfit.Demo.Evaluation
 {
     /// <summary>Ensures every judge call gets a generous output budget unless the caller set one.</summary>
-    internal sealed class MaxTokensChatClient(IChatClient inner, int maxOutputTokens) : DelegatingChatClient(inner)
+    internal sealed class MaxTokensChatClient : DelegatingChatClient
     {
+        private readonly int _maxOutputTokens;
+
+        public MaxTokensChatClient(IChatClient inner, int maxOutputTokens)
+            : base(inner)
+        {
+            _maxOutputTokens = maxOutputTokens;
+        }
+
         public override Task<ChatResponse> GetResponseAsync(
             IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
         {
             options = options?.Clone() ?? new ChatOptions();
-            options.MaxOutputTokens ??= maxOutputTokens;
+            options.MaxOutputTokens ??= _maxOutputTokens;
             return base.GetResponseAsync(messages, options, cancellationToken);
         }
     }

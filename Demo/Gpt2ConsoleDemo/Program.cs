@@ -38,7 +38,7 @@ namespace DevOnBike.Overfit.Demo.Gpt2Console
             try
             {
                 var opts = CliOptions.Parse(args);
-                if (opts is null)
+                if (opts == null)
                 {
                     return 0;
                 }  // --help was printed

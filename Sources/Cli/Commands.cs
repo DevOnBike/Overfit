@@ -45,13 +45,13 @@ namespace DevOnBike.Overfit.Cli
 
             // A sentence-embedder alias (minilm / bge / e5) → download the small BERT directory, not a GGUF.
             var embedderRepo = EmbedderAliases.Resolve(spec);
-            if (embedderRepo is not null)
+            if (embedderRepo != null)
             {
                 return PullEmbedder(embedderRepo);
             }
 
             var resolved = ModelAliases.Resolve(spec);
-            if (resolved is null)
+            if (resolved == null)
             {
                 Console.Error.WriteLine($"Unknown model '{spec}'. Pass a HuggingFace GGUF repo (owner/repo), a direct https URL, or an alias:");
                 Console.Error.WriteLine("  chat:      " + string.Join(", ", ModelAliases.Known));
@@ -188,7 +188,7 @@ namespace DevOnBike.Overfit.Cli
 
         private static int PullEmbedder(string repo)
         {
-            var dirName = repo[(repo.LastIndexOf('/') + 1)..];   // canonical folder name, e.g. all-MiniLM-L6-v2
+            var dirName = repo.Substring(repo.LastIndexOf('/') + 1);   // canonical folder name, e.g. all-MiniLM-L6-v2
             try
             {
                 using var interrupt = CreateInterruptSource();
@@ -242,7 +242,7 @@ namespace DevOnBike.Overfit.Cli
             var startup = ValueStopwatch.StartNew();
 
             var path = ModelCache.Resolve(model);
-            if (path is null)
+            if (path == null)
             {
                 Console.Error.WriteLine($"Model '{model}' not found in {ModelCache.Dir}.");
                 Console.Error.WriteLine($"Download it first:  overfit pull {model}   (or pass a .gguf path directly)");
@@ -287,7 +287,7 @@ namespace DevOnBike.Overfit.Cli
             if (!string.IsNullOrWhiteSpace(embedModel))
             {
                 var embedDir = ResolveEmbedderDir(embedModel);
-                if (embedDir is null)
+                if (embedDir == null)
                 {
                     Console.Error.WriteLine($"Embedding model '{embedModel}' not found.");
                     Console.Error.WriteLine($"Pull it first:  overfit pull minilm   (or pass a directory path with config.json + vocab.txt + model.safetensors)");
@@ -314,11 +314,11 @@ namespace DevOnBike.Overfit.Cli
             {
                 var orpheus = ResolveOrpheusModel(ttsModel);
                 var snac = ResolveSnacDir(ttsSnac);
-                if (orpheus is null || snac is null)
+                if (orpheus == null || snac == null)
                 {
                     Console.Error.WriteLine("TTS not started: need both an Orpheus GGUF (--tts-model) and SNAC weights (--tts-snac).");
-                    Console.Error.WriteLine(orpheus is null ? "  • Orpheus GGUF not found (pull it, or pass --tts-model <file.gguf>)." : $"  • Orpheus: {orpheus}");
-                    Console.Error.WriteLine(snac is null ? "  • SNAC weights not found (run Scripts/convert_snac.py, or pass --tts-snac <dir>)." : $"  • SNAC: {snac}");
+                    Console.Error.WriteLine(orpheus == null ? "  • Orpheus GGUF not found (pull it, or pass --tts-model <file.gguf>)." : $"  • Orpheus: {orpheus}");
+                    Console.Error.WriteLine(snac == null ? "  • SNAC weights not found (run Scripts/convert_snac.py, or pass --tts-snac <dir>)." : $"  • SNAC: {snac}");
                     embedder?.Dispose();
                     pool.Dispose();
                     return 1;
@@ -350,8 +350,8 @@ namespace DevOnBike.Overfit.Cli
                 // The server may bind 0.0.0.0 (all interfaces) but you can't *connect* to 0.0.0.0 — show a
                 // reachable address in the copy-paste examples.
                 var connectUrl = baseUrl.Replace("0.0.0.0", "127.0.0.1");
-                var embedEp = embedder is not null ? " | POST /v1/embeddings" : string.Empty;
-                var ttsEp = tts is not null ? " | POST /v1/audio/speech" : string.Empty;
+                var embedEp = embedder != null ? " | POST /v1/embeddings" : string.Empty;
+                var ttsEp = tts != null ? " | POST /v1/audio/speech" : string.Empty;
                 Console.WriteLine();
                 Console.WriteLine($"Overfit OpenAI-compatible server (ASP.NET / Kestrel, AOT) listening on {baseUrl}");
                 Console.WriteLine($"  ready in:  {startup.GetElapsedTime().TotalSeconds:F2} s");
@@ -392,7 +392,7 @@ namespace DevOnBike.Overfit.Cli
         public static int Repack(string model, string? output)
         {
             var path = ModelCache.Resolve(model);
-            if (path is null)
+            if (path == null)
             {
                 Console.Error.WriteLine($"Model '{model}' not found in {ModelCache.Dir}.");
                 Console.Error.WriteLine($"Download it first:  overfit pull {model}   (or pass a .gguf path directly)");
@@ -433,7 +433,7 @@ namespace DevOnBike.Overfit.Cli
         public static int Doctor(string model)
         {
             var path = ModelCache.Resolve(model);
-            if (path is null)
+            if (path == null)
             {
                 Console.Error.WriteLine($"Model '{model}' not found in {ModelCache.Dir}.");
                 Console.Error.WriteLine($"Download it first:  overfit pull {model}   (or pass a .gguf path directly)");
@@ -733,15 +733,15 @@ namespace DevOnBike.Overfit.Cli
                 model.PredictBatchParallel(flat, rows.Count, outputs);
             }
 
-            using var writer = outputPath is null ? null : new StreamWriter(outputPath);
+            using var writer = outputPath == null ? null : new StreamWriter(outputPath);
             void Emit(string text)
             {
-                if (writer is null)
+                if (writer == null)
                 {
                     Console.Out.WriteLine(text);
                 }
 
-                if (!(writer is null))
+                if (writer != null)
                 {
                     writer.WriteLine(text);
                 }
@@ -757,7 +757,7 @@ namespace DevOnBike.Overfit.Cli
             Console.Error.WriteLine(
                 $"Scored {rows.Count:N0} rows · {model.NumTrees} trees · {model.Objective} · "
                 + $"{model.NumGroups} output(s) · {sw.GetElapsedTime().TotalMilliseconds:F1} ms ({nsPerRow:F0} ns/row)"
-                + (outputPath is null ? string.Empty : $" → {outputPath}"));
+                + (outputPath == null ? string.Empty : $" → {outputPath}"));
             return 0;
         }
 
@@ -930,7 +930,7 @@ namespace DevOnBike.Overfit.Cli
         public static int Mcp(string model, string? ragDir, string? whisperModel)
         {
             var path = ModelCache.Resolve(model);
-            if (path is null)
+            if (path == null)
             {
                 Console.Error.WriteLine($"Model '{model}' not found in {ModelCache.Dir}.");
                 Console.Error.WriteLine($"Download it first:  overfit pull {model}   (or pass a .gguf path directly)");
@@ -1008,9 +1008,9 @@ namespace DevOnBike.Overfit.Cli
             }
 
             var repo = EmbedderAliases.Resolve(spec);
-            if (repo is not null)
+            if (repo != null)
             {
-                var aliasDir = Path.Combine(ModelCache.Dir, repo[(repo.LastIndexOf('/') + 1)..]);
+                var aliasDir = Path.Combine(ModelCache.Dir, repo.Substring(repo.LastIndexOf('/') + 1));
                 if (Directory.Exists(aliasDir))
                 {
                     return aliasDir;
@@ -1052,7 +1052,7 @@ namespace DevOnBike.Overfit.Cli
             {
                 var orpheus = ResolveOrpheusModel(model);
                 var snac = ResolveSnacDir(snacDir);
-                if (orpheus is not null && snac is not null)
+                if (orpheus != null && snac != null)
                 {
                     return TtsOrpheus(text, voice, outPath, orpheus, snac);
                 }
@@ -1110,10 +1110,10 @@ namespace DevOnBike.Overfit.Cli
             Console.WriteLine($"Wrote {outPath}  (voice '{profile.Id}', {engine.SampleRate} Hz, placeholder tone — watermarked).");
             Console.WriteLine();
             Console.WriteLine("This is the placeholder tone engine — real neural speech needs two models:");
-            Console.WriteLine(orpheus is null
+            Console.WriteLine(orpheus == null
                 ? "  • Orpheus GGUF: overfit pull isaiahbjork/orpheus-3b-0.1-ft-Q4_K_M-GGUF   (then pass --model <file.gguf>)"
                 : $"  • Orpheus GGUF: found ({orpheus})");
-            Console.WriteLine(snac is null
+            Console.WriteLine(snac == null
                 ? "  • SNAC weights: python Scripts/convert_snac.py --out %USERPROFILE%\\.overfit\\snac   (or pass --snac <dir>)"
                 : $"  • SNAC weights: found ({snac})");
             return 0;
@@ -1131,7 +1131,7 @@ namespace DevOnBike.Overfit.Cli
             if (!string.IsNullOrWhiteSpace(envDir) && Directory.Exists(envDir))
             {
                 var hit = FindOrpheusGguf(envDir);
-                if (hit is not null)
+                if (hit != null)
                 {
                     return hit;
                 }
@@ -1382,7 +1382,7 @@ namespace DevOnBike.Overfit.Cli
             float typicalP = 0f)
         {
             var path = ModelCache.Resolve(model);
-            if (path is null)
+            if (path == null)
             {
                 Console.Error.WriteLine($"Model '{model}' not found in {ModelCache.Dir}.");
                 Console.Error.WriteLine($"Download it first:  overfit pull {model}   (or pass a .gguf path directly)");
@@ -1419,7 +1419,7 @@ namespace DevOnBike.Overfit.Cli
                 // Bound stated in the header (OVERFIT023): the REPL ends when stdin closes — ReadLine
                 // returns null on EOF, a closed pipe or Ctrl+Z/Ctrl+D. `/exit` is the interactive shortcut
                 // for the same thing and stays an explicit break.
-                for (var line = ReadCommand(); line is not null; line = ReadCommand())
+                for (var line = ReadCommand(); line != null; line = ReadCommand())
                 {
                     if (line.Equals("/exit", StringComparison.OrdinalIgnoreCase))
                     {

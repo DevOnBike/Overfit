@@ -81,7 +81,7 @@ namespace DevOnBike.Overfit.Demo.AnomalyConsole
 
             if (!hadCheckpoint)
             {
-                if (csv is null || !File.Exists(csv))
+                if (csv == null || !File.Exists(csv))
                 {
                     throw new FileNotFoundException(
                         "No checkpoint and no metrics CSV found. Pass --csv <path> " +
@@ -343,7 +343,7 @@ namespace DevOnBike.Overfit.Demo.AnomalyConsole
                     var history = tuner.FineTune(
                         corpus, steps: 300, contextLength: ContextSnapshots * tps, learningRate: 1e-2f);
                     Console.WriteLine(
-                        $"  LoRA loss {history[0]:F3} → {history[^1]:F3}  ({history.Count} steps, rank 16, "
+                        $"  LoRA loss {history[0]:F3} → {history[history.Count - 1]:F3}  ({history.Count} steps, rank 16, "
                         + $"LM head: {tuner.AdapterCount} adapter / {tuner.TrainableParameterCount} params, base frozen)");
                     tuner.Save(loraPath);
                 }
@@ -473,14 +473,14 @@ namespace DevOnBike.Overfit.Demo.AnomalyConsole
             var dir = Environment.GetEnvironmentVariable(OverfitEnvironment.ModelDir);
             var candidates = new[]
             {
-                dir is null ? null : Path.Combine(dir, "k8s_metrics.csv"),
+                dir == null ? null : Path.Combine(dir, "k8s_metrics.csv"),
                 Path.Combine("Tests", "test_fixtures", "k8s_metrics.csv"),
                 "k8s_metrics.csv",
             };
 
             foreach (var c in candidates)
             {
-                if (c is not null && File.Exists(c))
+                if (c != null && File.Exists(c))
                 {
                     return c;
                 }

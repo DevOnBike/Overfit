@@ -279,7 +279,7 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
             {
                 var id = tokens[i];
 
-                if (id < 0 || id >= _decoder.Length || _decoder[id] is null)
+                if (id < 0 || id >= _decoder.Length || _decoder[id] == null)
                 {
                     continue;
                 }
@@ -312,13 +312,13 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
                 return;
             }
 
-            var pending = bytes[..byteCount];
+            var pending = bytes.Slice(0, byteCount);
             var charCount = Encoding.UTF8.GetCharCount(pending);
 
             using var chars = new PooledBuffer<char>(charCount, clearMemory: false);
 
             Encoding.UTF8.GetChars(pending, chars.Span);
-            text.Append(chars.Span[..charCount]);
+            text.Append(chars.Span.Slice(0, charCount));
 
             byteCount = 0;
         }
@@ -352,7 +352,7 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
         /// <summary>Decode a single token ID (for streaming output).</summary>
         public string DecodeToken(int id)
         {
-            if (id < 0 || id >= _decoder.Length || _decoder[id] is null)
+            if (id < 0 || id >= _decoder.Length || _decoder[id] == null)
             {
                 return string.Empty;
             }
@@ -373,7 +373,7 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
                 bytes.Span[i] = _charToByte[piece[i]];
             }
 
-            return Encoding.UTF8.GetString(bytes.Span[..piece.Length]);
+            return Encoding.UTF8.GetString(bytes.Span.Slice(0, piece.Length));
         }
 
         public bool IsSpecialToken(int id) => _specialTokenIds.Contains(id);
@@ -486,7 +486,7 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
             {
                 if (m.Index > pos)
                 {
-                    result.Add((text[pos..m.Index], false));
+                    result.Add((text.Substring(pos, m.Index - pos), false));
                 }
                 result.Add((m.Value, true));
                 pos = m.Index + m.Length;
@@ -494,7 +494,7 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
 
             if (pos < text.Length)
             {
-                result.Add((text[pos..], false));
+                result.Add((text.Substring(pos), false));
             }
 
             return result;

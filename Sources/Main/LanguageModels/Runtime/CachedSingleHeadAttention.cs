@@ -272,7 +272,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
             // K is rotated and stored — cached K vectors stay permanently rotated,
             // so no re-rotation at read time.
-            if (rope is not null)
+            if (rope != null)
             {
                 RopeKernel.Apply(_key, rope, position + cache.BasePosition);
             }
@@ -308,7 +308,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 QkNormKernel.Apply(_query, qNorm, rows: 1, headDim: HeadDimension);
             }
 
-            if (rope is not null)
+            if (rope != null)
             {
                 RopeKernel.Apply(_query, rope, position + cache.BasePosition);
             }
@@ -365,7 +365,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 QkNormKernel.Apply(_query, qNorm, rows: 1, headDim: HeadDimension);
             }
 
-            if (rope is not null)
+            if (rope != null)
             {
                 RopeKernel.Apply(_query, rope, ropePosition);
             }
@@ -502,7 +502,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             // Apply RoPE to Q and K at the current position before attention and cache write.
             // Q is rotated for the current step. K is rotated and stored — cached K vectors
             // are permanently rotated, so no re-rotation is needed at read time.
-            if (rope is not null)
+            if (rope != null)
             {
                 RopeKernel.Apply(_query, rope, position + cache.BasePosition);
                 RopeKernel.Apply(_key, rope, position + cache.BasePosition);

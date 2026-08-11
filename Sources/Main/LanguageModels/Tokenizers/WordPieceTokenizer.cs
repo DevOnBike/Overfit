@@ -107,7 +107,7 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
             using (var reader = new StreamReader(path, Encoding.UTF8))
             {
                 string? line;
-                while ((line = reader.ReadLine()) is not null)
+                while ((line = reader.ReadLine()) != null)
                 {
                     // vocab.txt tokens never contain trailing whitespace; a token is the line verbatim
                     // minus the platform newline (already stripped by ReadLine). Blank lines map too.
@@ -189,7 +189,7 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
                     continue;
                 }
                 var tok = _inverse[id];
-                if (tok is null || id == _clsId || id == _sepId || id == _padId)
+                if (tok == null || id == _clsId || id == _sepId || id == _padId)
                 {
                     continue;
                 }

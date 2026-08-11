@@ -188,7 +188,7 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
         /// <param name="channels">Channel names; null or empty restores the default of fitting everything.</param>
         public void ExemptFromCalibration(IReadOnlyList<string>? channels)
         {
-            _notFittable = channels is null
+            _notFittable = channels == null
                 ? []
                 : new HashSet<string>(channels, StringComparer.Ordinal);
 
@@ -224,7 +224,7 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
             var times = new double[window.Length];
             window.WriteTimestampSeconds(times);
 
-            var windowSeconds = times[^1] - times[0];
+            var windowSeconds = times[times.Length - 1] - times[0];
             var medians = new double[pods];
 
             // Reused across metrics rather than allocated per metric: thirteen channels every cycle for as
@@ -531,7 +531,7 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
                 if (parts[0].Length > 1 && parts[0][0] == CustomMarker)
                 {
                     calibrator._cached = null;
-                    calibrator._customChannels[LearnedStateText.Unescape(parts[0][1..])] = new CustomChannel
+                    calibrator._customChannels[LearnedStateText.Unescape(parts[0].Substring(1))] = new CustomChannel
                     {
                         PeerGaps = BoundedSamples.Read(parts[1]),
                         TrendChanges = BoundedSamples.Read(parts[2]),
@@ -591,7 +591,7 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
         /// </summary>
         public FloorProposal[] Propose()
         {
-            if (_cached is null)
+            if (_cached == null)
             {
                 _cached = Compute();
             }
@@ -802,7 +802,7 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
         private bool Cap(
             string signal, ref double proposedGap, ref double proposedChange, ref double proposedStep)
         {
-            if (_labels is null)
+            if (_labels == null)
             {
                 return false;
             }

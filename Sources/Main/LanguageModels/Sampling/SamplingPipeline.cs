@@ -568,7 +568,7 @@ namespace DevOnBike.Overfit.LanguageModels.Sampling
                 }
 
                 var start = _penaltyLastN > 0 && history.Length > _penaltyLastN ? history.Length - _penaltyLastN : 0;
-                var window = history[start..];
+                var window = history.Slice(start);
                 var m = window.Length;
                 if (m < 2)
                 {

@@ -70,9 +70,21 @@ namespace DevOnBike.Overfit.Server.AspNet
 
             app.Lifetime.ApplicationStarted.Register(() => onListening?.Invoke($"http://{host}:{port}"));
 
-            // Discarding the shutdown Task is intentional (StopAsync is fire-and-forget on cancel);
-            // `_ =` keeps CS4014 — promoted to error repo-wide — from tripping.
+            // The shutdown task cannot be observed here, and the constraint is the callback signature rather
+            // than any diagnostic: CancellationToken.Register hands us an Action, so there is nothing to
+            // await from and no return value anything could look at, and the usual escape — making the
+            // lambda `async void` — is banned by OVERFIT027 because an exception out of one is uncatchable
+            // and kills the host process.
+            //
+            // WHAT IS LOST, accepted deliberately: if StopAsync faults, nobody learns. No log, no exit code,
+            // no trace. The visible symptom would be `app.Run` below failing to return after cancellation —
+            // a hang at shutdown with no stated cause. The two alternatives are worse for this path: holding
+            // the task in a local and inspecting it after Run returns adds cross-thread machinery to a
+            // shutdown path, and an OnlyOnFaulted continuation reintroduces an unobserved task inside a
+            // non-async lambda, where NOTHING would flag it — trading a visible discard for an invisible one.
+#pragma warning disable OVERFIT046
             using var reg = cancellationToken.Register(() => _ = app.StopAsync());
+#pragma warning restore OVERFIT046
 
             app.Run($"http://{host}:{port}");
         }

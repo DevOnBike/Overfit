@@ -84,7 +84,7 @@ namespace DevOnBike.Overfit.Audio
                 }
             }
 
-            if (data is null || channels == 0)
+            if (data == null || channels == 0)
             {
                 throw new OverfitFormatException("WAV missing fmt/data chunk.");
             }

@@ -31,7 +31,7 @@ namespace DevOnBike.Overfit.Demo.Agent
         {
             var dir = Environment.GetEnvironmentVariable(OverfitEnvironment.ModelDir) ?? @"C:\qwen3b";
             var ggufPath = ResolveGguf(dir);
-            if (ggufPath is null)
+            if (ggufPath == null)
             {
                 Console.Error.WriteLine(
                     $"No .gguf found in '{dir}'. Set OVERFIT_MODEL_DIR to a Qwen2.5 GGUF directory " +

@@ -279,7 +279,7 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.Observability
                     }
                 }
 
-                return Convert.ToHexString(hash.GetHashAndReset())[..16].ToLowerInvariant();
+                return Convert.ToHexString(hash.GetHashAndReset()).Substring(0, 16).ToLowerInvariant();
             }
             catch
             {

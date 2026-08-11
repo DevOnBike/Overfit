@@ -87,7 +87,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Streaming
             // OR we hit maxTokens without seeing newline.
             if (tokens.Count < 64)
             {
-                Assert.Equal(198, tokens[^1]);
+                Assert.Equal(198, tokens[tokens.Count - 1]);
                 _output.WriteLine($"Stopped at newline after {tokens.Count} tokens.");
             }
             else
@@ -209,7 +209,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Streaming
                 tokens.Add(t);
             }
 
-            _output.WriteLine($"Generated {tokens.Count} tokens, last = {tokens[^1]}");
+            _output.WriteLine($"Generated {tokens.Count} tokens, last = {tokens[tokens.Count - 1]}");
             // Either hit a stop token OR maxTokens
             Assert.True(tokens.Count > 0);
             Assert.True(tokens.Count <= 48);

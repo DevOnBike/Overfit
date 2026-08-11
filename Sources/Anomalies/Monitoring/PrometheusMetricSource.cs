@@ -120,7 +120,7 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
                     // No template means this deployment has no source for the feature. Issuing a query built
                     // from a metric name that is not there would return an empty result indistinguishable
                     // from a real one, so it is not issued at all and IsMapped says why.
-                    if (query is null)
+                    if (query == null)
                     {
                         continue;
                     }

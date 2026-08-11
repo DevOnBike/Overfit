@@ -222,7 +222,7 @@ namespace DevOnBike.Overfit.Anomalies.Hosting
             // Optional, and the default is the conservative one: with no map every silent metric is treated
             // as bound-and-silent, which warns too much rather than too little. A guard that has lost track
             // of its own configuration should err towards saying something.
-            if (metricMap is not null)
+            if (metricMap != null)
             {
                 var unmapped = metricMap.Unmapped;
 
@@ -449,7 +449,7 @@ namespace DevOnBike.Overfit.Anomalies.Hosting
         /// </summary>
         private async Task RefreshTopologyAsync(CancellationToken ct)
         {
-            if (_topology is null)
+            if (_topology == null)
             {
                 return;
             }
@@ -478,7 +478,7 @@ namespace DevOnBike.Overfit.Anomalies.Hosting
         /// </summary>
         private void ProposeFloors(MetricWindow window, DateTimeOffset now)
         {
-            if (_calibrator is null)
+            if (_calibrator == null)
             {
                 return;
             }
@@ -632,7 +632,7 @@ namespace DevOnBike.Overfit.Anomalies.Hosting
                 var end = now - _options.EndOffset;
                 var window = await _source.ReadAsync(end, _options.Window, ct).ConfigureAwait(false);
 
-                if (window is null)
+                if (window == null)
                 {
                     // No pod returned anything. Not an empty cluster — a cluster this source cannot see.
                     _blind(_logger, (int)MetricIndex.Count, 0, 0, 0, null);
@@ -643,7 +643,7 @@ namespace DevOnBike.Overfit.Anomalies.Hosting
                 // The trace is built only when the flag is on, so the ordinary path allocates no delegate and
                 // the guard takes the null branch it always did. Passing one unconditionally would make every
                 // cycle pay for a diagnostic nobody asked for.
-                var result = _peerTraceFilter is null
+                var result = _peerTraceFilter == null
                     ? _guard.RunCycle(window, now)
                     : _guard.RunCycle(
                         window, now, null, LogPeerDecision, LogTrendDecision, LogRuleDecision);

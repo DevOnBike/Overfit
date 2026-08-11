@@ -22,7 +22,7 @@ namespace DevOnBike.Overfit.Server.OpenAi
             ArgumentNullException.ThrowIfNull(embedder);
             ArgumentNullException.ThrowIfNull(sink);
 
-            var inputs = req is null ? [] : OpenAiChatMapping.ParseInputs(req.Input);
+            var inputs = req == null ? [] : OpenAiChatMapping.ParseInputs(req.Input);
             if (inputs.Count == 0)
             {
                 WriteError(sink, 400, "'input' is required (a string or an array of strings).");

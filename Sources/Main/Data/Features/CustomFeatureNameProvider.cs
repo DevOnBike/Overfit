@@ -26,7 +26,7 @@ namespace DevOnBike.Overfit.Data.Features
         /// </param>
         public CustomFeatureNameProvider(string[] names)
         {
-            if (names is null || names.Length == 0)
+            if (names == null || names.Length == 0)
             {
                 throw new ArgumentException("Names must not be null or empty.", nameof(names));
             }

@@ -37,13 +37,13 @@ namespace DevOnBike.Overfit.Ops
             var hw = h * w;
             var outHW = outH * outW;
 
-            var requiresGrad = input.RequiresGrad || kernel.RequiresGrad || (bias is not null && bias.RequiresGrad);
+            var requiresGrad = input.RequiresGrad || kernel.RequiresGrad || (bias != null && bias.RequiresGrad);
             var output = AllocateNode(graph, new TensorShape(n, channels, outH, outW), requiresGrad, clearMemory: true);
 
             var inS = input.DataView.AsReadOnlySpan();
             var kS = kernel.DataView.AsReadOnlySpan();
             var outS = output.DataView.AsSpan();
-            var hasBias = bias is not null;
+            var hasBias = bias != null;
             var bS = hasBias ? bias!.DataView.AsReadOnlySpan() : default;
 
             for (var ni = 0; ni < n; ni++)
@@ -114,7 +114,7 @@ namespace DevOnBike.Overfit.Ops
             ComputationGraph graph, AutogradNode input, AutogradNode kernel, AutogradNode output, AutogradNode bias,
             int channels, int h, int w, int k, int padding, int stride)
         {
-            var biasNeedsGrad = bias is not null && bias.RequiresGrad;
+            var biasNeedsGrad = bias != null && bias.RequiresGrad;
             if (!input.RequiresGrad && !kernel.RequiresGrad && !biasNeedsGrad)
             {
                 return;

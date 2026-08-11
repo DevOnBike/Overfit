@@ -193,7 +193,7 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
 
                 // A histogram is bound by its family name; the _bucket series is only how it was found.
                 var source = kind == MetricSourceKind.HistogramSeconds
-                    ? name[..^"_bucket".Length]
+                    ? name.Substring(0, name.Length - "_bucket".Length)
                     : name;
 
                 var candidate = new MetricCandidate(source, kind, string.Empty, pods, quantile, Inferred: true);

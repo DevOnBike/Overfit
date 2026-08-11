@@ -196,7 +196,7 @@ namespace DevOnBike.Overfit.DeepLearning
         private static AutogradNode Proj(ComputationGraph graph, AutogradNode x, IDequantRowSource w, LoRAAdapter? lora)
         {
             var baseOut = graph.FrozenQuantizedLinear(x, w);
-            return lora is null ? baseOut : graph.Add(baseOut, lora.Apply(graph, x));
+            return lora == null ? baseOut : graph.Add(baseOut, lora.Apply(graph, x));
         }
 
         public int FeedForwardWidthCached => _wGate.OutputSize;
@@ -319,7 +319,7 @@ namespace DevOnBike.Overfit.DeepLearning
             _ = row; // dequant scratch is now per-thread inside DequantMatVec
             DequantMatVec.Run(x, w, dst.Slice(0, outDim));
 
-            if (lora is null)
+            if (lora == null)
             {
                 return;
             }

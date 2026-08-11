@@ -54,7 +54,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
 
             // ── FINE-TUNE on the three sentences (next-token, overfit) ──
             var ids = tok.Encode(passage);
-            var input = ids[..^1];
+            var input = ids[..(ids.Length - 1)];
             var target = ids[1..];
             _out.WriteLine($"\nfine-tuning on {ids.Length} tokens ...");
 

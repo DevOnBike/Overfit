@@ -389,7 +389,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
                         // Pre-decoded when the caller hoisted the F16 widening out of the tile loop; identical
                         // values either way, so the two paths are bit-identical.
-                        var dVec = dsc is not null
+                        var dVec = dsc != null
                             ? Vector256.Load(dsc + (((long)x * nb) + l) * DecodedScalesPerBlock)
                             : LoadF16x8Int(blk);
 
@@ -544,7 +544,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                         var ql = blk + DstQlOffset;
                         var qh = blk + DstQhOffset;
 
-                        var dVec = dsc is not null
+                        var dVec = dsc != null
                             ? Vector256.Load(dsc + (((long)x * nb) + l) * DecodedScalesPerBlock)
                             : LoadF16x8Int(blk);
 

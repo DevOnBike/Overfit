@@ -77,7 +77,7 @@ namespace DevOnBike.Overfit.Statistics
             {
                 if (budget <= 0)
                 {
-                    values[lo..(hi + 1)].Sort();
+                    values.Slice(lo, (hi + 1) - lo).Sort();
 
                     return values[k];
                 }

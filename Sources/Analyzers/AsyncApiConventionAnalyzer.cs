@@ -113,7 +113,7 @@ namespace DevOnBike.Overfit.Analyzers
         private static bool IsAwaitable(Compilation compilation, ITypeSymbol type)
         {
             var named = type as INamedTypeSymbol;
-            if (named is null)
+            if (named == null)
             {
                 return false;
             }
@@ -130,7 +130,7 @@ namespace DevOnBike.Overfit.Analyzers
                      })
             {
                 var symbol = compilation.GetTypeByMetadataName(candidate);
-                if (symbol is not null && SymbolEqualityComparer.Default.Equals(definition, symbol))
+                if (symbol != null && SymbolEqualityComparer.Default.Equals(definition, symbol))
                 {
                     return true;
                 }
@@ -162,7 +162,7 @@ namespace DevOnBike.Overfit.Analyzers
         private static bool ImplementsInterface(IMethodSymbol method)
         {
             var type = method.ContainingType;
-            if (type is null)
+            if (type == null)
             {
                 return false;
             }

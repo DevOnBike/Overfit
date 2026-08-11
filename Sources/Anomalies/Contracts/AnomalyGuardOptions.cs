@@ -444,7 +444,7 @@ namespace DevOnBike.Overfit.Anomalies.Contracts
         {
             var index = (int)metric;
 
-            if (table is null || index < 0 || index >= table.Count)
+            if (table == null || index < 0 || index >= table.Count)
             {
                 return double.NaN;
             }
@@ -459,7 +459,7 @@ namespace DevOnBike.Overfit.Anomalies.Contracts
         {
             var index = (int)metric;
 
-            if (table is null || index < 0 || index >= table.Count)
+            if (table == null || index < 0 || index >= table.Count)
             {
                 return 0.0;
             }

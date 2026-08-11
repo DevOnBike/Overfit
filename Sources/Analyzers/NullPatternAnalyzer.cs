@@ -17,13 +17,26 @@ namespace DevOnBike.Overfit.Analyzers
     /// OVERFIT043: <c>== null</c> and <c>!= null</c> read better here and are what this codebase uses. 412
     /// sites at the time the decision was taken, which was known before it was taken.</para>
     ///
-    /// <para><b>The two are NOT always equivalent, and this is the one place the rule could bite.</b> A
-    /// pattern ignores a user-defined <c>operator ==</c>; <c>== null</c> calls it. On a type that overloads
-    /// equality the swap can change behaviour, and no compiler warning marks the difference. Surveyed before
-    /// shipping the rule: <b>exactly one</b> user-defined <c>operator ==</c> exists in <c>Sources</c> —
+    /// <para><b>The two are NOT always equivalent, and this is the one place the rule could bite.</b>
+    /// <c>is null</c> always tests reference (or default) equality; <c>== null</c> dispatches to a
+    /// user-defined <c>operator ==</c> whenever the operand's type declares one, and no compiler warning
+    /// marks the difference. A well-written operator short-circuits on a null operand, so the two agree —
+    /// that is the case to expect, and it is what must be established before a site is swept rather than
+    /// assumed. Where an operator does not short-circuit, the rewrite this rule asks for can change
+    /// behaviour or throw. <b>When they disagree, the spelling that preserves the pattern's meaning is
+    /// <c>(object?)x == null</c> or <c>ReferenceEquals(x, null)</c></b> — both bypass the operator. One of
+    /// those, not the pattern, is the answer at such a site.</para>
+    ///
+    /// <para><b>The overload does not have to live in this repository, and that is the easy mistake.</b>
+    /// Surveyed in <c>Sources</c>: <b>exactly one</b> user-defined <c>operator ==</c> exists —
     /// <c>Anomalies/Contracts/GuardCycleOutcome.cs</c>, on a value type, where a null comparison does not
-    /// arise. So the hazard is real in general and absent here, which is why the rule is safe to sweep
-    /// mechanically <b>today</b> and why this paragraph exists for whoever adds the second overload.</para>
+    /// arise. That survey is necessary and <b>not sufficient</b>, because a REFERENCED type supplies
+    /// operators too, and one already reaches a swept site: <c>Microsoft.CodeAnalysis.Location</c> declares
+    /// <c>operator ==</c> and is the declared type of a local in <c>OneTopLevelTypePerFileAnalyzer</c>. It
+    /// was exercised against the pattern on both a null and a non-null operand, in both directions, before
+    /// that site was converted; it short-circuits, so the two agree and the swap is behaviour-preserving.
+    /// <b>The check belongs to the operand's TYPE, not to the repository</b> — read the operator, or run it
+    /// against the pattern, and only then swap.</para>
     ///
     /// <para>Only null patterns are flagged. <c>is string s</c>, <c>is > 0</c>, <c>is { Count: 0 }</c> and
     /// the rest of pattern matching are untouched — the objection was to this spelling of a null check, not

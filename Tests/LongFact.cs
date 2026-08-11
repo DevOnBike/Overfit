@@ -118,7 +118,7 @@ namespace DevOnBike.Overfit.Tests
             // ends in "s" and would otherwise be read as seconds with a stray "m".
             if (text.EndsWith("ms", StringComparison.OrdinalIgnoreCase))
             {
-                if (!double.TryParse(text[..^2], System.Globalization.NumberStyles.Float,
+                if (!double.TryParse(text[..(text.Length - 2)], System.Globalization.NumberStyles.Float,
                         System.Globalization.CultureInfo.InvariantCulture, out var milliseconds))
                 {
                     return false;

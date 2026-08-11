@@ -83,7 +83,7 @@ namespace DevOnBike.Overfit.DeepLearning
 
         private AutogradNode ForwardCore(ComputationGraph? graph, AutogradNode input)
         {
-            if (graph is null || !IsTraining)
+            if (graph == null || !IsTraining)
             {
                 var out1 = _linear1.Forward(null, input);
                 using var bn1Out = _bn1.Forward(null, out1);

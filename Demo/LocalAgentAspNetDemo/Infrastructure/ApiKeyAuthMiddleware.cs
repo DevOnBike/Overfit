@@ -46,7 +46,7 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.Infrastructure
 
         public async Task InvokeAsync(HttpContext context)
         {
-            if (_keyHash is null || IsOpenPath(context.Request.Path.Value))
+            if (_keyHash == null || IsOpenPath(context.Request.Path.Value))
             {
                 await _next(context);
                 return;
@@ -106,7 +106,7 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.Infrastructure
             var auth = request.Headers.Authorization.ToString();
             if (auth.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
             {
-                return auth["Bearer ".Length..].Trim();
+                return auth.Substring("Bearer ".Length).Trim();
             }
 
             return null;

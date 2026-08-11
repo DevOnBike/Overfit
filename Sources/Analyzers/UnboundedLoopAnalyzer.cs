@@ -70,7 +70,7 @@ namespace DevOnBike.Overfit.Analyzers
             };
 
             // `for` with an omitted condition is infinite by construction; while/do need a constant `true`.
-            var infinite = condition is null
+            var infinite = condition == null
                 ? context.Node.IsKind(SyntaxKind.ForStatement)
                 : IsAlwaysTrue(context, condition);
 

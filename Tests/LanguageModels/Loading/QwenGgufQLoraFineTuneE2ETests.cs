@@ -39,7 +39,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             // A short, fixed sequence of valid token IDs (the point is gradient mechanics on the real
             // 3B base, not natural text — no tokenizer needed). inputs predict next-token targets.
             var seq = new[] { 785, 12, 3091, 40, 264, 17556, 1614, 11, 358, 1184, 311, 6923, 1467, 13, 9085, 25, 1986 };
-            var input = seq[..^1];
+            var input = seq[..(seq.Length - 1)];
             var target = seq[1..];
 
             // Snapshot a frozen base row to prove the 4-bit weights never change.

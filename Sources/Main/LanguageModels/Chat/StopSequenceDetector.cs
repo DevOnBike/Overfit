@@ -35,7 +35,7 @@ namespace DevOnBike.Overfit.LanguageModels.Chat
         public StopSequenceDetector(params string[] stopSequences)
         {
             var kept = new List<string>(stopSequences?.Length ?? 0);
-            if (stopSequences is not null)
+            if (stopSequences != null)
             {
                 foreach (var s in stopSequences)
                 {
@@ -88,12 +88,12 @@ namespace DevOnBike.Overfit.LanguageModels.Chat
             {
                 Stopped = true;
                 _buffer.Clear();
-                return buf[..stopAt];
+                return buf.Substring(0, stopAt);
             }
 
             // No complete stop: hold back the longest suffix that prefixes some stop.
             var hold = LongestHeldSuffix(buf);
-            var emit = buf[..(buf.Length - hold)];
+            var emit = buf.Substring(0, buf.Length - hold);
             _buffer.Clear();
             _buffer.Append(buf, buf.Length - hold, hold);
             return emit;

@@ -174,7 +174,7 @@ namespace DevOnBike.Overfit.DeepLearning
         public AutogradNode Forward(ComputationGraph? graph, AutogradNode input)
         {
             _kernelsNode ??= Kernels.AsNode();
-            if (Bias is not null)
+            if (Bias != null)
             {
                 _biasNode ??= Bias.AsNode();
             }

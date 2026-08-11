@@ -16,7 +16,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
     {
         public static IKeyValueCacheReader AsReader(this KeyValueCache cache)
         {
-            if (cache is null)
+            if (cache == null)
             {
                 throw new ArgumentNullException(nameof(cache));
             }

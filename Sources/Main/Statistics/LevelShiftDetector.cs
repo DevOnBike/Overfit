@@ -83,7 +83,7 @@ namespace DevOnBike.Overfit.Statistics
             }
 
             using var buffer = new PooledBuffer<double>(series.Length, clearMemory: false);
-            var usable = buffer.Span[..series.Length];
+            var usable = buffer.Span.Slice(0, series.Length);
             var written = 0;
 
             for (var i = 0; i < series.Length; i++)
@@ -112,8 +112,8 @@ namespace DevOnBike.Overfit.Statistics
             // test. Searching for the best split would find one in any series — that is what a change-point
             // search does, and it needs a multiple-comparisons correction this does not have.
             var split = written / 2;
-            var before = usable[..split];
-            var after = usable[split..written];
+            var before = usable.Slice(0, split);
+            var after = usable.Slice(split, written - split);
 
             var beforeMedian = MedianOf(before);
             var afterMedian = MedianOf(after);
@@ -228,7 +228,7 @@ namespace DevOnBike.Overfit.Statistics
         public static double StepSize(ReadOnlySpan<double> series)
         {
             using var buffer = new PooledBuffer<double>(Math.Max(series.Length, 1), clearMemory: false);
-            var usable = buffer.Span[..series.Length];
+            var usable = buffer.Span.Slice(0, series.Length);
             var written = 0;
 
             for (var i = 0; i < series.Length; i++)
@@ -246,13 +246,13 @@ namespace DevOnBike.Overfit.Statistics
 
             var split = written / 2;
 
-            return Math.Abs(MedianOf(usable[split..written]) - MedianOf(usable[..split]));
+            return Math.Abs(MedianOf(usable.Slice(split, written - split)) - MedianOf(usable.Slice(0, split)));
         }
 
         private static double MedianOf(ReadOnlySpan<double> values)
         {
             using var scratch = new PooledBuffer<double>(values.Length, clearMemory: false);
-            var span = scratch.Span[..values.Length];
+            var span = scratch.Span.Slice(0, values.Length);
 
             values.CopyTo(span);
 

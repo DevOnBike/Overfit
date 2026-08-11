@@ -169,7 +169,7 @@ namespace DevOnBike.Overfit.DeepLearning
         public AutogradNode Forward(ComputationGraph? graph, AutogradNode input)
         {
             // No graph (inference) → run the inner module directly; checkpointing only pays off in training.
-            if (graph is null)
+            if (graph == null)
             {
                 return _inner.Forward(graph, input);
             }

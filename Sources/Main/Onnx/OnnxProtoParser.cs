@@ -3,6 +3,8 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Globalization;
+using DevOnBike.Overfit.Exceptions;
 using DevOnBike.Overfit.Onnx.Protobuf;
 using DevOnBike.Overfit.Onnx.Schema;
 
@@ -386,7 +388,7 @@ namespace DevOnBike.Overfit.Onnx
                             floatData ??= [];
                             var newArr = new float[floatData.Length + 1];
                             floatData.CopyTo(newArr, 0);
-                            newArr[^1] = reader.ReadFloat();
+                            newArr[newArr.Length - 1] = reader.ReadFloat();
                             floatData = newArr;
                         }
                         break;
@@ -401,7 +403,7 @@ namespace DevOnBike.Overfit.Onnx
                             int64Data ??= [];
                             var newArr = new long[int64Data.Length + 1];
                             int64Data.CopyTo(newArr, 0);
-                            newArr[^1] = reader.ReadInt64();
+                            newArr[newArr.Length - 1] = reader.ReadInt64();
                             int64Data = newArr;
                         }
                         break;
@@ -431,11 +433,11 @@ namespace DevOnBike.Overfit.Onnx
                 long offset = 0, length = 0;
                 if (externalEntries.TryGetValue("offset", out var offsetStr))
                 {
-                    long.TryParse(offsetStr, out offset);
+                    offset = ExternalDataNumber(offsetStr, "offset", name);
                 }
                 if (externalEntries.TryGetValue("length", out var lengthStr))
                 {
-                    long.TryParse(lengthStr, out length);
+                    length = ExternalDataNumber(lengthStr, "length", name);
                 }
                 externalEntries.TryGetValue("location", out var location);
 
@@ -457,6 +459,51 @@ namespace DevOnBike.Overfit.Onnx
                 Int64Data = int64Data,
                 ExternalData = extInfo,
             };
+        }
+
+        /// <summary>
+        /// An external-data <c>offset</c> or <c>length</c>, or a refusal naming the key and the text that
+        /// failed to parse.
+        /// </summary>
+        /// <remarks>
+        /// <para><b>Why a discarded <c>TryParse</c> was worse here than it usually is.</b> Both fields land
+        /// on <c>0</c> when the parse fails, and <c>0</c> is a LEGAL value for each: an offset of 0 is the
+        /// start of the sidecar, and a length of 0 is the <i>read to the end</i> sentinel that
+        /// <c>OnnxExternalData.ResolveOne</c> acts on. Every downstream bound therefore passes, and the
+        /// loader hands back weights read from the wrong region of the <c>.data</c> file rather than
+        /// refusing it. Nothing further down can tell "the model said 0" from "the model said something that
+        /// is not a number", so it has to be caught at the point of parse.
+        /// </para>
+        /// <para><b>The bound applied here is non-negativity, and only that, deliberately.</b> The sidecar is
+        /// not open at parse time and its size is not known here, so the bound that actually governs — offset
+        /// and length against the file — cannot be applied here and is not invented here. It already exists
+        /// in <c>OnnxExternalData.ResolveOne</c>, which checks the offset against <c>file.Length</c>, the
+        /// length against what remains after the offset, and the length against
+        /// <see cref="Array.MaxLength"/>. This method rejects what is malformed on its face; that one
+        /// rejects what does not fit the file.
+        /// </para>
+        /// <para>Parsed under <see cref="CultureInfo.InvariantCulture"/> with a leading sign the only
+        /// permitted decoration. These are decimal strings in a file format rather than display text, so the
+        /// parse must not vary with the machine's locale, and no thousands separator or surrounding
+        /// whitespace is legal in a value this loader will act on.
+        /// </para>
+        /// </remarks>
+        private static long ExternalDataNumber(string value, string key, string tensorName)
+        {
+            if (!long.TryParse(
+                    value, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out var parsed))
+            {
+                throw new OverfitFormatException(
+                    $"External data '{key}' for initializer '{tensorName}' is not an integer: '{value}'.");
+            }
+
+            if (parsed < 0)
+            {
+                throw new OverfitFormatException(
+                    $"External data '{key}' for initializer '{tensorName}' is negative ({parsed}).");
+            }
+
+            return parsed;
         }
 
         private static (string Key, string Value) ParseStringStringEntry(ref ProtoReader reader)

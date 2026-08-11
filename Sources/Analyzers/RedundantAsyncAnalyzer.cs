@@ -82,7 +82,7 @@ namespace DevOnBike.Overfit.Analyzers
 
             var awaited = FindElidableAwait(declaration);
 
-            if (awaited is null)
+            if (awaited == null)
             {
                 return;
             }
@@ -97,7 +97,7 @@ namespace DevOnBike.Overfit.Analyzers
             // conversion — ValueTask against Task, a derived task type — is a rewrite, not a keyword removal.
             var awaitedType = context.SemanticModel.GetTypeInfo(Unwrap(awaited.Expression), context.CancellationToken).Type;
 
-            if (awaitedType is null
+            if (awaitedType == null
                 || awaitedType.TypeKind == TypeKind.Error
                 || !SymbolEqualityComparer.Default.Equals(awaitedType, method.ReturnType))
             {
@@ -116,7 +116,7 @@ namespace DevOnBike.Overfit.Analyzers
         {
             var body = (SyntaxNode?)declaration.Body ?? declaration.ExpressionBody?.Expression;
 
-            if (body is null)
+            if (body == null)
             {
                 return null;
             }
@@ -132,12 +132,12 @@ namespace DevOnBike.Overfit.Analyzers
 
             // An `await using` is a disposal that must follow completion, and a `using` declaration compiles
             // to a try/finally that no ancestor node reveals — both make the task unsafe to hand back.
-            if (declaration.Body is not null && HasDisposalScope(declaration.Body))
+            if (declaration.Body != null && HasDisposalScope(declaration.Body))
             {
                 return null;
             }
 
-            if (declaration.ExpressionBody is not null)
+            if (declaration.ExpressionBody != null)
             {
                 return ReferenceEquals(declaration.ExpressionBody.Expression, awaited) ? awaited : null;
             }

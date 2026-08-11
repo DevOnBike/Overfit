@@ -427,7 +427,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 layer.FfnUp.Dispose();
                 layer.FfnDown.Dispose();
 
-                if (layer.MoeGate is not null)
+                if (layer.MoeGate != null)
                 {
                     foreach (var w in layer.MoeGate)
                     {

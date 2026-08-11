@@ -69,7 +69,7 @@ namespace DevOnBike.Overfit.Analyzers
             // calls itself is just as unbounded as a method that does.
             var enclosing = context.ContainingSymbol as IMethodSymbol;
 
-            if (enclosing is null)
+            if (enclosing == null)
             {
                 return;
             }
@@ -91,7 +91,7 @@ namespace DevOnBike.Overfit.Analyzers
             {
                 var receiver = operation.Instance;
 
-                if (receiver is not null && receiver.Kind != OperationKind.InstanceReference)
+                if (receiver != null && receiver.Kind != OperationKind.InstanceReference)
                 {
                     return;
                 }

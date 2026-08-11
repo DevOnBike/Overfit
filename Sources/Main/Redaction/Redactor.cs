@@ -230,7 +230,7 @@ namespace DevOnBike.Overfit.Redaction
                     }
 
                     // Precision gate: a checksum-validated rule (PESEL, NIP, Luhn…) only counts if the value passes.
-                    if (rule.Validator is not null && !rule.Validator(match.Value))
+                    if (rule.Validator != null && !rule.Validator(match.Value))
                     {
                         continue;
                     }

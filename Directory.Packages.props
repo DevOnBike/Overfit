@@ -54,25 +54,48 @@
 
          Still true and still the reason to look here first if the tool breaks after an SDK change: the
          constraint is "do not CALL API the runtime lacks", and the version is only a proxy for it. Not
-         exercised on this bump: the `callers`, `unused` and `serve` verbs.
+         exercised on the 18.8.2 bump: the `callers`, `unused` and `serve` verbs.
+
+         18.9.6 taken 2026-08-11, same day, on the same reasoning and with the gap above closed — this time
+         every verb was exercised, not three of them, because "it built" is not evidence about a tool whose
+         failure mode is answering "no results" instead of throwing. The two packages move TOGETHER; bumping
+         Microsoft.Build.Framework alone reproduces MSBL001, which is the failure this pair was created for.
 
          NOT 17.11.31 (what Workspaces.MSBuild 5.0.0 resolves transitively): that version carries
          GHSA-w3q9-fxm7-j8fq and NuGetAudit fails the build on it, correctly. -->
-    <PackageVersion Include="Microsoft.Build.Framework" Version="18.8.2" />
-    <PackageVersion Include="Microsoft.NET.StringTools" Version="18.8.2" />
+    <PackageVersion Include="Microsoft.Build.Framework" Version="18.9.6" />
+    <PackageVersion Include="Microsoft.NET.StringTools" Version="18.9.6" />
     <PackageVersion Include="Microsoft.Agents.AI" Version="1.17.0" />
-    <PackageVersion Include="Microsoft.AspNetCore.TestHost" Version="10.0.10" />
+    <!-- 10.0.11 is the 2026-08-11 .NET security servicing release (10 CVEs across .NET 8/9/10, of which
+         CVE-2026-62897 is CVSS 7.0). Taken immediately because the blast radius is one test project and
+         nothing ships it. NOTE, and this is the part that matters: bumping this pin does NOT close that CVE
+         for anything real — it is the shared runtime that is affected, so the SDK and runtime INSTALLS have
+         to move, on this box and in CI. See XC-21. System.Numerics.Tensors is the other 10.0.11 pin and is
+         deliberately NOT taken here: it is a decode hot-path dependency and wants a canary bench first. -->
+    <PackageVersion Include="Microsoft.AspNetCore.TestHost" Version="10.0.11" />
     <PackageVersion Include="Microsoft.Extensions.AI.Abstractions" Version="10.8.3" />
     <PackageVersion Include="Microsoft.Extensions.AI.Evaluation" Version="10.8.0" />
     <PackageVersion Include="Microsoft.Extensions.AI.Evaluation.Quality" Version="10.8.0" />
     <PackageVersion Include="Microsoft.ML" Version="5.0.0" />
     <PackageVersion Include="Microsoft.ML.OnnxRuntime" Version="1.28.0" />
     <PackageVersion Include="Microsoft.ML.OnnxTransformer" Version="5.0.0" />
-    <PackageVersion Include="Microsoft.SourceLink.GitHub" Version="10.0.301" />
+    <!-- Build/pack-time only (PrivateAssets="all"), so it adds no runtime surface to the shipped package.
+         10.0.400 is an SDK-feature-band-aligned re-release; no changelog was found for it, which is stated
+         rather than glossed — the verdict rests on the asset scope, not on having read release notes. -->
+    <PackageVersion Include="Microsoft.SourceLink.GitHub" Version="10.0.400" />
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.8.1" />
     <PackageVersion Include="Moq" Version="4.20.72" />
     <PackageVersion Include="Swashbuckle.AspNetCore" Version="10.2.3" />
-    <PackageVersion Include="System.CommandLine" Version="2.0.10" />
+    <!-- 2.0.11 is SOURCE-IDENTICAL to 2.0.10 — verified against the upstream v2.0.10...v2.0.11 comparison,
+         not inferred from the version shape. It is a re-stamp tied to the SDK release train, so the risk is
+         zero by construction rather than by judgement. `Cli` is the only consumer. -->
+    <PackageVersion Include="System.CommandLine" Version="2.0.11" />
+    <!-- HELD at 10.0.10 while 10.0.11 exists, deliberately. This is TensorPrimitives — a decode hot-path
+         dependency — and this repository does not take a version bump on a hot path without a measurement,
+         however unlikely a servicing release is to touch vectorization. What it needs is a canary run (an
+         untouched path measured on both sides to prove the box did not move), not a full re-benchmark. Not
+         run today: five agents were on the machine and the benchmark host takes a global mutex, so any
+         number taken now would have been measured against a contended box — which is worse than no number. -->
     <PackageVersion Include="System.Numerics.Tensors" Version="10.0.10" />
     <PackageVersion Include="xunit.v3" Version="3.2.2" />
     <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5" />

@@ -47,7 +47,7 @@ namespace DevOnBike.Overfit.Demo.VoiceClone
             var testText = a.Get("test");
             var testOut = a.Get("test-out") ?? "voice_test.wav";
             var adapterIn = a.Get("adapter");
-            var synthOnly = adapterIn is not null;
+            var synthOnly = adapterIn != null;
             // 1200 codes ≈ 14 s and truncated longer sentences; 2000 ≈ 23 s covers a full LinkedIn-length line.
             var maxNew = int.TryParse(a.Get("max-new"), out var mn) ? mn : 2000;
             var temperature = float.TryParse(a.Get("temp"), System.Globalization.CultureInfo.InvariantCulture, out var tp) ? tp : 0.6f;
@@ -60,7 +60,7 @@ namespace DevOnBike.Overfit.Demo.VoiceClone
 
             // Optional Whisper → auto-transcribe each segment (robust: can't misalign like order-pairing a transcript).
             var whisperArg = a.Get("whisper");
-            var whisper = whisperArg is not null && File.Exists(whisperArg) ? WhisperTranscriber.Load(whisperArg) : null;
+            var whisper = whisperArg != null && File.Exists(whisperArg) ? WhisperTranscriber.Load(whisperArg) : null;
 
             // Diagnostic: split the recording and transcribe each segment with Whisper, alongside the expected line
             // — reveals transcript/segment misalignment and badly-recorded sentences. Needs --whisper.
@@ -69,12 +69,12 @@ namespace DevOnBike.Overfit.Demo.VoiceClone
                 return RunCheck(recording, transcript, a.Get("whisper"), minSilence, threshold);
             }
 
-            if (snacDir is null || !PathExists(snacDir))
+            if (snacDir == null || !PathExists(snacDir))
             {
                 Console.Error.WriteLine($"Missing --snac (path not found: {snacDir ?? "<null>"}).");
                 return 1;
             }
-            if (!synthOnly && folder is not null)
+            if (!synthOnly && folder != null)
             {
                 if (!PathExists(folder))
                 {
@@ -82,21 +82,21 @@ namespace DevOnBike.Overfit.Demo.VoiceClone
                     return 1;
                 }
             }
-            if (!synthOnly && folder is null)
+            if (!synthOnly && folder == null)
             {
-                if (recording is null || !PathExists(recording))
+                if (recording == null || !PathExists(recording))
                 {
                     Console.Error.WriteLine($"Missing --recording (path not found: {recording ?? "<null>"}).");
                     return 1;
                 }
                 // Either a transcript (paired by order) or --whisper (auto-transcribe each segment).
-                if (whisper is null && (transcript is null || !PathExists(transcript)))
+                if (whisper == null && (transcript == null || !PathExists(transcript)))
                 {
                     Console.Error.WriteLine("Need --transcript <txt> (paired by order) or --whisper <ggml> (auto-transcribe per segment).");
                     return 1;
                 }
             }
-            if (!dryRun && (orpheus is null || !File.Exists(orpheus)))
+            if (!dryRun && (orpheus == null || !File.Exists(orpheus)))
             {
                 Console.Error.WriteLine("Training needs --orpheus <orpheus.gguf> (omit it only with --dry-run).");
                 return 1;
@@ -105,9 +105,9 @@ namespace DevOnBike.Overfit.Demo.VoiceClone
             var snac = Snac.Load(snacDir);
 
             // Synth-only: load an existing adapter and speak --test in the cloned voice (no training).
-            if (adapterIn is not null)
+            if (adapterIn != null)
             {
-                if (orpheus is null || !File.Exists(orpheus) || !File.Exists(adapterIn) || testText is null)
+                if (orpheus == null || !File.Exists(orpheus) || !File.Exists(adapterIn) || testText == null)
                 {
                     Console.Error.WriteLine("--adapter mode needs --orpheus <gguf>, an existing --adapter <file>, and --test \"sentence\".");
                     return 1;
@@ -160,7 +160,7 @@ namespace DevOnBike.Overfit.Demo.VoiceClone
             trainer.SaveAdapter(outPath);
             Console.WriteLine($"\nSaved adapter → {outPath}");
 
-            if (testText is not null)
+            if (testText != null)
             {
                 Synthesize(trainer, snac, testText, voice, testOut);
             }
@@ -198,7 +198,7 @@ namespace DevOnBike.Overfit.Demo.VoiceClone
 
                 // Per-file folder: NN.wav + sibling NN.txt. Normalizes + trims lead/trail silence per clip.
                 // --trim-threshold / --trim-padding tune the silence trim (bigger padding preserves soft onsets).
-                if (folder is not null)
+                if (folder != null)
                 {
                     var trimThreshold = float.TryParse(a.Get("trim-threshold"), System.Globalization.CultureInfo.InvariantCulture, out var tt) ? tt : 0.015f;
                     var trimPadding = float.TryParse(a.Get("trim-padding"), System.Globalization.CultureInfo.InvariantCulture, out var tpad) ? tpad : 0.1f;
@@ -209,7 +209,7 @@ namespace DevOnBike.Overfit.Demo.VoiceClone
                 }
 
                 var audio = AudioFile.ReadMono(recording!, out var rate);
-                if (whisper is not null)
+                if (whisper != null)
                 {
                     Console.WriteLine($"recording: {audio.Length / (double)rate:F1}s @ {rate} Hz | auto-transcribing each segment with Whisper");
                     return builder.BuildFromRecording(audio, rate, voice, whisper, minSilence, threshold);
@@ -292,7 +292,7 @@ namespace DevOnBike.Overfit.Demo.VoiceClone
         // next to the expected transcript line — so misalignment / bad takes are visible.
         private static int RunCheck(string? recording, string? transcript, string? whisperArg, float minSilence, float threshold)
         {
-            if (recording is null || !File.Exists(recording) || transcript is null || !File.Exists(transcript))
+            if (recording == null || !File.Exists(recording) || transcript == null || !File.Exists(transcript))
             {
                 Console.Error.WriteLine("--check needs --recording <wav> and --transcript <txt>.");
                 return 1;
@@ -330,7 +330,7 @@ namespace DevOnBike.Overfit.Demo.VoiceClone
         {
             var buf = new int[tok.CountTokens(text)];
             var n = tok.Encode(text, buf);
-            return n == buf.Length ? buf : buf[..n];
+            return n == buf.Length ? buf : buf.AsSpan(0, n).ToArray();
         }
 
         private static int ResolveAudioBase(ITokenizer tok)
@@ -395,7 +395,7 @@ namespace DevOnBike.Overfit.Demo.VoiceClone
                 {
                     continue;
                 }
-                var key = argv[i][2..];
+                var key = argv[i].Substring(2);
                 // Capture BEFORE consuming the value: `argv[++i]` advances i, so re-testing would look at
                 // the NEXT argument and could null out the value that was just parsed.
                 var hasValue = i + 1 < argv.Length && !argv[i + 1].StartsWith("--", StringComparison.Ordinal);
@@ -414,10 +414,17 @@ namespace DevOnBike.Overfit.Demo.VoiceClone
         }
     }
 
-    internal sealed class Args(Dictionary<string, string?> map)
+    internal sealed class Args
     {
-        public string? Get(string key) => map.TryGetValue(key, out var v) ? v : null;
+        private readonly Dictionary<string, string?> _map;
 
-        public bool Has(string key) => map.ContainsKey(key);
+        public Args(Dictionary<string, string?> map)
+        {
+            _map = map;
+        }
+
+        public string? Get(string key) => _map.TryGetValue(key, out var v) ? v : null;
+
+        public bool Has(string key) => _map.ContainsKey(key);
     }
 }

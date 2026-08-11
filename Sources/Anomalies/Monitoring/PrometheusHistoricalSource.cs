@@ -48,7 +48,7 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
         {
             ArgumentNullException.ThrowIfNull(config);
             _config = config;
-            _ownsHttpClient = httpClient is null;
+            _ownsHttpClient = httpClient == null;
             _http = httpClient ?? BuildHttpClient(config);
         }
 
@@ -137,7 +137,7 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
                     // No template means this deployment has no source for the feature. Issuing a query built
                     // from a metric name that is not there returns an empty result indistinguishable from a
                     // real one, so it is not issued at all.
-                    if (query is null)
+                    if (query == null)
                     {
                         continue;
                     }

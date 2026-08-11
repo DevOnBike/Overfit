@@ -252,7 +252,7 @@ namespace DevOnBike.Overfit.Tests.TestSupport
                 {
                     runStart = runStart < 0 ? t : runStart;
                     runFloor = Math.Max(runFloor, floor);
-                    runPeak = Math.Max(runPeak, ratios[^1]);
+                    runPeak = Math.Max(runPeak, ratios[ratios.Count - 1]);
                     runPods = Math.Max(runPods, ratios.Count);
 
                     continue;

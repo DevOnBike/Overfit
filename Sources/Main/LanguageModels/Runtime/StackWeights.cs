@@ -21,7 +21,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
     {
         private static TensorStorage<float> CreateStorage(float[]? a)
         {
-            if (a is null || a.Length == 0)
+            if (a == null || a.Length == 0)
             {
                 return new TensorStorage<float>(0);
             }

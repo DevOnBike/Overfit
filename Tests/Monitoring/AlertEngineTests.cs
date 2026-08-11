@@ -417,11 +417,18 @@ namespace DevOnBike.Overfit.Tests.Monitoring
             }
         }
 
-        private sealed class SlowSink(int delayMs = 50) : IAlertSink
+        private sealed class SlowSink : IAlertSink
         {
+            private readonly int _delayMs;
+
+            public SlowSink(int delayMs = 50)
+            {
+                _delayMs = delayMs;
+            }
+
             public Task SendAsync(AlertEvent alert, CancellationToken ct = default)
             {
-                return Task.Delay(delayMs, ct);
+                return Task.Delay(_delayMs, ct);
             }
         }
     }

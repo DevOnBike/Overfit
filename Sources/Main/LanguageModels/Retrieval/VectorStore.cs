@@ -126,7 +126,7 @@ namespace DevOnBike.Overfit.LanguageModels.Retrieval
 
             var buffer = new VectorMatch[capacity];
             var written = Search(query, buffer);
-            return written == buffer.Length ? buffer : buffer[..written];
+            return written == buffer.Length ? buffer : buffer.AsSpan(0, written).ToArray();
         }
 
         /// <summary>The id stored at <paramref name="index"/> (0-based, less than <see cref="Count"/>).</summary>
@@ -204,8 +204,8 @@ namespace DevOnBike.Overfit.LanguageModels.Retrieval
             {
                 writer.Write(_ids[i]);
                 var payload = _payloads[i];
-                writer.Write(payload is not null);
-                if (payload is not null)
+                writer.Write(payload != null);
+                if (payload != null)
                 {
                     writer.Write(payload);
                 }
