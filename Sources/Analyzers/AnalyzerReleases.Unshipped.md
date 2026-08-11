@@ -48,3 +48,6 @@ OVERFIT039 | Reliability | Warning | Blocking on a task (.GetAwaiter().GetResult
 OVERFIT040 | Reliability | Warning | Synchronous method calling APIs that have async siblings — the method should return a task, or say with a pragma why it is synchronous by design
 OVERFIT041 | Reliability | Warning | CancellationToken parameter with a default value — the caller silently gets None and the operation is uncancellable while still looking cancellable
 OVERFIT042 | Design | Warning | Index-from-end operator (x[^1]) — a readability decision; write the arithmetic out. Ranges are unaffected
+OVERFIT043 | Design | Warning | Range operator (x[1..]) — a readability decision; use Slice/Substring/AsSpan
+OVERFIT044 | Design | Warning | Null pattern (is null / is not null) — a readability decision; use == null / != null
+OVERFIT045 | Design | Warning | Primary constructor on a class or struct — write an ordinary constructor; positional records are exempt
