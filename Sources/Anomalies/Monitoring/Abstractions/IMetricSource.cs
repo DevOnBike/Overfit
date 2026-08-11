@@ -22,6 +22,6 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring.Abstractions
         ///     Reads the current metric sample.
         ///     Implementation may await the end of the scraping window before returning.
         /// </summary>
-        ValueTask<MetricSnapshot> ReadAsync(CancellationToken ct = default);
+        ValueTask<MetricSnapshot> ReadAsync(CancellationToken ct);
     }
 }

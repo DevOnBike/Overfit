@@ -51,10 +51,21 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
         /// synchronous HTTP inside an async call graph, holding the caller's thread for the whole round
         /// trip. Neither is worth a signature; the callback returns a task.
         /// </remarks>
+        /// <param name="cancellationToken">
+        /// Checked <b>once, on entry, and nowhere else</b>. Stated rather than implied because the shape
+        /// invites the opposite assumption: this method awaits one <paramref name="podsReporting"/> probe per
+        /// surviving candidate across every channel, so it is the long part of a discovery run, and none of it
+        /// can be abandoned once started.
+        ///
+        /// <para>The reason is the callback's own signature — <c>Func&lt;string, Task&lt;int&gt;&gt;</c>
+        /// carries no token, so there is nothing to hand the queries that do the waiting. Cancelling mid-run
+        /// needs that signature widened first; a loop check here would only stop the gaps between probes,
+        /// which is not where the time goes.</para>
+        /// </param>
         public static async Task<IReadOnlyList<ChannelDiscovery>> ProposeAsync(
             IReadOnlySet<string> available,
             Func<string, Task<int>> podsReporting,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
 

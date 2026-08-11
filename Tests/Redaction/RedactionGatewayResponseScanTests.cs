@@ -85,6 +85,7 @@ namespace DevOnBike.Overfit.Tests.Redaction
                         Redactor.CreateDefault(),
                         new NullAuditSink(),
                         RedactionPolicy.Default(),
+                        CancellationToken.None,
                         clientKeys: null,
                         scanResponses: true);
                 }

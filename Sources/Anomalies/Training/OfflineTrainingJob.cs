@@ -41,8 +41,8 @@ namespace DevOnBike.Overfit.Anomalies.Training
         public async Task<OfflineTrainingResult> RunAsync(
             string csvPath,
             string checkpointPath,
-            IProgress<TrainingProgress>? progress = null,
-            CancellationToken ct = default)
+            IProgress<TrainingProgress>? progress,
+            CancellationToken ct)
         {
             // 1. Load
             progress?.Report(new TrainingProgress { Phase = "Loading CSV", Step = 0, TotalSteps = _cfg.Steps });

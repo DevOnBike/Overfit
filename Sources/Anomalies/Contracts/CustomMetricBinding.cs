@@ -110,6 +110,24 @@ namespace DevOnBike.Overfit.Anomalies.Contracts
     /// <para>It reaches the calibrator as a name on <c>AnomalyGuardOptions.NonCalibratedCustomChannels</c>,
     /// because <c>FloorCalibrator</c> never receives a binding.</para>
     /// </param>
+    /// <param name="MinAbsoluteStepChange">
+    /// Smallest <b>move in the cross-pod median between the two halves of the window</b>, in this metric's own
+    /// units, that counts as a level shift. An absolute quantity in the signal's unit, not a ratio and not a
+    /// percentage of the level.
+    ///
+    /// <para><b>A different quantity from <paramref name="MinAbsoluteTrendChange"/>, which is why it is a
+    /// separate field.</b> A trend floor is fitted to how far ONE series travels across a window; this is
+    /// fitted to how far the median across pods steps between its halves. Sharing the two was measured on the
+    /// built-in side (<c>AN-D4b</c>) and made the step gate demand 40% of the level on
+    /// <c>MemoryWorkingSetBytes</c> and 123% at the low decile of <c>GcGen2HeapBytes</c> — a gate asking for
+    /// more than the whole signal.</para>
+    ///
+    /// <para><b>Zero means "not set", and falls back rather than disabling the gate.</b>
+    /// <c>AnomalyGuard.LevelShiftFloor</c> takes this if positive, else
+    /// <paramref name="MinAbsoluteTrendChange"/>, else the calibrator's fitted step distribution — and that
+    /// order is the compatibility contract: the middle step is what the gate used before this field existed,
+    /// so adding it moved no already-configured channel.</para>
+    /// </param>
     public readonly record struct CustomMetricBinding(
         string Name,
         string Source,

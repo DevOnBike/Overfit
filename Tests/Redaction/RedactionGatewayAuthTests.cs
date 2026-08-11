@@ -35,6 +35,7 @@ namespace DevOnBike.Overfit.Tests.Redaction
                         Redactor.CreateDefault(),
                         new NullAuditSink(),
                         RedactionPolicy.Default(),
+                        CancellationToken.None,
                         new[] { "sk-gateway-client" });
                 }
                 catch

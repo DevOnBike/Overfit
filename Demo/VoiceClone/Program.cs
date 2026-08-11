@@ -370,7 +370,11 @@ namespace DevOnBike.Overfit.Demo.VoiceClone
             Console.WriteLine($"built {ex.Count} examples | token length min {min} / avg {sum / Math.Max(ex.Count, 1)} / max {max}");
         }
 
+        // OVERFIT040 — synchronous by design: one-shot dataset preparation in a console tool. Read once,
+        // before any training or synthesis starts, on the process's main thread with nothing else to do.
+#pragma warning disable OVERFIT040
         private static List<string> ReadTranscript(string path)
+#pragma warning restore OVERFIT040
         {
             var lines = new List<string>();
             foreach (var raw in File.ReadAllLines(path))

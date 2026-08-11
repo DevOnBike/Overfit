@@ -59,7 +59,7 @@ namespace DevOnBike.Overfit.Cli
             string repo,
             string? pattern,
             string? explicitFile,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken)
         {
             using var response = await Http.GetAsync($"{Endpoint}/api/models/{repo}", cancellationToken);
 
@@ -132,7 +132,7 @@ namespace DevOnBike.Overfit.Cli
         public static async Task<string?> GetExpectedSha256Async(
             string repo,
             string file,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken)
         {
             try
             {
@@ -182,7 +182,7 @@ namespace DevOnBike.Overfit.Cli
         /// </summary>
         public static async Task<string?> GetSiblingSha256Async(
             string url,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken)
         {
             try
             {
@@ -240,7 +240,7 @@ namespace DevOnBike.Overfit.Cli
             string file,
             string destPath,
             string? expectedSha256,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken)
             => StreamWithResumeAsync(
                 $"{Endpoint}/{repo}/resolve/main/{file}", file, destPath, expectedSha256, cancellationToken);
 
@@ -251,7 +251,7 @@ namespace DevOnBike.Overfit.Cli
             string url,
             string destPath,
             string? expectedSha256,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken)
             => StreamWithResumeAsync(
                 url, Path.GetFileName(new Uri(url).AbsolutePath), destPath, expectedSha256, cancellationToken);
 

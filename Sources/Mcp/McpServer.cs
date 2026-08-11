@@ -77,7 +77,7 @@ namespace DevOnBike.Overfit.Mcp
         /// Serves newline-delimited JSON-RPC until <paramref name="input"/> ends (host closed our
         /// stdin — the standard MCP shutdown signal) or the token is cancelled. Blocking.
         /// </summary>
-        public void Run(TextReader input, TextWriter output, CancellationToken cancellationToken = default)
+        public void Run(TextReader input, TextWriter output, CancellationToken cancellationToken)
         {
             ArgumentNullException.ThrowIfNull(input);
             ArgumentNullException.ThrowIfNull(output);

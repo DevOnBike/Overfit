@@ -71,7 +71,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             try
             {
                 var cfg = GptTrainingConfig.Quick;
-                var result = await new OfflineTrainingJob(cfg).RunAsync(CsvPath, checkpoint);
+                var result = await new OfflineTrainingJob(cfg).RunAsync(CsvPath, checkpoint, progress: null, TestContext.Current.CancellationToken);
                 _out.WriteLine($"Quick base: {result.SnapshotsLoaded:N0} snapshots, val {result.InitialLoss:F2}→{result.FinalValLoss:F2}");
 
                 using var model = new GPT1Model(new GPT1Config

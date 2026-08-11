@@ -107,8 +107,8 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
             for (var cycle = 1; cycle <= cycles; cycle++)
             {
                 var now = DateTimeOffset.UtcNow;
-                var resolvedPods = await topology.RefreshAsync();
-                var read = await source.ReadAsync(now - endOffset, window);
+                var resolvedPods = await topology.RefreshAsync(TestContext.Current.CancellationToken);
+                var read = await source.ReadAsync(now - endOffset, window, TestContext.Current.CancellationToken);
 
                 if (read is null)
                 {

@@ -248,7 +248,13 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.Observability
         /// 1 MiB. Near-instant even for multi-GB files (no full read), and identifies a specific model
         /// build in practice. This is a partial fingerprint, not a full content hash — labelled as such.
         /// </summary>
+        // OVERFIT040 — synchronous by design: a one-shot STARTUP path. The single caller is Program.Main,
+        // before the host is built, to label the build-info metric once. Nothing is serving at that point,
+        // so there is no request thread to free and no pool to starve; the two 1 MiB reads happen while the
+        // process is doing nothing else.
+#pragma warning disable OVERFIT040
         public static string FingerprintModel(string path)
+#pragma warning restore OVERFIT040
         {
             try
             {

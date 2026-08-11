@@ -31,7 +31,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             double[] latency = [900.0, 950.0, 1000.0, 1050.0, 1100.0];
 
             using var source = Source(("pod-a", latency));
-            var window = await source.ReadAsync(End, TimeSpan.FromSeconds(60));
+            var window = await source.ReadAsync(End, TimeSpan.FromSeconds(60), TestContext.Current.CancellationToken);
 
             Assert.NotNull(window);
 
@@ -59,7 +59,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
         public async Task AStepWithNoSampleStaysNaN()
         {
             using var source = Source(("pod-a", [900.0, double.NaN, 1000.0]), skipIndex: 1);
-            var window = await source.ReadAsync(End, TimeSpan.FromSeconds(60));
+            var window = await source.ReadAsync(End, TimeSpan.FromSeconds(60), TestContext.Current.CancellationToken);
 
             Assert.NotNull(window);
 
@@ -78,7 +78,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
         public async Task NoSeriesAtAllYieldsNull_NotAWindowOfNaN()
         {
             using var source = Source();
-            var window = await source.ReadAsync(End, TimeSpan.FromSeconds(60));
+            var window = await source.ReadAsync(End, TimeSpan.FromSeconds(60), TestContext.Current.CancellationToken);
 
             Assert.Null(window);
         }
@@ -89,7 +89,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             using var source = Source(
                 ("pod-c", [1.0, 2.0]), ("pod-a", [3.0, 4.0]), ("pod-b", [5.0, 6.0]));
 
-            var window = await source.ReadAsync(End, TimeSpan.FromSeconds(60));
+            var window = await source.ReadAsync(End, TimeSpan.FromSeconds(60), TestContext.Current.CancellationToken);
 
             Assert.NotNull(window);
             Assert.Equal(["pod-a", "pod-b", "pod-c"], window.Pods);
@@ -111,7 +111,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
                 ("pod-live", [1.0, 2.0, 3.0, 4.0, 5.0]),
                 ("pod-deleted", [1.0, 2.0]));
 
-            var window = await source.ReadAsync(End, TimeSpan.FromSeconds(60));
+            var window = await source.ReadAsync(End, TimeSpan.FromSeconds(60), TestContext.Current.CancellationToken);
 
             Assert.NotNull(window);
             Assert.Equal(["pod-live"], window.Pods);
@@ -129,7 +129,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
                 ("pod-a", [1.0, 2.0, 3.0, 4.0, 5.0]),
                 ("pod-b", [1.0, 2.0, 3.0, 4.0]));
 
-            var window = await source.ReadAsync(End, TimeSpan.FromSeconds(60));
+            var window = await source.ReadAsync(End, TimeSpan.FromSeconds(60), TestContext.Current.CancellationToken);
 
             Assert.NotNull(window);
             Assert.Equal(["pod-a", "pod-b"], window.Pods);
@@ -151,7 +151,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
                 ("pod-b", [1.0]),
                 ("pod-c", [1.0]));
 
-            var window = await source.ReadAsync(End, TimeSpan.FromSeconds(60));
+            var window = await source.ReadAsync(End, TimeSpan.FromSeconds(60), TestContext.Current.CancellationToken);
 
             Assert.NotNull(window);
             Assert.Equal(["pod-a", "pod-b", "pod-c"], window.Pods);
@@ -166,13 +166,13 @@ namespace DevOnBike.Overfit.Tests.Anomalies
                 ("pod-live", [1.0, 2.0, 3.0, 4.0, 5.0]),
                 ("pod-deleted", [1.0, 2.0]));
 
-            await source.ReadAsync(End, TimeSpan.FromSeconds(60));
+            await source.ReadAsync(End, TimeSpan.FromSeconds(60), TestContext.Current.CancellationToken);
 
             Assert.NotEmpty(source.StalePodsExcluded);
 
             using var clean = Source(("pod-live", [1.0, 2.0, 3.0, 4.0, 5.0]));
 
-            await clean.ReadAsync(End, TimeSpan.FromSeconds(60));
+            await clean.ReadAsync(End, TimeSpan.FromSeconds(60), TestContext.Current.CancellationToken);
 
             Assert.Empty(clean.StalePodsExcluded);
         }
@@ -186,13 +186,13 @@ namespace DevOnBike.Overfit.Tests.Anomalies
 
             using (var source = new PrometheusMetricWindowSource(Template(), client))
             {
-                await source.ReadAsync(End, TimeSpan.FromSeconds(60));
+                await source.ReadAsync(End, TimeSpan.FromSeconds(60), TestContext.Current.CancellationToken);
             }
 
             // Would throw ObjectDisposedException if the source had disposed what it was lent.
             using var again = new PrometheusMetricWindowSource(Template(), client);
 
-            Assert.NotNull(await again.ReadAsync(End, TimeSpan.FromSeconds(60)));
+            Assert.NotNull(await again.ReadAsync(End, TimeSpan.FromSeconds(60), TestContext.Current.CancellationToken));
         }
 
         private static PrometheusMetricWindowSource Source(

@@ -113,7 +113,7 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
         /// grid, leaving <c>NaN</c> where a series has no sample for a step.</para>
         /// </summary>
         public async Task<IReadOnlyList<(long ScrapeTimestampMs, List<RawMetricSeries> Series)>> FetchAsync(
-            CancellationToken ct = default)
+            CancellationToken ct)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
 

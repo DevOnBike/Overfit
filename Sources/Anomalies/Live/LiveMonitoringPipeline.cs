@@ -153,7 +153,7 @@ namespace DevOnBike.Overfit.Anomalies.Live
         /// pod through the adaptive monitor, raises alerts on the raw score, and surfaces/auto-applies
         /// per-pod adaptation.
         /// </summary>
-        public async Task RunAsync(CancellationToken ct = default)
+        public async Task RunAsync(CancellationToken ct)
         {
             while (!ct.IsCancellationRequested)
             {

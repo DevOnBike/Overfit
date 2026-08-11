@@ -168,7 +168,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             public IReadOnlyList<string> StalePodsExcluded => [];
 
             public Task<MetricWindow?> ReadAsync(
-                DateTimeOffset end, TimeSpan window, CancellationToken ct = default)
+                DateTimeOffset end, TimeSpan window, CancellationToken ct)
             {
                 return Task.FromResult<MetricWindow?>(null);
             }

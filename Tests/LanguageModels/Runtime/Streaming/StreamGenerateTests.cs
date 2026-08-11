@@ -43,7 +43,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Streaming
             var opts = new StreamingOptions(maxTokens: 5, stopTokens: [], sampling: SamplingOptions.Greedy);
             var tokens = new List<int>();
 
-            await foreach (var t in session.StreamGenerateAsync(opts))
+            await foreach (var t in session.StreamGenerateAsync(opts, TestContext.Current.CancellationToken))
             {
                 tokens.Add(t);
             }
@@ -78,7 +78,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Streaming
                 sampling: SamplingOptions.Greedy);
 
             var tokens = new List<int>();
-            await foreach (var t in session.StreamGenerateAsync(opts))
+            await foreach (var t in session.StreamGenerateAsync(opts, TestContext.Current.CancellationToken))
             {
                 tokens.Add(t);
             }
@@ -143,7 +143,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Streaming
 
             await Assert.ThrowsAsync<OverfitRuntimeException>(async () =>
             {
-                await foreach (var _ in session.StreamGenerateAsync(opts))
+                await foreach (var _ in session.StreamGenerateAsync(opts, TestContext.Current.CancellationToken))
                 {
                     // should never reach here
                 }
@@ -174,7 +174,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Streaming
             s2.Reset(prompt);
             var viaStream = new List<int>();
             var opts = new StreamingOptions(n, [], SamplingOptions.Greedy);
-            await foreach (var t in s2.StreamGenerateAsync(opts))
+            await foreach (var t in s2.StreamGenerateAsync(opts, TestContext.Current.CancellationToken))
             {
                 viaStream.Add(t);
             }
@@ -204,7 +204,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Streaming
                 QwenTokenizer.ImEnd);
 
             var tokens = new List<int>();
-            await foreach (var t in session.StreamGenerateAsync(opts))
+            await foreach (var t in session.StreamGenerateAsync(opts, TestContext.Current.CancellationToken))
             {
                 tokens.Add(t);
             }

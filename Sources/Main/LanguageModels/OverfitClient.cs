@@ -287,9 +287,9 @@ namespace DevOnBike.Overfit.LanguageModels
         /// </summary>
         public Task<string> SendAsync(
             string userMessage,
+            CancellationToken cancellationToken,
             Action<string>? onText = null,
-            ITokenConstraint? constraint = null,
-            CancellationToken cancellationToken = default)
+            ITokenConstraint? constraint = null)
         {
             return Task.Run(() => Send(userMessage, onText, constraint), cancellationToken);
         }

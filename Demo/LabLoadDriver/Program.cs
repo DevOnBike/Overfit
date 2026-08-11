@@ -102,7 +102,21 @@ while (!cancellation.IsCancellationRequested)
 
     // Fire and forget, so a slow or stalling replica cannot hold the pacer back. That is the whole point of
     // pacing: offered load is a property of the client, not of how the server happens to be feeling.
+    //
+    // OVERFIT046 — WHAT MAKES THE DISCARD SAFE: SendAsync's whole body is inside a try/catch(Exception) that
+    // counts the failure into `failed`, and the one statement before that try is an Interlocked.Increment
+    // that cannot throw. The response is disposed inside the same try, so a fault during disposal is caught
+    // too. The task therefore never completes faulted and there is nothing for an observer to observe.
+    // Awaiting it here would restore exactly the coupling the pacer exists to remove, and the header comment
+    // above records what that coupling cost: a throttled replica received less traffic and read as idle.
+    //
+    // WHAT IS LOST: the failure is COUNTED, not attributed. No URL, no status code and no exception type
+    // reaches the log, so `failed=N` in the five-minute report is the only evidence, and a cancellation
+    // during shutdown is counted the same as a refused connection. That is acceptable here because the
+    // driver's job is offered load, and the workload's own metrics are what the guard reads.
+#pragma warning disable OVERFIT046
     _ = SendAsync(client, endpoint);
+#pragma warning restore OVERFIT046
 
     if (now - reportedAt > TimeSpan.FromMinutes(5))
     {

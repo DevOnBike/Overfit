@@ -368,9 +368,10 @@ namespace DevOnBike.Overfit.Cli
             try
             {
                 OverfitAspNetServer.Serve(
-                    pool, modelName, host, port, DefaultSystemPrompt, embedder, tts,
-                    onListening: PrintBanner,
-                    cancellationToken: cts.Token);
+                    pool, modelName, host, port, DefaultSystemPrompt, cts.Token,
+                    embedder: embedder,
+                    tts: tts,
+                    onListening: PrintBanner);
             }
             finally
             {
@@ -625,7 +626,14 @@ namespace DevOnBike.Overfit.Cli
 
             using var audit = new JsonLinesAuditSink(auditPath);
             Console.WriteLine($"audit log: {Path.GetFullPath(auditPath)}");
-            RedactionGateway.Serve(host, port, resolvedUpstream, key, redactor, audit, policy, clientKeys, resolvedScanResponses);
+            // CancellationToken.None, and it is a real gap rather than a formality: unlike `serve` above,
+            // this command wires no Console.CancelKeyPress handler, so there is no token in scope to hand
+            // over. The gateway therefore blocks for the lifetime of the process and Ctrl+C kills it rather
+            // than unwinding it. Passing None states that plainly instead of letting a default hide it.
+            RedactionGateway.Serve(
+                host, port, resolvedUpstream, key, redactor, audit, policy, CancellationToken.None,
+                clientKeys: clientKeys,
+                scanResponses: resolvedScanResponses);
             return 0;
         }
 
@@ -984,7 +992,10 @@ namespace DevOnBike.Overfit.Cli
                 var version = typeof(Commands).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
                 var server = new McpServer("overfit", version, tools, Console.Error);
                 Console.Error.WriteLine($"[overfit-mcp] serving {tools.Count} tool(s) over stdio ({Path.GetFileNameWithoutExtension(path)}). The host stops the server by closing stdin.");
-                server.Run(Console.In, Console.Out);
+                // CancellationToken.None by design, not by omission: MCP's shutdown signal is the host
+                // closing our stdin, which Run already returns on, and no other token exists in this
+                // command. There is nothing to cancel from here.
+                server.Run(Console.In, Console.Out, CancellationToken.None);
                 return 0;
             }
             catch (Exception ex)

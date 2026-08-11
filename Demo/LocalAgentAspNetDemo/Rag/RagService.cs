@@ -118,7 +118,18 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.Rag
         /// model-embedding anisotropy mean is corpus-wide, so it must be recomputed when the corpus changes), and
         /// the fresh index is persisted for next time.
         /// </summary>
+        // OVERFIT040 — synchronous by design, for two independent reasons and either alone is enough. The
+        // body runs entirely inside `lock (_gate)`, which cannot span an await; and the cost here is
+        // EMBEDDING every chunk of every document, which is CPU-bound and occupies a thread whether or not
+        // this method returns a task. The File.ReadAllText / ReadAllBytes calls the rule points at are a
+        // rounding error beside it, so making the method asynchronous would move no work off the thread.
+        //
+        // WHAT IS LOST: POST /documents/index does hold its request thread for the whole index build. That
+        // is inherent to doing the work inline; the fix is a background job with a status endpoint, not an
+        // async signature, and it is out of scope for a demo that indexes a handful of markdown files.
+#pragma warning disable OVERFIT040
         public IndexSummary IndexDocuments()
+#pragma warning restore OVERFIT040
         {
             lock (_gate)
             {
@@ -242,7 +253,12 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.Rag
             return new IndexSummary(loaded.Count, perFile);
         }
 
+        // OVERFIT040 — synchronous by design: private, and its only caller is IndexDocuments, which runs
+        // under `lock (_gate)`. An async signature here could not be awaited from inside that lock, so the
+        // constraint is the caller's; see the note on IndexDocuments.
+#pragma warning disable OVERFIT040
         private static string ComputeFileHash(string path)
+#pragma warning restore OVERFIT040
         {
             using var stream = File.OpenRead(path);
             return Convert.ToHexString(SHA256.HashData(stream));

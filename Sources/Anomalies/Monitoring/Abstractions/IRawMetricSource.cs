@@ -16,6 +16,6 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring.Abstractions
     /// </summary>
     public interface IRawMetricSource : IDisposable
     {
-        Task<List<RawMetricSeries>> ReadAsync(CancellationToken ct = default);
+        Task<List<RawMetricSeries>> ReadAsync(CancellationToken ct);
     }
 }

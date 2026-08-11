@@ -155,7 +155,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
                 return TryGetValue(pod, out placement);
             }
 
-            public Task<int> RefreshAsync(CancellationToken ct = default)
+            public Task<int> RefreshAsync(CancellationToken ct)
             {
                 Refreshes++;
 

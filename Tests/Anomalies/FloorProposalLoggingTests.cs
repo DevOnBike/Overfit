@@ -166,7 +166,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             public IReadOnlyList<string> StalePodsExcluded => [];
 
             public Task<MetricWindow?> ReadAsync(
-                DateTimeOffset end, TimeSpan window, CancellationToken ct = default)
+                DateTimeOffset end, TimeSpan window, CancellationToken ct)
             {
                 var names = new List<string>(12);
 

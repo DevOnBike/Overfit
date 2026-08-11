@@ -8,6 +8,8 @@ using DevOnBike.Overfit.Anomalies.Hosting;
 using DevOnBike.Overfit.Anomalies.Incidents;
 using DevOnBike.Overfit.Anomalies.Incidents.Abstractions;
 using DevOnBike.Overfit.Anomalies.Monitoring.Abstractions;
+using DevOnBike.Overfit.Runtime;
+using DevOnBike.Overfit.Tests.TestSupport;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.Anomalies
@@ -26,9 +28,12 @@ namespace DevOnBike.Overfit.Tests.Anomalies
     /// the clock. Two independently constructed services driven through the same windows and the same
     /// <c>now</c> sequence is the comparison that answers "does replaying this produce the same report".</para>
     ///
-    /// <para><b>Scoped to store-less replay.</b> <see cref="AnomalyGuard"/> still falls back to the wall clock
-    /// for <c>restoredAt</c> when a durable incident store is supplied; this service passes none, and these
-    /// tests do not widen the claim past that.</para>
+    /// <para><b>Was scoped to store-less replay, and the reason given for that was wrong.</b> This paragraph
+    /// used to say the service "passes none" — no durable store — which it never did: it passes the store it
+    /// is given. The real limit was narrower and worse, and is now fixed: the service accepted an
+    /// <c>IClock</c> and did not hand it to <see cref="AnomalyGuard"/>, so restore fell back to the wall clock
+    /// whatever a caller injected. <see cref="RestoreJudgesIncidentAgeByTheInjectedClock"/> pins the fix;
+    /// without it a store-backed replay begins from a state that depends on what time it was run at.</para>
     ///
     /// <para><b>All three cycle outcomes are driven here, not only the one a healthy fixture produces.</b>
     /// <see cref="GuardCycleOutcome"/> exists to keep "the source saw nothing" apart from "the cycle threw";
@@ -290,16 +295,91 @@ namespace DevOnBike.Overfit.Tests.Anomalies
         }
 
         private static AnomalyGuardService Service(
-            AnomalyGuardServiceOptions options, IMetricWindowSource source, IIncidentSink sink)
+            AnomalyGuardServiceOptions options,
+            IMetricWindowSource source,
+            IIncidentSink sink,
+            IIncidentStore? store = null,
+            IClock? clock = null)
         {
-            // No topology, no incident store, no learned state: the store-less replay this determinism claim
-            // is scoped to. A topology would reach the live cluster, and a store would take AnomalyGuard's
-            // restoredAt fallback down to the wall clock.
+            // No topology by default, and no store: a topology would reach the live cluster. The store and
+            // clock are supplied only by the restore test, which is the one case where either is observable —
+            // restore happens once, in the constructor, and nothing on the cycle path reads them.
             return new AnomalyGuardService(
                 options,
                 source,
                 sink,
-                NullLogger<AnomalyGuardService>.Instance);
+                NullLogger<AnomalyGuardService>.Instance,
+                store: store,
+                clock: clock);
+        }
+
+        /// <summary>
+        /// The clock this service is given must be the one its guard judges restored incidents against.
+        ///
+        /// <para><b>What was wrong.</b> The service took an <see cref="IClock"/>, used it for the cycle
+        /// timestamp, and constructed <see cref="AnomalyGuard"/> without it — so the guard kept its own
+        /// <c>SystemClock</c>. With <c>restoredAt: null</c>, that clock is what
+        /// <c>IncidentTracker.Restore</c> compares against <c>MaxRestoredIncidentAge</c>
+        /// (<c>now - saved.LastSeen &gt; maxAge</c>), so a caller that injected a clock still had its restore
+        /// decided by the wall clock. Nothing could see it: the cycle results were unaffected, only the state
+        /// the run started from.</para>
+        ///
+        /// <para><b>Why the store straddles the bound rather than sitting inside it.</b> A fake clock this far
+        /// from the wall clock makes every stored incident look ancient, so an assertion of "some were
+        /// dropped" would pass on the broken code too — the wall clock drops them as well, for the wrong
+        /// reason. Two records either side of the two-hour bound pin it from both directions: the answer is 1
+        /// only if the bound was applied AND applied against <see cref="T0"/>. Unwired, the wall clock drops
+        /// both and this reads 0; with no age bound at all it would read 2.</para>
+        /// </summary>
+        [Fact]
+        public void RestoreJudgesIncidentAgeByTheInjectedClock()
+        {
+            var options = Options();
+            var maxAge = options.Guard.MaxRestoredIncidentAge;
+
+            // The premise this test's discrimination rests on, asserted rather than assumed: T0 must be
+            // further behind the wall clock than the age bound, or the wall-clock path would keep the recent
+            // record too and a broken wiring would pass. If T0 is ever moved forward, this fails here and
+            // says why instead of going quietly green.
+            Assert.True(
+                DateTimeOffset.UtcNow - T0 > maxAge,
+                $"T0 ({T0:O}) is within {maxAge} of now, so this test can no longer tell the injected clock "
+                + "from the wall clock. Move T0 further into the past.");
+
+            var store = new MemoryStore();
+
+            store.Save(IncidentStateFormat.Write(
+                [
+                    Saved(id: 1, lastSeen: T0 - (maxAge / 2)),    // inside the bound as of T0
+                    Saved(id: 2, lastSeen: T0 - (maxAge * 2)),    // outside it as of T0
+                ],
+                nextId: 3));
+
+            using var source = new ScriptedMetricWindowSource([]);
+            using var service = Service(options, source, new NullSink(), store, new ManualClock(T0));
+
+            Assert.Equal(1, service.RestoredIncidents);
+        }
+
+        /// <summary>A saved incident that differs from its siblings only where this test looks: identity and age.</summary>
+        private static PersistedIncident Saved(long id, DateTimeOffset lastSeen)
+        {
+            return new PersistedIncident(
+                id, lastSeen, lastSeen, 2, 0, $"overfit/pod-{id}", [$"overfit/pod-{id}"],
+                "overfit", "overfit-server", "rs", $"pod-{id}", "node", "LatencyP95Ms",
+                SignalClass.Symptom, 0.75, lastSeen, lastSeen, 1, 1, "scripted");
+        }
+
+        private sealed class MemoryStore : IIncidentStore
+        {
+            private string? _state;
+
+            /// <summary>Memory does not fail in a test; there is nothing to report.</summary>
+            public string? LastError => null;
+
+            public string? Load() => _state;
+
+            public void Save(string state) => _state = state;
         }
 
         private static AnomalyGuardServiceOptions Options()
@@ -390,7 +470,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             }
 
             public Task<MetricWindow?> ReadAsync(
-                DateTimeOffset end, TimeSpan window, CancellationToken ct = default)
+                DateTimeOffset end, TimeSpan window, CancellationToken ct)
             {
                 LastEnd = end;
                 LastWindow = window;
@@ -433,7 +513,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             }
 
             public Task<MetricWindow?> ReadAsync(
-                DateTimeOffset end, TimeSpan window, CancellationToken ct = default)
+                DateTimeOffset end, TimeSpan window, CancellationToken ct)
             {
                 Reads++;
 

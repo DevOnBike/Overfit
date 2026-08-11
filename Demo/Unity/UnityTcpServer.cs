@@ -75,9 +75,18 @@ namespace DevOnBike.Overfit.Demo.Unity.Server
         ///     typically catch that and loop back into <see cref="AcceptAndServe"/> to accept
         ///     a reconnection.
         /// </remarks>
+        // OVERFIT040 — synchronous by design. This is a console host that owns its own threads: DemoMode
+        // calls this from a dedicated loop and catches the disconnect to call it again. There is no thread
+        // pool under pressure, so "holds a thread" is not a cost here — the thread exists to do exactly this.
+        //
+        // The signature also cannot become asynchronous without changing what it is: onFrame returns
+        // ReadOnlySpan<Vector2>, a ref struct, which cannot cross an await or appear in an async method's
+        // signature. That span is the zero-copy contract the per-frame path is built on.
+#pragma warning disable OVERFIT040
         public void AcceptAndServe(
             Func<Vector2, Vector2, ReadOnlySpan<Vector2>> onFrame,
             CancellationToken cancellation)
+#pragma warning restore OVERFIT040
         {
             using var client = _listener.AcceptTcpClient();
             client.NoDelay = true;
@@ -113,7 +122,13 @@ namespace DevOnBike.Overfit.Demo.Unity.Server
             }
         }
 
+        // OVERFIT040 — synchronous by design: private, and its only caller is AcceptAndServe, which cannot
+        // await it (see the note there). Reading one 16-byte command frame per Unity frame on the thread
+        // that already owns the connection is also the lower-latency shape — a pool hop per frame would add
+        // scheduling jitter to a real-time exchange.
+#pragma warning disable OVERFIT040
         private static void ReadExactly(NetworkStream stream, byte[] buffer)
+#pragma warning restore OVERFIT040
         {
             var total = 0;
 

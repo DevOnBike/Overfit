@@ -81,7 +81,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
                 step: TimeSpan.FromSeconds(15));
 
             using var source = new PrometheusHistoricalSource(config);
-            var frames = await source.FetchAsync();
+            var frames = await source.FetchAsync(TestContext.Current.CancellationToken);
 
             var history = Collect(frames);
 

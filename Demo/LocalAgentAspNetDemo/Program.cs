@@ -39,7 +39,14 @@ namespace DevOnBike.Overfit.Demo.LocalAgent
     /// </summary>
     public static class Program
     {
+        // OVERFIT040 — synchronous by design, and this is the shape the rule's own text names as legitimate:
+        // a process entry point. `app.Run()` blocks THIS thread — the application's main thread, which exists
+        // for nothing else — until the host shuts down. No pool thread is waiting on it, so nothing is held
+        // that could otherwise serve a request; `async Task Main` + `await app.RunAsync()` would move the
+        // same block onto a state machine and free nothing.
+#pragma warning disable OVERFIT040
         public static void Main(string[] args)
+#pragma warning restore OVERFIT040
         {
             var builder = WebApplication.CreateBuilder(args);
 

@@ -446,9 +446,11 @@ dotnet_diagnostic.OVERFIT900.severity = error
 # OVERFIT040 stays at suggestion globally and is raised only where threads are a scarce resource. In
 # Sources/Main most of its hits are one-shot model and config loading, where synchronous IS correct: a
 # GGUF reader is not improved by returning a task. Raising it there would make the rule lie.
-dotnet_diagnostic.OVERFIT040.severity = suggestion
-dotnet_diagnostic.OVERFIT043.severity = suggestion
-dotnet_diagnostic.OVERFIT044.severity = suggestion
+#
+# THE THREE SEVERITY LINES THAT USED TO SIT HERE HAVE MOVED to their own [*.cs] section near the end of
+# this file. They were written here on 2026-08-11 and this section is [Sources/Main/**.cs], so the word
+# "globally" three lines above was false for the whole day: outside Sources/Main all three ran at their
+# DEFAULT severity, which is Warning. See that section for what it measured.
 
 # ── OVERFIT046 — task discarded with `_ =`, added 2026-08-11 ──────────────────────────────────────────
 #
@@ -468,9 +470,15 @@ dotnet_diagnostic.OVERFIT044.severity = suggestion
 # wrapped end to end in a catch that counts the failure, and each LabWorkload body logs from a catch. So all
 # five take a pragma naming the reason and NONE is better fixed. That leaves the rule with no live defect to
 # catch, which is the OVERFIT027 posture — error at zero sites, as a tripwire on a shape that has already
-# produced one real defect here. Promoting before the five pragmas land would red-build three projects at
-# once, so it ships at warning and this line becomes `error` in the change that lands the last pragma.
-dotnet_diagnostic.OVERFIT046.severity = warning
+# produced one real defect here.
+#
+# ALL FIVE PRAGMAS HAVE NOW LANDED (2026-08-11), so the rule is `error` — but the severity line is NOT here
+# any more. THE LINE THAT USED TO SIT HERE WAS IN THE WRONG SECTION: this block is inside
+# [Sources/Main/**.cs], and four of the rule's five sites are under Demo/. Outside the library the rule was
+# therefore running at its ANALYZER DEFAULT, which is also Warning — so the configuration looked correct and
+# was inert, and writing `error` here would have bound the library (zero sites) and left the four real ones
+# at warning. Identical in kind to what the OVERFIT040/043/044 note at the end of this file describes.
+# See the [*.cs] section near the end for the severity and what promoting it is worth.
 
 # ── OVERFIT033 / OVERFIT034 — the two MSBuild guards, now analyzers ───────────────────────────────────
 #
@@ -531,6 +539,46 @@ dotnet_diagnostic.OVERFIT027.severity = error
 dotnet_diagnostic.OVERFIT028.severity = error
 dotnet_diagnostic.OVERFIT029.severity = error
 dotnet_diagnostic.OVERFIT030.severity = error
+
+# ── OVERFIT040 / 043 / 044 — the ratchet's severity, GLOBAL on purpose ────────────────────────────────
+# The reasoning for these three lives with the 040-045 backlog table earlier in this file. Only the
+# severities are here, and the placement is the whole point: they were written inside
+# [Sources/Main/**.cs] on 2026-08-11 while their own prose said "stays at suggestion globally", so for
+# one day the ratchet applied to the library and nowhere else.
+#
+# WHAT THAT COST, measured the same day by a deduplicated census over a whole-solution build: 60
+# OVERFIT040 (Cli 15, Server.AspNet 12, Mcp 6, Demo 6, rest scattered), 16 OVERFIT044 and 2 OVERFIT043 —
+# 78 of the tree's 115 analyzer warnings — were not a backlog anyone had chosen to carry. They were the
+# rules running STRICTER outside the library than the decision that created them, because a severity
+# written in a directory section is silent about every directory it does not name. Nothing reports this:
+# the build is green either way and the prose reads as though it had been applied.
+#
+# This section is [*.cs] and sits after every directory section above, so it wins for Sources/Main too —
+# which is what "globally" was always meant to say. Escalating any of the three later means moving its
+# line into a directory section, deliberately, with the sweep that earns it.
+[*.cs]
+dotnet_diagnostic.OVERFIT040.severity = suggestion
+dotnet_diagnostic.OVERFIT043.severity = suggestion
+dotnet_diagnostic.OVERFIT044.severity = suggestion
+
+# ── OVERFIT046 — task discarded with `_ =`. ERROR, and global for the same reason as the three above ──────
+# The rule's own reasoning is in its block earlier in this file; only the severity is here, and the
+# placement is the point: that block sits inside [Sources/Main/**.cs] and FOUR OF THE RULE'S FIVE SITES ARE
+# UNDER Demo/. A severity written there binds the library and is silent about every directory it does not
+# name. This section is [*.cs] and comes after every directory section above, so it wins everywhere.
+#
+# WHAT PROMOTING IT IS WORTH, stated plainly because the honest version is unflattering: THE RULE SHIPS WITH
+# ZERO LIVE DEFECTS TO CATCH. Its one true positive — Cli/GuardMetricsEndpoint, whose serve loop died
+# silently on any non-transport exception — was fixed by someone else the same day, and its remaining four
+# reports are all correct fire-and-forget that already observe their own exceptions. Each now carries a
+# pragma naming what makes the discard safe AND what is given up (2026-08-11: LabWorkload's three
+# fault-injection endpoints and LabLoadDriver's paced send).
+#
+# So this is a TRIPWIRE ON A SHAPE THAT HAS ALREADY PRODUCED ONE REAL DEFECT HERE, exactly like OVERFIT027
+# at zero sites — NOT a cleanup tool. It buys one thing: `_ = SomethingAsync()` can no longer be written by
+# accident to get past CS4014, which Directory.Build.props promotes to error and which is silent on the
+# discard. Every future one has to be signed.
+dotnet_diagnostic.OVERFIT046.severity = error
 
 # ── Source-generated files, by name ───────────────────────────────────────────────────────────────────
 # The System.Text.Json source generator emits its context under a path the [**/obj/**] section does not

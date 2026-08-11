@@ -44,7 +44,7 @@ namespace DevOnBike.Overfit.Server.AspNet.Endpoints
         /// caller that has already disconnected should not hold a request thread while its error body is
         /// written to a socket nobody is reading.
         /// </param>
-        public static async Task WriteErrorAsync(HttpResponse response, int status, string message, CancellationToken cancellationToken = default)
+        public static async Task WriteErrorAsync(HttpResponse response, int status, string message, CancellationToken cancellationToken)
         {
             var body = new OpenAiErrorResponse { Error = new OpenAiError { Message = message } };
             var json = JsonSerializer.Serialize(body, OpenAiJsonContext.Default.OpenAiErrorResponse);

@@ -195,6 +195,19 @@ namespace DevOnBike.Overfit.Anomalies.Hosting
         /// nothing. Optional, and omitting it is the conservative choice: every silent metric is then warned
         /// about every cycle, which says too much rather than too little.
         /// </param>
+        /// <param name="clock">
+        /// Time source for the cycle timestamp. Defaults to <see cref="SystemClock"/>.
+        ///
+        /// <para>Read in one place — the <c>now</c> handed to <c>RunCycleAsync</c> once per cycle by the
+        /// background loop. That is what makes a replay reproducible: every window boundary and every incident
+        /// age downstream is derived from this value rather than from a clock read somewhere deeper.</para>
+        ///
+        /// <para><b>It does NOT reach the <see cref="AnomalyGuard"/> this service builds.</b> The guard is
+        /// constructed without a clock, so it keeps its own <see cref="SystemClock"/> for the one thing it
+        /// uses one for — the staleness bound when restoring incidents from <paramref name="store"/>.
+        /// Injecting a fake clock here therefore makes the cycle sequence deterministic but leaves restore
+        /// reading the wall clock.</para>
+        /// </param>
         public AnomalyGuardService(
             AnomalyGuardServiceOptions options,
             IMetricWindowSource source,
@@ -253,7 +266,16 @@ namespace DevOnBike.Overfit.Anomalies.Hosting
                 // durable state existed in the library while nothing deployable reached it — the seasonal
                 // baseline and the floor calibration would have relearned from nothing on every rollout, and
                 // a guard that has forgotten its floors is quietly the noisy one.
-                historyStore: learnedState);
+                historyStore: learnedState,
+
+                // The same omission again, one field along, and it survived because it is invisible from
+                // outside: this service accepted an IClock, used it for the cycle timestamp, and left the
+                // guard to construct its own SystemClock. With `restoredAt: null` above, the guard's clock
+                // is what IncidentTracker.Restore compares against `MaxRestoredIncidentAge`
+                // (IncidentTracker.cs:229, `now - saved.LastSeen > maxAge`) — so a caller that injected a
+                // clock still had its restore judged by the wall clock, and a test asserting on restored
+                // incidents was asserting against whatever time the suite happened to run at.
+                clock: clock);
         }
 
         /// <summary>Incidents adopted from durable state when this instance started. Zero without a store.</summary>
@@ -607,10 +629,33 @@ namespace DevOnBike.Overfit.Anomalies.Hosting
         /// against an <c>EndOffset</c> whose default is two minutes, which is why this is recorded rather
         /// than guarded.</para>
         ///
-        /// <para><b>Deterministic for store-less replay only.</b> Two cold instances driven through the same
-        /// windows and the same <paramref name="now"/> sequence produce equal results;
-        /// <see cref="AnomalyGuard"/> still falls back to the wall clock for <c>restoredAt</c> when a durable
-        /// store is supplied, and this service passes none.</para>
+        /// <para><b>Deterministic for the cycle sequence; the STARTING state needs one more thing.</b> Two
+        /// instances driven through the same windows and the same <paramref name="now"/> sequence produce
+        /// equal results from equal starting state. Nothing on the cycle path reads a clock — that is what the
+        /// paragraphs above are about — so the only non-determinism left is what the guard adopted before the
+        /// first cycle.</para>
+        ///
+        /// <para>That adoption happens once, in the constructor, and only with a durable store: incidents are
+        /// kept or dropped by <c>now - LastSeen &gt; MaxRestoredIncidentAge</c>, where <c>now</c> is
+        /// <c>restoredAt ?? clock.UtcNow</c> and this service passes <c>restoredAt: null</c>. So a
+        /// store-backed replay is reproducible <b>exactly when the caller injects a clock</b>, and under the
+        /// default <see cref="SystemClock"/> it is <b>not</b> — the starting state then depends on what time
+        /// the replay was run at, and two runs of the same history a few hours apart can legitimately begin
+        /// with different incidents open. Injecting a clock is the fix, and it is available; it is not the
+        /// default.</para>
+        ///
+        /// <para><b>CORRECTION, and recorded rather than quietly rewritten</b> — the same treatment as the
+        /// <c>fallback</c> note in <see cref="AnomalyGuard"/>, and for the same reason: prose drifting away
+        /// from the code is a defect class this repository finds by reading, so the drift is worth more as
+        /// evidence than a clean paragraph is. This said <i>"Deterministic for store-less replay only … this
+        /// service passes none"</i>, resting on the claim that no durable store ever reached the guard from
+        /// here. <b>It does</b> — the constructor's <c>store</c> argument is passed straight through — and the
+        /// <c>store</c> parameter's own documentation records that wiring as having been added after the fact,
+        /// which is when this sentence became false. A second sentence, that the guard "still falls back to
+        /// the wall clock", was true for a different reason than the one given: the service accepted an
+        /// <c>IClock</c> and did not hand it to the guard, so the fallback was to the wall clock no matter
+        /// what the caller injected. That is fixed at the construction above; this paragraph describes the
+        /// behaviour after the fix.</para>
         /// </summary>
         /// <param name="now">The moment this cycle is evaluated as of.</param>
         /// <param name="ct">Cancellation.</param>

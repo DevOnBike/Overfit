@@ -276,6 +276,21 @@ app.MapPost("/fault/oom", () =>
     var token = faults.BeginOomAllocation();
     var logger = app.Logger;
 
+    // OVERFIT046 — fire-and-forget by construction: the endpoint has to answer BEFORE the allocation starts,
+    // or the caller sees a connection reset when the kernel kills this process and cannot tell an OOM from a
+    // network fault (the paragraph above this endpoint is that decision).
+    //
+    // WHAT MAKES THE DISCARD SAFE: everything the delegate does after its two locals is inside the
+    // try/catch(Exception) below, which logs through `logger.LogError` — the note on that catch ("Observed,
+    // not swallowed") records the incident where a swallowed throw made this endpoint report success while
+    // failing. The token, not the task handle, is the stop signal, and POST /fault/clear cancels it.
+    //
+    // WHAT IS LOST: two regions sit outside that catch — the `List<IntPtr>` construction before the `try`
+    // and the `finally` that frees the blocks. Neither throws in practice (a fixed-capacity list and
+    // Marshal.FreeHGlobal), but a fault in either would fault the task with nobody holding it. And nothing
+    // can await this to learn whether the kill actually happened; that is what the bounded loop, the LogError
+    // at the bound and IsAllocatingToOom exist for.
+#pragma warning disable OVERFIT046
     _ = Task.Run(() =>
     {
         var held = new List<IntPtr>((int)(maxBytes / chunkBytes));
@@ -328,6 +343,7 @@ app.MapPost("/fault/oom", () =>
             }
         }
     }, token);
+#pragma warning restore OVERFIT046
 
     return Results.Text("allocating native memory until the container limit kills this pod");
 });
@@ -357,6 +373,18 @@ app.MapPost("/fault/contend", (int? threads, int? holdMicroseconds) =>
     var token = faults.BeginContention();
     var logger = app.Logger;
 
+    // OVERFIT046 — fire-and-forget by construction: these threads run until POST /fault/clear cancels the
+    // token, so the endpoint cannot wait for them and must answer while the fault is still injected.
+    //
+    // WHAT MAKES THE DISCARD SAFE: the delegate's entire body is inside try/catch(Exception), which logs
+    // through `logger.LogError` — stated on that catch, because a contention thread that dies silently leaves
+    // the fault half-injected and the measurement unattributable. Cancellation goes through the token, which
+    // is also passed to StartNew, so nothing outside needs the handle.
+    //
+    // WHAT IS LOST: how many of the `count` threads are still contending is not observable. A thread that
+    // failed logs, but nothing counts survivors, so a half-injected fault has to be read out of the log
+    // rather than out of state — unlike the OOM and leak faults, which FaultState reports through Describe().
+#pragma warning disable OVERFIT046
     for (var i = 0; i < count; i++)
     {
         _ = Task.Factory.StartNew(
@@ -386,6 +414,7 @@ app.MapPost("/fault/contend", (int? threads, int? holdMicroseconds) =>
             TaskCreationOptions.LongRunning,
             TaskScheduler.Default);
     }
+#pragma warning restore OVERFIT046
 
     return Results.Text($"contending on one lock with {count} thread(s), {hold} us per hold");
 });
@@ -394,11 +423,26 @@ app.MapPost("/fault/contend", (int? threads, int? holdMicroseconds) =>
 // does not. Reproducing them separately is what makes the distinction testable at all.
 app.MapPost("/fault/crash", () =>
 {
+    // OVERFIT046 — fire-and-forget by construction, for the same reason as /fault/oom: the response has to
+    // be sent before the process ends, or the caller cannot tell a deliberate crash from a network fault.
+    //
+    // WHAT MAKES THE DISCARD SAFE: this body is NOT the "catches and logs" case the other three are — it is
+    // the case where there is no later. Its last statement ends the process, so there is no continuation for
+    // a handle to serve and no observer that could still act on a result. Between the two statements nothing
+    // can fail on its own: Thread.Sleep throws only if something calls Thread.Interrupt on this thread, and
+    // nothing in this workload does.
+    //
+    // WHAT IS LOST: there is no catch, so IF the exit ever failed to happen this endpoint would have already
+    // answered "exiting in 500ms" and the pod would stay up, silently — which is precisely the shape AN-D6
+    // was (an injector whose failure reads as success). Left as-is deliberately: this file is the live lab's
+    // fault injector and this change is comments and pragmas only. Reported rather than fixed.
+#pragma warning disable OVERFIT046
     _ = Task.Run(() =>
     {
         Thread.Sleep(500);
         Environment.Exit(1);
     });
+#pragma warning restore OVERFIT046
 
     return Results.Text("exiting in 500ms");
 });

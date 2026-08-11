@@ -142,8 +142,8 @@ namespace DevOnBike.Overfit.Evolutionary.Runtime
 
         public void Run(
             int generations,
-            Action<EvolutionGenerationMetrics>? onGenerationCompleted = null,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken,
+            Action<EvolutionGenerationMetrics>? onGenerationCompleted = null)
         {
             ThrowIfDisposed();
 
@@ -162,8 +162,8 @@ namespace DevOnBike.Overfit.Evolutionary.Runtime
             int generations,
             int checkpointEvery,
             Func<int, string?> checkpointPathFactory,
-            Action<EvolutionGenerationMetrics>? onGenerationCompleted = null,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken,
+            Action<EvolutionGenerationMetrics>? onGenerationCompleted = null)
         {
             ThrowIfDisposed();
 

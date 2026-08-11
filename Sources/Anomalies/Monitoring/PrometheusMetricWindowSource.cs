@@ -146,7 +146,7 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
         public async Task<MetricWindow?> ReadAsync(
             DateTimeOffset end,
             TimeSpan window,
-            CancellationToken ct = default)
+            CancellationToken ct)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
             ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(window, TimeSpan.Zero);

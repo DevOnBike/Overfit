@@ -33,7 +33,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
                 PodNodes = [("api-7d9f8-abcde", "node-1"), ("api-7d9f8-fghij", "node-2")],
             });
 
-            Assert.Equal(2, await source.RefreshAsync());
+            Assert.Equal(2, await source.RefreshAsync(TestContext.Current.CancellationToken));
             Assert.True(source.TryResolve("api-7d9f8-abcde", out var placement));
 
             Assert.Equal("api", placement.Workload);
@@ -59,7 +59,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
                 PodNodes = [],
             });
 
-            await source.RefreshAsync();
+            await source.RefreshAsync(TestContext.Current.CancellationToken);
 
             Assert.True(source.TryResolve("srv-111-aaaaa", out var healthy));
             Assert.True(source.TryResolve("srv-degraded-222-bbbbb", out var degraded));
@@ -83,7 +83,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
                 PodNodes = [("kafka-0", "node-3")],
             });
 
-            await source.RefreshAsync();
+            await source.RefreshAsync(TestContext.Current.CancellationToken);
 
             Assert.True(source.TryResolve("kafka-0", out var placement));
             Assert.Equal("kafka", placement.Workload);
@@ -107,12 +107,12 @@ namespace DevOnBike.Overfit.Tests.Anomalies
 
             using var source = Source(stub);
 
-            Assert.Equal(1, await source.RefreshAsync());
+            Assert.Equal(1, await source.RefreshAsync(TestContext.Current.CancellationToken));
 
             stub.PodOwners = [];
             stub.ReplicaSetOwners = [];
 
-            Assert.Equal(-1, await source.RefreshAsync());
+            Assert.Equal(-1, await source.RefreshAsync(TestContext.Current.CancellationToken));
             Assert.True(source.TryResolve("api-1-a", out var placement));
             Assert.Equal("api", placement.Workload);
         }
@@ -129,11 +129,11 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             };
 
             using var source = Source(stub);
-            await source.RefreshAsync();
+            await source.RefreshAsync(TestContext.Current.CancellationToken);
 
             stub.Fail = true;
 
-            Assert.Equal(-1, await source.RefreshAsync());
+            Assert.Equal(-1, await source.RefreshAsync(TestContext.Current.CancellationToken));
             Assert.True(source.TryResolve("api-1-a", out _));
             Assert.Equal(1, source.Count);
         }
@@ -148,7 +148,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
                 PodNodes = [],
             });
 
-            await source.RefreshAsync();
+            await source.RefreshAsync(TestContext.Current.CancellationToken);
 
             Assert.False(source.TryResolve("something-else", out var placement));
             Assert.False(placement.IsKnown);

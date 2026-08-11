@@ -183,7 +183,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
                 _cts = cts;
             }
 
-            public Task<List<RawMetricSeries>> ReadAsync(CancellationToken ct = default)
+            public Task<List<RawMetricSeries>> ReadAsync(CancellationToken ct)
             {
                 if (_batches.Count == 0)
                 {
@@ -202,7 +202,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
         {
             public List<AlertEvent> Events { get; } = [];
 
-            public Task SendAsync(AlertEvent alert, CancellationToken ct = default)
+            public Task SendAsync(AlertEvent alert, CancellationToken ct)
             {
                 Events.Add(alert);
                 return Task.CompletedTask;

@@ -912,7 +912,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// </example>
         public async IAsyncEnumerable<int> StreamGenerateAsync(
             StreamingOptions options,
-            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+            [EnumeratorCancellation] CancellationToken cancellationToken)
         {
             ThrowIfDisposed();
 

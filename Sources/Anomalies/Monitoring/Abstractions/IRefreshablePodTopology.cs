@@ -22,6 +22,6 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring.Abstractions
         /// to carry on with stale coordinates and say so. An empty topology is not neutral: it gives every
         /// pod the same blank workload, and the grouper then merges the entire namespace into one incident.</para>
         /// </summary>
-        Task<int> RefreshAsync(CancellationToken ct = default);
+        Task<int> RefreshAsync(CancellationToken ct);
     }
 }

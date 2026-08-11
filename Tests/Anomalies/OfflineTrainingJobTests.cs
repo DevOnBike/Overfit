@@ -54,7 +54,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             var job = new OfflineTrainingJob(config);
             var progress = new Progress<TrainingProgress>(p => _output.WriteLine(p.ToString()));
 
-            var result = await job.RunAsync(CsvPath, CheckpointPath, progress);
+            var result = await job.RunAsync(CsvPath, CheckpointPath, progress, TestContext.Current.CancellationToken);
 
             _output.WriteLine(string.Empty);
             _output.WriteLine($"Snapshots loaded: {result.SnapshotsLoaded:N0}");
@@ -105,7 +105,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             var job = new OfflineTrainingJob(config);
             var progress = new Progress<TrainingProgress>(p => _output.WriteLine(p.ToString()));
 
-            var result = await job.RunAsync(CsvPath, medCheckpoint, progress);
+            var result = await job.RunAsync(CsvPath, medCheckpoint, progress, TestContext.Current.CancellationToken);
 
             _output.WriteLine(string.Empty);
             _output.WriteLine($"Final val loss: {result.FinalValLoss:F4}");
@@ -139,7 +139,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             var job = new OfflineTrainingJob(config);
             var progress = new Progress<TrainingProgress>(p => _output.WriteLine(p.ToString()));
 
-            var result = await job.RunAsync(CsvPath, prodCheckpoint, progress);
+            var result = await job.RunAsync(CsvPath, prodCheckpoint, progress, TestContext.Current.CancellationToken);
 
             _output.WriteLine(string.Empty);
             _output.WriteLine($"Final val loss: {result.FinalValLoss:F4}");

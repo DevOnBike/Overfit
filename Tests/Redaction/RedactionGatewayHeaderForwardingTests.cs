@@ -83,7 +83,8 @@ namespace DevOnBike.Overfit.Tests.Redaction
                         "sk-upstream-real",
                         Redactor.CreateDefault(),
                         new NullAuditSink(),
-                        RedactionPolicy.Default());
+                        RedactionPolicy.Default(),
+                        CancellationToken.None);
                 }
                 catch
                 {

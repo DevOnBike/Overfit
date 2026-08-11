@@ -55,7 +55,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
 
             using var source = new PrometheusMetricSource(config);
 
-            var series = await source.ReadAsync();
+            var series = await source.ReadAsync(TestContext.Current.CancellationToken);
 
             var report = new StringBuilder();
             report.Append("metric".PadRight(24)).Append("mapped  series\n");

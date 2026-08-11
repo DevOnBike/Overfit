@@ -37,10 +37,17 @@ namespace DevOnBike.Overfit.Extensions.AI
         }
 
         /// <inheritdoc />
+        // The defaults and the parameter order are declared on IEmbeddingGenerator<,> in
+        // Microsoft.Extensions.AI.Abstractions 10.8.3, which this repository does not control. `options`
+        // precedes the token, so the token cannot be made required on its own, and reordering would stop
+        // this method implementing the interface. Consumers reach this adapter as IEmbeddingGenerator, and
+        // a call through the interface binds the interface's defaults whatever is written here.
+#pragma warning disable OVERFIT041
         public async Task<GeneratedEmbeddings<Embedding<float>>> GenerateAsync(
             IEnumerable<string> values,
             EmbeddingGenerationOptions? options = null,
             CancellationToken cancellationToken = default)
+#pragma warning restore OVERFIT041
         {
             ArgumentNullException.ThrowIfNull(values);
             ObjectDisposedException.ThrowIf(_disposed, this);

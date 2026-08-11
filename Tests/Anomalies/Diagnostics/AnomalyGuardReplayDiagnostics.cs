@@ -465,7 +465,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
             public double TotalSeconds => (double)_ticks / Stopwatch.Frequency;
 
             public async Task<MetricWindow?> ReadAsync(
-                DateTimeOffset end, TimeSpan window, CancellationToken ct = default)
+                DateTimeOffset end, TimeSpan window, CancellationToken ct)
             {
                 var started = Stopwatch.GetTimestamp();
 
@@ -544,7 +544,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
                 return resolved;
             }
 
-            public async Task<int> RefreshAsync(CancellationToken ct = default)
+            public async Task<int> RefreshAsync(CancellationToken ct)
             {
                 var started = Stopwatch.GetTimestamp();
 

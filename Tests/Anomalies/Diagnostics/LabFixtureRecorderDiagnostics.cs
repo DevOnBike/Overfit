@@ -117,7 +117,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
             };
 
             using var source = new PrometheusHistoricalSource(config);
-            var batches = await source.FetchAsync();
+            var batches = await source.FetchAsync(TestContext.Current.CancellationToken);
 
             // FetchAsync returns one entry per scrape step, but every entry holds THE SAME series list — the
             // batching exists for TimeSeriesAligner, which windows the shared list around each timestamp.

@@ -121,7 +121,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
             for (var cycle = 0; cycle < cycles; cycle++)
             {
                 var now = first + (cadence * cycle);
-                var window = await source.ReadAsync(now - options.EndOffset, options.Window);
+                var window = await source.ReadAsync(now - options.EndOffset, options.Window, TestContext.Current.CancellationToken);
 
                 if (window is null)
                 {

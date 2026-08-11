@@ -107,7 +107,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
             for (var i = 0; i < windows; i++)
             {
                 var end = DateTimeOffset.UtcNow.AddMinutes(-2 - (i * stepMinutes));
-                var slice = await source.ReadAsync(end, window);
+                var slice = await source.ReadAsync(end, window, TestContext.Current.CancellationToken);
 
                 if (slice is null)
                 {

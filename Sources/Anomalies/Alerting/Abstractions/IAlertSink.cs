@@ -17,6 +17,6 @@ namespace DevOnBike.Overfit.Anomalies.Alerting.Abstractions
         ///     Sends the alert event to the destination.
         ///     Implementations must not throw — catch internally and log/swallow.
         /// </summary>
-        Task SendAsync(AlertEvent alert, CancellationToken ct = default);
+        Task SendAsync(AlertEvent alert, CancellationToken ct);
     }
 }

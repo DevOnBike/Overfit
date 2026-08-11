@@ -197,6 +197,16 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
         /// other. Without it the guard still learns within a run and forgets on restart — correct, just
         /// slower to become useful.
         /// </param>
+        /// <param name="clock">
+        /// Time source. Defaults to <see cref="SystemClock"/>.
+        ///
+        /// <para><b>Read in exactly one place</b>: it supplies the staleness bound when restoring from
+        /// <paramref name="store"/>, and only when <paramref name="restoredAt"/> was not given
+        /// (<c>restoredAt ?? clock.UtcNow</c>). Nothing else in the guard reads it — incident ages come from
+        /// the <c>observedAt</c> handed to <see cref="RunCycle"/>, which is a parameter rather than a clock
+        /// read precisely so a replay can drive the same history twice and get the same answer. Injecting a
+        /// clock here therefore changes restore behaviour and nothing else.</para>
+        /// </param>
         public AnomalyGuard(
             AnomalyGuardOptions options,
             IIncidentSink sink,
@@ -414,6 +424,30 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
         /// <param name="peerTrace">
         /// Optional per-member explanation of every peer comparison. For diagnostics: "no finding" has five
         /// different causes that call for opposite fixes, and only the individual gates tell them apart.
+        /// </param>
+        /// <param name="trendTrace">
+        /// Optional per-pod, per-signal explanation of every trend decision, built-in channels and custom ones
+        /// alike. For diagnostics.
+        ///
+        /// <para><b>Invoked for pods the trend family skipped as well as those it judged</b> — a pod inside
+        /// the warm-up grace is reported with <c>WarmingUp</c> set and its measured fields left at zero, which
+        /// is the case this callback was worth adding for. Without it, "tested and found healthy" and "never
+        /// tested" were the same silence, and during a rollout the second is every pod.</para>
+        /// </param>
+        /// <param name="ruleTrace">
+        /// Optional per-pod explanation of every absolute-threshold decision made against
+        /// <c>AnomalyGuardOptions.Rules</c> — the BUILT-IN metrics. For diagnostics.
+        ///
+        /// <para><b>It does not cover custom channels, and they are not exempt from the family.</b> A
+        /// <c>CustomMetricBinding</c> carrying a <c>Rule</c> is evaluated by the same detector and its findings
+        /// reach the same pipeline, but no row is emitted here. So an empty trace means "no built-in rule was
+        /// configured", never "no rule fired", and a trace that lists every built-in metric is still not the
+        /// whole rule family. This is the one asymmetry with <paramref name="trendTrace"/>, which does report
+        /// custom channels.</para>
+        ///
+        /// <para>A metric with no rule configured is not evaluated by this family at all and produces no row —
+        /// so an absent row is silence about three different things, and only the configuration says which.
+        /// </para>
         /// </param>
         public GuardCycleResult RunCycle(
             MetricWindow window,

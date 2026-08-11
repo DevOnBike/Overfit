@@ -41,9 +41,9 @@ namespace DevOnBike.Overfit.Server
             Redactor redactor,
             IRedactionAuditSink audit,
             RedactionPolicy policy,
+            CancellationToken cancellationToken,
             IReadOnlyCollection<string>? clientKeys = null,
-            bool scanResponses = false,
-            CancellationToken cancellationToken = default)
+            bool scanResponses = false)
         {
             ArgumentException.ThrowIfNullOrEmpty(upstreamBaseUrl);
             ArgumentNullException.ThrowIfNull(redactor);

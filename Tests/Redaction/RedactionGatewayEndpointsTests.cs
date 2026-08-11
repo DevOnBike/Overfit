@@ -93,7 +93,8 @@ namespace DevOnBike.Overfit.Tests.Redaction
                         "sk-not-leaked",
                         Redactor.CreateDefault(),
                         new NullAuditSink(),
-                        RedactionPolicy.Default());
+                        RedactionPolicy.Default(),
+                        CancellationToken.None);
                 }
                 catch
                 {

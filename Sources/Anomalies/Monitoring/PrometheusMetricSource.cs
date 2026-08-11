@@ -99,7 +99,7 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
         ///     Waits ScrapeInterval, then issues 24 parallel instant queries.
         ///     Returns one RawMetricSeries per (pod, metric) found in Prometheus.
         /// </summary>
-        public async Task<List<RawMetricSeries>> ReadAsync(CancellationToken ct = default)
+        public async Task<List<RawMetricSeries>> ReadAsync(CancellationToken ct)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
 

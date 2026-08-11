@@ -114,8 +114,13 @@ namespace DevOnBike.Overfit.Demo.Evaluation
             _maxOutputTokens = maxOutputTokens;
         }
 
+        // This OVERRIDES DelegatingChatClient.GetResponseAsync from Microsoft.Extensions.AI 10.8.3, so both
+        // the parameter order and the defaults are the package's — `options` precedes the token, and callers
+        // reach this through IChatClient, where the interface's defaults bind whatever an override writes.
+#pragma warning disable OVERFIT041
         public override Task<ChatResponse> GetResponseAsync(
             IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
+#pragma warning restore OVERFIT041
         {
             options = options?.Clone() ?? new ChatOptions();
             options.MaxOutputTokens ??= _maxOutputTokens;

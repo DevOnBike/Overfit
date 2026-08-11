@@ -41,10 +41,10 @@ namespace DevOnBike.Overfit.Server.AspNet
             string host,
             int port,
             string systemMessage,
+            CancellationToken cancellationToken,
             SentenceEmbedder? embedder = null,
             OrpheusVoiceEngine? tts = null,
-            Action<string>? onListening = null,
-            CancellationToken cancellationToken = default)
+            Action<string>? onListening = null)
         {
             ArgumentNullException.ThrowIfNull(pool);
 

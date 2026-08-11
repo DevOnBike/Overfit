@@ -69,6 +69,6 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring.Abstractions
         Task<MetricWindow?> ReadAsync(
             DateTimeOffset end,
             TimeSpan window,
-            CancellationToken ct = default);
+            CancellationToken ct);
     }
 }

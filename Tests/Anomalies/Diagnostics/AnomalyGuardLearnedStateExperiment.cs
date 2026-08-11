@@ -605,7 +605,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
             public List<DateTimeOffset> Starts { get; } = [];
 
             public async Task<MetricWindow?> ReadAsync(
-                DateTimeOffset end, TimeSpan window, CancellationToken ct = default)
+                DateTimeOffset end, TimeSpan window, CancellationToken ct)
             {
                 var result = await _inner.ReadAsync(end, window, ct);
 

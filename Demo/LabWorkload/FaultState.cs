@@ -135,7 +135,21 @@ namespace DevOnBike.Overfit.LabWorkload
         /// cancelled first: two overlapping injections would otherwise race to the limit and leave one loop
         /// unreachable.
         /// </summary>
+        // OVERFIT040 — synchronous by design. The call the rule points at is
+        // CancellationTokenSource.Cancel(), whose async sibling CancelAsync exists for ONE reason: Cancel
+        // runs registered callbacks on the calling thread, so a registration that blocks blocks the caller.
+        // There are no registrations here to run — grep the project: nothing calls Token.Register, and the
+        // fault loops poll IsCancellationRequested. The only registrations on these sources are the ones
+        // Task.Run / Task.Factory.StartNew make internally, which flip task state and return. So Cancel()
+        // has no user code to execute and holds no thread; this is not the "synchronous island" the rule
+        // describes, and CancelAsync would only push a flag flip onto the pool.
+        //
+        // The shape also constrains it: these methods return a CancellationToken (not a task) to synchronous
+        // minimal-API handlers, so an async signature would make the whole fault-injection surface
+        // asynchronous in order to set a flag.
+#pragma warning disable OVERFIT040
         public CancellationToken BeginOomAllocation()
+#pragma warning restore OVERFIT040
         {
             var fresh = new CancellationTokenSource();
             var previous = Interlocked.Exchange(ref _oomAllocation, fresh);
@@ -154,7 +168,11 @@ namespace DevOnBike.Overfit.LabWorkload
         /// Starts lock contention and returns the token that stops it, cancelling any run already in
         /// progress so two injections cannot leave one set of threads unreachable.
         /// </summary>
+        // OVERFIT040 — same constraint as BeginOomAllocation above: Cancel() has no registered callbacks to
+        // run here, so it holds no thread.
+#pragma warning disable OVERFIT040
         public CancellationToken BeginContention()
+#pragma warning restore OVERFIT040
         {
             var fresh = new CancellationTokenSource();
             var previous = Interlocked.Exchange(ref _contention, fresh);
@@ -166,7 +184,12 @@ namespace DevOnBike.Overfit.LabWorkload
         }
 
         /// <summary>Back to a good replica, without a restart.</summary>
+        // OVERFIT040 — same constraint as BeginOomAllocation above: Cancel() has no registered callbacks to
+        // run here, so it holds no thread. Clear() is also the undo path POST /fault/clear calls
+        // synchronously, and it must leave the fault state consistent before that handler returns.
+#pragma warning disable OVERFIT040
         public void Clear()
+#pragma warning restore OVERFIT040
         {
             StallProbability = 0.0;
             ErrorRate = 0.0;

@@ -66,6 +66,13 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
         /// operator already publishes it and updates it on failover; a hand-written list is wrong from the
         /// first election.</para>
         /// </param>
+        /// <param name="clock">
+        /// Time source. Defaults to <see cref="SystemClock"/>.
+        ///
+        /// <para>Read in one place — stamping <see cref="LastRefreshed"/> after a refresh that resolved pods.
+        /// Nothing about resolution or grouping depends on it, so injecting one changes what this type
+        /// REPORTS about its own freshness and never what it answers.</para>
+        /// </param>
         public PrometheusTopologySource(
             string prometheusBaseUrl,
             IPrometheusQuerySelector selector,
@@ -164,7 +171,7 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
         /// snapshot is kept and <c>-1</c> is returned, so a caller can report degraded topology without
         /// having its grouping silently collapse.
         /// </summary>
-        public async Task<int> RefreshAsync(CancellationToken ct = default)
+        public async Task<int> RefreshAsync(CancellationToken ct)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
 

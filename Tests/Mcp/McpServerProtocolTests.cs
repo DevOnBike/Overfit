@@ -190,7 +190,7 @@ namespace DevOnBike.Overfit.Tests.Mcp
                 """{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"echo","arguments":{"text":"x"}}}""" + "\n");
             using var output = new StringWriter();
 
-            server.Run(input, output);   // returns at EOF
+            server.Run(input, output, TestContext.Current.CancellationToken);   // returns at EOF
 
             var lines = output.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries);
             Assert.Equal(2, lines.Length);   // initialize + tools/call; the notification is silent

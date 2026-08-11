@@ -97,7 +97,9 @@ namespace DevOnBike.Overfit.Demo.AnomalyConsole
                         Console.WriteLine($"  step {p.Step}/{p.TotalSteps}  train={p.TrainLoss:F3}  val={p.ValLoss:F3}");
                     }
                 });
-                var result = await job.RunAsync(csv, checkpoint, progress);
+                // CancellationToken.None: this demo's Main wires no Console.CancelKeyPress handler, so no
+                // token exists to hand over. Training therefore runs to completion or dies with the process.
+                var result = await job.RunAsync(csv, checkpoint, progress, CancellationToken.None);
                 Console.WriteLine($"Trained: {result.SnapshotsLoaded:N0} snapshots, " +
                     $"val loss {result.InitialLoss:F2} → {result.FinalValLoss:F2}, {result.TrainingTime:mm\\:ss}.");
             }

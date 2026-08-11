@@ -399,7 +399,7 @@ namespace DevOnBike.Overfit.Tests.Monitoring
             public IReadOnlyList<AlertEvent> Received => _received;
             public int SendCount => _received.Count;
 
-            public Task SendAsync(AlertEvent alert, CancellationToken ct = default)
+            public Task SendAsync(AlertEvent alert, CancellationToken ct)
             {
                 lock (_received)
                 {
@@ -411,7 +411,7 @@ namespace DevOnBike.Overfit.Tests.Monitoring
 
         private sealed class ThrowingSink : IAlertSink
         {
-            public Task SendAsync(AlertEvent alert, CancellationToken ct = default)
+            public Task SendAsync(AlertEvent alert, CancellationToken ct)
             {
                 return Task.FromException(new InvalidOperationException("Sink failure"));
             }
@@ -426,7 +426,7 @@ namespace DevOnBike.Overfit.Tests.Monitoring
                 _delayMs = delayMs;
             }
 
-            public Task SendAsync(AlertEvent alert, CancellationToken ct = default)
+            public Task SendAsync(AlertEvent alert, CancellationToken ct)
             {
                 return Task.Delay(_delayMs, ct);
             }

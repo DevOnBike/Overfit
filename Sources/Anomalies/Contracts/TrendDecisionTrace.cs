@@ -22,8 +22,43 @@ namespace DevOnBike.Overfit.Anomalies.Contracts
     /// <param name="Signal">Channel name, built-in or custom.</param>
     /// <param name="Pod">The pod judged.</param>
     /// <param name="Status">The verdict, or <c>InsufficientData</c> when none was reached.</param>
-    /// <param name="WarmingUp">The pod was inside the warm-up grace and no test ran.</param>
+    /// <param name="WarmingUp">
+    /// The pod was inside the warm-up grace and no test ran.
+    ///
+    /// <para><b>When this is true the five measured fields below are placeholder zeros, not results</b> —
+    /// <paramref name="SlopePerSecond"/>, <paramref name="KendallTau"/>, <paramref name="PValue"/>,
+    /// <paramref name="Autocorrelation"/> and <paramref name="SampleCount"/> are all written as 0 because no
+    /// test produced any of them. A zero <paramref name="PValue"/> is the one that misleads, since read on its
+    /// own it is the most significant value the field can take. <paramref name="Status"/> is
+    /// <c>InsufficientData</c> in this case and is what should be read first.</para>
+    /// </param>
     /// <param name="FloorOverWindow">The change the signal had to clear, in its own unit.</param>
+    /// <param name="SlopePerSecond">
+    /// Theil-Sen slope in the signal's own units <b>per second</b> — the median of all pairwise slopes, so a
+    /// handful of spikes cannot steer it.
+    ///
+    /// <para><b>Not comparable with <paramref name="FloorOverWindow"/> as it stands</b>, and that is the one
+    /// thing to know before reading the two together: the floor is a change across the whole window, so the
+    /// comparison the gate performs is this slope multiplied by the window length in seconds. A slope that
+    /// looks tiny beside the floor may still have cleared it over an hour.</para>
+    /// </param>
+    /// <param name="KendallTau">
+    /// Monotonicity on −1…+1 — the effect size, and the answer to "how consistently", where
+    /// <paramref name="SlopePerSecond"/> answers "how fast". Sign follows the direction of travel.
+    /// </param>
+    /// <param name="PValue">
+    /// One-sided Mann-Kendall p-value in the direction observed, already discounted for
+    /// <paramref name="Autocorrelation"/>. Compared against the trend options' own bar, not read on its own.
+    /// </param>
+    /// <param name="Autocorrelation">
+    /// Lag-1 autocorrelation of the detrended series, on 0…1 — how much the significance had to be discounted.
+    /// Surfaced because a value near 1 means the window carries far less independent evidence than
+    /// <paramref name="SampleCount"/> suggests, which is the case where a confident-looking p-value is not.
+    /// </param>
+    /// <param name="SampleCount">
+    /// Observations the verdict rests on, after filtering and any thinning — not the window's length in
+    /// samples, which is larger whenever a scrape returned nothing.
+    /// </param>
     /// <param name="HasExpectation">A seasonal expectation was subtracted before the fit.</param>
     /// <param name="Reason">The detector's own sentence, which is what an operator reads first.</param>
     public readonly record struct TrendDecisionTrace(
