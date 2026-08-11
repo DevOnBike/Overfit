@@ -30,7 +30,6 @@ using DevOnBike.Overfit.Demo.LocalAgent.Rag;
 using DevOnBike.Overfit.Demo.LocalAgent.Swagger;
 using DevOnBike.Overfit.Demo.LocalAgent.Tools;
 using DevOnBike.Overfit.LanguageModels;
-using OpenTelemetry.Metrics;
 
 namespace DevOnBike.Overfit.Demo.LocalAgent
 {
@@ -90,20 +89,6 @@ namespace DevOnBike.Overfit.Demo.LocalAgent
                 ModelFingerprint = MetricsCollector.FingerprintModel(modelFile),
                 MmapEnabled = isGguf,
                 ModelLoadSeconds = Math.Round(loadStopwatch.Elapsed.TotalSeconds, 3),
-            });
-
-            builder.Services.AddOpenTelemetry().WithMetrics(metrics =>
-            {
-                metrics.AddMeter(MetricsCollector.MeterName);
-                // Latency-shaped buckets for the retrieval histogram (defaults start at 0 then jump to 5s, useless
-                // for ~10-50 ms searches); the rest keep their defaults.
-                metrics.AddView(
-                    "overfit.rag.search",
-                    new ExplicitBucketHistogramConfiguration
-                    {
-                        Boundaries = [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1],
-                    });
-                metrics.AddPrometheusExporter();
             });
 
             // Audit trail (production gate): append-only metadata log of every request — never prompt/response
@@ -363,9 +348,14 @@ namespace DevOnBike.Overfit.Demo.LocalAgent
             app.MapOpenAiApi(modelDisplay, systemMessage);
 
             // ── Metrics (Phase 4): Prometheus scrape endpoint ─────────────────────────
-            // OpenTelemetry serves the Prometheus exposition at /metrics from the Meter instruments recorded by
-            // MetricsCollector — the idiomatic ASP.NET Core path, no hand-rolled text.
-            app.MapPrometheusScrapingEndpoint();
+            // Written by MetricsCollector itself rather than by an exporter package. The only one that
+            // served this format was OpenTelemetry.Exporter.Prometheus.AspNetCore, in prerelease since 2022
+            // with no stable release ever, and it was the repository's only prerelease pin. The product
+            // hand-rolls the same format in Sources/Server.AspNet and Sources/Anomalies, so this now matches
+            // it. The Meter instruments are untouched: attach OpenTelemetry to MetricsCollector.MeterName if
+            // you want it, without editing this file.
+            app.MapGet("/metrics", (MetricsCollector metrics) =>
+                Results.Text(metrics.WriteExposition(), "text/plain; version=0.0.4"));
 
             app.Run();
         }

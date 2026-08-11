@@ -29,10 +29,17 @@
           Accepted prereleases. One entry per package, each with WHY and WHEN, so the next reader can judge
           whether the reason still holds instead of assuming somebody thought about it.
 
-          Nothing is accepted at the moment. `OpenTelemetry.Exporter.Prometheus.AspNetCore` is deliberately
-          NOT listed: it reaches only Demo/LocalAgentAspNetDemo, and the 2026-08-06 investigation concluded
-          the product does not need it at all — the stable OTLP exporter covers the same need off the same
-          Meter. See docs/specs/guard-telemetry-meter-plan.md, section "C0 resolved".
+          Nothing is accepted, and as of 2026-08-11 there is nothing to accept: the tree has NO prerelease
+          pin at all. `OpenTelemetry.Exporter.Prometheus.AspNetCore` was the one, was deliberately never
+          listed here, and is now gone — Demo/LocalAgentAspNetDemo writes its own Prometheus exposition
+          (Observability/BucketHistogram.cs + MetricsCollector.WriteExposition), which is what the product
+          already does in Sources/Server.AspNet and Sources/Anomalies. XC-6 in docs/TASKS.md carries the
+          reasoning, including why hand-rolling beat the stable OTLP exporter here: the demo's compose stack
+          SCRAPES /metrics, so OTLP would have needed a collector added to it.
+
+          That is this check working as intended, and the only evidence it has: a pin nobody re-examined for
+          four years became visible, then became a decision, then became a removal. Keep the list empty if
+          you can — an entry here is a standing exception, not a fix.
         -->
         <!-- <OverfitAcceptedPrerelease Include="Some.Package" Reason="why" Since="yyyy-mm-dd" /> -->
     </ItemGroup>

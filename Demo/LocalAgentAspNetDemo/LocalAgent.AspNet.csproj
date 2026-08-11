@@ -34,8 +34,6 @@
         <!-- Metrics: instrument with the built-in System.Diagnostics.Metrics (Meter) API and expose a
              Prometheus scrape endpoint via OpenTelemetry — the idiomatic ASP.NET Core path
              (learn.microsoft.com/aspnet/core/log-mon/metrics). -->
-        <PackageReference Include="OpenTelemetry.Extensions.Hosting" />
-        <PackageReference Include="OpenTelemetry.Exporter.Prometheus.AspNetCore" />
     </ItemGroup>
 
     <ItemGroup>

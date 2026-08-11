@@ -38,6 +38,16 @@
 		<ProjectReference Include="..\Sources\Server\Server.csproj" />
 		<ProjectReference Include="..\Sources\Server.AspNet\Server.AspNet.csproj" />
 		<ProjectReference Include="..\Sources\Anomalies\Anomalies.csproj" />
+		<!--
+		  The only Demo project this test assembly references, and it earns it. On 2026-08-11 the demo stopped
+		  getting its Prometheus exposition from OpenTelemetry.Exporter.Prometheus.AspNetCore — four years in
+		  prerelease, never a stable release, and the repository's only prerelease pin — and now writes the text
+		  itself, the way Sources/Server.AspNet and Sources/Anomalies already do. That swapped a package for
+		  real logic: cumulative buckets, label escaping, one HELP/TYPE pair per metric. A document that breaks
+		  any of those is REJECTED BY PROMETHEUS and looks perfectly fine from the outside, which is the class
+		  of failure this repository does not leave untested.
+		-->
+		<ProjectReference Include="..\Demo\LocalAgentAspNetDemo\LocalAgent.AspNet.csproj" />
 	</ItemGroup>
 
 	<ItemGroup>
