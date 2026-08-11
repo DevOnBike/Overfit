@@ -235,7 +235,12 @@ namespace DevOnBike.Overfit.LanguageModels.Chat
             var stops = new StopSequenceDetector(_stopSequences);
             var generated = new List<int>();
             var reply = new StringBuilder();
-            var prevText = string.Empty;
+
+            // Was `var prevText = string.Empty;` plus a DecodeToString of the WHOLE run inside EmitToken,
+            // i.e. a string holding the entire reply so far allocated once per generated token. The rule it
+            // implements — decode everything, emit only what has stopped changing, because byte-level BPE
+            // splits codepoints across tokens — is unchanged and now lives somewhere it can be tested.
+            using var detokenizer = new IncrementalDetokenizer();
             var sampling = options.Sampling;
             var maxNew = options.MaxNewTokens > 0 ? options.MaxNewTokens : int.MaxValue;
             var stopOnEot = options.StopOnEndOfTextToken;          // hoisted: `in` params can't be captured by a local fn
@@ -256,15 +261,15 @@ namespace DevOnBike.Overfit.LanguageModels.Chat
                 // Incremental detokenize: decode the whole run and emit only the newly stabilised
                 // suffix (byte-level BPE can leave a trailing partial codepoint until the next token
                 // arrives — hold it back rather than emit garbage).
-                var full = _tokenizer.DecodeToString(CollectionsMarshal.AsSpan(generated));
-                if (full.Length <= prevText.Length || !full.StartsWith(prevText, StringComparison.Ordinal))
+                if (!detokenizer.TryAdvance(_tokenizer, CollectionsMarshal.AsSpan(generated), out var delta))
                 {
                     return false;
                 }
-                var delta = full[prevText.Length..];
-                prevText = full;
 
-                var emit = stops.Append(delta);
+                // The one string this step still allocates, and it stays: StopSequenceDetector.Append and
+                // the onText callback both take a string, and both are public contracts. It is linear in
+                // the reply rather than quadratic, so it was never the cost worth removing.
+                var emit = stops.Append(delta.ToString());
                 if (emit.Length > 0)
                 {
                     reply.Append(emit);
