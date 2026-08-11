@@ -46,13 +46,16 @@ namespace DevOnBike.Overfit.Anomalies.Hosting
         private const int IncidentEventId = 5001;
         private const int FindingEventId = 5002;
         private const int CommonModeEventId = 5003;
+        private const int OngoingEvidenceEventId = 5103;
         private const int ResolvedEventId = 5007;
 
         // Built per instance rather than statically, because LoggerMessage.Define bakes the level into the
         // delegate and the level is the one thing a deployment genuinely needs to change. The templates are
         // still parsed once — at construction, not per call, which is the cost the pattern exists to avoid.
         private readonly Action<ILogger, string, string, string, double, int, Exception?> _incident;
-        private readonly Action<ILogger, string, string, string, double, Exception?> _commonMode;
+        private readonly Action<ILogger, string, string, string, double, string, Exception?> _commonMode;
+        private readonly Action<ILogger, string, string, SignalClass, double, string, Exception?> _ongoingFinding;
+        private readonly Action<ILogger, string, string, string, double, string, Exception?> _ongoingCommonMode;
         private readonly Action<ILogger, string, string, SignalClass, double, string, Exception?> _finding;
         private readonly Action<ILogger, long, string, string, Exception?> _resolved;
 
@@ -77,11 +80,39 @@ namespace DevOnBike.Overfit.Anomalies.Hosting
             // Common mode gets its own event because it is a different claim: the deployment moved, no
             // replica is accused. Emitted as an ordinary finding with an empty pod it would read as a
             // finding with a missing field, and "unknown pod" is exactly the wrong reading.
-            _commonMode = LoggerMessage.Define<string, string, string, double>(
+            // {Reason} added 2026-08-11 (XC-16). It was missing while the per-pod finding three lines below
+            // carried it, so a deployment-wide finding said THAT something moved and never WHAT the detector
+            // concluded — and the workload-level families are precisely the ones whose verdicts differ:
+            // a trend and a level shift both report here and call for opposite responses. Measured cost of
+            // the omission: during the AN-D3 injection the guard reported a fleet-wide CPU step correctly
+            // and the log could not say which family had said so, so it had to be recovered by refetching
+            // the window from Prometheus and re-running the detector offline.
+            _commonMode = LoggerMessage.Define<string, string, string, double, string>(
                 level,
                 new EventId(CommonModeEventId, "AnomalyCommonMode"),
                 "Deployment-wide movement in {Namespace}/{Workload} on {Signal} "
-                + "(severity {Severity}) — no individual replica is implicated");
+                + "(severity {Severity}) — no individual replica is implicated. {Reason}");
+
+            // Evidence for an incident the operator has already been told about. Debug, unconditionally,
+            // and NOT _options.FindingLevel: under the Shadow profile that level is Information, which would
+            // put every finding of every open incident into the operator's stream on every cycle — the
+            // twelve-notifications-per-hour behaviour the tracker exists to remove.
+            //
+            // Debug is the level whose whole meaning is "there when someone goes looking". Before this,
+            // going to look found nothing at all: a guard reporting a real fault for half an hour emitted
+            // `cycle: findings=3` five times and not one word about what those findings were, which from
+            // outside is indistinguishable from a guard reporting nothing — this subsystem's entire failure
+            // mode.
+            _ongoingFinding = LoggerMessage.Define<string, string, SignalClass, double, string>(
+                LogLevel.Debug,
+                new EventId(OngoingEvidenceEventId, "AnomalyOngoingFinding"),
+                "Still anomalous on {Pod}: {Signal} [{Class}] severity {Severity} — {Reason}");
+
+            _ongoingCommonMode = LoggerMessage.Define<string, string, string, double, string>(
+                LogLevel.Debug,
+                new EventId(OngoingEvidenceEventId, "AnomalyOngoingCommonMode"),
+                "Still deployment-wide in {Namespace}/{Workload} on {Signal} (severity {Severity}) "
+                + "— no individual replica is implicated. {Reason}");
 
             _resolved = LoggerMessage.Define<long, string, string>(
                 level,
@@ -140,20 +171,33 @@ namespace DevOnBike.Overfit.Anomalies.Hosting
                     continue;
                 }
 
-                // Evidence follows its incident: repeating it for an unchanged one is noise.
-                if (row.State == IncidentState.Ongoing)
-                {
-                    continue;
-                }
-
                 if (!_options.IncludeFindings)
                 {
                     continue;
                 }
 
+                // Evidence follows its incident: repeating it at the operator's level for an unchanged one
+                // is noise. It goes to Debug rather than nowhere — see the note on _ongoingFinding.
+                if (row.State == IncidentState.Ongoing)
+                {
+                    if (row.NamesAPod)
+                    {
+                        _ongoingFinding(_logger, row.Pod, row.Signal, row.Class, row.Severity, row.Message,
+                            null);
+
+                        continue;
+                    }
+
+                    _ongoingCommonMode(_logger, row.Namespace, row.Workload, row.Signal, row.Severity,
+                        row.Message, null);
+
+                    continue;
+                }
+
                 if (!row.NamesAPod)
                 {
-                    _commonMode(_logger, row.Namespace, row.Workload, row.Signal, row.Severity, null);
+                    _commonMode(_logger, row.Namespace, row.Workload, row.Signal, row.Severity,
+                        row.Message, null);
 
                     continue;
                 }

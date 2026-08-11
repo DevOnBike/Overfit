@@ -6,6 +6,8 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using DevOnBike.Overfit.Text;
+using DevOnBike.Overfit.Tensors;
 
 namespace DevOnBike.Overfit.LanguageModels.Tokenizers
 {
@@ -211,11 +213,72 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
         /// <summary>Decode a sequence of token IDs to text.</summary>
         public string Decode(ReadOnlySpan<int> tokens)
         {
-            var bytes = new List<byte>();
-            var sb = new StringBuilder();
+            var text = new ValueStringBuilder(CharBudget(tokens));
 
-            foreach (var id in tokens)
+            try
             {
+                DecodeInto(tokens, ref text);
+
+                return text.AsSpan().ToString();
+            }
+            finally
+            {
+                text.Dispose();
+            }
+        }
+
+        /// <summary>
+        /// Decodes into a caller-owned buffer and returns the characters written; allocates nothing once
+        /// the pool is warm.
+        ///
+        /// <para>The reason this exists is <c>ChatSession</c>'s incremental detokenizer, which decodes the
+        /// WHOLE generated run once per token. Through the string overload that was a
+        /// <c>List&lt;byte&gt;</c>, a <c>StringBuilder</c>, an array from <c>ToArray</c> and two strings per
+        /// call, over a growing sequence.</para>
+        /// </summary>
+        /// <exception cref="ArgumentException">
+        /// <paramref name="destination"/> is shorter than the decoded text. It names the required length
+        /// rather than truncating: a silently shortened reply looks like a model that stopped early.
+        /// </exception>
+        public int Decode(ReadOnlySpan<int> tokens, Span<char> destination)
+        {
+            var text = new ValueStringBuilder(CharBudget(tokens));
+
+            try
+            {
+                DecodeInto(tokens, ref text);
+
+                if (!text.TryCopyTo(destination, out var written))
+                {
+                    throw new ArgumentException(
+                        $"Destination holds {destination.Length} char(s); the decoded text needs "
+                        + $"{text.Length}.",
+                        nameof(destination));
+                }
+
+                return written;
+            }
+            finally
+            {
+                text.Dispose();
+            }
+        }
+
+        /// <summary>
+        /// Byte-level pieces are accumulated and flushed as UTF-8 only when a special token interrupts
+        /// them or the sequence ends — a piece can hold half a codepoint, and converting each separately
+        /// yields a replacement character where the text had a letter.
+        /// </summary>
+        private void DecodeInto(ReadOnlySpan<int> tokens, ref ValueStringBuilder text)
+        {
+            using var byteBuffer = new PooledBuffer<byte>(ByteBudget(tokens), clearMemory: false);
+            var bytes = byteBuffer.Span;
+            var byteCount = 0;
+
+            for (var i = 0; i < tokens.Length; i++)
+            {
+                var id = tokens[i];
+
                 if (id < 0 || id >= _decoder.Length || _decoder[id] is null)
                 {
                     continue;
@@ -223,33 +286,67 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
 
                 var piece = _decoder[id];
 
+                // Looked up once. The previous shape asked the set twice per token, in an if and then in
+                // its negation.
                 if (_specialTokenIds.Contains(id))
                 {
-                    // Flush byte buffer first
-                    if (bytes.Count > 0)
-                    {
-                        sb.Append(Encoding.UTF8.GetString(bytes.ToArray()));
-                        bytes.Clear();
-                    }
-                    sb.Append(piece);
+                    Flush(ref text, bytes, ref byteCount);
+                    text.Append(piece);
+
+                    continue;
                 }
 
-                if (!(_specialTokenIds.Contains(id)))
+                for (var c = 0; c < piece.Length; c++)
                 {
-                    // Decode byte-level piece → raw bytes
-                    foreach (var ch in piece)
-                    {
-                        bytes.Add(_charToByte[ch]);
-                    }
+                    bytes[byteCount++] = _charToByte[piece[c]];
                 }
             }
 
-            if (bytes.Count > 0)
+            Flush(ref text, bytes, ref byteCount);
+        }
+
+        private static void Flush(ref ValueStringBuilder text, Span<byte> bytes, ref int byteCount)
+        {
+            if (byteCount == 0)
             {
-                sb.Append(Encoding.UTF8.GetString(bytes.ToArray()));
+                return;
             }
 
-            return sb.ToString();
+            var pending = bytes[..byteCount];
+            var charCount = Encoding.UTF8.GetCharCount(pending);
+
+            using var chars = new PooledBuffer<char>(charCount, clearMemory: false);
+
+            Encoding.UTF8.GetChars(pending, chars.Span);
+            text.Append(chars.Span[..charCount]);
+
+            byteCount = 0;
+        }
+
+        /// <summary>
+        /// Upper bound on the accumulated bytes. <b>Must be an upper bound</b>: the loop indexes into the
+        /// rented span directly, so an underestimate is an <see cref="IndexOutOfRangeException"/> on some
+        /// vocabulary rather than a slower path. Byte-level pieces contribute exactly one byte per
+        /// character, so their total length is the bound.
+        /// </summary>
+        private int ByteBudget(ReadOnlySpan<int> tokens) => CharBudget(tokens);
+
+        /// <summary>Total piece length across the sequence — bounds both the bytes and the characters.</summary>
+        private int CharBudget(ReadOnlySpan<int> tokens)
+        {
+            var total = 0;
+
+            for (var i = 0; i < tokens.Length; i++)
+            {
+                var id = tokens[i];
+
+                if (id >= 0 && id < _decoder.Length && _decoder[id] is { } piece)
+                {
+                    total += piece.Length;
+                }
+            }
+
+            return total + 1;
         }
 
         /// <summary>Decode a single token ID (for streaming output).</summary>
@@ -266,13 +363,17 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
                 return piece;
             }
 
-            var bytes = new byte[piece.Length];
+            // Rented rather than `new byte[piece.Length]`: this is the per-token streaming entry point, so
+            // that array was one allocation per token for no reason. The returned string stays — it is the
+            // method's product.
+            using var bytes = new PooledBuffer<byte>(piece.Length, clearMemory: false);
+
             for (var i = 0; i < piece.Length; i++)
             {
-                bytes[i] = _charToByte[piece[i]];
+                bytes.Span[i] = _charToByte[piece[i]];
             }
 
-            return Encoding.UTF8.GetString(bytes);
+            return Encoding.UTF8.GetString(bytes.Span[..piece.Length]);
         }
 
         public bool IsSpecialToken(int id) => _specialTokenIds.Contains(id);

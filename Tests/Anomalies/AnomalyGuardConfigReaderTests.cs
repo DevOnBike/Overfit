@@ -82,7 +82,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
                 MinGap = "100MB",
             };
 
-            var (gap, _) = AnomalyGuardConfigReader.ReadThresholds(file, out var problems);
+            var (gap, _, _) = AnomalyGuardConfigReader.ReadThresholds(file, out var problems);
 
             Assert.Empty(problems);
             Assert.Equal(100_000_000.0, gap[(int)MetricIndex.MemoryWorkingSetBytes], 3);
@@ -99,7 +99,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
                 MinGap = "one hundred megabytes",
             };
 
-            var (gap, _) = AnomalyGuardConfigReader.ReadThresholds(file, out var problems);
+            var (gap, _, _) = AnomalyGuardConfigReader.ReadThresholds(file, out var problems);
 
             Assert.Single(problems);
             Assert.Contains("gate is OFF", problems[0], StringComparison.Ordinal);

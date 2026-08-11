@@ -160,7 +160,7 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
         /// The per-feature absolute floors, as the positional tables the guard takes. Built here so the
         /// indexed-by-enum shape stays an implementation detail rather than something a human has to write.
         /// </summary>
-        public static (double[] Gap, double[] TrendChange) ReadThresholds(
+        public static (double[] Gap, double[] TrendChange, double[] StepChange) ReadThresholds(
             AnomalyGuardConfigFile file,
             out IReadOnlyList<string> problems)
         {
@@ -169,6 +169,7 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
             var found = new List<string>();
             var gap = new double[(int)MetricIndex.Count];
             var trend = new double[(int)MetricIndex.Count];
+            var step = new double[(int)MetricIndex.Count];
 
             foreach (var (key, entry) in file.Thresholds)
             {
@@ -183,11 +184,16 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
                 gap[(int)metric] = Quantity($"Thresholds['{key}'].minGap", entry.MinGap, found);
                 trend[(int)metric] =
                     Quantity($"Thresholds['{key}'].minTrendChange", entry.MinTrendChange, found);
+
+                // Left at zero when absent, which ConfiguredFloorSource reads as "fall back to the trend
+                // floor" — the behaviour every config had before this field existed.
+                step[(int)metric] =
+                    Quantity($"Thresholds['{key}'].minStepChange", entry.MinStepChange, found);
             }
 
             problems = found;
 
-            return (gap, trend);
+            return (gap, trend, step);
         }
 
         /// <summary>

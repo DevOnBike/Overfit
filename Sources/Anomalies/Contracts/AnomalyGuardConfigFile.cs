@@ -235,6 +235,25 @@ namespace DevOnBike.Overfit.Anomalies.Contracts
 
         public sealed class ThresholdEntry
         {
+            /// <summary>
+            /// Smallest STEP in the workload's own level worth reporting, in the signal's units.
+            ///
+            /// <para><b>Absent falls back to <see cref="MinTrendChange"/>, which is what this gate used
+            /// before this field existed.</b> That fallback is the whole compatibility story: adding the
+            /// field must not move a single deployed threshold on its own, because dropping every existing
+            /// config onto the calibrator overnight is a silent change to what the guard reports.</para>
+            ///
+            /// <para><b>Why it needed its own entry.</b> A trend floor is fitted to how far ONE pod's series
+            /// moves across a window; a step floor governs how far the median across pods moves between the
+            /// halves of one. Measured 2026-08-11 (`AN-D4b`) over 30.8 h of lab data: reusing the trend
+            /// floor made the step gate demand 40% of the level on `MemoryWorkingSetBytes` — where the 25%
+            /// relative gate then never binds at all, 100% of the time — and at the low decile of
+            /// `GcGen2HeapBytes` it demanded 123%, i.e. the heap had to more than double before a step was
+            /// reportable. <c>FloorCalibrator.ProposedMinAbsoluteLevelShift</c> already computes the right
+            /// number from the step distribution; this is where an operator writes it down.</para>
+            /// </summary>
+            public string MinStepChange { get; set; } = string.Empty;
+
             /// <summary>Smallest peer difference worth reporting, with a unit.</summary>
             public string MinGap { get; set; } = string.Empty;
 

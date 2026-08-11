@@ -123,6 +123,15 @@ namespace DevOnBike.Overfit.Text
         /// the destination is too small, rather than throwing or writing a truncated prefix: a partially
         /// filled buffer that reports success is the failure this signature exists to make impossible.
         /// </summary>
+        /// <remarks>
+        /// Checked against Cysharp's ZString on 2026-08-11, since it is the best-known third-party take on
+        /// this type. Its two builders disagree with each other: <c>Utf16ValueStringBuilder.TryCopyTo</c>
+        /// does not dispose, while its vendored <c>Number/ValueStringBuilder.TryCopyTo</c> disposes on BOTH
+        /// the success and the failure branch — so a caller that got <c>false</c> for a too-small
+        /// destination has also silently lost its buffer and cannot retry with a bigger one. Not disposing
+        /// here is deliberate for exactly that reason, and the retry it enables is what
+        /// <c>IncrementalDetokenizer</c> relies on.
+        /// </remarks>
         public readonly bool TryCopyTo(Span<char> destination, out int written)
         {
             if (destination.Length < _position)

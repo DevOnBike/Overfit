@@ -154,7 +154,7 @@ namespace DevOnBike.Overfit.Anomalies.Hosting
             ArgumentNullException.ThrowIfNull(file);
 
             var map = AnomalyGuardConfigReader.ReadMap(file, out var mapProblems);
-            var (gap, trendChange) = AnomalyGuardConfigReader.ReadThresholds(file, out var floorProblems);
+            var (gap, trendChange, stepChange) = AnomalyGuardConfigReader.ReadThresholds(file, out var floorProblems);
             var maintenance = AnomalyGuardConfigReader.ReadMaintenance(file, out var windowProblems);
 
             if (onProblem is not null)
@@ -197,6 +197,7 @@ namespace DevOnBike.Overfit.Anomalies.Hosting
                     Workload = file.Workload ?? string.Empty,
                     MinAbsoluteGap = gap,
                     MinAbsoluteTrendChange = trendChange,
+                    MinAbsoluteStepChange = stepChange,
                     CustomMetrics = map.Custom,
 
                     // By name, because the calibrator is keyed by name and never receives a binding. Set

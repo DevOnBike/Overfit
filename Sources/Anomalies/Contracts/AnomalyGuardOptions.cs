@@ -218,6 +218,26 @@ namespace DevOnBike.Overfit.Anomalies.Contracts
         public IReadOnlyList<double>? MinAbsoluteTrendChange { get; init; } = DefaultAbsoluteTrendFloors;
 
         /// <summary>
+        /// Per-metric floors for the STEP family, in each signal's own units. Zero or absent for a metric
+        /// falls back to <see cref="MinAbsoluteTrendChange"/> for that metric.
+        ///
+        /// <para><b>Null by default, and the default is load-bearing.</b> It reproduces exactly what the
+        /// step gate did before this property existed — the trend floor — so adding the property moves no
+        /// deployed threshold by itself. An operator opts in per metric.</para>
+        ///
+        /// <para><b>Why the two must be able to differ.</b> A trend floor describes how far ONE pod's series
+        /// travels across a window; a step floor describes how far the median across pods moves between the
+        /// halves of one, and they are not the same distribution. Measured on the lab 2026-08-11
+        /// (<c>AN-D4b</c>): sharing them made the step gate demand 40% of the level on
+        /// <see cref="MetricIndex.MemoryWorkingSetBytes"/> against a nominal 25%, so the relative gate never
+        /// bound at all, and 123% at the low decile of <see cref="MetricIndex.GcGen2HeapBytes"/> — the heap
+        /// had to more than double before a step could be reported. This is the THIRD time this gate has
+        /// been fed the wrong distribution; see the note on <c>LevelShiftDetector.StepSize</c> for the
+        /// first two.</para>
+        /// </summary>
+        public IReadOnlyList<double>? MinAbsoluteStepChange { get; init; }
+
+        /// <summary>
         /// Turns on the peer-novelty gate, which stops a replica's <i>standing</i> difference from being
         /// reported as news every cycle. Null — the default — leaves the peer family exactly as it was.
         ///

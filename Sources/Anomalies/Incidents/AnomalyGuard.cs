@@ -240,8 +240,8 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
             // replaceable, because the two things a customer is most likely to own are their own threshold
             // policy and their own deployment calendar.
             _floors = options.Floors ?? new ConfiguredFloorSource(
-                options.MinAbsoluteGap, options.MinAbsoluteTrendChange, calibrator,
-                options.ApplyCalibratedFloors);
+                options.MinAbsoluteGap, options.MinAbsoluteTrendChange, options.MinAbsoluteStepChange,
+                calibrator, options.ApplyCalibratedFloors);
 
             _calendar = options.Calendar ?? new StaticMaintenanceCalendar(options.MaintenanceWindows);
             _workload = options.Workload;

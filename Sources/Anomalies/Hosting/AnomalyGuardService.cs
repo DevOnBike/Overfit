@@ -517,16 +517,26 @@ namespace DevOnBike.Overfit.Anomalies.Hosting
                     continue;
                 }
 
-                if (!proposal.IsUsable || proposal.ProposedMinAbsoluteGap <= 0.0)
+                // Gated on usability alone. It used to also require ProposedMinAbsoluteGap > 0, which
+                // silently skipped every gate on a channel whose PEER proposal happened to be empty — a
+                // channel could have a perfectly good step or trend proposal and never be mentioned. Each
+                // Propose call already refuses its own empty proposal, so this only has to answer "is there
+                // enough history to say anything at all".
+                if (!proposal.IsUsable)
                 {
                     continue;
                 }
 
-                // Both gates, because they are read by different families and only one of them was being
-                // reported. The peer gate governs how far apart two replicas may sit; the trend gate governs
-                // how far one may move across a window. On the lab the dominant false-positive source is the
-                // TREND family, so proposing only the peer floor addressed the smaller half of the problem —
-                // and did it silently, which is worse than not addressing it.
+                // All THREE gates, because they are read by different families and reporting a subset is how
+                // the unreported one goes unexamined for months. The peer gate governs how far apart two
+                // replicas may sit; the trend gate how far one may move across a window; the step gate how
+                // far the median across pods moves between the halves of one.
+                //
+                // The step gate was added 2026-08-11 (AN-D4b) and its absence had a measured cost: because
+                // the step floor falls back to the trend floor, and a trend floor is fitted to a much larger
+                // quantity, the step gate was demanding 40% of the level on MemoryWorkingSetBytes and 123%
+                // at the low decile of GcGen2HeapBytes — and the calibrator had been computing the right
+                // number the whole time, into a field nothing printed.
                 Propose(
                     metric, "peer gap",
                     AnomalyGuardOptions.FloorFor(_options.Guard.MinAbsoluteGap, metric),
@@ -536,7 +546,28 @@ namespace DevOnBike.Overfit.Anomalies.Hosting
                     metric, "trend change across a window",
                     AnomalyGuardOptions.FloorFor(_options.Guard.MinAbsoluteTrendChange, metric),
                     proposal.TrendChangeMax, proposal.ProposedMinAbsoluteTrendChange, proposal);
+
+                // Compared against the EFFECTIVE step floor, not against the step table alone. With no
+                // minStepChange configured the gate really runs on the trend floor, so comparing against an
+                // unset table would print a proposal on every interval for a floor that already covers it —
+                // advice that is wrong rather than merely noisy.
+                Propose(
+                    metric, "step in the workload's level",
+                    EffectiveStepFloor(metric),
+                    proposal.LevelShiftMax, proposal.ProposedMinAbsoluteLevelShift, proposal);
             }
+        }
+
+        /// <summary>
+        /// The floor the step gate actually uses: its own table where configured, the trend floor
+        /// otherwise. Mirrors <c>ConfiguredFloorSource.MinAbsoluteLevelShift</c> — the two must agree, or
+        /// the log proposes against a number the detector does not use.
+        /// </summary>
+        private double EffectiveStepFloor(MetricIndex metric)
+        {
+            var step = AnomalyGuardOptions.FloorFor(_options.Guard.MinAbsoluteStepChange, metric);
+
+            return step > 0.0 ? step : AnomalyGuardOptions.FloorFor(_options.Guard.MinAbsoluteTrendChange, metric);
         }
 
         /// <summary>

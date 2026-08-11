@@ -27,6 +27,7 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
     {
         private readonly IReadOnlyList<double>? _gap;
         private readonly IReadOnlyList<double>? _trend;
+        private readonly IReadOnlyList<double>? _step;
         private readonly FloorCalibrator? _calibrator;
 
         /// <param name="gap">Configured per-metric peer floors, or null.</param>
@@ -38,9 +39,28 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
             IReadOnlyList<double>? trend,
             FloorCalibrator? calibrator,
             bool applyCalibrated)
+            : this(gap, trend, step: null, calibrator, applyCalibrated)
+        {
+        }
+
+        /// <param name="gap">Configured per-metric peer floors, or null.</param>
+        /// <param name="trend">Configured per-metric trend floors, or null.</param>
+        /// <param name="step">
+        /// Configured per-metric STEP floors, or null. Zero for a metric means "fall back to that metric's
+        /// trend floor" — see <see cref="MinAbsoluteLevelShift(MetricIndex)"/>.
+        /// </param>
+        /// <param name="calibrator">Learned floors, consulted only where the configured one is absent.</param>
+        /// <param name="applyCalibrated">Whether the fallback is used at all.</param>
+        public ConfiguredFloorSource(
+            IReadOnlyList<double>? gap,
+            IReadOnlyList<double>? trend,
+            IReadOnlyList<double>? step,
+            FloorCalibrator? calibrator,
+            bool applyCalibrated)
         {
             _gap = gap;
             _trend = trend;
+            _step = step;
             _calibrator = applyCalibrated ? calibrator : null;
         }
 
@@ -60,14 +80,27 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
 
         /// <inheritdoc/>
         /// <remarks>
-        /// <b>The configured table is the trend one, deliberately.</b> There is no separate step floor in the
-        /// config file and adding one would make every existing deployment's step gate fall back to the
-        /// calibrator overnight. An operator who wrote a number for a signal meant "do not report movements
-        /// below this on this signal", and that reading still holds. What changes is the fallback: where
-        /// nothing is configured, the learned floor now comes from the step distribution rather than the
-        /// slope distribution, which is the defect being fixed.
+        /// <b>There is now a separate step floor, and the trend table is its fallback.</b> Until 2026-08-11
+        /// this read the trend table outright, on the reasoning that adding a step floor would drop every
+        /// existing deployment onto the calibrator overnight. That reasoning was right about the hazard and
+        /// wrong about the remedy: falling back per metric to the trend floor keeps every deployed threshold
+        /// exactly where it was while letting an operator write the correct number.
+        ///
+        /// <para>Why it had to be separable, measured rather than argued (<c>AN-D4b</c>): a trend floor is
+        /// fitted to how far ONE pod's series travels across a window, a step floor to how far the median
+        /// across pods moves between the halves of one. Sharing them made the step gate demand 40% of the
+        /// level on MemoryWorkingSetBytes — so its 25% relative gate never bound, 100% of the time — and
+        /// 123% at the low decile of GcGen2HeapBytes.</para>
         /// </remarks>
-        public double MinAbsoluteLevelShift(MetricIndex metric) => Resolve(_trend, metric, Kind.Step);
+        public double MinAbsoluteLevelShift(MetricIndex metric)
+        {
+            // A configured step floor wins outright. This is the only place the two tables differ, and the
+            // ORDER is the compatibility contract: falling back to the trend table — not to the calibrator —
+            // is what makes adding this field move no deployed threshold on its own.
+            var explicitly = AnomalyGuardOptions.FloorFor(_step, metric);
+
+            return explicitly > 0.0 ? explicitly : Resolve(_trend, metric, Kind.Step);
+        }
 
         /// <inheritdoc/>
         /// <remarks>
