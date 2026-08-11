@@ -261,7 +261,10 @@ namespace DevOnBike.Overfit.Cli
         /// <para>Empty means none was configured, and <see cref="IsAuthorised"/> then refuses every call —
         /// fail closed, because the endpoint's effect is to silence a finding.</para>
         /// </summary>
-        private static string AckToken { get; } =
+        private static string AckToken
+        {
+            get;
+        } =
             Environment.GetEnvironmentVariable(OverfitEnvironment.GuardAckToken)?.Trim() ?? string.Empty;
 
         /// <summary>

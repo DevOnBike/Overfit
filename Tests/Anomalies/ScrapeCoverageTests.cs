@@ -51,7 +51,10 @@ namespace DevOnBike.Overfit.Tests.Anomalies
         public void APodSustainingPartialCoverageIsNamed()
         {
             var sink = new CapturingSink();
-            var guard = Guard(sink, Binding() with { RequirePersistence = false });
+            var guard = Guard(sink, Binding() with
+            {
+                RequirePersistence = false
+            });
 
             guard.RunCycle(SmoothedWindow(), T0);
 
@@ -121,7 +124,10 @@ namespace DevOnBike.Overfit.Tests.Anomalies
         {
             var smoothed = new CapturingSink();
             var raw = new CapturingSink();
-            var binding = Binding() with { RequirePersistence = false };
+            var binding = Binding() with
+            {
+                RequirePersistence = false
+            };
 
             Guard(smoothed, binding).RunCycle(SmoothedWindow(), T0);
             Guard(raw, binding).RunCycle(RawUpWindow(), T0);
@@ -237,7 +243,10 @@ namespace DevOnBike.Overfit.Tests.Anomalies
         {
             var sink = new CapturingSink();
 
-            Guard(sink, Binding() with { RequirePersistence = false }).RunCycle(SmoothedWindow(), T0);
+            Guard(sink, Binding() with
+            {
+                RequirePersistence = false
+            }).RunCycle(SmoothedWindow(), T0);
 
             Assert.Contains(sink.Rows, r => string.Equals(r.Signal, Coverage, StringComparison.Ordinal));
         }
@@ -324,7 +333,10 @@ namespace DevOnBike.Overfit.Tests.Anomalies
 
         private static AnomalyGuard Guard(IIncidentSink sink, CustomMetricBinding binding)
         {
-            return new AnomalyGuard(Options() with { CustomMetrics = [binding] },
+            return new AnomalyGuard(Options() with
+            {
+                CustomMetrics = [binding]
+            },
                 sink, IncidentTrackingOptions.Balanced);
         }
 

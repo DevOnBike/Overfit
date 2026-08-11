@@ -7,7 +7,6 @@ using System.Diagnostics;
 using DevOnBike.Overfit.Audio;
 using DevOnBike.Overfit.LanguageModels.Whisper;
 using DevOnBike.Overfit.Tests.TestSupport;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Whisper
 {

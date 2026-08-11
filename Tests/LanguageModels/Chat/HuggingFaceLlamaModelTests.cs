@@ -9,7 +9,6 @@ using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Loading;
 using DevOnBike.Overfit.LanguageModels.Tokenizers;
 using DevOnBike.Overfit.Tests.TestSupport;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Chat
 {

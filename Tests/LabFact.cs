@@ -5,6 +5,8 @@
 
 using System.Net.Sockets;
 
+using System.Runtime.CompilerServices;
+
 namespace DevOnBike.Overfit.Tests
 {
     /// <summary>
@@ -39,8 +41,12 @@ namespace DevOnBike.Overfit.Tests
 
         private const int ProbeMilliseconds = 500;
 
-        public LabFact(LabEndpoint endpoint, string runtime = null)
-            : base(runtime)
+        public LabFact(
+            LabEndpoint endpoint,
+            string runtime = null,
+            [CallerFilePath] string sourceFilePath = null,
+            [CallerLineNumber] int sourceLineNumber = -1)
+            : base(runtime, sourceFilePath, sourceLineNumber)
         {
             Endpoint = endpoint;
 
@@ -76,7 +82,10 @@ namespace DevOnBike.Overfit.Tests
         }
 
         /// <summary>Which face of the lab this test needs.</summary>
-        public LabEndpoint Endpoint { get; }
+        public LabEndpoint Endpoint
+        {
+            get;
+        }
 
         /// <summary>
         /// The marker <c>Scripts/longfact_gate.py</c> greps for when it separates lab skips from fixture

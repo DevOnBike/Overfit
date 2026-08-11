@@ -3,6 +3,8 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Runtime.CompilerServices;
+
 namespace DevOnBike.Overfit.Tests
 {
     /// <summary>
@@ -30,8 +32,11 @@ namespace DevOnBike.Overfit.Tests
         /// <summary>The checkpoint this fixture-dependent group needs.</summary>
         internal const string FileName = "k8s_anomaly_production.bin";
 
-        public ProductionAnomalyBaseFact(string runtime = null)
-            : base(runtime)
+        public ProductionAnomalyBaseFact(
+            string runtime = null,
+            [CallerFilePath] string sourceFilePath = null,
+            [CallerLineNumber] int sourceLineNumber = -1)
+            : base(runtime, sourceFilePath, sourceLineNumber)
         {
             // Already skipped as a long test — leave that message alone, it is the more general reason.
             if (Skip is not null)

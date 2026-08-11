@@ -6,7 +6,6 @@
 using System.Numerics.Tensors;
 using DevOnBike.Overfit.Audio.Tts.Orpheus;
 using DevOnBike.Overfit.LanguageModels.LoRA;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
 {

@@ -14,7 +14,6 @@ using DevOnBike.Overfit.Anomalies.Monitoring.Abstractions;
 using DevOnBike.Overfit.Statistics;
 using DevOnBike.Overfit.Tests.TestSupport;
 using Microsoft.Extensions.DependencyInjection;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
 {

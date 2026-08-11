@@ -5,7 +5,6 @@
 
 using System.Diagnostics;
 using System.Numerics.Tensors;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
 {

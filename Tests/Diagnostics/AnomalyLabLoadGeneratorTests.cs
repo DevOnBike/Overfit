@@ -5,7 +5,6 @@
 
 using System.Diagnostics;
 using System.Net.Http.Json;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.Diagnostics
 {

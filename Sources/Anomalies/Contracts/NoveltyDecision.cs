@@ -43,7 +43,10 @@ namespace DevOnBike.Overfit.Anomalies.Contracts
         /// The fail-open answer: report it, classified <see cref="NoveltyKind.New"/>, because nothing is
         /// known. Used wherever the gate is switched off or cannot be consulted.
         /// </summary>
-        public static NoveltyDecision Unknown { get; } = new(
+        public static NoveltyDecision Unknown
+        {
+            get;
+        } = new(
             NoveltyKind.New,
             true,
             DetectionStatus.InsufficientData,

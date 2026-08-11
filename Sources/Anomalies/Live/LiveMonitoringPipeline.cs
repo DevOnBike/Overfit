@@ -10,8 +10,8 @@ using DevOnBike.Overfit.Anomalies.Gpt;
 using DevOnBike.Overfit.Anomalies.Monitoring;
 using DevOnBike.Overfit.Anomalies.Monitoring.Abstractions;
 using DevOnBike.Overfit.DeepLearning;
-using GptTrainingConfig = DevOnBike.Overfit.Anomalies.Training.GptTrainingConfig;
 using DevOnBike.Overfit.Runtime;
+using GptTrainingConfig = DevOnBike.Overfit.Anomalies.Training.GptTrainingConfig;
 
 namespace DevOnBike.Overfit.Anomalies.Live
 {

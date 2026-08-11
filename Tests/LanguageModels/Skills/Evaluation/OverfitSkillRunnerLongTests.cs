@@ -6,7 +6,6 @@
 using DevOnBike.Overfit.LanguageModels;
 using DevOnBike.Overfit.LanguageModels.Skills.Evaluation;
 using DevOnBike.Overfit.Tests.TestSupport;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Skills.Evaluation
 {

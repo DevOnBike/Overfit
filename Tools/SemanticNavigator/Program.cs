@@ -346,13 +346,25 @@ namespace DevOnBike.Overfit.Navigator
                 IncludePublic = includePublic;
             }
 
-            public string Solution { get; }
+            public string Solution
+            {
+                get;
+            }
 
-            public string? Target { get; }
+            public string? Target
+            {
+                get;
+            }
 
-            public int Depth { get; }
+            public int Depth
+            {
+                get;
+            }
 
-            public bool IncludePublic { get; }
+            public bool IncludePublic
+            {
+                get;
+            }
 
             private static string DefaultSolutionPath()
             {

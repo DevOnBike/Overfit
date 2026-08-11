@@ -3,6 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Runtime.CompilerServices;
 using DevOnBike.Overfit.Tests.TestSupport;
 
 namespace DevOnBike.Overfit.Tests
@@ -24,8 +25,12 @@ namespace DevOnBike.Overfit.Tests
     /// </summary>
     internal sealed class FixtureFact : LongFact
     {
-        public FixtureFact(TestFixture fixture, string runtime = null)
-            : base(runtime)
+        public FixtureFact(
+            TestFixture fixture,
+            string runtime = null,
+            [CallerFilePath] string sourceFilePath = null,
+            [CallerLineNumber] int sourceLineNumber = -1)
+            : base(runtime, sourceFilePath, sourceLineNumber)
         {
             Fixture = fixture;
 
@@ -46,7 +51,10 @@ namespace DevOnBike.Overfit.Tests
         }
 
         /// <summary>Which prerequisite this test needs.</summary>
-        public TestFixture Fixture { get; }
+        public TestFixture Fixture
+        {
+            get;
+        }
 
         /// <summary>
         /// The resolved path, or <see langword="null"/> with a sentence saying what is missing and what to
@@ -102,16 +110,16 @@ namespace DevOnBike.Overfit.Tests
                         + "Scripts/convert_gpt2.py)");
 
                 case TestFixture.QwenMoeGgufAndReferenceTokenizer:
-                {
-                    const string gguf = @"C:\qwen-moe\Qwen1.5-MoE-A2.7B-Chat.Q8_0.gguf";
-                    var reference = File.Exists(Path.Combine(TestModelPaths.Qwen3B.Dir, "tokenizer.json"))
-                                    || File.Exists(Path.Combine(TestModelPaths.Qwen3B.Dir, "vocab.json"));
+                    {
+                        const string gguf = @"C:\qwen-moe\Qwen1.5-MoE-A2.7B-Chat.Q8_0.gguf";
+                        var reference = File.Exists(Path.Combine(TestModelPaths.Qwen3B.Dir, "tokenizer.json"))
+                                        || File.Exists(Path.Combine(TestModelPaths.Qwen3B.Dir, "vocab.json"));
 
-                    return Check(File.Exists(gguf) && reference ? gguf : null,
-                        "the Qwen1.5-MoE GGUF and a reference Qwen tokenizer (tokenizer.json or "
-                        + "vocab.json) are not both available, so the GGUF-embedded vocab has nothing to "
-                        + "be cross-checked against");
-                }
+                        return Check(File.Exists(gguf) && reference ? gguf : null,
+                            "the Qwen1.5-MoE GGUF and a reference Qwen tokenizer (tokenizer.json or "
+                            + "vocab.json) are not both available, so the GGUF-embedded vocab has nothing to "
+                            + "be cross-checked against");
+                    }
 
                 case TestFixture.MiniLmSafetensors:
                     return Check(TestModelPaths.MiniLm.SafetensorsPath,

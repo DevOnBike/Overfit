@@ -4,7 +4,6 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using DevOnBike.Overfit.Evolutionary.Storage;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.Evolutionary.Noise
 {

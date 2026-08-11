@@ -10,7 +10,6 @@ using DevOnBike.Overfit.Anomalies.Incidents;
 using DevOnBike.Overfit.Anomalies.Monitoring;
 using DevOnBike.Overfit.Statistics;
 using DevOnBike.Overfit.Tests.TestSupport;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
 {

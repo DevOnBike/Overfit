@@ -8,9 +8,9 @@ using DevOnBike.Overfit.Anomalies.Incidents;
 using DevOnBike.Overfit.Anomalies.Incidents.Abstractions;
 using DevOnBike.Overfit.Anomalies.Monitoring;
 using DevOnBike.Overfit.Anomalies.Monitoring.Abstractions;
+using DevOnBike.Overfit.Runtime;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using DevOnBike.Overfit.Runtime;
 
 namespace DevOnBike.Overfit.Anomalies.Hosting
 {

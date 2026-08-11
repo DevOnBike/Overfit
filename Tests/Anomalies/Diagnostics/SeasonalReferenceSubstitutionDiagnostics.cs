@@ -58,7 +58,10 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
             report.Append("  fleet movement        common   seasonal\n");
 
             var detector = new TrendDetector();
-            var options = TrendOptions.Balanced with { MinAbsoluteChangeOverWindow = 1.089e6 };
+            var options = TrendOptions.Balanced with
+            {
+                MinAbsoluteChangeOverWindow = 1.089e6
+            };
             var times = new double[Length];
 
             for (var i = 0; i < Length; i++)
@@ -139,7 +142,10 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
         public void APodDivergingFromAFlatFleetIsStillReportedAgainstTheCommonReference()
         {
             var detector = new TrendDetector();
-            var options = TrendOptions.Balanced with { MinAbsoluteChangeOverWindow = 1.089e6 };
+            var options = TrendOptions.Balanced with
+            {
+                MinAbsoluteChangeOverWindow = 1.089e6
+            };
             var times = new double[Length];
 
             for (var i = 0; i < Length; i++)

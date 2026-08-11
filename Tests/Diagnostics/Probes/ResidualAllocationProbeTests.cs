@@ -8,7 +8,6 @@ using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Ops;
 using DevOnBike.Overfit.Tensors;
 using DevOnBike.Overfit.Tensors.Core;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.Diagnostics.Probes
 {

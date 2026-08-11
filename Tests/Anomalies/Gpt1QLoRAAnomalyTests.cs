@@ -8,7 +8,6 @@ using DevOnBike.Overfit.Anomalies.Gpt;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.LanguageModels.LoRA;
 using DevOnBike.Overfit.Maths;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.Anomalies
 {

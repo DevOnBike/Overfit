@@ -14,7 +14,6 @@ using DevOnBike.Overfit.Tensors;
 using DevOnBike.Overfit.Tensors.Core;
 using DevOnBike.Overfit.Tests.TestSupport;
 using DevOnBike.Overfit.Tests.TestSupport.Helpers;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.Data.Mnist
 {

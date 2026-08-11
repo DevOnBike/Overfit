@@ -8,7 +8,6 @@ using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.Arm;
 using System.Runtime.Intrinsics.X86;
 using DevOnBike.Overfit.Diagnostics;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.Diagnostics
 {

@@ -1,6 +1,9 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
 		<TargetFramework>net10.0</TargetFramework>
+		<!-- xunit v3 ships its own test host, so the project is an executable rather than a
+	     library discovered by VSTest. Without this the assembly builds and no test runs. -->
+		<OutputType>Exe</OutputType>
 		<Nullable>annotations</Nullable>
 		<ImplicitUsings>enable</ImplicitUsings>
 		<IsPackable>false</IsPackable>
@@ -17,7 +20,7 @@
 		<PackageReference Include="Microsoft.AspNetCore.TestHost" />
 		<PackageReference Include="Moq" />
 		<PackageReference Include="System.Numerics.Tensors" />
-		<PackageReference Include="xunit" />
+		<PackageReference Include="xunit.v3" />
 		<PackageReference Include="xunit.runner.visualstudio">
 			<IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
 			<PrivateAssets>all</PrivateAssets>

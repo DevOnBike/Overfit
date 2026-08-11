@@ -7,7 +7,6 @@ using DevOnBike.Overfit.LanguageModels.Embeddings;
 using DevOnBike.Overfit.LanguageModels.Retrieval;
 using DevOnBike.Overfit.LanguageModels.Retrieval.Evaluation;
 using DevOnBike.Overfit.Tests.TestSupport;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Retrieval
 {

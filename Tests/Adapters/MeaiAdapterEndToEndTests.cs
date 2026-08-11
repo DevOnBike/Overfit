@@ -8,7 +8,6 @@ using DevOnBike.Overfit.Extensions.AI;
 using DevOnBike.Overfit.LanguageModels;
 using DevOnBike.Overfit.LanguageModels.Embeddings;
 using Microsoft.Extensions.AI;
-using Xunit.Abstractions;
 using ChatMessage = Microsoft.Extensions.AI.ChatMessage;
 
 namespace DevOnBike.Overfit.Tests.Adapters

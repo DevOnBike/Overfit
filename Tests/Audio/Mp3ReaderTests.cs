@@ -5,7 +5,6 @@
 
 using DevOnBike.Overfit.Audio.Mp3;
 using DevOnBike.Overfit.Tests.TestSupport;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.Audio
 {

@@ -6,7 +6,6 @@
 using System.Text.Json;
 using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Loading;
-using Xunit.Abstractions;
 using DevOnBike.Overfit.Tests.TestSupport;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Loading

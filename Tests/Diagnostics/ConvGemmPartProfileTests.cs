@@ -8,7 +8,6 @@ using DevOnBike.Overfit.Inference;
 using DevOnBike.Overfit.Kernels;
 using DevOnBike.Overfit.Onnx;
 using DevOnBike.Overfit.Runtime;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.Diagnostics
 {

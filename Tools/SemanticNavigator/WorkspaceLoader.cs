@@ -49,7 +49,10 @@ namespace DevOnBike.Overfit.Navigator
         public IReadOnlyList<string> Failures => _failures;
 
         /// <summary>Wall-clock time spent inside <see cref="MSBuildWorkspace.OpenSolutionAsync"/>.</summary>
-        public TimeSpan OpenDuration { get; private set; }
+        public TimeSpan OpenDuration
+        {
+            get; private set;
+        }
 
         /// <summary>Opens <paramref name="solutionPath"/>, registering MSBuild first if nothing has yet.</summary>
         public static async Task<WorkspaceLoader> OpenAsync(string solutionPath, CancellationToken cancellationToken)

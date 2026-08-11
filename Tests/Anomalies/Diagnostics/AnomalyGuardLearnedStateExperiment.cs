@@ -11,10 +11,9 @@ using DevOnBike.Overfit.Anomalies.Hosting;
 using DevOnBike.Overfit.Anomalies.Incidents;
 using DevOnBike.Overfit.Anomalies.Incidents.Abstractions;
 using DevOnBike.Overfit.Anomalies.Monitoring.Abstractions;
+using DevOnBike.Overfit.Tests.TestSupport;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Xunit.Abstractions;
-using DevOnBike.Overfit.Tests.TestSupport;
 
 namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
 {
@@ -504,39 +503,87 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
                 IncidentStatePath = incidentStatePath;
             }
 
-            public string Name { get; }
+            public string Name
+            {
+                get;
+            }
 
-            public int Cycles { get; }
+            public int Cycles
+            {
+                get;
+            }
 
             /// <summary>Where this arm's incident store ended up, so a later arm can be seeded from it.</summary>
-            public string? IncidentStatePath { get; }
+            public string? IncidentStatePath
+            {
+                get;
+            }
 
-            public int Completed { get; set; }
+            public int Completed
+            {
+                get; set;
+            }
 
-            public int Blind { get; set; }
+            public int Blind
+            {
+                get; set;
+            }
 
-            public int Failed { get; set; }
+            public int Failed
+            {
+                get; set;
+            }
 
-            public int Findings { get; set; }
+            public int Findings
+            {
+                get; set;
+            }
 
-            public int Opened { get; set; }
+            public int Opened
+            {
+                get; set;
+            }
 
-            public int Resolved { get; set; }
+            public int Resolved
+            {
+                get; set;
+            }
 
-            public int StillOpen { get; set; }
+            public int StillOpen
+            {
+                get; set;
+            }
 
-            public int SinkRows { get; set; }
+            public int SinkRows
+            {
+                get; set;
+            }
 
-            public int Restored { get; set; }
+            public int Restored
+            {
+                get; set;
+            }
 
             /// <summary>Observations the calibrator already held before the first cycle. Zero when cold.</summary>
-            public int SamplesAtStart { get; set; }
+            public int SamplesAtStart
+            {
+                get; set;
+            }
 
-            public string? StateError { get; set; }
+            public string? StateError
+            {
+                get; set;
+            }
 
-            public int WindowsReturned { get; set; }
+            public int WindowsReturned
+            {
+                get; set;
+            }
 
-            public int WindowsAdvanced { get; set; }
+            public int WindowsAdvanced
+            {
+                get; set;
+            }
 
             public List<int> OpenedAt { get; } = [];
 

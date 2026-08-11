@@ -6,7 +6,6 @@
 using System.Diagnostics;
 using DevOnBike.Overfit.Runtime;
 using DevOnBike.Overfit.Trees;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.Trees.Diagnostics
 {

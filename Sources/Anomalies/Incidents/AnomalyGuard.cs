@@ -8,8 +8,8 @@ using DevOnBike.Overfit.Anomalies.Incidents.Abstractions;
 using DevOnBike.Overfit.Anomalies.Monitoring;
 using DevOnBike.Overfit.Anomalies.Monitoring.Abstractions;
 using DevOnBike.Overfit.Anomalies.Rules;
-using DevOnBike.Overfit.Statistics;
 using DevOnBike.Overfit.Runtime;
+using DevOnBike.Overfit.Statistics;
 
 namespace DevOnBike.Overfit.Anomalies.Incidents
 {

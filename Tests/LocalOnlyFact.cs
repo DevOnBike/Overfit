@@ -3,6 +3,8 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Runtime.CompilerServices;
+
 namespace DevOnBike.Overfit.Tests
 {
     /// <summary>
@@ -15,7 +17,10 @@ namespace DevOnBike.Overfit.Tests
     /// </summary>
     internal class LocalOnlyFact : FactAttribute
     {
-        public LocalOnlyFact()
+        public LocalOnlyFact(
+            [CallerFilePath] string sourceFilePath = null,
+            [CallerLineNumber] int sourceLineNumber = -1)
+            : base(sourceFilePath, sourceLineNumber)
         {
             if (IsContinuousIntegration())
             {

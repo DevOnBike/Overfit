@@ -36,6 +36,11 @@
              names the required incantation, which is what these lines are. Compile-time only, runtime from
              the SDK — that is the whole point of the Locator. -->
         <PackageReference Include="Microsoft.Build.Framework" ExcludeAssets="runtime" PrivateAssets="all" />
+        <!-- Pulled in transitively by Microsoft.Build.Framework 18.3+. MSBuild
+             Locator's own MSBL001 gate refuses the build unless it carries the same two
+             attributes, because it would otherwise be copied to output and collide with the
+             MSBuild the Locator loads at runtime. -->
+        <PackageReference Include="Microsoft.NET.StringTools" ExcludeAssets="runtime" PrivateAssets="all" />
     </ItemGroup>
 
 </Project>

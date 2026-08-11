@@ -3,11 +3,13 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using Xunit.Abstractions;
-using Xunit.Sdk;
+using Xunit.v3;
 
-[assembly: Xunit.TestFramework(
-    "DevOnBike.Overfit.Tests.MeasurementExclusion", "DevOnBike.Overfit.Tests")]
+// xunit v3 takes the framework as a Type rather than as two strings. That is a real improvement here and
+// not just a signature change: the old form named the class and its assembly in text, so a rename or a
+// move compiled cleanly and silently fell back to the default framework — this guard's exact failure
+// mode, and one already paid for once in the note on Environment.Exit below.
+[assembly: Xunit.TestFramework(typeof(DevOnBike.Overfit.Tests.MeasurementExclusion))]
 
 namespace DevOnBike.Overfit.Tests
 {
@@ -34,6 +36,24 @@ namespace DevOnBike.Overfit.Tests
     /// <para>Registered through <c>[assembly: TestFramework]</c> rather than a fixture, because this has to
     /// hold for the whole assembly however the run was launched — <c>dotnet test</c>, an IDE runner, or a
     /// debugger attached to one test.</para>
+    ///
+    /// <para><b>What the xunit v3 migration changed, measured on 2026-08-11 by holding the mutex externally
+    /// and running both ways.</b> The protection is intact: the suite does not run. The DIAGNOSIS is not,
+    /// and only through <c>dotnet test</c>.</para>
+    ///
+    /// <list type="bullet">
+    /// <item><description>Running the built executable directly — v3 makes the test project an exe — is
+    /// exactly right: exit code <b>2</b> and the full message below.</description></item>
+    /// <item><description>Through <c>dotnet test</c>, the VSTest bridge launches that exe as a CHILD and
+    /// speaks JSON to it. <c>Environment.Exit(2)</c> lands in the middle of the bridge's very first probe,
+    /// so the operator sees <c>Catastrophic failure: Test process did not return valid JSON (non-object)</c>
+    /// plus "no tests available", and the process reports <b>1</b>, not 2. The message never appears.
+    /// </description></item>
+    /// </list>
+    ///
+    /// <para>So a script keying on exit code 2 no longer works through <c>dotnet test</c>, and a human who
+    /// hits this reads something unintelligible instead of the sentence written for them. Recorded rather
+    /// than papered over: a refusal nobody can interpret is only half a guard. Tracked as <c>XC-17</c>.</para>
     /// </summary>
     public sealed class MeasurementExclusion : XunitTestFramework
     {
@@ -46,8 +66,9 @@ namespace DevOnBike.Overfit.Tests
 
         private readonly Mutex? _held;
 
-        public MeasurementExclusion(IMessageSink messageSink)
-            : base(messageSink)
+        // v3 constructs the framework with no arguments; the IMessageSink the v2 base class took is gone.
+        // Nothing in this guard used it.
+        public MeasurementExclusion()
         {
             // Opt-out for the case this cannot anticipate: a CI agent that runs suites concurrently by
             // design, where the mutex would serialise unrelated jobs on one host. Named rather than

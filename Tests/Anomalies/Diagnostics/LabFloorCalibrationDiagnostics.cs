@@ -9,7 +9,6 @@ using System.Text.Json;
 using DevOnBike.Overfit.Anomalies.Contracts;
 using DevOnBike.Overfit.Anomalies.Monitoring;
 using DevOnBike.Overfit.Statistics;
-using Xunit.Abstractions;
 using DevOnBike.Overfit.Tests.TestSupport;
 
 namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics

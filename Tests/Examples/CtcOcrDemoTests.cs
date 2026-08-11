@@ -6,7 +6,6 @@
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Optimizers;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.Examples
 {

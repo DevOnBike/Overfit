@@ -7,7 +7,6 @@ using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.Redaction
 {

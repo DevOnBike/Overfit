@@ -3,6 +3,8 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Runtime.CompilerServices;
+
 namespace DevOnBike.Overfit.Tests
 {
     /// <summary>
@@ -58,7 +60,11 @@ namespace DevOnBike.Overfit.Tests
         /// readers use <see cref="TryParseRuntime"/>. Leave it off when the test has never been measured;
         /// an absent value says "unknown", and a wrong one says something worse.
         /// </param>
-        public LongFact(string runtime = null)
+        public LongFact(
+            string runtime = null,
+            [CallerFilePath] string sourceFilePath = null,
+            [CallerLineNumber] int sourceLineNumber = -1)
+            : base(sourceFilePath, sourceLineNumber)
         {
             Runtime = runtime;
 
@@ -76,7 +82,10 @@ namespace DevOnBike.Overfit.Tests
         }
 
         /// <summary>Measured wall-clock in human notation, or <see langword="null"/> if never measured.</summary>
-        public string Runtime { get; }
+        public string Runtime
+        {
+            get;
+        }
 
         /// <summary>
         /// Parses the notation written by <c>Scripts/longfact_annotate.py</c>: an optional hours part, an

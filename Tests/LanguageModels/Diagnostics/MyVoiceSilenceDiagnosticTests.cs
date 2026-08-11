@@ -5,7 +5,6 @@
 
 using DevOnBike.Overfit.Audio;
 using DevOnBike.Overfit.Audio.Tts;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
 {

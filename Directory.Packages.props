@@ -34,15 +34,32 @@
     <PackageVersion Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="5.0.0" />
     <!-- Discovers the installed .NET SDK's MSBuild at runtime. Not bound to Roslyn's version. -->
     <PackageVersion Include="Microsoft.Build.Locator" Version="1.11.2" />
-    <!-- Compile-time only (ExcludeAssets="runtime" at the reference site — see SemanticNavigator.csproj). The
-         version therefore sets which MSBuild API the navigator COMPILES against, while the one it RUNS against
-         is whatever the installed SDK ships. It must be AT OR BELOW the SDK's MSBuild, or the tool compiles
-         against API the runtime does not have and fails with a MissingMethodException at the first call.
-         Measured, not assumed: `dotnet msbuild -version` on SDK 10.0.110 reports 18.0.11, so 18.0.2 is the
-         highest published version that satisfies the constraint. Re-check after an SDK bump.
+    <!-- Compile-time only (ExcludeAssets="runtime" at the reference site — see SemanticNavigator.csproj), so
+         the version sets which MSBuild API the navigator COMPILES against while the SDK supplies the one it
+         RUNS against. The stated rule was "must be AT OR BELOW the SDK's MSBuild, or it fails with a
+         MissingMethodException at the first call", and on that reasoning this sat at 18.0.2 because
+         `dotnet msbuild -version` on SDK 10.0.110 reports 18.0.11.
+
+         Tested on 2026-08-11 rather than reasoned about again, and the rule turned out to be VACUOUS HERE:
+         the navigator calls no Microsoft.Build.Framework API at all. Its only MSBuild-shaped calls are
+         MSBuildLocator (a different package, pinned separately) and Roslyn's MSBuildWorkspace, so there is no
+         call site that a newer reference could resolve to missing API. 18.8.2 builds and runs — `measure`
+         loads all 26 projects and 1667 documents, and `refs`/`impls` return correct results.
+
+         What DID block the bump, and it is worth knowing because the message names the fix: 18.3+ pulls
+         Microsoft.NET.StringTools transitively, and MSBuild Locator's own MSBL001 gate fails the build unless
+         that package carries the same ExcludeAssets="runtime" PrivateAssets="all" — otherwise it lands in
+         output and collides with the MSBuild the Locator loads. Hence the second pin below; the two move
+         together and pinning one without the other reproduces MSBL001.
+
+         Still true and still the reason to look here first if the tool breaks after an SDK change: the
+         constraint is "do not CALL API the runtime lacks", and the version is only a proxy for it. Not
+         exercised on this bump: the `callers`, `unused` and `serve` verbs.
+
          NOT 17.11.31 (what Workspaces.MSBuild 5.0.0 resolves transitively): that version carries
          GHSA-w3q9-fxm7-j8fq and NuGetAudit fails the build on it, correctly. -->
-    <PackageVersion Include="Microsoft.Build.Framework" Version="18.0.2" />
+    <PackageVersion Include="Microsoft.Build.Framework" Version="18.8.2" />
+    <PackageVersion Include="Microsoft.NET.StringTools" Version="18.8.2" />
     <PackageVersion Include="Microsoft.Agents.AI" Version="1.17.0" />
     <PackageVersion Include="Microsoft.AspNetCore.TestHost" Version="10.0.10" />
     <PackageVersion Include="Microsoft.Extensions.AI.Abstractions" Version="10.8.3" />
@@ -59,7 +76,7 @@
     <PackageVersion Include="Swashbuckle.AspNetCore" Version="10.2.3" />
     <PackageVersion Include="System.CommandLine" Version="2.0.10" />
     <PackageVersion Include="System.Numerics.Tensors" Version="10.0.10" />
-    <PackageVersion Include="xunit" Version="2.9.3" />
+    <PackageVersion Include="xunit.v3" Version="3.2.2" />
     <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5" />
   </ItemGroup>
 </Project>

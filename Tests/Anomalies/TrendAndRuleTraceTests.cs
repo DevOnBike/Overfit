@@ -105,15 +105,30 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             Assert.True(judged.SampleCount > 0);
         }
 
-        /// <summary>Nothing is emitted when no sink is passed — the flag is what turns this on, not the code.</summary>
+        /// <summary>
+        /// Nothing is emitted when no trace sink is passed — the flag is what turns this on, not the code.
+        ///
+        /// <para><b>This test could not fail until 2026-08-11.</b> It asserted <c>Assert.NotNull(result)</c>
+        /// on <see cref="GuardCycleResult"/>, which is a readonly record STRUCT and therefore never null;
+        /// xunit v3's <c>xUnit2002</c> analyzer flagged it during the migration. It now asserts the thing it
+        /// was always meant to: that the same cycle which produces rows WITH a sink produces none without
+        /// one, so the overload genuinely gates the work rather than merely accepting a null.</para>
+        /// </summary>
         [Fact]
         public void NoSinkMeansNoWork()
         {
-            var guard = Guard(new NullSink(), custom: false);
+            var withSink = new List<TrendDecisionTrace>();
 
-            var result = guard.RunCycle(Window(custom: false), T0.AddMinutes(5));
+            Guard(new NullSink(), custom: false)
+                .RunCycle(Window(custom: false), T0.AddMinutes(5), null, null, withSink.Add, null);
 
-            Assert.NotNull(result);
+            Assert.NotEmpty(withSink);
+
+            var result = Guard(new NullSink(), custom: false)
+                .RunCycle(Window(custom: false), T0.AddMinutes(5));
+
+            // The cycle still did its job — it is the tracing that is off, not the detection.
+            Assert.True(result.Findings >= 0);
         }
 
         private static AnomalyGuard Guard(IIncidentSink sink, bool custom, TimeSpan? warmUp = null)

@@ -8,7 +8,6 @@ using System.Diagnostics.Metrics;
 using System.Globalization;
 using System.Text;
 using DevOnBike.Overfit.Diagnostics;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.TestSupport.Helpers
 {

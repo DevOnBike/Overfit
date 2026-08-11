@@ -3,6 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Runtime.CompilerServices;
 using DevOnBike.Overfit.Tests.TestSupport;
 
 namespace DevOnBike.Overfit.Tests
@@ -53,8 +54,12 @@ namespace DevOnBike.Overfit.Tests
     {
         /// <param name="requiredFile">Model file that must exist; a compile-time constant.</param>
         /// <param name="runtime">Measured wall-clock, as on <see cref="LongFact"/> — e.g. <c>"45s"</c>.</param>
-        public ModelFact(string requiredFile, string runtime = null)
-            : this([requiredFile], runtime)
+        public ModelFact(
+            string requiredFile,
+            string runtime = null,
+            [CallerFilePath] string sourceFilePath = null,
+            [CallerLineNumber] int sourceLineNumber = -1)
+            : this([requiredFile], runtime, sourceFilePath, sourceLineNumber)
         {
         }
 
@@ -64,8 +69,12 @@ namespace DevOnBike.Overfit.Tests
         /// half-present fixture (a model without its tokenizer, say) is a common and confusing state.
         /// </param>
         /// <param name="runtime">Measured wall-clock, as on <see cref="LongFact"/>.</param>
-        public ModelFact(string[] requiredFiles, string runtime = null)
-            : base(runtime)
+        public ModelFact(
+            string[] requiredFiles,
+            string runtime = null,
+            [CallerFilePath] string sourceFilePath = null,
+            [CallerLineNumber] int sourceLineNumber = -1)
+            : base(runtime, sourceFilePath, sourceLineNumber)
         {
             RequiredFiles = requiredFiles ?? [];
 
@@ -96,7 +105,10 @@ namespace DevOnBike.Overfit.Tests
         }
 
         /// <summary>The files whose absence makes this skip.</summary>
-        public string[] RequiredFiles { get; }
+        public string[] RequiredFiles
+        {
+            get;
+        }
 
         /// <summary>
         /// Resolves a fixture path. An absolute one is returned unchanged — model fixtures live outside

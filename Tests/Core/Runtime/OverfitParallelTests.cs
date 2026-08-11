@@ -6,7 +6,6 @@
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using DevOnBike.Overfit.Runtime;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.Core.Runtime
 {
