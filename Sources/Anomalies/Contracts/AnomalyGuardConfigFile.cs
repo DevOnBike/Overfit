@@ -171,6 +171,14 @@ namespace DevOnBike.Overfit.Anomalies.Contracts
             /// </summary>
             public string MinGapChange { get; set; } = string.Empty;
 
+            /// <summary>
+            /// Smallest STEP in this channel's level worth reporting. Absent falls back to
+            /// <see cref="MinTrendChange"/>, which is what the step gate used before this field existed —
+            /// so adding it moves no configured channel on its own. See the built-in equivalent on
+            /// <c>ThresholdEntry.MinStepChange</c> for why the two distributions differ.
+            /// </summary>
+            public string MinStepChange { get; set; } = string.Empty;
+
             /// <summary>Optional absolute rule: the level, with a unit.</summary>
             public string RuleThreshold { get; set; } = string.Empty;
 

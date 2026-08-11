@@ -124,7 +124,8 @@ namespace DevOnBike.Overfit.Anomalies.Contracts
         double MinAbsoluteGapChange = 0.0,
         string Query = "",
         bool RequirePersistence = false,
-        bool Calibrated = true)
+        bool Calibrated = true,
+        double MinAbsoluteStepChange = 0.0)
     {
         /// <summary>
         /// Verbatim PromQL, used in place of everything <see cref="Kind"/> would have wrapped around

@@ -133,6 +133,11 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
                     MinAbsoluteTrendChange:
                         Quantity($"CustomMetrics['{key}'].minTrendChange", entry.MinTrendChange, found),
 
+                    // Zero when absent, which AnomalyGuard.LevelShiftFloor reads as "fall back to the trend
+                    // floor" — what the step gate did before this field existed.
+                    MinAbsoluteStepChange:
+                        Quantity($"CustomMetrics['{key}'].minStepChange", entry.MinStepChange, found),
+
                     // Required by the peer-novelty gate and by nothing else, so it stays optional here and is
                     // enforced where it is used: AnomalyGuard.RestoreNovelty refuses a zero. Reading it was
                     // missing entirely until 2026-08-10 — the binding carried the property, the file could

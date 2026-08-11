@@ -777,12 +777,26 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
 
         /// <inheritdoc cref="GapFloor"/>
         /// <remarks>
-        /// The binding's configured value is <c>MinAbsoluteTrendChange</c> for this gate too — there is no
-        /// separate step field on a binding, and adding one would move every existing custom channel onto
-        /// the calibrator overnight. Only the fallback changes, and it changes to the right distribution.
+        /// <b>Three sources, in this order, and the order is the compatibility contract.</b> The binding's
+        /// own step floor wins; absent, its trend floor — which is what this gate used before
+        /// <c>MinAbsoluteStepChange</c> existed, so adding the field moved no configured channel; absent
+        /// both, the calibrator's step distribution.
+        ///
+        /// <para>The note that used to sit here said a separate field "would move every existing custom
+        /// channel onto the calibrator overnight". That was right about the hazard and wrong about the
+        /// remedy: falling back to the trend floor keeps every deployed channel exactly where it was.
+        /// Measured on the built-in side first (<c>AN-D4b</c>): sharing the two made the step gate demand
+        /// 40% of the level on MemoryWorkingSetBytes and 123% at the low decile of GcGen2HeapBytes, because
+        /// a trend floor is fitted to how far ONE series travels across a window and a step floor to how far
+        /// the median across pods moves between its halves.</para>
         /// </remarks>
         private double LevelShiftFloor(in CustomMetricBinding binding)
         {
+            if (binding.MinAbsoluteStepChange > 0.0)
+            {
+                return binding.MinAbsoluteStepChange;
+            }
+
             return binding.MinAbsoluteTrendChange > 0.0
                 ? binding.MinAbsoluteTrendChange
                 : _floors.MinAbsoluteLevelShift(binding.Name);
