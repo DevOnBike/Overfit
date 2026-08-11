@@ -21,7 +21,7 @@ namespace DevOnBike.Overfit.Server.AspNet.Endpoints
     {
         public static RouteGroupBuilder MapSpeech(this RouteGroupBuilder v1)
         {
-            v1.MapPost("/audio/speech", async (HttpContext ctx, IOpenAiInferenceService service) =>
+            v1.MapPost("/audio/speech", static async (HttpContext ctx, IOpenAiInferenceService service) =>
             {
                 SpeechRequest? req;
                 try
@@ -31,7 +31,7 @@ namespace DevOnBike.Overfit.Server.AspNet.Endpoints
                 }
                 catch (JsonException ex)
                 {
-                    EndpointHelpers.WriteError(ctx.Response, StatusCodes.Status400BadRequest, $"invalid JSON body: {ex.Message}");
+                    await EndpointHelpers.WriteErrorAsync(ctx.Response, StatusCodes.Status400BadRequest, $"invalid JSON body: {ex.Message}", ctx.RequestAborted);
                     return;
                 }
 

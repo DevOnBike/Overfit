@@ -18,7 +18,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
     public sealed class MetricDiscoveryTests
     {
         [Fact]
-        public void ADotNetWorkloadResolvesItsRuntimeChannels()
+        public async Task ADotNetWorkloadResolvesItsRuntimeChannels()
         {
             var available = Names(
                 "container_cpu_usage_seconds_total",
@@ -27,7 +27,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
                 "dotnet_gc_pause_seconds_total",
                 "dotnet_threadpool_queue_length");
 
-            var found = MetricDiscovery.Propose(available, _ => 12);
+            var found = await MetricDiscovery.ProposeAsync(available, _ => Task.FromResult(12));
 
             Assert.Equal(DiscoveryOutcome.Resolved, Outcome(found, MetricIndex.GcGen2HeapBytes));
             Assert.Equal("dotnet_gc_heap_size_bytes", Chosen(found, MetricIndex.GcGen2HeapBytes).Source);
@@ -36,7 +36,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
         }
 
         [Fact]
-        public void AJvmWorkloadResolvesTheJvmNamesForTheSameChannels()
+        public async Task AJvmWorkloadResolvesTheJvmNamesForTheSameChannels()
         {
             var available = Names(
                 "container_cpu_usage_seconds_total",
@@ -44,7 +44,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
                 "jvm_gc_pause_seconds_sum",
                 "http_server_requests_seconds_bucket");
 
-            var found = MetricDiscovery.Propose(available, _ => 4);
+            var found = await MetricDiscovery.ProposeAsync(available, _ => Task.FromResult(4));
 
             Assert.Equal("jvm_memory_used_bytes", Chosen(found, MetricIndex.GcGen2HeapBytes).Source);
             Assert.Equal("jvm_gc_pause_seconds_sum", Chosen(found, MetricIndex.GcPauseRatio).Source);
@@ -61,13 +61,13 @@ namespace DevOnBike.Overfit.Tests.Anomalies
         /// returns nothing for ever and a channel that reports blind while looking configured.
         /// </summary>
         [Fact]
-        public void ANameThatExistsButIsNotExportedByThesePodsIsRejected()
+        public async Task ANameThatExistsButIsNotExportedByThesePodsIsRejected()
         {
             var available = Names("dotnet_gc_heap_size_bytes", "jvm_memory_used_bytes");
 
-            var found = MetricDiscovery.Propose(
+            var found = await MetricDiscovery.ProposeAsync(
                 available,
-                name => name.StartsWith("dotnet_", StringComparison.Ordinal) ? 12 : 0);
+                name => Task.FromResult(name.StartsWith("dotnet_", StringComparison.Ordinal) ? 12 : 0));
 
             var heap = Find(found, MetricIndex.GcGen2HeapBytes);
 
@@ -84,10 +84,10 @@ namespace DevOnBike.Overfit.Tests.Anomalies
         /// business decision, and a guess here is a guard confidently measuring the wrong thing.
         /// </summary>
         [Fact]
-        public void SeveralEvidencedCandidatesStayAmbiguous()
+        public async Task SeveralEvidencedCandidatesStayAmbiguous()
         {
             var available = Names("http_requests_total", "nginx_http_requests_total");
-            var found = MetricDiscovery.Propose(available, _ => 6);
+            var found = await MetricDiscovery.ProposeAsync(available, _ => Task.FromResult(6));
 
             var errors = Find(found, MetricIndex.ErrorRate);
 
@@ -97,18 +97,18 @@ namespace DevOnBike.Overfit.Tests.Anomalies
         }
 
         [Fact]
-        public void AChannelNobodyExportsIsReportedAsNotFound()
+        public async Task AChannelNobodyExportsIsReportedAsNotFound()
         {
-            var found = MetricDiscovery.Propose(Names("container_cpu_usage_seconds_total"), _ => 12);
+            var found = await MetricDiscovery.ProposeAsync(Names("container_cpu_usage_seconds_total"), _ => Task.FromResult(12));
 
             Assert.Equal(DiscoveryOutcome.NotFound, Outcome(found, MetricIndex.GcGen2HeapBytes));
             Assert.Empty(Find(found, MetricIndex.GcGen2HeapBytes).Candidates);
         }
 
         [Fact]
-        public void EveryChannelIsAccountedFor()
+        public async Task EveryChannelIsAccountedFor()
         {
-            var found = MetricDiscovery.Propose(Names("container_cpu_usage_seconds_total"), _ => 1);
+            var found = await MetricDiscovery.ProposeAsync(Names("container_cpu_usage_seconds_total"), _ => Task.FromResult(1));
 
             // One entry per channel, always — a discovery report that silently omits a channel is a report
             // that says nothing about the thing the guard will be blind to.
@@ -121,7 +121,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
         /// this project's own lab for exactly this reason.
         /// </summary>
         [Fact]
-        public void ABespokeApplicationIsMatchedByTheShapeOfItsNames()
+        public async Task ABespokeApplicationIsMatchedByTheShapeOfItsNames()
         {
             var available = Names(
                 "labapp_requests_total",
@@ -129,7 +129,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
                 "labapp_request_duration_seconds_bucket",
                 "container_cpu_usage_seconds_total");
 
-            var found = MetricDiscovery.Propose(available, _ => 12);
+            var found = await MetricDiscovery.ProposeAsync(available, _ => Task.FromResult(12));
 
             var rps = Find(found, MetricIndex.RequestsPerSecond);
             Assert.Equal(DiscoveryOutcome.Resolved, rps.Outcome);
@@ -155,10 +155,10 @@ namespace DevOnBike.Overfit.Tests.Anomalies
         /// series would displace a binding whose meaning is actually known.
         /// </summary>
         [Fact]
-        public void AKnownNameWinsOverASuffixMatch()
+        public async Task AKnownNameWinsOverASuffixMatch()
         {
             var available = Names("dotnet_gc_heap_size_bytes", "some_other_heap_used_bytes");
-            var found = MetricDiscovery.Propose(available, _ => 12);
+            var found = await MetricDiscovery.ProposeAsync(available, _ => Task.FromResult(12));
 
             var heap = Find(found, MetricIndex.GcGen2HeapBytes);
 
@@ -170,10 +170,10 @@ namespace DevOnBike.Overfit.Tests.Anomalies
         }
 
         [Fact]
-        public void ASuffixMatchThesePodsDoNotExportIsStillRejected()
+        public async Task ASuffixMatchThesePodsDoNotExportIsStillRejected()
         {
             var available = Names("otherapp_requests_total");
-            var found = MetricDiscovery.Propose(available, _ => 0);
+            var found = await MetricDiscovery.ProposeAsync(available, _ => Task.FromResult(0));
 
             var rps = Find(found, MetricIndex.RequestsPerSecond);
 
@@ -185,10 +185,10 @@ namespace DevOnBike.Overfit.Tests.Anomalies
         }
 
         [Fact]
-        public void TwoBespokeCountersStayAmbiguous()
+        public async Task TwoBespokeCountersStayAmbiguous()
         {
             var available = Names("orders_requests_total", "payments_requests_total");
-            var found = MetricDiscovery.Propose(available, _ => 3);
+            var found = await MetricDiscovery.ProposeAsync(available, _ => Task.FromResult(3));
 
             Assert.Equal(DiscoveryOutcome.Ambiguous, Outcome(found, MetricIndex.RequestsPerSecond));
         }
@@ -198,9 +198,9 @@ namespace DevOnBike.Overfit.Tests.Anomalies
         /// application — a rule there could only invent false candidates.
         /// </summary>
         [Fact]
-        public void ContainerChannelsAreNotSuffixMatched()
+        public async Task ContainerChannelsAreNotSuffixMatched()
         {
-            var found = MetricDiscovery.Propose(Names("myapp_memory_working_set_bytes"), _ => 12);
+            var found = await MetricDiscovery.ProposeAsync(Names("myapp_memory_working_set_bytes"), _ => Task.FromResult(12));
 
             Assert.Equal(DiscoveryOutcome.NotFound, Outcome(found, MetricIndex.MemoryWorkingSetBytes));
         }
@@ -211,10 +211,10 @@ namespace DevOnBike.Overfit.Tests.Anomalies
         /// application's genuine error counter.
         /// </summary>
         [Fact]
-        public void InfrastructureSeriesAreNotOfferedAsApplicationSignals()
+        public async Task InfrastructureSeriesAreNotOfferedAsApplicationSignals()
         {
             var available = Names("container_memory_failures_total", "labapp_errors_total");
-            var found = MetricDiscovery.Propose(available, _ => 12);
+            var found = await MetricDiscovery.ProposeAsync(available, _ => Task.FromResult(12));
 
             var errors = Find(found, MetricIndex.ErrorRate);
 
@@ -224,7 +224,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
         }
 
         [Fact]
-        public void StacksAreNamedFromWhatIsPresent()
+        public async Task StacksAreNamedFromWhatIsPresent()
         {
             var stacks = MetricDiscovery.Stacks(Names(
                 "jvm_memory_used_bytes", "nginx_connections_waiting", "container_cpu_usage_seconds_total"));
@@ -237,22 +237,22 @@ namespace DevOnBike.Overfit.Tests.Anomalies
         /// guess in a file that then looks like a decision somebody made.
         /// </summary>
         [Fact]
-        public void OnlyResolvedChannelsReachTheConfig()
+        public async Task OnlyResolvedChannelsReachTheConfig()
         {
             var available = Names(
                 "container_cpu_usage_seconds_total", "http_requests_total", "nginx_http_requests_total");
 
-            var json = MetricDiscovery.ToConfigJson(MetricDiscovery.Propose(available, _ => 5));
+            var json = MetricDiscovery.ToConfigJson(await MetricDiscovery.ProposeAsync(available, _ => Task.FromResult(5)));
 
             Assert.Contains("\"CpuUsageRatio\"", json, StringComparison.Ordinal);
             Assert.DoesNotContain("\"ErrorRate\"", json, StringComparison.Ordinal);
         }
 
         [Fact]
-        public void HistogramChannelsCarryTheirQuantileIntoTheConfig()
+        public async Task HistogramChannelsCarryTheirQuantileIntoTheConfig()
         {
             var json = MetricDiscovery.ToConfigJson(
-                MetricDiscovery.Propose(Names("http_request_duration_seconds_bucket"), _ => 3));
+                await MetricDiscovery.ProposeAsync(Names("http_request_duration_seconds_bucket"), _ => Task.FromResult(3)));
 
             Assert.Contains("\"quantile\": 0.99", json, StringComparison.Ordinal);
             Assert.Contains("HistogramSeconds", json, StringComparison.Ordinal);

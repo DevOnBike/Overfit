@@ -43,9 +43,21 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
         /// How many of the pods under inspection export a given series. Return 0 for "none" — that is the
         /// answer that turns a plausible name into a rejected candidate.
         /// </param>
-        public static IReadOnlyList<ChannelDiscovery> Propose(
-            IReadOnlySet<string> available, Func<string, int> podsReporting)
+        /// <remarks>
+        /// <b>The evidence callback is asynchronous, and that is deliberate rather than fashionable.</b>
+        /// It costs one Prometheus instant query per candidate series, so the only implementation that
+        /// exists does network I/O. A synchronous <c>Func&lt;string, int&gt;</c> forced its caller to either
+        /// block a thread on a task — which is the deadlock OVERFIT039 guards against — or do genuinely
+        /// synchronous HTTP inside an async call graph, holding the caller's thread for the whole round
+        /// trip. Neither is worth a signature; the callback returns a task.
+        /// </remarks>
+        public static async Task<IReadOnlyList<ChannelDiscovery>> ProposeAsync(
+            IReadOnlySet<string> available,
+            Func<string, Task<int>> podsReporting,
+            CancellationToken cancellationToken = default)
         {
+            cancellationToken.ThrowIfCancellationRequested();
+
             ArgumentNullException.ThrowIfNull(available);
             ArgumentNullException.ThrowIfNull(podsReporting);
 
@@ -74,7 +86,7 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
                         continue;
                     }
 
-                    var pods = podsReporting(probe);
+                    var pods = await podsReporting(probe).ConfigureAwait(false);
                     var found = candidate with
                     {
                         PodsReporting = pods
@@ -99,7 +111,9 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
                 // ends like the right thing — see MetricNameCatalog.SuffixesFor.
                 if (evidenced == 0)
                 {
-                    evidenced = BySuffix(metric, available, podsReporting, matched, ref chosen);
+                    (evidenced, chosen) =
+                        await BySuffixAsync(metric, available, podsReporting, matched, chosen)
+                            .ConfigureAwait(false);
                 }
 
                 var outcome = evidenced switch
@@ -127,18 +141,23 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
         /// Looks for a series whose <b>ending</b> identifies the channel, whatever the application is called.
         /// </summary>
         /// <returns>How many evidenced candidates were found this way.</returns>
-        private static int BySuffix(
+        /// <remarks>
+        /// Returns the pick rather than taking <c>ref MetricCandidate chosen</c>: a <c>ref</c> parameter is
+        /// illegal on an async method, and this became async when the evidence callback did. Same contract,
+        /// one fewer way to forget to assign it.
+        /// </remarks>
+        private static async Task<(int Found, MetricCandidate Chosen)> BySuffixAsync(
             MetricIndex metric,
             IReadOnlySet<string> available,
-            Func<string, int> podsReporting,
+            Func<string, Task<int>> podsReporting,
             List<MetricCandidate> matched,
-            ref MetricCandidate chosen)
+            MetricCandidate chosen)
         {
             var suffixes = MetricNameCatalog.SuffixesFor(metric);
 
             if (suffixes.Count == 0)
             {
-                return 0;
+                return (0, chosen);
             }
 
             var quantile = metric switch
@@ -158,7 +177,7 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
                     continue;
                 }
 
-                var pods = podsReporting(name);
+                var pods = await podsReporting(name).ConfigureAwait(false);
 
                 if (pods <= 0)
                 {
@@ -188,7 +207,7 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
                 }
             }
 
-            return found;
+            return (found, chosen);
         }
 
         /// <summary>

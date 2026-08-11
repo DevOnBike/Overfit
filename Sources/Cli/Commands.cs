@@ -23,6 +23,14 @@ using DevOnBike.Overfit.Trees;
 
 namespace DevOnBike.Overfit.Cli
 {
+    // OVERFIT039 for this file: every blocking call below is a CLI verb's synchronous handler bridging to
+    // an async helper (HfDownloader.*Async and friends). The rule guards against a thread-pool thread
+    // blocking while the pool is saturated and the awaited continuation cannot get a thread; a console
+    // command's main thread is not that, and there is no pool pressure to deadlock against. The fix that
+    // would remove them for real is making System.CommandLine's handlers async, which is a separate change
+    // and not one to smuggle in under a lint sweep.
+#pragma warning disable OVERFIT039
+
     /// <summary>Command implementations for the <c>overfit</c> CLI.</summary>
     internal static class Commands
     {
@@ -1450,4 +1458,6 @@ namespace DevOnBike.Overfit.Cli
             }
         }
     }
+
+#pragma warning restore OVERFIT039
 }

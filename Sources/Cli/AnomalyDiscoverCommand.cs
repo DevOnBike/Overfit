@@ -62,9 +62,11 @@ namespace DevOnBike.Overfit.Cli
             // share a candidate (the request counter feeds both throughput and errors).
             var evidence = new Dictionary<string, int>(StringComparer.Ordinal);
 
-            var discovered = MetricDiscovery.Propose(
+            var discovered = await MetricDiscovery.ProposeAsync(
                 names,
-                series => Count(http, prometheus, series, namespaceName, podRegex, evidence, ct));
+                series => CountAsync(http, prometheus, series, namespaceName, podRegex, evidence, ct),
+                ct)
+                .ConfigureAwait(false);
 
             Report(discovered);
 
@@ -196,7 +198,16 @@ namespace DevOnBike.Overfit.Cli
         /// that its decisions stay testable without a cluster, and the alternative would be dragging async
         /// through the pure core to save a few seconds in a command a human runs once.</para>
         /// </summary>
-        private static int Count(
+        /// <remarks>
+        /// <b>Asynchronous all the way down, after two wrong shapes.</b> It first blocked on a task
+        /// (<c>GetAsync(...).GetAwaiter().GetResult()</c>) — the deadlock OVERFIT039 exists to catch. The
+        /// repair that only removed the block, swapping in genuinely synchronous <c>HttpClient.Send</c>,
+        /// was still wrong: this is reached from <c>RunAsync</c>, so a synchronous round trip holds the
+        /// caller's thread for the whole query. Making it async meant changing
+        /// <c>MetricDiscovery.ProposeAsync</c>'s callback, which is the actual fix and was worth the
+        /// signature — there is exactly one caller.
+        /// </remarks>
+        private static async Task<int> CountAsync(
             HttpClient http, string prometheus, string series, string namespaceName, string podRegex,
             Dictionary<string, int> cache, CancellationToken ct)
         {
@@ -215,11 +226,11 @@ namespace DevOnBike.Overfit.Cli
 
             try
             {
-                using var response = http.GetAsync(url, ct).GetAwaiter().GetResult();
+                using var response = await http.GetAsync(url, ct).ConfigureAwait(false);
 
                 response.EnsureSuccessStatusCode();
 
-                var body = response.Content.ReadAsStringAsync(ct).GetAwaiter().GetResult();
+                var body = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
 
                 using var json = JsonDocument.Parse(body);
 

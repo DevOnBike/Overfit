@@ -29,7 +29,13 @@ namespace DevOnBike.Overfit.Cli
             string prompt,
             int warmup,
             double costUnits)
+            // OVERFIT039: this IS the synchronous entry point — a CLI verb whose handler cannot return a
+            // task. Nothing is running on a thread-pool thread that a continuation could be waiting for,
+            // which is the deadlock the rule guards. Suppressed rather than fixed because the fix would be
+            // to make System.CommandLine's handler async, which is a different change.
+#pragma warning disable OVERFIT039
             => RunAsync(url, model, users, requests, maxTokens, prompt, warmup, costUnits).GetAwaiter().GetResult();
+#pragma warning restore OVERFIT039
 
         private static async Task<int> RunAsync(
             string url,

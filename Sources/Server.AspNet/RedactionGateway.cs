@@ -72,6 +72,15 @@ namespace DevOnBike.Overfit.Server
             });
 
             app.Urls.Add($"http://{host}:{port}");
+
+            // OVERFIT039 suppressed for the three blocking calls in this method, with the reason the rule
+            // asks for. `Serve` IS the synchronous entry point: it is called from a CLI command and blocks
+            // for the lifetime of the process. Nothing here runs on a thread-pool thread that a
+            // continuation could be waiting for, which is the deadlock the rule exists to prevent —
+            // the hazard needs a pool thread blocked while the pool is saturated, and there is no pool
+            // thread involved before the host has started. The request path, which DOES run on pool
+            // threads, was fixed rather than suppressed: see ReadBody below.
+#pragma warning disable OVERFIT039
             app.StartAsync(cancellationToken).GetAwaiter().GetResult();
 
             Console.WriteLine($"Redaction gateway listening on http://{host}:{port}");
@@ -97,6 +106,7 @@ namespace DevOnBike.Overfit.Server
             }
 
             app.StopAsync().GetAwaiter().GetResult();
+#pragma warning restore OVERFIT039
         }
 
         /// <summary>
@@ -289,7 +299,7 @@ namespace DevOnBike.Overfit.Server
             }
 
             using var upstreamResponse = http.Send(upstreamRequest);
-            var responseJson = upstreamResponse.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+            var responseJson = ReadBody(upstreamResponse);
 
             // ── Response-side scan: mask any secret/PII the MODEL produced (run before restore, while the caller's
             //    own values are still placeholders, so only genuinely model-generated content is caught). ──
@@ -572,7 +582,7 @@ namespace DevOnBike.Overfit.Server
             }
 
             using var upstreamResponse = http.Send(upstreamRequest);
-            var responseBody = upstreamResponse.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+            var responseBody = ReadBody(upstreamResponse);
 
             // Response-side scan (model-generated leaks), then restore the caller's own placeholders — same order as
             // the chat path: scan first while originals are still placeholders, restore second.
@@ -619,6 +629,31 @@ namespace DevOnBike.Overfit.Server
         // Passes the caller's request headers (OpenAI-Beta, OpenAI-Organization/Project, X-*, User-Agent, Accept, …)
         // through to the upstream so client features keep working — minus the security/framing denylist. The client's
         // Authorization (its gateway key) is dropped here; the real upstream key is injected separately by the caller.
+        /// <summary>
+        /// Reads an upstream response body synchronously.
+        ///
+        /// <para><b>Why not <c>ReadAsStringAsync().GetAwaiter().GetResult()</c>, which is what this was.</b>
+        /// That blocks the request thread on a task while the task's continuation may need a thread to
+        /// finish — under a saturated pool the two wait for each other and the gateway stops serving with
+        /// no exception (OVERFIT039). <c>ReadAsStream</c> is genuinely synchronous, so nothing is blocked
+        /// on: the rest of this path already uses the sync APIs deliberately (<c>http.Send</c>,
+        /// <c>AllowSynchronousIO</c>), and this was the one place that reached for an async one and then
+        /// waited on it.</para>
+        ///
+        /// <para><b>One behaviour difference, stated rather than hidden.</b> <c>ReadAsStringAsync</c> honours
+        /// a <c>charset</c> from the Content-Type header; this decodes as UTF-8 with BOM detection. Both
+        /// endpoints here speak JSON, which RFC 8259 requires to be UTF-8, so the difference cannot bite on
+        /// a conforming upstream — and a non-conforming one would already be mangled downstream where the
+        /// body is parsed as JSON.</para>
+        /// </summary>
+        private static string ReadBody(HttpResponseMessage response)
+        {
+            using var reader = new StreamReader(
+                response.Content.ReadAsStream(), Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+
+            return reader.ReadToEnd();
+        }
+
         private static void ForwardRequestHeaders(HttpRequest src, HttpRequestMessage dst)
         {
             foreach (var header in src.Headers)

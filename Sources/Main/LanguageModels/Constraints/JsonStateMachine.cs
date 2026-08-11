@@ -48,10 +48,21 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints
         // ── Structural accessors for the JSON-Schema overlay (JsonSchemaTracker) ──
         // The schema tracker advances in lockstep with this machine and needs to observe its structural
         // position (which phase, nesting depth, whether the current string is a key, array vs object top).
-        internal Phase CurrentPhase => _phase;
-        internal int Depth => _depth;
-        internal bool CurrentStringIsKey => _stringIsKey;
-        internal bool TopIsArray => _depth > 0 && (_stack & (1UL << (_depth - 1))) != 0;
+        //
+        // `readonly` on each one, and it is not decoration. This is a MUTABLE struct — it has to be, the
+        // acceptor advances in place — and the tracker takes it as `in JsonStateMachine`. Reading a
+        // non-readonly member through an `in` parameter makes the compiler emit a full defensive copy of
+        // the struct at EVERY access, because it cannot prove the getter does not mutate. That is ~32 bytes
+        // copied per read, inside `JsonSchemaConstraint`'s prune loop, which runs once per vocabulary entry
+        // per decode step — 151,936 entries on Qwen — and again per character inside `Accepts`.
+        //
+        // Added 2026-08-11. `IsComplete` above was already readonly, so the idiom was known and missed
+        // exactly where it costs; the comment on the call site at JsonSchemaConstraint.cs:85 even claims
+        // "(no copy)", which is what it was supposed to be and was not.
+        internal readonly Phase CurrentPhase => _phase;
+        internal readonly int Depth => _depth;
+        internal readonly bool CurrentStringIsKey => _stringIsKey;
+        internal readonly bool TopIsArray => _depth > 0 && (_stack & (1UL << (_depth - 1))) != 0;
 
         /// <summary>
         /// Feeds one character, advancing the acceptor. Returns false if the character cannot extend

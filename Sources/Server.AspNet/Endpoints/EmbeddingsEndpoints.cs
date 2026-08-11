@@ -21,17 +21,16 @@ namespace DevOnBike.Overfit.Server.AspNet.Endpoints
     {
         public static RouteGroupBuilder MapEmbeddings(this RouteGroupBuilder v1)
         {
-            v1.MapPost("/embeddings", async (HttpContext ctx, IOpenAiInferenceService service) =>
+            v1.MapPost("/embeddings", static async (HttpContext ctx, IOpenAiInferenceService service) =>
             {
                 EmbeddingsRequest? req;
                 try
                 {
-                    req = await JsonSerializer.DeserializeAsync(
-                        ctx.Request.Body, OpenAiJsonContext.Default.EmbeddingsRequest, ctx.RequestAborted);
+                    req = await JsonSerializer.DeserializeAsync(ctx.Request.Body, OpenAiJsonContext.Default.EmbeddingsRequest, ctx.RequestAborted);
                 }
                 catch (JsonException ex)
                 {
-                    EndpointHelpers.WriteError(ctx.Response, StatusCodes.Status400BadRequest, $"invalid JSON body: {ex.Message}");
+                    await EndpointHelpers.WriteErrorAsync(ctx.Response, StatusCodes.Status400BadRequest, $"invalid JSON body: {ex.Message}", ctx.RequestAborted);
                     return;
                 }
 

@@ -45,3 +45,6 @@ OVERFIT036 | Design | Error | Schema file name cannot become a C# identifier
 OVERFIT037 | Design | Warning | Comment is not in English — comments here carry measurements and rejected designs, not only description
 OVERFIT038 | Reliability | Warning | Count read from a file sizes an allocation, a counted read or a loop with no bound checked in between — the validator must run BEFORE the first use
 OVERFIT039 | Reliability | Warning | Blocking on a task (.GetAwaiter().GetResult(), .Result, Task.Wait()) — under a saturated pool the waiter and the continuation deadlock silently
+OVERFIT040 | Reliability | Warning | Synchronous method calling APIs that have async siblings — the method should return a task, or say with a pragma why it is synchronous by design
+OVERFIT041 | Reliability | Warning | CancellationToken parameter with a default value — the caller silently gets None and the operation is uncancellable while still looking cancellable
+OVERFIT042 | Design | Warning | Index-from-end operator (x[^1]) — a readability decision; write the arithmetic out. Ranges are unaffected
