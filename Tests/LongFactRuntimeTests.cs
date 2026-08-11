@@ -47,6 +47,9 @@ namespace DevOnBike.Overfit.Tests
         }
 
         [Theory]
+        // Null is deliberate — TryParseRuntime is called with whatever a LongFact carried, and its
+        // `runtime` parameter is optional, so null is a real input rather than an invalid one. The
+        // parameter is nullable for that reason; xUnit1012 was flagging the signature, not the data.
         [InlineData(null)]
         [InlineData("")]
         [InlineData("   ")]
@@ -55,7 +58,7 @@ namespace DevOnBike.Overfit.Tests
         [InlineData("32sec")]       // not the notation
         [InlineData("min32")]       // unit before the number
         [InlineData("2h15")]        // trailing digits with no unit
-        public void UnparseableInputReturnsFalseInsteadOfThrowing(string runtime)
+        public void UnparseableInputReturnsFalseInsteadOfThrowing(string? runtime)
         {
             Assert.False(LongFact.TryParseRuntime(runtime, out var value));
             Assert.Equal(TimeSpan.Zero, value);

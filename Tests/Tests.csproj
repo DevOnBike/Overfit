@@ -11,7 +11,30 @@
 		<RootNamespace>DevOnBike.Overfit.Tests</RootNamespace>
 		<AssemblyName>DevOnBike.Overfit.Tests</AssemblyName>
 		<SonarQubeExclude>true</SonarQubeExclude>
-		<NoWarn>$(NoWarn);1591</NoWarn>
+		<!--
+		  xUnit1051 SUPPRESSED 2026-08-11, deliberately and with a trigger to revisit (XC-18).
+
+		  The rule wants every call that accepts a CancellationToken to be given
+		  TestContext.Current.CancellationToken, so a cancelled run can interrupt it. It flagged 69 sites
+		  across 13 files the moment the suite moved to xunit v3 — none of them new, all ordinary awaits.
+
+		  Suppressed rather than swept because the rule's benefit is proportional to how long a test runs,
+		  and this suite is 22 seconds by policy: `dotnet test -c Release` carries correctness checks only
+		  and everything long-running sits behind [LongFact], skipped by default. Sixty-nine mechanical
+		  edits to make a 22-second run more interruptible is a poor trade, and leaving 69 permanent
+		  warnings is worse than either — a warning nobody can act on is how a build's output becomes
+		  wallpaper, which is the reasoning behind the prerelease accept-list in Directory.Build.targets.
+
+		  REVISIT IF: a test hangs rather than fails. XC-10, XC-13 and XC-19 are three single
+		  non-reproducing failures already on record; if that class turns out to be tests that stop
+		  responding rather than tests that assert wrongly, cancellation responsiveness is exactly the
+		  property wanted and this suppression is what would be hiding the lever.
+
+		  The other two v3 rules were NOT suppressed: xUnit1031 (7 sites, blocking on tasks — a real
+		  deadlock risk) was fixed at 5 sites and suppressed per-site with a reason at the 2 where the
+		  blocking IS the assertion, and xUnit1012 was fixed.
+		-->
+		<NoWarn>$(NoWarn);1591;xUnit1051</NoWarn>
 		<CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
 		<!--Thread_UseAllCpuGroups>true</Thread_UseAllCpuGroups-->
 	</PropertyGroup>

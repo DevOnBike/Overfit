@@ -80,9 +80,17 @@ namespace DevOnBike.Overfit.Tests.Serving
                 l.Dispose();
             });
 
+            // xUnit1031 suppressed, not fixed, and the distinction matters. The rule is right in general —
+            // blocking on a task inside a test can deadlock — but here the BLOCKING IS THE ASSERTION:
+            // "Wait(200) returned false" is the only way to state "this waiter is still parked because no
+            // slot is free", and there is no await that expresses it. Rewriting these as awaits would
+            // assert that the waiter eventually completes, which it does either way, and the test would
+            // pass with the pool's blocking removed entirely.
+#pragma warning disable xUnit1031
             Assert.False(waiter.Wait(200));   // still blocked — no slot
             held.Dispose();                    // free it
             Assert.True(waiter.Wait(5000));    // waiter now proceeds
+#pragma warning restore xUnit1031
             Assert.True(gotIt);
         }
 

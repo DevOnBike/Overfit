@@ -20,7 +20,7 @@ namespace DevOnBike.Overfit.Tests.Redaction
     public sealed class RedactionGatewayEndpointsTests
     {
         [Fact]
-        public void GenericProxy_RedactsEmbeddingsBody_RestoresResponse_PassesThroughGet()
+        public async Task GenericProxy_RedactsEmbeddingsBody_RestoresResponse_PassesThroughGet()
         {
             string? upstreamPath = null;
             string? upstreamBody = null;
@@ -108,7 +108,7 @@ namespace DevOnBike.Overfit.Tests.Redaction
             var baseUrl = $"http://127.0.0.1:{gatewayPort}";
             try
             {
-                WaitForHealth($"{baseUrl}/health");
+                await WaitForHealth($"{baseUrl}/health");
                 using var client = new HttpClient();
 
                 // ── /v1/embeddings: body carries an e-mail; the upstream must see only the placeholder. ──
@@ -119,7 +119,7 @@ namespace DevOnBike.Overfit.Tests.Redaction
                     Content = new StringContent(embedRequest, Encoding.UTF8, "application/json")
                 };
                 using var embedResp = client.Send(embedMsg);
-                var clientGot = embedResp.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+                var clientGot = await embedResp.Content.ReadAsStringAsync();
 
                 Assert.Equal(HttpStatusCode.OK, embedResp.StatusCode);
 
@@ -136,9 +136,9 @@ namespace DevOnBike.Overfit.Tests.Redaction
                 Assert.DoesNotContain("REDACTED", clientGot);
 
                 // ── GET /v1/models passes straight through. ──
-                using var modelsResp = client.GetAsync($"{baseUrl}/v1/models").GetAwaiter().GetResult();
+                using var modelsResp = await client.GetAsync($"{baseUrl}/v1/models");
                 Assert.Equal(HttpStatusCode.OK, modelsResp.StatusCode);
-                Assert.Contains("gpt-4", modelsResp.Content.ReadAsStringAsync().GetAwaiter().GetResult());
+                Assert.Contains("gpt-4", await modelsResp.Content.ReadAsStringAsync());
                 Assert.Equal("/v1/models", upstreamPath);
             }
             finally
@@ -163,7 +163,15 @@ namespace DevOnBike.Overfit.Tests.Redaction
             return port;
         }
 
-        private static void WaitForHealth(string url)
+        /// <summary>
+        /// Polls until the gateway answers, or gives up after fifteen seconds.
+        ///
+        /// <para>Asynchronous since 2026-08-11 (<c>XC-18</c>): it used to block on the probe with
+        /// <c>GetAwaiter().GetResult()</c>, which xunit v3's <c>xUnit1031</c> flags as a deadlock risk. The
+        /// <c>Task.Delay</c> between attempts is deliberate and is NOT the sleep-as-synchronisation smell —
+        /// the loop is polling an external process's startup, which has no event to wait on.</para>
+        /// </summary>
+        private static async Task WaitForHealth(string url)
         {
             using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(1) };
             var deadline = Environment.TickCount64 + 15_000;
@@ -171,7 +179,7 @@ namespace DevOnBike.Overfit.Tests.Redaction
             {
                 try
                 {
-                    if (client.GetAsync(url).GetAwaiter().GetResult().IsSuccessStatusCode)
+                    if ((await client.GetAsync(url)).IsSuccessStatusCode)
                     {
                         return;
                     }
@@ -180,7 +188,7 @@ namespace DevOnBike.Overfit.Tests.Redaction
                 {
                     // not up yet
                 }
-                Thread.Sleep(100);
+                await Task.Delay(100);
             }
             throw new TimeoutException($"gateway did not become healthy at {url}");
         }
