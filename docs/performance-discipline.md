@@ -150,6 +150,41 @@ that sounded good.
   the enumerator. Monomorphism does **not** guarantee zero allocation — that refuted an earlier explanation
   of my own. Do not "tidy" a `T[]` into `IReadOnlyList<T>`.
 
+## The cross-process floor on this box is ~3-4%, and a quiet machine does not fix it
+
+Measured 2026-08-12 during `PB-ORT1`, over 12 A/B process pairs. **Canary arms — paths that could not
+have changed by a byte between the two arms — land 3-4% apart from one run to the next, and on the
+worst-behaved class up to 25%.** That is the floor below which a process-level A/B on this machine is
+**silent, not negative**.
+
+**The instinct that this is background load is wrong, and it was tested.** Canary spread on a loaded
+box — ~30 processes, 3.8 GB of idle preview-SDK MSBuild workers, Windows updates staged — was
+**median 3.17% / worst 12.54%**. After a reboot with a single process running it was **median 4.26% /
+worst 24.94%**. Slightly *worse* clean. Closing the IDE, shutting the build servers and rebooting cost
+an hour and bought nothing measurable. (Suggestive rather than decisive: the loaded set is not
+homogeneous. But no reading of it supports the memory-pressure explanation.)
+
+**What follows, and it is a design rule rather than a caution.** An effect smaller than a few percent
+cannot be established here by running the two versions in separate processes, however many pairs you
+run and however quiet the box is. It needs a **different experiment shape** — the two shapes in one
+process, ABAB-interleaved, so the comparison never crosses a process boundary. When the artefact makes
+that impossible (a native asset: one process loads one copy), say so, state the resolving power, and
+stop. `PB-ORT1` is the worked example: 0.3-1.5% effect against a 4.26% floor, reported as "does not
+separate" rather than as a number.
+
+Three traps from the same run, each of which produced a wrong answer before it was caught:
+
+- **`ABAB` at *pair* level does not break the position/version confound.** Every A precedes its own B,
+  so "the new version is faster" and "the second process is faster" are the same observation. Alternate
+  the pair order — AB, BA, AB, BA. This cost six pairs.
+- **BenchmarkDotNet builds a generated child project with its own copy of any native asset**, and that
+  is the copy the measuring process loads. Asserting the host's `bin` proves nothing, and with
+  `--keepFiles` the previous arm's binary sits there waiting for the next arm's check to pass on it.
+- **An A/B asserts the identity of the thing it varies and assumes everything else.** The native
+  library was asserted 48 times while the **.NET runtime** changed underneath the run — a servicing
+  install mid-sequence — and it was caught only afterwards, by reading `HostEnvironmentInfo` out of the
+  saved arms. Assert the platform too, and abort on mismatch rather than discovering it in analysis.
+
 ## The bar
 
 Never ship, claim or commit a perf win you have not measured on a stable box, best-of-N on **both** sides,
