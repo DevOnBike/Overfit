@@ -84,6 +84,36 @@ namespace DevOnBike.Overfit.Server.AspNet.Services
             }
         }
 
+        /// <summary>
+        /// Runs one chat completion through <see cref="ChatCompletionExchange"/> on a session rented from the
+        /// pool for the duration.
+        ///
+        /// <para><b>The rent blocks the calling thread for up to thirty seconds — <c>RentTimeout</c>, passed
+        /// to <c>OverfitResourcePool.TryRent</c> — and that is a decision (XC-26, 2026-08-12), not an
+        /// oversight.</b> Unlike the two gates below there is nothing to await: <c>TryRent</c> waits on
+        /// <c>SemaphoreSlim.Wait(TimeSpan, CancellationToken)</c>, which blocks a thread, and the pool has no
+        /// asynchronous rental. The token IS honoured, and the two outcomes differ: a cancelled wait throws
+        /// <see cref="OperationCanceledException"/> (caught below, answered 503) and is deliberately NOT
+        /// counted a rejection, while a timeout returns false, IS counted, and sheds with 503 into
+        /// <c>overfit_pool_rejected_total</c>. The CLI's <c>--sessions</c> defaults to 1, so at any
+        /// concurrency above one every request but one waits here, each holding a thread.</para>
+        ///
+        /// <para><b>Why it is not awaited:</b> an asynchronous rent would hand the thread back for the QUEUE
+        /// only. Once through the gate the thread is held for the generation as well — <c>Handle</c> is
+        /// synchronous and <see cref="AspNetResponseSink"/> writes each token from inside the model's decode
+        /// callback, which that file records as the server's design — and the number of concurrent
+        /// completions is bounded by the pool size either way. What it would cost is permanent: <c>out
+        /// lease</c> cannot cross an <c>await</c>, so <c>DevOnBike.Overfit</c> would gain its first
+        /// asynchronous primitive in public API, and <see cref="IOpenAiInferenceService.CompleteChat"/> would
+        /// have to become task-returning.</para>
+        ///
+        /// <para><b>What is NOT known, and the condition that would reopen it:</b> whether those parked
+        /// threads delay unrelated endpoints has never been measured on this server, and neither has any
+        /// throughput effect of awaiting the rent. Both are unverified claims rather than findings, and the
+        /// verdict on either belongs to a measurement. Reopen if a burst at <c>--sessions 1</c> measurably
+        /// delays <c>GET /v1/models</c> or <c>GET /metrics</c> while <c>dotnet_threadpool_queue_length</c>
+        /// rises.</para>
+        /// </summary>
         public void CompleteChat(ChatCompletionRequest? request, IOpenAiResponseSink sink, CancellationToken cancellationToken)
         {
             OverfitResourcePool<OverfitClient>.Lease lease;

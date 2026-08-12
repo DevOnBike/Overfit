@@ -1,7 +1,7 @@
 ---
 description: Full gate — build the solution with CI flags, then run the whole test suite
 argument-hint: (no arguments)
-allowed-tools: Write, Edit, Bash(python .claude/do-check.py)
+allowed-tools: Write, Edit, Bash(python .claude/do-check.py), Bash(python Scripts/check_agent_definitions.py), Bash(python Scripts/plan_gate_check.py)
 ---
 
 Run the standard gate for this repository: build everything, then run every test.
@@ -54,3 +54,22 @@ Non-negotiables baked into the script above — do not "simplify" them away:
 If a test fails, re-run with `--logger "console;verbosity=detailed"` and report the **test name** before
 diagnosing anything. A bare exit code is not a finding — this repo has twice lost a real failure because
 the output filter kept only the summary line.
+
+## Then the two checks the compiler cannot make
+
+Run both and report them beside the suite numbers. They are seconds each and they cover the two places
+where this repository has been broken **without anything turning red**:
+
+```
+python Scripts/check_agent_definitions.py
+python Scripts/plan_gate_check.py
+```
+
+- **`check_agent_definitions.py`** — every `.claude/agents/*.md` must still parse as an agent. On
+  2026-08-10 one 0x01 byte in a frontmatter silently unregistered `overfit-developer`, the only agent
+  permitted to modify source, for two days: the file was on disk, `CLAUDE.md` described eleven agents, the
+  session offered ten, and no build or test could see any of it. The script self-tests first, so a clean
+  run means the checker still works rather than that it checked nothing.
+- **`plan_gate_check.py`** — plans that stopped between gates, and gate manifests that are missing,
+  unreadable, or say `NOT_REQUIRED` without a reason. **A non-zero exit here is not a build failure**; it
+  is a list of process debts. Report it, do not "fix" it by editing a plan's status line.

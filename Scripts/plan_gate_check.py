@@ -19,7 +19,58 @@ sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 # Ordered. Reaching one without the previous is not the concern; STOPPING at one is.
-STAGES = ["ANALYSIS_READY", "APPROVED", "IMPLEMENTED", "VERIFIED", "REVIEWED", "PR_READY", "MERGED"]
+STAGES = ["ANALYSIS_READY", "APPROVED", "IMPLEMENTED", "VERIFIED", "REVIEWED", "GATES_PASSED",
+          "PR_READY", "MERGED", "OUTCOME_MEASURED"]
+
+# The gate manifest, added 2026-08-13. The STATUS line is a scalar: it says how far the work got and
+# cannot say WHICH check ran. Before the manifest, "the CISO gate was not required" and "the CISO gate
+# was never dispatched" were the same absence in the plan file.
+GATES = ["verifier", "reviewer", "mutation-proof", "performance", "security", "leak-scan", "AOT",
+         "API-compatibility", "release-readiness"]
+
+VERDICTS = ("PASS", "FAIL", "INCONCLUSIVE", "NOT_REQUIRED")
+
+# `overfit-architect` closes with SIGNED, which is the same state the pipeline calls APPROVED. Accepted
+# rather than "corrected" in seven plan files: a plan is not broken because two documents chose different
+# words for one state, and a checker that reports a synonym as unreadable teaches people to ignore it.
+ALIASES = {"SIGNED": "APPROVED"}
+
+
+def check_manifest(text):
+    """A missing line is NOT `NOT_REQUIRED` — it means nobody asked.
+
+    Returns a list of messages rather than printing, so the caller can print the plan's name once and
+    only when there is something to say.
+    """
+    found = []
+    lines = {}
+
+    for line in text.splitlines():
+        m = re.match(r"\s{2,}([A-Za-z-]+):\s*(\S+)(.*)$", line)
+        if m and m.group(1) in GATES:
+            lines[m.group(1)] = (m.group(2).rstrip(","), m.group(3).strip())
+
+    if not lines:
+        return ["no GATES: block — nothing records what was checked"]
+
+    for gate in GATES:
+        if gate not in lines:
+            found.append(f"gate NOT ASKED: {gate} — a missing line is not NOT_REQUIRED")
+
+            continue
+
+        verdict, tail = lines[gate]
+
+        if verdict not in VERDICTS:
+            found.append(f"gate {gate}: unreadable verdict {verdict!r} — expected {', '.join(VERDICTS)}")
+        elif verdict == "NOT_REQUIRED" and not tail:
+            # The reason is the whole point: it is what separates a gate nobody needed from one
+            # nobody ran. Without it the manifest re-creates the ambiguity it exists to remove.
+            found.append(f"gate {gate}: NOT_REQUIRED with no reason on the line")
+        elif verdict == "FAIL":
+            found.append(f"gate {gate}: FAIL — the plan must not advance past it")
+
+    return found
 
 # A stage that is dangerous to rest at, and what is missing when you do.
 STALLS = {
@@ -33,8 +84,8 @@ problems = 0
 # A plan is a file whose name says so. docs/specs also holds a README, which has no status and
 # should not be reported as a stalled plan — the first run of this script did exactly that.
 for plan in sorted((ROOT / "docs" / "specs").glob("*-plan.md")):
-    status = next((l for l in plan.read_text(encoding="utf-8", errors="replace").splitlines()
-                   if l.startswith("STATUS:")), None)
+    text = plan.read_text(encoding="utf-8", errors="replace")
+    status = next((l for l in text.splitlines() if l.startswith("STATUS:")), None)
 
     if status is None:
         print(f"[no status] {plan.name}")
@@ -50,6 +101,8 @@ for plan in sorted((ROOT / "docs" / "specs").glob("*-plan.md")):
         continue
 
     reached = [s for s in STAGES if re.search(rf"\b{s}\b", status)]
+    reached += [canonical for word, canonical in ALIASES.items()
+                if re.search(rf"\b{word}\b", status, re.I) and canonical not in reached]
     committed = "COMMITTED" in status.upper()
 
     if not reached:
@@ -70,6 +123,20 @@ for plan in sorted((ROOT / "docs" / "specs").glob("*-plan.md")):
         print(f"[stalled at {furthest}] {plan.name}")
         print(f"    next is {missing[0]}: {missing[1]}")
         problems += 1
+
+    # The manifest is only demanded once there is work to have gated. Asking a plan that is still
+    # ANALYSIS_READY for a verifier verdict would train people to write NOT_REQUIRED everywhere,
+    # which is how a gate list becomes wallpaper.
+    if STAGES.index(furthest) >= STAGES.index("IMPLEMENTED"):
+        found = check_manifest(text)
+
+        if found:
+            print(f"[gate manifest] {plan.name}")
+
+            for message in found:
+                print(f"    {message}")
+
+            problems += len(found)
 
 print(f"\n{problems} plan(s) need attention" if problems else "\nno plan is stalled between gates")
 sys.exit(1 if problems else 0)

@@ -157,12 +157,14 @@ namespace DevOnBike.Overfit.Anomalies.Hosting
             var (gap, trendChange, stepChange, gapChange) =
                 AnomalyGuardConfigReader.ReadThresholds(file, out var floorProblems);
             var maintenance = AnomalyGuardConfigReader.ReadMaintenance(file, out var windowProblems);
+            var novelty = AnomalyGuardConfigReader.ReadPeerNovelty(file, out var noveltyProblems);
 
             if (onProblem != null)
             {
                 Report(mapProblems, onProblem);
                 Report(floorProblems, onProblem);
                 Report(windowProblems, onProblem);
+                Report(noveltyProblems, onProblem);
             }
 
             var now = (clock ?? SystemClock.Instance).UtcNow.UtcDateTime;
@@ -206,6 +208,12 @@ namespace DevOnBike.Overfit.Anomalies.Hosting
                     // nothing, and an unconditional assignment would erase a table a host had set in code and
                     // turn a working peer-novelty gate into a refusal to start.
                     MinAbsoluteGapChange = gapChange ?? given.Guard.MinAbsoluteGapChange,
+
+                    // Conditional for the same reason as the floor above, and the pair is the feature: a file
+                    // that names no profile leaves the gate exactly as the caller left it, which for every
+                    // deployment written before this key existed means off. Naming one without the floor is
+                    // refused at construction rather than run — see AnomalyGuard.RestoreNovelty.
+                    PeerNovelty = novelty ?? given.Guard.PeerNovelty,
                     CustomMetrics = map.Custom,
 
                     // By name, because the calibrator is keyed by name and never receives a binding. Set

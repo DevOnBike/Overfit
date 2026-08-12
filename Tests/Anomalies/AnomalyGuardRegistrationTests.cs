@@ -258,6 +258,153 @@ namespace DevOnBike.Overfit.Tests.Anomalies
         }
 
         /// <summary>
+        /// A file naming a profile AND a change floor builds a guard with the gate on.
+        ///
+        /// <para><b>The two halves are one feature and this is where that is proved.</b> The floor shipped
+        /// on 2026-08-12 and the profile key beside it; either alone is useless — a floor with no profile
+        /// gates nothing, and the arm below shows what a profile with no floor does.</para>
+        /// </summary>
+        [Fact]
+        public void AProfileAndAFloorTogetherBuildAGuardWithTheGateOn()
+        {
+            var services = new ServiceCollection();
+
+            services.AddLogging();
+            services.AddOverfitAnomalyGuard(WithNovelty("Daily", floor: "2.5MB"));
+
+            using var provider = services.BuildServiceProvider();
+            var options = provider.GetRequiredService<AnomalyGuardServiceOptions>();
+
+            Assert.Equal(PeerNoveltyOptions.Daily, options.Guard.PeerNovelty);
+
+            // Resolving is the assertion that matters: AnomalyGuardService builds the AnomalyGuard in its
+            // constructor, so a guard that would refuse to start refuses here.
+            Assert.NotNull(provider.GetRequiredService<AnomalyGuardService>());
+        }
+
+        /// <summary>
+        /// A profile with no change floor still refuses to start, with the message that names the missing
+        /// table.
+        ///
+        /// <para><b>This is the arm that must never become a start.</b> The floor is unmeasured, so a guard
+        /// that ran the gate without one would be suppressing findings against a threshold nobody chose —
+        /// and a suppression gate running with its floor off looks exactly like a quiet cluster. Refusing is
+        /// deliberate: starting loudly beats suppressing quietly.</para>
+        /// </summary>
+        [Fact]
+        public void AProfileWithoutAChangeFloorStillRefusesToStart()
+        {
+            var services = new ServiceCollection();
+
+            services.AddLogging();
+            services.AddOverfitAnomalyGuard(WithNovelty("Daily", floor: ""));
+
+            using var provider = services.BuildServiceProvider();
+
+            var error = Assert.Throws<ArgumentException>(
+                () => provider.GetRequiredService<AnomalyGuardService>());
+
+            Assert.Contains(nameof(AnomalyGuardOptions.MinAbsoluteGapChange), error.Message,
+                StringComparison.Ordinal);
+        }
+
+        /// <summary>
+        /// A file naming no profile leaves the gate off and the guard buildable — the compatibility arm for
+        /// every configuration written before the key existed.
+        /// </summary>
+        [Fact]
+        public void AFileWithNoProfileLeavesTheGateOffAndTheGuardBuildable()
+        {
+            var services = new ServiceCollection();
+
+            services.AddLogging();
+            services.AddOverfitAnomalyGuard(WithNovelty(profile: "", floor: "2.5MB"));
+
+            using var provider = services.BuildServiceProvider();
+            var options = provider.GetRequiredService<AnomalyGuardServiceOptions>();
+
+            Assert.Null(options.Guard.PeerNovelty);
+            Assert.NotNull(provider.GetRequiredService<AnomalyGuardService>());
+        }
+
+        /// <summary>
+        /// A misspelled profile is reported through <c>onProblem</c> and leaves the gate off, rather than
+        /// being rounded to a profile the operator did not choose.
+        /// </summary>
+        [Fact]
+        public void AnUnknownProfileNameIsReportedToTheHostAndLeavesTheGateOff()
+        {
+            var services = new ServiceCollection();
+            var problems = new List<string>();
+
+            services.AddLogging();
+            services.AddOverfitAnomalyGuard(
+                WithNovelty("Dayly", floor: "2.5MB"), options: null, onProblem: problems.Add);
+
+            using var provider = services.BuildServiceProvider();
+            var options = provider.GetRequiredService<AnomalyGuardServiceOptions>();
+
+            Assert.Null(options.Guard.PeerNovelty);
+            Assert.Contains(problems, p => p.Contains("Dayly", StringComparison.Ordinal));
+
+            // And the guard still builds — the gate being off is the state every deployment is in today.
+            Assert.NotNull(provider.GetRequiredService<AnomalyGuardService>());
+        }
+
+        /// <summary>
+        /// A profile a host assigned in code survives a file that names none, matching how the change floor
+        /// beside it behaves and for the same reason.
+        /// </summary>
+        [Fact]
+        public void ACodeSuppliedProfileIsNotErasedByAFileThatNamesNone()
+        {
+            var floors = new double[(int)MetricIndex.Count];
+            floors[(int)MetricIndex.MemoryWorkingSetBytes] = 2.5e6;
+
+            var services = new ServiceCollection();
+
+            services.AddLogging();
+            services.AddOverfitAnomalyGuard(
+                WithNovelty(profile: "", floor: ""),
+                new AnomalyGuardServiceOptions
+                {
+                    Guard = new AnomalyGuardOptions
+                    {
+                        PeerNovelty = PeerNoveltyOptions.Weekly,
+                        MinAbsoluteGapChange = floors,
+                    },
+                });
+
+            using var provider = services.BuildServiceProvider();
+            var options = provider.GetRequiredService<AnomalyGuardServiceOptions>();
+
+            Assert.Equal(PeerNoveltyOptions.Weekly, options.Guard.PeerNovelty);
+        }
+
+        /// <summary>
+        /// One scope, one channel, and the two peer-novelty knobs varied independently by the callers above.
+        /// </summary>
+        private static AnomalyGuardConfigFile WithNovelty(string profile, string floor)
+        {
+            return new AnomalyGuardConfigFile
+            {
+                Prometheus = "http://127.0.0.1:9090",
+                Namespace = "lab",
+                Workload = "lab-workload",
+                PodRegex = "lab-workload-.*",
+                PeerNovelty = profile,
+                Thresholds =
+                {
+                    ["MemoryWorkingSetBytes"] = new AnomalyGuardConfigFile.ThresholdEntry
+                    {
+                        MinGap = "9.52MB",
+                        MinGapChange = floor,
+                    },
+                },
+            };
+        }
+
+        /// <summary>
         /// A syntactically valid target that nothing is listening on. Registration issues no query, and
         /// neither does resolution — the first request happens on the first cycle, which these tests never
         /// run.

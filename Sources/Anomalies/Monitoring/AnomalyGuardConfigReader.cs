@@ -221,6 +221,49 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
         }
 
         /// <summary>
+        /// The peer-novelty cadence profile the file names, or <c>null</c> when it names none.
+        ///
+        /// <para><b>Null is the whole compatibility story.</b> The gate is what makes the peer family
+        /// <i>quieter</i>, so a file that says nothing must leave it off and every existing deployment
+        /// untouched. There is no default profile to fall into and none is invented here — see
+        /// <see cref="PeerNoveltyOptions"/>, which refuses <c>default</c> for the same reason.</para>
+        ///
+        /// <para><b>An unrecognised name is reported and dropped, not rounded.</b> The gate stays off, which
+        /// leaves the guard noisy rather than silent — the safe direction for a typo — and the operator is
+        /// told which names exist. Choosing the nearest profile would switch a suppression gate on from a
+        /// misspelling.</para>
+        /// </summary>
+        public static PeerNoveltyOptions? ReadPeerNovelty(
+            AnomalyGuardConfigFile file,
+            out IReadOnlyList<string> problems)
+        {
+            ArgumentNullException.ThrowIfNull(file);
+
+            var found = new List<string>();
+            var name = file.PeerNovelty.Trim();
+
+            if (name.Length == 0)
+            {
+                problems = found;
+
+                return null;
+            }
+
+            if (TryNovelty(name, out var profile))
+            {
+                problems = found;
+
+                return profile;
+            }
+
+            found.Add($"peerNovelty = '{name}' — not one of {NoveltyNames()}. The peer-novelty gate is OFF.");
+
+            problems = found;
+
+            return null;
+        }
+
+        /// <summary>
         /// The declared maintenance windows, with anything unparseable reported and dropped.
         ///
         /// <para><b>Dropped, never widened.</b> A window whose timestamps cannot be read must not become one
@@ -283,12 +326,17 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
         {
             var map = ReadMap(file, out var mapProblems);
             ReadThresholds(file, out var thresholdProblems);
+            ReadPeerNovelty(file, out var noveltyProblems);
 
             var report = new StringBuilder();
             report.Append(map.Describe());
 
             var problems = new List<string>(mapProblems);
             problems.AddRange(thresholdProblems);
+
+            // A misspelled profile leaves the gate off, which is a decision an operator should see BEFORE
+            // deploying rather than infer from the guard staying as noisy as it was.
+            problems.AddRange(noveltyProblems);
 
             if (problems.Count == 0)
             {
@@ -354,6 +402,50 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
         private static bool TryKind(string text, out MetricSourceKind kind)
         {
             return Enum.TryParse(text, ignoreCase: true, out kind) && Enum.IsDefined(kind);
+        }
+
+        /// <summary>
+        /// Maps a profile name onto the preset that carries it.
+        ///
+        /// <para><b>A switch rather than an enum parse, because these are static properties and not enum
+        /// members.</b> The cost is that a fourth preset added to <see cref="PeerNoveltyOptions"/> would not
+        /// become nameable here on its own, so a test walks the type's presets and fails if one of them
+        /// cannot be reached through this method — the drift is caught by a gate rather than by a comment.
+        /// </para>
+        /// </summary>
+        private static bool TryNovelty(string text, out PeerNoveltyOptions profile)
+        {
+            if (string.Equals(text, nameof(PeerNoveltyOptions.PerShift), StringComparison.OrdinalIgnoreCase))
+            {
+                profile = PeerNoveltyOptions.PerShift;
+
+                return true;
+            }
+
+            if (string.Equals(text, nameof(PeerNoveltyOptions.Daily), StringComparison.OrdinalIgnoreCase))
+            {
+                profile = PeerNoveltyOptions.Daily;
+
+                return true;
+            }
+
+            if (string.Equals(text, nameof(PeerNoveltyOptions.Weekly), StringComparison.OrdinalIgnoreCase))
+            {
+                profile = PeerNoveltyOptions.Weekly;
+
+                return true;
+            }
+
+            profile = default;
+
+            return false;
+        }
+
+        private static string NoveltyNames()
+        {
+            return nameof(PeerNoveltyOptions.PerShift)
+                   + ", " + nameof(PeerNoveltyOptions.Daily)
+                   + ", " + nameof(PeerNoveltyOptions.Weekly);
         }
 
         private static string KindNames()

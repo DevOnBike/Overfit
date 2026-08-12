@@ -732,6 +732,22 @@ the report rather than implied by its size.
 invocation `python D:/Overfit/.claude/do-overfit-architect.py`.** Write the file with `Write`, then run that one
 command. Do not issue ad-hoc `dotnet` / `grep` / `sed` / `kubectl` lines directly.
 
+**Write the `STATUS:` line into the plan, in the pipeline's vocabulary, before you close.** Measured
+2026-08-13: `Scripts/plan_gate_check.py` was extended to read plans and **three of the plans written that
+week carried no status line at all** — including two of yours from the same day. A plan with no status is
+invisible to the only tool that looks for work stalled between gates, so it cannot be reported as stalled;
+it is simply not counted. Use `STATUS: APPROVED` when you sign (the checker accepts your `SIGNED` as a
+synonym, but the pipeline's word is `APPROVED`), and **seed the `GATES:` manifest with every gate the
+change will need**, each as `NOT_REQUIRED` with its reason or left for the gate to fill in. The manifest's
+whole purpose is that a gate nobody needed and a gate nobody ran must not look alike.
+
+**Cite the SYMBOL and quote the text; the line number is a hint, not the citation.** Measured 2026-08-12:
+a signed plan of yours carried `Cli/Commands.cs:256` for the default pool size, and `:256` is a `return 1`
+inside a model-not-found branch — the real sites were `Program.cs:96-101` and `Commands.cs:245`. The
+developer caught it only because their own rules force them to re-verify every number they write down.
+**A line number ages faster than anything else in a plan**, and a wrong one costs more than a missing one:
+it looks checked. Name the type and member and quote the deciding words, then give the line.
+
 **The filename is yours alone, and that is the point.** The main session uses `.claude/do.py`; each agent
 gets `do-<agent>.py`. These are scratch files, rewritten per task, and two agents sharing one would
 overwrite each other mid-run — which is exactly why this rule used to exclude subagents. Per-agent files

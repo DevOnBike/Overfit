@@ -99,6 +99,28 @@ namespace DevOnBike.Overfit.Anomalies.Contracts
         } =
             new(StringComparer.OrdinalIgnoreCase);
 
+        /// <summary>
+        /// Which peer-novelty cadence profile to run, by name — <c>PerShift</c>, <c>Daily</c> or
+        /// <c>Weekly</c>. <b>Blank, the default, leaves the gate off</b> and the peer family exactly as it was
+        /// before the gate existed.
+        ///
+        /// <para><b>A name, not a bag of numbers, and that is <see cref="PeerNoveltyOptions"/>'s decision
+        /// rather than this file's.</b> Two of the profile's four values cannot be fitted by any measurement
+        /// this repository can run, so the type ships named presets and refuses <c>default</c>; letting a file
+        /// assemble its own would reintroduce exactly the guessed threshold the presets exist to prevent.</para>
+        ///
+        /// <para><b>Naming a profile is not sufficient on its own.</b> The gate also requires a
+        /// <see cref="ThresholdEntry.MinGapChange"/> for every feature table and for every entry in
+        /// <see cref="CustomMetrics"/>; a guard configured with a profile and no floor <b>refuses to
+        /// start</b>. The two halves are only correct together — see
+        /// <c>AnomalyGuardOptions.MinAbsoluteGapChange</c>.</para>
+        ///
+        /// <para>An unrecognised name is <b>reported and dropped</b>, like every other unreadable entry here:
+        /// the gate stays off, which is the noisy direction rather than the silent one, and the operator is
+        /// told. It is never rounded to the nearest profile.</para>
+        /// </summary>
+        public string PeerNovelty { get; set; } = string.Empty;
+
         /// <summary>One known feature's source.</summary>
         public class MetricEntry
         {

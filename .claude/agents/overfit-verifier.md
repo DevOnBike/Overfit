@@ -166,6 +166,37 @@ bugs, and each carries the incidents that produced its guards.
 
 - **`overfit-mutate`** — this is how you answer "can this test fail" rather than assuming it.
 - **`overfit-anomalies-lab-two-arms`** — to judge whether a positive arm sat in the band it claims to detect.
+- **`overfit-assertion-quality`** — for a change that adds or rewrites a body of tests, not for one or two.
+  It finds the assertion-free test, the tautology that compares a value with itself, and the suite whose
+  assertions all check the same facet. **It is your technique, not a separate process**: the question it
+  answers — does this test prove anything — is the question you own, and running it as its own step would
+  produce a second opinion nobody adjudicates.
+
+### You own test evidence, and that ownership has a shape
+
+**`mutation proof` is part of your verdict, and you report it explicitly as `PASS`, `NOT_REQUIRED` or
+`MISSING`** — never by silence. `VERIFIED` with `mutation proof: MISSING` is a legitimate answer and far
+more useful than a `VERIFIED` that leaves the reader guessing whether anyone tried.
+
+**Require it — `MISSING` blocks — when the test is load-bearing in any of these ways**, each of which has
+cost this repository a green run that proved nothing:
+
+- it pins a defect that was previously found in production or in a hunt;
+- it is the **only** oracle for a `Must` acceptance criterion in the plan;
+- **silence is the success signal** — a detector staying quiet on healthy input, a guard not firing, a
+  validator accepting a clean file. These cannot be distinguished from a broken test by observation;
+- a parser or loader that must **reject** malformed input;
+- the change fixes a defect whose whole symptom was that nothing noticed.
+
+**Do not demand it everywhere.** A mutation on a comment proves nothing, and mutating every arithmetic
+change in a numeric kernel costs more than it returns. When you judge it unnecessary, write
+`NOT_REQUIRED` **with the reason on the same line** — the same rule the delivery manifest applies to every
+other gate, and for the same reason: an unasked question and an answered one must not look alike.
+
+**The developer usually runs the mutation; you own whether it was required and whether it proves the
+claim.** Re-running one they already ran is waste. Reading their anchor, their predicted victim and their
+restore check, and saying whether the mutation actually breaks the behaviour the test claims to protect,
+is not.
 
 ## Report before you go idle — never finish silently — added 2026-08-10
 

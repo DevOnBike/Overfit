@@ -130,6 +130,14 @@ Read the diff, not the intent. Dispatch every gate whose trigger fires:
 | public documentation, a large refactor, or comments moved with code | **`overfit-reviewer`** (merged 2026-08-09) |
 | `.github/workflows/**`, publishing credentials, release integrity | **`overfit-ciso`** — and the workflow edit itself is the user's, never an agent's |
 | a dependency advisory with reachable impact | **`overfit-ciso`** |
+| configuration, logs, docs, CI, fixtures, model metadata, `k8s/**`, anything carrying a host name, a path or a token | **`overfit-leak-scan`** |
+| public API of `Sources/Main` added, removed or changed | **API compatibility** — run the assembly comparator in `Tests/TestSupport/Assemblies/` against the last published package, and record `breaking` / `additive` / `unchanged` in the manifest. A breaking result needs an explicit decision in the plan and a `MINOR` bump per `CHANGELOG.md`'s versioning policy |
+
+**`overfit-leak-scan` is a gate, not an optional courtesy, and it was missing from this file until
+2026-08-13** — the agent existed, said in its own description to run it before any push, and no pipeline
+step named it. A seatbelt that is not bolted to the car. **At the release gate it runs unconditionally**,
+whatever the diff touched, because history is in scope there and a secret already pushed is not fixed by
+deleting the file.
 
 **`overfit-find-bugs-game` is not a gate.** It is bounded exploration on a ten-minute clock and its coverage
 is heuristic. Use it deliberately on a neglected module, never as a required step.
@@ -156,18 +164,63 @@ is reachable from `AotSmokeTest`, plan traceability, reviewer verdict green, eve
 green, no undocumented scope creep.
 
 **Release gate** — everything above, plus versioning, package metadata, `dotnet pack`, CHANGELOG honesty,
-public documentation, SourceLink and release integrity, container images, and the security posture.
+public documentation, SourceLink and release integrity, container images, and the security posture. **Plus
+`overfit-leak-scan`, unconditionally**, and the API-compatibility comparison against the last published
+package.
+
+**Both gates read the manifest rather than asking the coordinator.** `overfit-release-readiness` is
+instructed to treat a missing gate line as **not run** — never as `NOT_REQUIRED` — and to report the plan
+as blocked rather than inferring what somebody probably did.
 
 ## Plan status — write it into the plan file
 
 Keep the state in `docs/specs/<slug>-plan.md`, on one line near the top, so the pipeline survives a session
 ending and a human can see where it stopped:
 
-`STATUS: ANALYSIS_READY → APPROVED → IMPLEMENTED → REVIEWED → PR_READY`
+**There is exactly ONE sequence, and this is it:**
+
+`STATUS: ANALYSIS_READY → APPROVED → IMPLEMENTED → VERIFIED → REVIEWED → GATES_PASSED → PR_READY → MERGED → OUTCOME_MEASURED`
 
 Update it as each stage completes. **Never advance it past a stage that did not actually pass**, and never
 advance it for a check that could not run — an unrun check recorded as a pass is the failure mode this
 repository cares about most.
+
+**Why "exactly one" is stated so loudly: until 2026-08-13 this file carried TWO.** One here without
+`VERIFIED`, one further down with it, both presented as the sequence. A coordinator following the first
+could write `REVIEWED` into a plan with **no durable trace that the verifier ever ran** — and a plan that
+skipped the evidence stage would then be indistinguishable from one that passed it. `GATES_PASSED` is new
+for the same reason: the conditional gates were real work with no state, so "the CISO gate was not required"
+and "the CISO gate was never dispatched" looked identical from the plan file.
+
+### The gate manifest — because a status is a scalar and cannot say which gate is missing
+
+**The status line says how far the work got. It cannot say what was checked**, and `GATES_PASSED` on its own
+just moves the ambiguity one word along. So the plan carries a second block, and every gate has its own
+verdict:
+
+```
+GATES:
+  verifier:           PASS | FAIL | INCONCLUSIVE | NOT_REQUIRED
+  reviewer:           ...
+  mutation-proof:     ...
+  performance:        ...
+  security:           ...
+  leak-scan:          ...
+  AOT:                ...
+  API-compatibility:  ...
+  release-readiness:  ...
+```
+
+**`NOT_REQUIRED` must carry its reason on the same line** — "no hot path touched", "no public API changed".
+That is the whole point: a gate nobody needed and a gate nobody ran are the same absence, and only the
+written reason separates them. **A missing line is not `NOT_REQUIRED`**; it means the question was never
+asked, and `Scripts/plan_gate_check.py` treats it as such.
+
+`INCONCLUSIVE` is a first-class outcome and must not be rounded to either neighbour — a gate that could not
+reach a verdict (no lab, no baseline, a flaky box) is evidence about the gate, not about the change.
+
+**Write it as facts, not as narrative**, because the reader is `overfit-release-readiness`: it should read
+what happened rather than reconstruct it from a coordinator's summary written hours earlier.
 
 
 ## The pipeline does not end at the merge
@@ -176,9 +229,9 @@ repository cares about most.
 achieve — and every gate before this point checked *correctness*, not *outcome*. A change can be correct,
 reviewed, verified, shippable, and useless.
 
-So the status line has one more state, and you must not skip it:
-
-`STATUS: ANALYSIS_READY → APPROVED → IMPLEMENTED → VERIFIED → REVIEWED → PR_READY → MERGED → OUTCOME_MEASURED`
+That is what the last two states in the sequence above are for — `MERGED` and `OUTCOME_MEASURED` — and you
+must not treat the pipeline as finished before them. **The sequence is defined once, in "Plan status"; do
+not restate it here or anywhere else.** This paragraph used to carry its own copy, and the two drifted.
 
 **When you report at the PR gate, say the outcome is not yet known.** Name the success metric, name what
 would measure it, and say when that becomes possible — after a deploy, after a day of data, after a

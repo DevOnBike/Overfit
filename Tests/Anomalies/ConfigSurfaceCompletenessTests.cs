@@ -3,6 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Reflection;
 using System.Text.Json;
 using DevOnBike.Overfit.Anomalies.Contracts;
 using DevOnBike.Overfit.Anomalies.Incidents;
@@ -34,6 +35,12 @@ namespace DevOnBike.Overfit.Tests.Anomalies
     /// deployment could set `minGapChange` on a custom channel and had no way at all to set it on
     /// `MemoryWorkingSetBytes`. Enabling the gate from a ConfigMap would have failed at startup on the
     /// per-metric table before any custom channel was reached.</para>
+    ///
+    /// <para><b>And the floor was only half of it — the GATE itself could not be switched on either, found
+    /// 2026-08-12 while closing the half above.</b> `AnomalyGuardOptions.PeerNovelty` had no config key at
+    /// all, so a mechanism with a plan, an ADR, a tracker, persistence and 25 tests was reachable only by a
+    /// host assembling options in code. The two are one feature: a profile without a floor refuses to start,
+    /// and a floor without a profile does nothing.</para>
     /// </summary>
     public sealed class ConfigSurfaceCompletenessTests
     {
@@ -365,6 +372,130 @@ namespace DevOnBike.Overfit.Tests.Anomalies
 
             Assert.Null(gapChange);
             Assert.Contains(problems, p => p.Contains("not a known feature", StringComparison.Ordinal));
+        }
+
+        /// <summary>
+        /// The file names a cadence profile and gets that profile — by name, because
+        /// <see cref="PeerNoveltyOptions"/> ships presets and refuses <c>default</c>.
+        /// </summary>
+        [Theory]
+        [InlineData("PerShift", 8.0)]
+        [InlineData("Daily", 24.0)]
+        [InlineData("Weekly", 168.0)]
+        [InlineData("daily", 24.0)]
+        public void ANamedProfileIsReadFromTheConfigFile(string name, double hours)
+        {
+            var profile = AnomalyGuardConfigReader.ReadPeerNovelty(
+                Parse($$"""
+                       {
+                         "prometheus": "http://127.0.0.1:9090",
+                         "namespace": "lab",
+                         "podRegex": "app-.*",
+                         "peerNovelty": "{{name}}"
+                       }
+                       """),
+                out var problems);
+
+            Assert.Empty(problems);
+            Assert.NotNull(profile);
+
+            // The interval is what distinguishes the three, so asserting it is what makes a reader that
+            // returned the wrong preset fail rather than look right.
+            Assert.Equal(TimeSpan.FromHours(hours), profile.Value.StandingReassertionInterval);
+            Assert.True(profile.Value.IsValid);
+        }
+
+        /// <summary>
+        /// No key means no gate. This is the arm that protects every deployment written before the key
+        /// existed, and it is the reason nothing here defaults.
+        /// </summary>
+        [Fact]
+        public void AFileThatNamesNoProfileLeavesTheGateOff()
+        {
+            var profile = AnomalyGuardConfigReader.ReadPeerNovelty(
+                Parse(
+                    """
+                    {
+                      "prometheus": "http://127.0.0.1:9090",
+                      "namespace": "lab",
+                      "podRegex": "app-.*"
+                    }
+                    """),
+                out var problems);
+
+            Assert.Empty(problems);
+            Assert.Null(profile);
+        }
+
+        /// <summary>
+        /// A misspelled profile is reported and the gate stays OFF — never rounded to the nearest name.
+        ///
+        /// <para>The direction is the point. Off leaves the guard as noisy as it was, which an operator
+        /// notices; guessing a profile from a typo would switch a suppression gate on, and a suppression gate
+        /// nobody chose is indistinguishable from a quiet cluster.</para>
+        /// </summary>
+        [Fact]
+        public void AnUnknownProfileNameIsReportedAndRefused()
+        {
+            var profile = AnomalyGuardConfigReader.ReadPeerNovelty(
+                Parse(
+                    """
+                    {
+                      "prometheus": "http://127.0.0.1:9090",
+                      "namespace": "lab",
+                      "podRegex": "app-.*",
+                      "peerNovelty": "Dayly"
+                    }
+                    """),
+                out var problems);
+
+            Assert.Null(profile);
+
+            var problem = Assert.Single(problems);
+
+            Assert.Contains("Dayly", problem, StringComparison.Ordinal);
+            Assert.Contains("PerShift, Daily, Weekly", problem, StringComparison.Ordinal);
+            Assert.Contains("OFF", problem, StringComparison.Ordinal);
+        }
+
+        /// <summary>
+        /// Every preset <see cref="PeerNoveltyOptions"/> publishes is reachable by name from the file.
+        ///
+        /// <para><b>This is the drift gate, and it exists because the mapping is a hand-written switch.</b>
+        /// The presets are static properties rather than enum members, so the reader cannot enumerate them
+        /// and a fourth one added later would be silently un-nameable — the same shape as the defect this
+        /// whole class was written for, one level up. Walking the type is what turns "remember to update the
+        /// reader" from a comment into a failing test.</para>
+        ///
+        /// <para>The count is asserted before the loop: a reflection query that returned nothing would make
+        /// this pass vacuously, which is the failure mode of every test that iterates a collection.</para>
+        /// </summary>
+        [Fact]
+        public void EveryPublishedProfileIsReachableByNameFromTheConfigFile()
+        {
+            var presets = typeof(PeerNoveltyOptions)
+                .GetProperties(BindingFlags.Public | BindingFlags.Static)
+                .Where(p => p.PropertyType == typeof(PeerNoveltyOptions))
+                .ToList();
+
+            Assert.True(
+                presets.Count >= 3,
+                $"expected at least the three documented presets, found [{presets.Count}] — a reflection "
+                + "query that finds nothing would make the loop below assert nothing at all");
+
+            foreach (var preset in presets)
+            {
+                var expected = (PeerNoveltyOptions)preset.GetValue(null)!;
+                var file = new AnomalyGuardConfigFile { PeerNovelty = preset.Name };
+                var read = AnomalyGuardConfigReader.ReadPeerNovelty(file, out var problems);
+
+                Assert.True(
+                    problems.Count == 0,
+                    $"PeerNoveltyOptions.{preset.Name} is published but the config reader does not know the "
+                    + $"name: {string.Join("; ", problems)}");
+
+                Assert.Equal(expected, read);
+            }
         }
 
         private static AnomalyGuardConfigFile Parse(string json)

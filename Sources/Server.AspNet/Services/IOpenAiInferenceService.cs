@@ -24,7 +24,11 @@ namespace DevOnBike.Overfit.Server.AspNet.Services
     /// asynchronous form, while the embedder and TTS engine are gated by a <c>SemaphoreSlim</c>, which does.
     /// So the two that can hand the request thread back while they queue do (OVERFIT040), and the one that
     /// cannot says so here rather than looking like an oversight. The waiting is the only part that is
-    /// awaitable in any of them; once through the gate the work runs to completion on one thread.</para>
+    /// awaitable in any of them; once through the gate the work runs to completion on one thread.
+    /// <b>What the synchronous one costs</b> — a request thread blocked for up to thirty seconds, and with
+    /// the CLI's default of one session that is every concurrent request but one — is written above
+    /// <c>OverfitInferenceService.CompleteChat</c>, together with the reasoning for keeping it (XC-26,
+    /// 2026-08-12: a decision, not a default).</para>
     /// </summary>
     public interface IOpenAiInferenceService
     {
