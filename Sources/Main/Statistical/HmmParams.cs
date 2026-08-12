@@ -35,6 +35,15 @@ namespace DevOnBike.Overfit.Statistical
             get; init;
         }
 
+        // OVERFIT040 for the two persistence methods below.
+        //
+        // THE CONSTRAINT: one small JSON document holding a fitted HMM's initial probabilities, transition
+        // matrix, means and covariances, moved once at the boundary of a fitting run — saved after training,
+        // loaded once before the model is used. Both run on the caller's own thread; no pool thread is behind
+        // either.
+        //
+        // WHAT IS GIVEN UP: both are public API of the shipped `DevOnBike.Overfit` package.
+#pragma warning disable OVERFIT040
         public void SaveToFile(string path)
         {
             var json = JsonSerializer.Serialize(this, OverfitJsonContext.Default.HmmParams);
@@ -47,6 +56,7 @@ namespace DevOnBike.Overfit.Statistical
 
             return JsonSerializer.Deserialize(json, OverfitJsonContext.Default.HmmParams) ?? throw new OverfitRuntimeException("Nie udało się zdeserializować HmmParams.");
         }
+#pragma warning restore OVERFIT040
 
         /// <summary>
         /// Converts flat arrays from JSON into optimized FastTensors for the Overfit engine.

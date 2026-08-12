@@ -30,6 +30,13 @@ namespace DevOnBike.Overfit.Onnx
         private const int MinSupportedOpset = 11;
         private const int MaxSupportedOpset = 20;
 
+        // OVERFIT040 for `Load` — same constraint as `OnnxImporter.Load`, which this is the DAG counterpart
+        // of: a whole `.onnx` file slurped once, at model-construction time, on the caller's own thread, with
+        // no pool thread behind it; and `LoadFromBytes` immediately below already serves a caller who
+        // obtained the bytes some other way.
+        //
+        // WHAT IS GIVEN UP: `Load` is public API of the shipped `DevOnBike.Overfit` package.
+#pragma warning disable OVERFIT040
         public static OnnxGraphModel Load(string path, int inputSize, int outputSize)
         {
             var fullPath = Path.GetFullPath(path);
@@ -38,6 +45,7 @@ namespace DevOnBike.Overfit.Onnx
 
             return LoadFromBytes(modelBytes, inputSize, outputSize, modelDir);
         }
+#pragma warning restore OVERFIT040
 
         public static OnnxGraphModel LoadFromBytes(
             byte[] modelBytes,

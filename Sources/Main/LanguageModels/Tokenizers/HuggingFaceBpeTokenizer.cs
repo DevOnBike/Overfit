@@ -100,6 +100,17 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
 
         // ── Load ────────────────────────────────────────────────────────────
 
+        // OVERFIT040 for `Load` (and, further down, for `ResolveSpecialIds`, the private helper it calls).
+        // Scoped to those two rather than the file ON PURPOSE: the Encode / Decode section below is the hot
+        // path, and a file-wide disable here would cover it too and hide a future I/O call that landed there.
+        //
+        // THE CONSTRAINT: `Load` reads one `tokenizer.json` once, at model-construction time, on the caller's
+        // own thread — before any session, any request or any decode exists. No pool thread is behind it.
+        //
+        // WHAT IS GIVEN UP: `Load` is public API of the shipped `DevOnBike.Overfit` package and is how every
+        // consumer of this tokenizer constructs one; a task-returning form is a breaking change.
+#pragma warning disable OVERFIT040
+
         /// <summary>Loads from a directory containing <c>tokenizer.json</c>, or directly from a tokenizer.json path.</summary>
         public static HuggingFaceBpeTokenizer Load(string pathOrDirectory)
         {
@@ -134,6 +145,7 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
 
             return new HuggingFaceBpeTokenizer(vocab, decoder, mergeRanks, specialTokens, split, eos, unk, addPrefixSpace);
         }
+#pragma warning restore OVERFIT040
 
         // ── Encode / Decode ─────────────────────────────────────────────────
 
@@ -506,6 +518,9 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
             return null;
         }
 
+        // OVERFIT040: same constraint as `Load` above, of which this is a private helper — it reads the
+        // sibling `tokenizer_config.json` once, inside that same one-shot construction, on the same thread.
+#pragma warning disable OVERFIT040
         // EOS/UNK: tokenizer_config.json eos_token/unk_token (string or {content}) → id; else heuristics.
         private static (int eos, int unk) ResolveSpecialIds(string? dir, Dictionary<string, int> specialTokens, Dictionary<string, int> vocab, JsonElement model)
         {
@@ -541,6 +556,7 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
             }
             return (eos, unk);
         }
+#pragma warning restore OVERFIT040
 
         private static string? ReadTokenString(JsonElement root, string key)
         {

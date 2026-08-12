@@ -554,12 +554,25 @@ dotnet_diagnostic.OVERFIT030.severity = error
 # the build is green either way and the prose reads as though it had been applied.
 #
 # This section is [*.cs] and sits after every directory section above, so it wins for Sources/Main too —
-# which is what "globally" was always meant to say. Escalating any of the three later means moving its
-# line into a directory section, deliberately, with the sweep that earns it.
+# which is what "globally" was always meant to say.
+#
+# 043 and 044 ESCALATED TO ERROR 2026-08-12, on the ratchet's own terms: swept to zero and only then
+# locked. Backlog at introduction was 394 and 808 sites; the last of them — 2 and 16, every remaining
+# one in Tools/SemanticNavigator — went on 2026-08-12. **Measured before escalating, not assumed**: a
+# whole-solution rebuild with all three temporarily raised to `warning` reports 0 and 0. That step is
+# not ceremony — a build does NOT print suggestions, so counting these at their normal severity
+# measures the config's silence rather than the code, which is the mistake recorded verbatim in the
+# [Sources/{Anomalies,Server.AspNet,Mcp,Cli}] block below.
+#
+# 040 stays at suggestion: 12 sites remain (Sources/Anomalies 4, three demos, Tools/SemanticNavigator 1)
+# and, unlike the other two, it is NOT a sweepable rule — most of its hits in the library were one-shot
+# model and config loading where synchronous IS correct, and the 2026-08-12 pass through Sources/Main
+# ended in 32 pragmas and zero conversions for exactly that reason. Escalating it would make the rule
+# lie. The remaining 12 have never been assigned to anyone.
 [*.cs]
 dotnet_diagnostic.OVERFIT040.severity = suggestion
-dotnet_diagnostic.OVERFIT043.severity = suggestion
-dotnet_diagnostic.OVERFIT044.severity = suggestion
+dotnet_diagnostic.OVERFIT043.severity = error
+dotnet_diagnostic.OVERFIT044.severity = error
 
 # ── OVERFIT046 — task discarded with `_ =`. ERROR, and global for the same reason as the three above ──────
 # The rule's own reasoning is in its block earlier in this file; only the severity is here, and the

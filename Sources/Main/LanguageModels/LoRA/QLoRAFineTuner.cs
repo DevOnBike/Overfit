@@ -64,10 +64,23 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
         /// <summary>Transformer layer count of the loaded model.</summary>
         public int LayerCount => _model.LayerCount;
 
+        // OVERFIT040 for `FineTuneOnFile`. THE CONSTRAINT: the flagged `File.ReadAllText` is the training
+        // corpus, read once, and everything after it on the same thread is `FineTune` — minutes of
+        // CPU-saturating gradient work. A thread this method holds is not held by the file read; it is held
+        // by the training, which is the point of calling it. Freeing the thread across the read would return
+        // it for microseconds before the training seized it again.
+        //
+        // WHAT IS GIVEN UP: `FineTuneOnFile` is public API of the shipped `DevOnBike.Overfit` package, and
+        // `FineTune` (the string overload it delegates to) is synchronous and CPU-bound, so a task-returning
+        // wrapper would have nothing to await — it would have to `Task.Run`, which moves the block rather
+        // than removing it and is the shape OVERFIT039 exists to stop.
+#pragma warning disable OVERFIT040
+
         /// <summary>Fine-tune on the contents of a text file. See <see cref="FineTune"/>.</summary>
         public IReadOnlyList<float> FineTuneOnFile(
             string textPath, Action<int, int, float>? onStep = null, string? checkpointPath = null, bool resume = false)
             => FineTune(File.ReadAllText(textPath), onStep, checkpointPath, resume);
+#pragma warning restore OVERFIT040
 
         /// <summary>
         /// Fine-tune the adapter on <paramref name="text"/>. The text is tokenized and split into

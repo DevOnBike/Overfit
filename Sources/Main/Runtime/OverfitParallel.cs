@@ -667,6 +667,21 @@ namespace DevOnBike.Overfit.Runtime
         /// generation. Pool size == the decode cap, so a worker almost always gets a chunk —
         /// no idle spin-burn.
         /// </summary>
+        // OVERFIT040 for the two worker loops below (DecodeWorkerLoop and WorkerLoop).
+        //
+        // THE CONSTRAINT: these run on DEDICATED BACKGROUND THREADS this class creates and owns for the
+        // process's lifetime — not on thread-pool threads. Blocking one is what it is FOR: a parked worker
+        // holding its own thread is how it resumes in nanoseconds when the next generation is dispatched.
+        // `WaitAsync` would hand the continuation back to the thread pool and reintroduce exactly the
+        // scheduling latency this pool exists to avoid.
+        //
+        // WHAT IT IS WORTH, measured: the decode pool runs 455 us / 0 B against `Parallel.For`'s
+        // 2059 us / 925 KB on the same sustained decode workload — 4.5x, and zero allocation instead of
+        // 925 KB. That number is the reason the answer here is not "await it".
+        //
+        // WHAT IS GIVEN UP: one OS thread per pool slot, parked, for as long as the process runs. The pool is
+        // sized to the decode cap (<= core count), which is the bound that makes that acceptable.
+#pragma warning disable OVERFIT040
         private static void DecodeWorkerLoop()
         {
             var seen = 0L;
@@ -726,6 +741,7 @@ namespace DevOnBike.Overfit.Runtime
                 }
             }
         }
+#pragma warning restore OVERFIT040
 
         /// <summary>
         /// Runs one chunk's body, capturing any thrown exception into the chunk
@@ -752,6 +768,9 @@ namespace DevOnBike.Overfit.Runtime
             }
         }
 
+        // OVERFIT040: same constraint and same measurement as DecodeWorkerLoop above — a dedicated background
+        // thread this class owns, parked on its own semaphore, where blocking IS the design.
+#pragma warning disable OVERFIT040
         private static void WorkerLoop()
         {
             // BOUND: none by design — daemon worker, parks on _startSemaphore until the process exits. Runs on
@@ -790,6 +809,7 @@ namespace DevOnBike.Overfit.Runtime
                 ExecuteChunk(index);
             }
         }
+#pragma warning restore OVERFIT040
 
         /// <summary>
         /// Per-chunk descriptor. Padded to one cache line because workers

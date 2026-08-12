@@ -85,6 +85,17 @@ namespace DevOnBike.Overfit.Audio.Tts
             }
         }
 
+        // OVERFIT040 for `Complete`. THE CONSTRAINT is the interface, not a preference: this method implements
+        // `IAudioSink.Complete()`, and the same interface's `Write(ReadOnlySpan<float> samples)` takes a span,
+        // which CANNOT cross an `await`. `IAudioSink` is therefore synchronous by construction — a TTS engine
+        // pushes decoded PCM into it from a synchronous decode callback — and making one of its two methods
+        // task-returning would leave the interface half-async while breaking every implementation and caller
+        // in the shipped `DevOnBike.Overfit` package.
+        //
+        // The flagged call is `_output.Flush()`, which follows a `WavWriter.WriteMono` that is itself the
+        // synchronous write of the whole buffered file; flushing asynchronously after a synchronous write
+        // frees nothing.
+#pragma warning disable OVERFIT040
         public void Complete()
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
@@ -96,6 +107,7 @@ namespace DevOnBike.Overfit.Audio.Tts
             _output.Flush();
             _completed = true;
         }
+#pragma warning restore OVERFIT040
 
         public void Dispose()
         {

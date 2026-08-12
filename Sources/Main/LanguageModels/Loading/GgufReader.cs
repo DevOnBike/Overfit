@@ -20,6 +20,20 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
     ///   var buffer = new float[info.ElementCount];
     ///   reader.LoadTensorAsF32(info, buffer);
     /// </summary>
+    // OVERFIT040 for this whole type, type-scoped because the constraint is a property of the type rather
+    // than of any one of its four flagged methods (LoadTensorQ8_0Raw, ReadF16ToF32, ReadBF16ToF32,
+    // ReadQ8_0ToF32 — every one of them `_stream.Read(...)`).
+    //
+    // THE CONSTRAINT: a GgufReader is constructed, drained once, and disposed, on whatever thread asked for
+    // the model. It is model-CONSTRUCTION, not serving: the reads happen before any session exists, they run
+    // to completion on the caller's own thread, and there is no thread-pool thread behind them to hand back.
+    // Nothing is waiting on that thread except the caller who wants the model loaded.
+    //
+    // WHAT IS GIVEN UP, and it is the larger half of the reason: `GgufReader` is public API of the shipped
+    // `DevOnBike.Overfit` package, and so is every loader that drives it. Making these return tasks is a
+    // breaking change for every consumer, propagated all the way up through the model-loading surface — a
+    // decision for the maintainer, not a lint sweep.
+#pragma warning disable OVERFIT040
     public sealed class GgufReader : IDisposable
     {
         private readonly Stream _stream;
@@ -875,4 +889,5 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             }
         }
     }
+#pragma warning restore OVERFIT040
 }

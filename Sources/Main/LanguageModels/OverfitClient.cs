@@ -199,6 +199,16 @@ namespace DevOnBike.Overfit.LanguageModels
             catch { engine.Dispose(); throw; }
         }
 
+        // OVERFIT040 for this private helper. THE CONSTRAINT: it reads one `tokenizer_config.json` inside the
+        // `Load` factory above, which is model construction — the weights are being mapped and a session
+        // built, on the caller's own thread, before any request or decode exists. This read is microseconds
+        // inside an operation whose bulk is the model load itself.
+        //
+        // WHAT IS GIVEN UP: the method is private, but its only caller is the public `OverfitClient.Load`
+        // factory in the shipped `DevOnBike.Overfit` package. Making this one return a task means making that
+        // factory async, which is the breaking change — the fix cannot stop at this helper.
+#pragma warning disable OVERFIT040
+
         /// <summary>Reads the Jinja chat template from <c>tokenizer_config.json</c> (empty string if absent).</summary>
         private static string ReadChatTemplate(string modelDir)
         {
@@ -216,6 +226,7 @@ namespace DevOnBike.Overfit.LanguageModels
             }
             catch { return string.Empty; }
         }
+#pragma warning restore OVERFIT040
 
         /// <summary>True when the directory ships tokenizer files (tokenizer.json, or vocab.json + merges.txt).</summary>
         private static bool HasSiblingTokenizer(string modelDir)

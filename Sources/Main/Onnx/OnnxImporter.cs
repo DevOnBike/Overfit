@@ -31,6 +31,18 @@ namespace DevOnBike.Overfit.Onnx
         private const int MinSupportedOpset = 11;
         private const int MaxSupportedOpset = 20;
 
+        // OVERFIT040 for `Load` — the path-taking overload, which is the only method here that touches disk.
+        //
+        // THE CONSTRAINT: a whole `.onnx` file slurped once, at model-construction time, on the caller's own
+        // thread. The importer is a one-shot conversion into a `Sequential`; there is no pool thread behind
+        // it, no session yet, and nothing queued on the thread. The byte-taking `LoadFromBytes` immediately
+        // below is the overload for a caller who already has the bytes — including one who fetched them
+        // asynchronously — so the async door is already open without changing this signature.
+        //
+        // WHAT IS GIVEN UP: `Load` is public API of the shipped `DevOnBike.Overfit` package and the documented
+        // ONNX entry point; a task-returning form is a breaking change.
+#pragma warning disable OVERFIT040
+
         /// <summary>
         /// Loads an ONNX model from disk.
         /// External data files are resolved relative to the .onnx file directory.
@@ -53,6 +65,7 @@ namespace DevOnBike.Overfit.Onnx
                 modelBytes,
                 modelDir);
         }
+#pragma warning restore OVERFIT040
 
         /// <summary>
         /// Loads an ONNX model from a raw byte array.

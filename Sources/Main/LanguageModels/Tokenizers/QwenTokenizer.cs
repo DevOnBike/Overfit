@@ -66,6 +66,16 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
                 RegexOptions.Compiled);
         }
 
+        // OVERFIT040 for `Load` only — deliberately not the file, because the Encode / Decode section below is
+        // the hot path and must keep the rule pointed at it.
+        //
+        // THE CONSTRAINT: one `tokenizer.json` read once, at model-construction time, on the caller's own
+        // thread, before any session or decode exists. No pool thread is behind it.
+        //
+        // WHAT IS GIVEN UP: `Load` is public API of the shipped `DevOnBike.Overfit` package — the only way to
+        // construct this tokenizer — so a task-returning form is a breaking change.
+#pragma warning disable OVERFIT040
+
         /// <summary>Load tokenizer from a directory containing tokenizer.json, or directly from tokenizer.json path.</summary>
         public static QwenTokenizer Load(string pathOrDirectory)
         {
@@ -175,6 +185,7 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
 
             return new QwenTokenizer(vocab, decoder, mergeRanks, specialTokens);
         }
+#pragma warning restore OVERFIT040
 
         // ── Public API ─────────────────────────────────────────────────────
 

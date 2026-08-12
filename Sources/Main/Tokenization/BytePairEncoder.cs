@@ -62,6 +62,14 @@ namespace DevOnBike.Overfit.Tokenization
                     ? unknown
                     : 0;
 
+        // OVERFIT040 for `Load` only, so the encode path below stays covered by the rule.
+        //
+        // THE CONSTRAINT: a vocab JSON and a merges list read once, at construction time, on the caller's own
+        // thread, before any text is encoded — and the method exists purely to hand both file contents to
+        // `LoadFromStrings`, which is the string-in overload a caller who already has the bytes uses instead.
+        //
+        // WHAT IS GIVEN UP: `Load` is public API of the shipped `DevOnBike.Overfit` package.
+#pragma warning disable OVERFIT040
         public static BytePairEncoder Load(
             string vocabJsonPath,
             string mergesPath)
@@ -73,6 +81,7 @@ namespace DevOnBike.Overfit.Tokenization
                 vocabJson,
                 string.Join('\n', mergesLines));
         }
+#pragma warning restore OVERFIT040
 
         public static BytePairEncoder LoadFromStrings(
             string vocabJson,

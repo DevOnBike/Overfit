@@ -193,6 +193,15 @@ namespace DevOnBike.Overfit.Audio.Tts.Orpheus
         /// Convenience: read a single audio file and a transcript file (one line per utterance, in order) and build
         /// the dataset. Blank lines and a leading "N." / "N)" numbering are ignored.
         /// </summary>
+        // OVERFIT040 for `BuildFromRecordingFile`. THE CONSTRAINT: the flagged `File.ReadAllLines` is a
+        // transcript of a few dozen short lines, read once at the head of a method whose remaining work is
+        // `BuildFromRecording` — resampling and SNAC-encoding every segment of a whole recording on this same
+        // thread. The thread is held by that, not by the transcript read; and the audio it pairs with is
+        // already loaded synchronously one line above by `AudioFile.ReadMono`.
+        //
+        // WHAT IS GIVEN UP: this is public API of the shipped `DevOnBike.Overfit` package, on the
+        // dataset-preparation path (an offline, one-shot operation), not on any serving path.
+#pragma warning disable OVERFIT040
         public List<OrpheusTrainingExample> BuildFromRecordingFile(string audioPath, string transcriptPath, string voice)
         {
             var audio = AudioFile.ReadMono(audioPath, out var rate);
@@ -207,6 +216,7 @@ namespace DevOnBike.Overfit.Audio.Tts.Orpheus
             }
             return BuildFromRecording(audio, rate, lines, voice);
         }
+#pragma warning restore OVERFIT040
 
         private static string CleanTranscriptLine(string raw)
         {
@@ -228,6 +238,12 @@ namespace DevOnBike.Overfit.Audio.Tts.Orpheus
         // routinely also holds non-dataset audio (e.g. previously-generated clone outputs) with no sibling .txt;
         // those must be skipped, not fail the whole build. With no .txt and no Whisper there's nothing to pair, so
         // the clip is skipped; if EVERY clip ends up unpaired, BuildFromFolder's count==0 guard reports it clearly.
+        //
+        // OVERFIT040: the flagged `File.ReadAllText` is a one-line sibling `.txt`, and the alternative branch
+        // three lines below runs a whole Whisper transcription on this thread — seconds of CPU-bound decode
+        // against a file read that is a rounding error next to it. This runs once per clip during offline
+        // dataset preparation, on the caller's own thread; nothing is queued behind it.
+#pragma warning disable OVERFIT040
         private static string ResolveTranscript(
             string audioPath, float[] raw, int rate, WhisperTranscriber? whisper, string language)
         {
@@ -243,6 +259,7 @@ namespace DevOnBike.Overfit.Audio.Tts.Orpheus
             var audio16 = rate == WhisperSampleRate ? raw : AudioResampler.Resample(raw, rate, WhisperSampleRate);
             return whisper.Transcribe(audio16, language).Trim();
         }
+#pragma warning restore OVERFIT040
 
         private int[] Tokenize(string text)
         {
