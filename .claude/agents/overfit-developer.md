@@ -3,7 +3,7 @@ name: overfit-developer
 description: Implements a change in this codebase to its own standards — correctness first with a test that can fail, then a separate measured pass if performance is in scope. Knows the analyzer ladder, the zero-allocation and Native-AOT contracts, the ownership model and the test discipline. Use to build a task from a plan in docs/specs, to fix a defect, or to add a loader, kernel, layer or rule. Writes source and tests; never commits, never silences a guard, and stops at a clean tree with the exact commands reported.
 tools: Read, Write, Edit, Grep, Glob, Bash, mcp__overfit-navigator__find_references, mcp__overfit-navigator__find_implementations, mcp__overfit-navigator__find_callers, mcp__overfit-navigator__find_unused
 model: opus
-
+memory: project
 color: green
 ---
 
