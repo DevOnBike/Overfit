@@ -123,7 +123,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
                 },
             };
 
-            var (_, trend, step) = AnomalyGuardConfigReader.ReadThresholds(file, out var problems);
+            var (_, trend, step, _) = AnomalyGuardConfigReader.ReadThresholds(file, out var problems);
 
             Assert.Empty(problems);
             Assert.Equal(3.93e6, trend[(int)Heap]);
@@ -146,7 +146,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
                 },
             };
 
-            var (_, trend, step) = AnomalyGuardConfigReader.ReadThresholds(file, out var problems);
+            var (_, trend, step, _) = AnomalyGuardConfigReader.ReadThresholds(file, out var problems);
 
             Assert.Empty(problems);
             Assert.Equal(0.0, step[(int)Heap]);

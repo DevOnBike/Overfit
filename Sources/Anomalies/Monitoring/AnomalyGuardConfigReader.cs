@@ -164,10 +164,18 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
         /// <summary>
         /// The per-feature absolute floors, as the positional tables the guard takes. Built here so the
         /// indexed-by-enum shape stays an implementation detail rather than something a human has to write.
+        ///
+        /// <para><b><c>GapChange</c> is nullable and the other three are not.</b> Absent from the first three
+        /// means "that gate is off", which is a table of zeros; absent from the fourth means "not
+        /// configured", which is <c>null</c> — and a guard with the peer-novelty gate switched on refuses to
+        /// start on a null rather than suppressing findings against a floor nobody chose
+        /// (<c>AnomalyGuard.RestoreNovelty</c>). Returning a zero-filled table there would clear that check
+        /// and turn a loud failure into a silent one.</para>
         /// </summary>
-        public static (double[] Gap, double[] TrendChange, double[] StepChange) ReadThresholds(
-            AnomalyGuardConfigFile file,
-            out IReadOnlyList<string> problems)
+        public static (double[] Gap, double[] TrendChange, double[] StepChange, double[]? GapChange)
+            ReadThresholds(
+                AnomalyGuardConfigFile file,
+                out IReadOnlyList<string> problems)
         {
             ArgumentNullException.ThrowIfNull(file);
 
@@ -175,6 +183,8 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
             var gap = new double[(int)MetricIndex.Count];
             var trend = new double[(int)MetricIndex.Count];
             var step = new double[(int)MetricIndex.Count];
+            var gapChange = new double[(int)MetricIndex.Count];
+            var anyGapChange = false;
 
             foreach (var (key, entry) in file.Thresholds)
             {
@@ -194,11 +204,20 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
                 // floor" — the behaviour every config had before this field existed.
                 step[(int)metric] =
                     Quantity($"Thresholds['{key}'].minStepChange", entry.MinStepChange, found);
+
+                // Positive, not merely present: Quantity returns zero for an absent key, for an explicit
+                // "0" and for an unreadable value alike, and all three have to mean "not configured" here.
+                // Counting any of them as a declaration would hand the novelty gate a full-length table of
+                // zeros, which passes AnomalyGuard.RestoreNovelty's length check and then runs the gate on
+                // the relative test alone.
+                var change = Quantity($"Thresholds['{key}'].minGapChange", entry.MinGapChange, found);
+                gapChange[(int)metric] = change;
+                anyGapChange |= change > 0.0;
             }
 
             problems = found;
 
-            return (gap, trend, step);
+            return (gap, trend, step, anyGapChange ? gapChange : null);
         }
 
         /// <summary>

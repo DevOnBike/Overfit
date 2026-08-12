@@ -124,7 +124,13 @@ try:
         print(f"--- DID NOT COMPILE — the mutation is invalid, not the test: {errors[0][:150]}")
     else:
         print(f"--- under mutation: rc={code} failed={failed or 'NONE'}")
-        print(f"    -> {'CAUGHT by ' + EXPECTED if EXPECTED in failed else 'NOT CAUGHT'}")
+        # startswith, NOT `EXPECTED in failed`. A [Theory] comes back as
+        # `MyTest(arg: 3)` and the runner truncates at the first space, so exact
+        # membership reports a CAUGHT mutation as survived — an error whose
+        # direction MANUFACTURES findings. Measured 2026-08-12: two false
+        # "survived" lines against tests that had gone red.
+        caught = any(f.startswith(EXPECTED) for f in failed)
+        print(f"    -> {'CAUGHT by ' + EXPECTED if caught else 'NOT CAUGHT'}")
 finally:
     TARGET.write_text(original, encoding="utf-8")
     print(f"--- restored byte-for-byte: {TARGET.read_text(encoding='utf-8') == original}")
@@ -163,6 +169,8 @@ mutation, the victim, and whether the restore was verified.
 | Anchor matches zero times | A multi-line anchor that does not account for CRLF. It reads as "not caught" if the count is not printed |
 | Red baseline | Cannot distinguish "the test caught it" from "it was already failing" |
 | Treating a compile failure as a caught mutation | By exit code alone they are identical. Filter for `: error ` separately |
+| **A `[Theory]` victim reported as survived when it went red** | The runner names a theory `MyTest(arg: 3)` and truncates at the first space, so `EXPECTED in failed` — exact membership — misses it. Match with `startswith`. **This error's direction manufactures findings**: it turns a caught mutation into a "green mutation", which this skill tells you to treat as a defect, so the harness invents work that does not exist. Measured 2026-08-12, two false survivals in one run |
+| A guard that cannot apply, skipped instead of replaced | Guard 1 ("clean against `HEAD`") is vacuous when the mutated code is the task's own uncommitted work — the target differs from `HEAD` by design. Do not drop the guard: snapshot the bytes at the start of the run and compare against that instead, and **say in the report that you substituted it** |
 | Assuming a broken guard hangs rather than reds | It can go either way. A cycle-detection guard was expected to hang under mutation and produced a clean red — check, do not assume |
 | Mutating until something goes red | That is fitting the harness to the answer. One prediction, one run, one verdict |
 | Calling a test weak because its assertion looks thin | Shape is not failability. Five `Assert.NotNull`-only tests in `CheckpointedModuleSegmentWalkTests` were reddened by mutation, and `overfit-assertion-quality`'s rubric calls them trivial. **This skill owns that verdict** |

@@ -71,7 +71,8 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
             Assert.NotNull(file);
 
             var map = AnomalyGuardConfigReader.ReadMap(file, out var problems);
-            var (gap, trendChange, _) = AnomalyGuardConfigReader.ReadThresholds(file, out var floorProblems);
+            var (gap, trendChange, _, _) =
+                AnomalyGuardConfigReader.ReadThresholds(file, out var floorProblems);
 
             var report = new StringBuilder();
 

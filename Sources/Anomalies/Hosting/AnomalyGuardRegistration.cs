@@ -154,7 +154,8 @@ namespace DevOnBike.Overfit.Anomalies.Hosting
             ArgumentNullException.ThrowIfNull(file);
 
             var map = AnomalyGuardConfigReader.ReadMap(file, out var mapProblems);
-            var (gap, trendChange, stepChange) = AnomalyGuardConfigReader.ReadThresholds(file, out var floorProblems);
+            var (gap, trendChange, stepChange, gapChange) =
+                AnomalyGuardConfigReader.ReadThresholds(file, out var floorProblems);
             var maintenance = AnomalyGuardConfigReader.ReadMaintenance(file, out var windowProblems);
 
             if (onProblem != null)
@@ -198,6 +199,13 @@ namespace DevOnBike.Overfit.Anomalies.Hosting
                     MinAbsoluteGap = gap,
                     MinAbsoluteTrendChange = trendChange,
                     MinAbsoluteStepChange = stepChange,
+
+                    // Falls back to whatever the caller supplied rather than overwriting it, unlike the three
+                    // above. Those are always a table — a file that declares nothing yields zeros, so an
+                    // unconditional assignment loses nothing. This one is null when the file declares
+                    // nothing, and an unconditional assignment would erase a table a host had set in code and
+                    // turn a working peer-novelty gate into a refusal to start.
+                    MinAbsoluteGapChange = gapChange ?? given.Guard.MinAbsoluteGapChange,
                     CustomMetrics = map.Custom,
 
                     // By name, because the calibrator is keyed by name and never receives a binding. Set

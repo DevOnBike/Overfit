@@ -5,7 +5,10 @@
 
 using System.Text.Json;
 using DevOnBike.Overfit.Anomalies.Contracts;
+using DevOnBike.Overfit.Anomalies.Incidents;
+using DevOnBike.Overfit.Anomalies.Incidents.Abstractions;
 using DevOnBike.Overfit.Anomalies.Monitoring;
+using DevOnBike.Overfit.Statistics;
 
 namespace DevOnBike.Overfit.Tests.Anomalies
 {
@@ -25,6 +28,12 @@ namespace DevOnBike.Overfit.Tests.Anomalies
     /// not check that the values are sensible — that is a different question — only that they arrive at all.
     /// A test that asserted defaults would pass on a reader that ignored the file entirely, which is the
     /// exact failure being closed here.</para>
+    ///
+    /// <para><b>The BUILT-IN half was still missing until 2026-08-12</b>, and the custom fix hid it: the
+    /// file's `thresholds` entries carried three floors and the guard's options carried four, so a
+    /// deployment could set `minGapChange` on a custom channel and had no way at all to set it on
+    /// `MemoryWorkingSetBytes`. Enabling the gate from a ConfigMap would have failed at startup on the
+    /// per-metric table before any custom channel was reached.</para>
     /// </summary>
     public sealed class ConfigSurfaceCompletenessTests
     {
@@ -200,6 +209,164 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             Assert.Contains(problems, p => p.Contains("%selector%", StringComparison.Ordinal));
         }
 
+        /// <summary>
+        /// Every floor a built-in <c>thresholds</c> entry carries survives the file, at the index the enum
+        /// names. Distinct values on purpose: a reader that copied one field into another would still pass
+        /// if they shared a number.
+        /// </summary>
+        [Fact]
+        public void EveryFloorOnABuiltInThresholdCanBeSetFromTheConfigFile()
+        {
+            var (gap, trend, step, gapChange) = ReadThresholds(
+                """
+                {
+                  "prometheus": "http://127.0.0.1:9090",
+                  "namespace": "lab",
+                  "podRegex": "app-.*",
+                  "thresholds": {
+                    "MemoryWorkingSetBytes": {
+                      "minGap": "11MB",
+                      "minTrendChange": "22MB",
+                      "minStepChange": "33MB",
+                      "minGapChange": "44MB"
+                    }
+                  }
+                }
+                """);
+
+            const double mb = 1_000_000.0;
+            const int index = (int)MetricIndex.MemoryWorkingSetBytes;
+
+            Assert.Equal(11.0 * mb, gap[index]);
+            Assert.Equal(22.0 * mb, trend[index]);
+            Assert.Equal(33.0 * mb, step[index]);
+
+            // The one that was unreachable until 2026-08-12.
+            Assert.NotNull(gapChange);
+            Assert.Equal(44.0 * mb, gapChange[index]);
+
+            // And nowhere else: a reader that filled the table instead of one slot would leave the gate on
+            // for twelve features whose floor nobody wrote down.
+            Assert.Equal(0.0, gapChange[(int)MetricIndex.LatencyP95Ms]);
+        }
+
+        /// <summary>
+        /// The arm that matters most: a file that declares no <c>minGapChange</c> hands back <b>no table</b>,
+        /// and a guard with the novelty gate switched on still refuses to start.
+        ///
+        /// <para><b>A zero-filled table would clear that check.</b> <c>AnomalyGuard.RestoreNovelty</c> tests
+        /// only that the table exists and is long enough, so returning one full of zeros would start the
+        /// guard with a suppression gate running on the relative test alone — a threshold nobody chose,
+        /// applied to a decision whose failure mode is silence. This is the mutation that has to stay red.
+        /// </para>
+        /// </summary>
+        [Fact]
+        public void OmittingTheGapChangeLeavesNoTableAndTheGateStillRefusesToStart()
+        {
+            var (_, _, _, gapChange) = ReadThresholds(
+                """
+                {
+                  "prometheus": "http://127.0.0.1:9090",
+                  "namespace": "lab",
+                  "podRegex": "app-.*",
+                  "thresholds": {
+                    "MemoryWorkingSetBytes": { "minGap": "11MB", "minTrendChange": "22MB" }
+                  }
+                }
+                """);
+
+            Assert.Null(gapChange);
+
+            var error = Assert.Throws<ArgumentException>(() => new AnomalyGuard(
+                new AnomalyGuardOptions
+                {
+                    Namespace = "lab",
+                    Workload = "lab-workload",
+                    PeerNovelty = PeerNoveltyOptions.Daily,
+                    MinAbsoluteGapChange = gapChange,
+                },
+                new CapturingSink(),
+                IncidentTrackingOptions.Balanced));
+
+            Assert.Contains(nameof(AnomalyGuardOptions.MinAbsoluteGapChange), error.Message,
+                StringComparison.Ordinal);
+        }
+
+        /// <summary>
+        /// An explicit <c>"0"</c> is "not configured", not "gate off" — the same trap `AN-D4b` recorded for
+        /// the step floor one field along, and the reason the reader tests the parsed value rather than the
+        /// presence of the key.
+        /// </summary>
+        [Fact]
+        public void AZeroGapChangeIsNotAConfiguredFloor()
+        {
+            var (_, _, _, gapChange) = ReadThresholds(
+                """
+                {
+                  "prometheus": "http://127.0.0.1:9090",
+                  "namespace": "lab",
+                  "podRegex": "app-.*",
+                  "thresholds": {
+                    "MemoryWorkingSetBytes": { "minGap": "11MB", "minGapChange": "0" }
+                  }
+                }
+                """);
+
+            Assert.Null(gapChange);
+        }
+
+        /// <summary>
+        /// A value that is not a number is reported and the table stays absent. The direction matters: a typo
+        /// must not be the difference between a guard that refuses to start and one that starts with a
+        /// suppression gate switched on and its floor at zero.
+        /// </summary>
+        [Fact]
+        public void AnUnreadableGapChangeIsReportedAndLeavesNoTable()
+        {
+            var (_, _, _, gapChange) = AnomalyGuardConfigReader.ReadThresholds(
+                Parse(
+                    """
+                    {
+                      "prometheus": "http://127.0.0.1:9090",
+                      "namespace": "lab",
+                      "podRegex": "app-.*",
+                      "thresholds": {
+                        "MemoryWorkingSetBytes": { "minGapChange": "quite a lot" }
+                      }
+                    }
+                    """),
+                out var problems);
+
+            Assert.Null(gapChange);
+            Assert.Contains(problems, p => p.Contains("minGapChange", StringComparison.Ordinal)
+                                           && p.Contains("gate is OFF", StringComparison.Ordinal));
+        }
+
+        /// <summary>
+        /// A <c>thresholds</c> key that is not a feature is dropped with the rest of its entry, so a
+        /// misspelled metric name cannot smuggle a floor in under a name the guard never reads.
+        /// </summary>
+        [Fact]
+        public void AGapChangeUnderAnUnknownFeatureIsDroppedAndReported()
+        {
+            var (_, _, _, gapChange) = AnomalyGuardConfigReader.ReadThresholds(
+                Parse(
+                    """
+                    {
+                      "prometheus": "http://127.0.0.1:9090",
+                      "namespace": "lab",
+                      "podRegex": "app-.*",
+                      "thresholds": {
+                        "MemoryWorkingSetBytesTypo": { "minGapChange": "44MB" }
+                      }
+                    }
+                    """),
+                out var problems);
+
+            Assert.Null(gapChange);
+            Assert.Contains(problems, p => p.Contains("not a known feature", StringComparison.Ordinal));
+        }
+
         private static AnomalyGuardConfigFile Parse(string json)
         {
             var file = JsonSerializer.Deserialize<AnomalyGuardConfigFile>(
@@ -218,6 +385,23 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             Assert.True(problems.Count == 0, string.Join("; ", problems));
 
             return map;
+        }
+
+        private static (double[] Gap, double[] Trend, double[] Step, double[]? GapChange) ReadThresholds(
+            string json)
+        {
+            var tables = AnomalyGuardConfigReader.ReadThresholds(Parse(json), out var problems);
+
+            Assert.True(problems.Count == 0, string.Join("; ", problems));
+
+            return tables;
+        }
+
+        private sealed class CapturingSink : IIncidentSink
+        {
+            public void Report(ReadOnlySpan<IncidentLogRecord> rows)
+            {
+            }
         }
     }
 }

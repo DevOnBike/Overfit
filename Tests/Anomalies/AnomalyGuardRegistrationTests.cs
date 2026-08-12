@@ -7,6 +7,7 @@ using DevOnBike.Overfit.Anomalies.Contracts;
 using DevOnBike.Overfit.Anomalies.Hosting;
 using DevOnBike.Overfit.Anomalies.Monitoring;
 using DevOnBike.Overfit.Anomalies.Monitoring.Abstractions;
+using DevOnBike.Overfit.Statistics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -157,6 +158,103 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             var options = provider.GetRequiredService<AnomalyGuardServiceOptions>();
 
             Assert.Equal(["ScrapeCoverage"], options.Guard.NonCalibratedCustomChannels);
+        }
+
+        /// <summary>
+        /// The built-in change-in-gap floor reaches the guard's options as a positional table, and a file
+        /// that declares none leaves it null.
+        ///
+        /// <para><b>Both halves are the test.</b> The reader is where the table is built and this is the
+        /// hand-across — the link that has broken repeatedly in this subsystem, where a property exists, a
+        /// file sets it, and nothing carries it over. Null is asserted as hard as the value: a registration
+        /// that turned "declared nothing" into a zero-filled table would satisfy
+        /// <c>AnomalyGuard.RestoreNovelty</c>'s length check and start the peer-novelty gate with its floor
+        /// off, which from outside looks exactly like a quiet cluster.</para>
+        /// </summary>
+        [Theory]
+        [InlineData("2.5MB", 2_500_000.0)]
+        [InlineData("", 0.0)]
+        public void TheBuiltInGapChangeFloorReachesTheGuardOptions(string declared, double expected)
+        {
+            var services = new ServiceCollection();
+
+            services.AddLogging();
+            services.AddOverfitAnomalyGuard(
+                new AnomalyGuardConfigFile
+                {
+                    Prometheus = "http://127.0.0.1:9090",
+                    Namespace = "lab",
+                    Workload = "lab-workload",
+                    PodRegex = "lab-workload-.*",
+                    Thresholds =
+                    {
+                        ["MemoryWorkingSetBytes"] = new AnomalyGuardConfigFile.ThresholdEntry
+                        {
+                            MinGap = "9.52MB",
+                            MinGapChange = declared,
+                        },
+                    },
+                });
+
+            using var provider = services.BuildServiceProvider();
+            var guard = provider.GetRequiredService<AnomalyGuardServiceOptions>().Guard;
+
+            // The neighbouring floor is asserted in both arms so a registration that dropped the whole
+            // thresholds block would fail rather than pass the null half by accident.
+            Assert.Equal(
+                9.52e6,
+                AnomalyGuardOptions.FloorFor(guard.MinAbsoluteGap, MetricIndex.MemoryWorkingSetBytes));
+
+            if (expected == 0.0)
+            {
+                Assert.Null(guard.MinAbsoluteGapChange);
+
+                return;
+            }
+
+            Assert.NotNull(guard.MinAbsoluteGapChange);
+            Assert.Equal(
+                expected,
+                AnomalyGuardOptions.FloorFor(
+                    guard.MinAbsoluteGapChange, MetricIndex.MemoryWorkingSetBytes));
+        }
+
+        /// <summary>
+        /// A table a host assigned in code survives a file that declares no <c>minGapChange</c>.
+        ///
+        /// <para>Unlike the three floors beside it, this one is overwritten conditionally — those are always
+        /// a table, so an unconditional assignment loses nothing, while an unconditional assignment here
+        /// would erase a caller's table and turn a working peer-novelty gate into a refusal to start.</para>
+        /// </summary>
+        [Fact]
+        public void ACodeSuppliedGapChangeTableIsNotErasedByAFileThatDeclaresNone()
+        {
+            var supplied = new double[(int)MetricIndex.Count];
+            supplied[(int)MetricIndex.MemoryWorkingSetBytes] = 7.0e6;
+
+            var services = new ServiceCollection();
+
+            services.AddLogging();
+            services.AddOverfitAnomalyGuard(
+                new AnomalyGuardConfigFile
+                {
+                    Prometheus = "http://127.0.0.1:9090",
+                    Namespace = "lab",
+                    Workload = "lab-workload",
+                    PodRegex = "lab-workload-.*",
+                },
+                new AnomalyGuardServiceOptions
+                {
+                    Guard = new AnomalyGuardOptions { MinAbsoluteGapChange = supplied },
+                });
+
+            using var provider = services.BuildServiceProvider();
+            var guard = provider.GetRequiredService<AnomalyGuardServiceOptions>().Guard;
+
+            Assert.Equal(
+                7.0e6,
+                AnomalyGuardOptions.FloorFor(
+                    guard.MinAbsoluteGapChange, MetricIndex.MemoryWorkingSetBytes));
         }
 
         /// <summary>

@@ -205,7 +205,6 @@ namespace DevOnBike.Overfit.Anomalies.Contracts
             public bool Calibrated { get; set; } = true;
         }
 
-        /// <summary>One feature's absolute floors.</summary>
         /// <summary>
         /// Periods declared abnormal on purpose — a deployment, a node pool upgrade, a load test.
         ///
@@ -241,6 +240,7 @@ namespace DevOnBike.Overfit.Anomalies.Contracts
             public string Reason { get; set; } = string.Empty;
         }
 
+        /// <summary>One feature's absolute floors.</summary>
         public sealed class ThresholdEntry
         {
             /// <summary>
@@ -267,6 +267,32 @@ namespace DevOnBike.Overfit.Anomalies.Contracts
 
             /// <summary>Smallest trend change worth reporting, with a unit.</summary>
             public string MinTrendChange { get; set; } = string.Empty;
+
+            /// <summary>
+            /// Smallest change in this feature's PEER GAP worth treating as news, with a unit. Required by
+            /// the peer-novelty gate and read by nothing else.
+            ///
+            /// <para><b>Absent is not zero here, and that is the whole point of the field.</b> Everywhere
+            /// else in this entry a missing key means "that gate is off"; for this one it means "not
+            /// configured", and a guard with <c>AnomalyGuardOptions.PeerNovelty</c> set then <b>refuses to
+            /// start</b> rather than running the gate with its floor off. An explicit <c>"0"</c> and an
+            /// unreadable value are both read the same way, because a suppression gate that quietly stopped
+            /// gating is the one failure this whole surface exists to prevent — and it presents as a quiet
+            /// cluster.</para>
+            ///
+            /// <para>Distinct from <see cref="MinGap"/> and <see cref="MinTrendChange"/> on purpose, and the
+            /// distinction is measured, not stylistic: <see cref="MinGap"/> is how far apart two replicas
+            /// are at an instant, <see cref="MinTrendChange"/> is how far one replica's own series moved
+            /// across a window, and this is how far the <i>distance between them</i> moved. See
+            /// <c>AnomalyGuardOptions.MinAbsoluteGapChange</c>, which carries the two readings that exist and
+            /// says why neither is a calibration.</para>
+            ///
+            /// <para><b>Added 2026-08-12 for the same reason as the custom-channel field two days before it:
+            /// the property existed, the file could not express it.</b> Until then
+            /// <c>AnomalyGuardOptions.MinAbsoluteGapChange</c> could only be assigned in code, so the first
+            /// deployment to switch the gate on from a ConfigMap would have failed at startup.</para>
+            /// </summary>
+            public string MinGapChange { get; set; } = string.Empty;
         }
     }
 }
