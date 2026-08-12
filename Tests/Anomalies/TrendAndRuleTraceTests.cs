@@ -23,6 +23,12 @@ namespace DevOnBike.Overfit.Tests.Anomalies
     /// <c>continue</c>, so before this "tested and healthy" and "never tested" were the same silence — and
     /// during a rollout that is every pod at once. Anything else the trace shows can be inferred from a
     /// finding; that one cannot be inferred from anything.</para>
+    ///
+    /// <para><b>The rule half is <c>AN-D14</c>, and it is the same shape one level down.</b> The rule trace
+    /// covered only the built-in profiles, so a custom binding's rule — same detector, same pipeline —
+    /// produced no row, and on a deployment whose rules are all custom the trace was empty every cycle while
+    /// reading as "no rule fired". The property these tests pin is what an EMPTY trace means: after the
+    /// change, exactly that no rule is configured on any channel.</para>
     /// </summary>
     public sealed class TrendAndRuleTraceTests
     {
@@ -131,7 +137,179 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             Assert.True(result.Findings >= 0);
         }
 
-        private static AnomalyGuard Guard(IIncidentSink sink, bool custom, TimeSpan? warmUp = null)
+        /// <summary>
+        /// <b>The custom half of the rule family, which emitted nothing at all until <c>AN-D14</c>.</b> The
+        /// binding is evaluated by the same detector into the same pipeline as a built-in profile, so a
+        /// firing rule that leaves no row is a finding an operator cannot explain from the trace they were
+        /// given.
+        /// </summary>
+        [Fact]
+        public void ACustomChannelsRuleThatFiresIsTraced()
+        {
+            var rows = new List<RuleDecisionTrace>();
+
+            Guard(new NullSink(), custom: true, customRule: Fires, builtInRules: false)
+                .RunCycle(Window(custom: true), T0.AddMinutes(5), null, null, null, rows.Add);
+
+            var queue = rows.Where(r => string.Equals(r.Signal, Queue, StringComparison.Ordinal)).ToList();
+
+            Assert.NotEmpty(queue);
+            Assert.All(queue, r => Assert.Equal(DetectionStatus.Anomalous, r.Status));
+
+            // The gates, separately: a row that only carried a verdict would leave the reader with the same
+            // question the trace exists to answer.
+            Assert.All(queue, r => Assert.Equal(Fires.Threshold, r.Threshold));
+            Assert.All(queue, r => Assert.Equal(Fires.MinBreachFraction, r.MinBreachFraction));
+            Assert.All(queue, r => Assert.True(r.UsableSamples >= Fires.MinimumSamples));
+        }
+
+        /// <summary>
+        /// <b>The fixture that matters most.</b> A rule that did not fire has to leave a row saying so —
+        /// otherwise the silence keeps two meanings and nothing about the task has changed for the operator
+        /// reading the trace on a healthy cluster, which is almost every cycle.
+        /// </summary>
+        [Fact]
+        public void ACustomChannelsRuleThatDoesNotFireStillEmitsARow()
+        {
+            var rows = new List<RuleDecisionTrace>();
+
+            Guard(new NullSink(), custom: true, customRule: Silent, builtInRules: false)
+                .RunCycle(Window(custom: true), T0.AddMinutes(5), null, null, null, rows.Add);
+
+            var queue = rows.Where(r => string.Equals(r.Signal, Queue, StringComparison.Ordinal)).ToList();
+
+            Assert.Equal(8, queue.Count);
+            Assert.All(queue, r => Assert.Equal(DetectionStatus.Healthy, r.Status));
+            Assert.All(queue, r => Assert.False(string.IsNullOrWhiteSpace(r.Reason)));
+        }
+
+        /// <summary>
+        /// The missing-data arm, and the branch the obvious fix misses: a binding whose channel nobody
+        /// reported never reaches the evaluation at all, so threading the callback into the rule loop alone
+        /// would have left a configured rule silent on exactly the cycles where a broken exporter is the
+        /// thing to find.
+        ///
+        /// <para>Never <c>Healthy</c>: no observation is silence about the channel, not compliance with the
+        /// threshold.</para>
+        /// </summary>
+        [Fact]
+        public void ACustomRuleOnAChannelNobodyReportedIsTracedAsInsufficientData()
+        {
+            var rows = new List<RuleDecisionTrace>();
+
+            Guard(new NullSink(), custom: true, customRule: Fires, builtInRules: false)
+                .RunCycle(
+                    Window(custom: true, fillCustom: false), T0.AddMinutes(5), null, null, null, rows.Add);
+
+            var queue = rows.Where(r => string.Equals(r.Signal, Queue, StringComparison.Ordinal)).ToList();
+
+            Assert.Equal(8, queue.Count);
+            Assert.All(queue, r => Assert.Equal(DetectionStatus.InsufficientData, r.Status));
+            Assert.All(queue, r => Assert.Equal(0, r.UsableSamples));
+
+            // The gate is still carried — what the rule WOULD have tested against is the next thing asked.
+            Assert.All(queue, r => Assert.Equal(Fires.Threshold, r.Threshold));
+        }
+
+        /// <summary>
+        /// A binding pointed at a channel this window does not carry at all — a query that returns nothing on
+        /// this cluster, which is the shape a misconfigured custom metric arrives in.
+        ///
+        /// <para><c>MetricWindow.Series(pod, name)</c> throws for an unknown channel, so a version of the fix
+        /// that evaluated the rule "anyway" for symmetry with the built-in path would turn a silent channel
+        /// into a failed cycle. The row is emitted without reading the series.</para>
+        /// </summary>
+        [Fact]
+        public void ACustomRuleOnAChannelTheWindowDoesNotCarryIsTracedRatherThanThrowing()
+        {
+            var rows = new List<RuleDecisionTrace>();
+
+            var result = Guard(new NullSink(), custom: true, customRule: Fires, builtInRules: false)
+                .RunCycle(Window(custom: false), T0.AddMinutes(5), null, null, null, rows.Add);
+
+            Assert.True(result.BlindMetrics > 0);
+            Assert.Equal(8, rows.Count(r => string.Equals(r.Signal, Queue, StringComparison.Ordinal)));
+        }
+
+        /// <summary>
+        /// <b>The property the task exists to establish.</b> With no rule configured anywhere the trace is
+        /// empty — and after the change that is the ONLY thing an empty trace can mean, where before it also
+        /// covered "every rule here is a custom one".
+        ///
+        /// <para>The custom channel is present and reporting; it simply carries no <c>Rule</c>. So this is
+        /// the configuration statement, not an absence of data.</para>
+        /// </summary>
+        [Fact]
+        public void AnEmptyRuleTraceMeansNoRuleIsConfiguredAnywhere()
+        {
+            var rows = new List<RuleDecisionTrace>();
+
+            Guard(new NullSink(), custom: true, customRule: null, builtInRules: false)
+                .RunCycle(Window(custom: true), T0.AddMinutes(5), null, null, null, rows.Add);
+
+            Assert.Empty(rows);
+        }
+
+        /// <summary>
+        /// The trace stays a statement about RULES, not about coverage: an unreported channel that carries no
+        /// rule produces nothing here. A blind channel is reported by the guard's own blind-metric count and
+        /// the service's per-metric warning, and duplicating it into this trace would put a row in front of
+        /// the reader for a family that was never configured.
+        /// </summary>
+        [Fact]
+        public void AnUnreportedChannelWithNoRuleEmitsNoRow()
+        {
+            var rows = new List<RuleDecisionTrace>();
+
+            var result = Guard(new NullSink(), custom: true, customRule: null, builtInRules: false)
+                .RunCycle(
+                    Window(custom: true, fillCustom: false), T0.AddMinutes(5), null, null, null, rows.Add);
+
+            Assert.True(result.BlindMetrics > 0);
+            Assert.Empty(rows);
+        }
+
+        /// <summary>
+        /// The control: the built-in family is untouched, and both kinds of row arrive in the same cycle. A
+        /// change that MOVED rows from one path to the other would satisfy every test above and fail this one.
+        /// </summary>
+        [Fact]
+        public void TheBuiltInRowsSurviveAlongsideTheCustomOnes()
+        {
+            var rows = new List<RuleDecisionTrace>();
+
+            Guard(new NullSink(), custom: true, customRule: Fires, builtInRules: true)
+                .RunCycle(
+                    Window(custom: true, throttle: 0.9), T0.AddMinutes(5), null, null, null, rows.Add);
+
+            var builtIn = rows
+                .Where(r => string.Equals(
+                    r.Signal, nameof(MetricIndex.CpuThrottleRatio), StringComparison.Ordinal))
+                .ToList();
+
+            Assert.Equal(8, builtIn.Count);
+            Assert.All(builtIn, r => Assert.Equal(DetectionStatus.Anomalous, r.Status));
+            Assert.Equal(8, rows.Count(r => string.Equals(r.Signal, Queue, StringComparison.Ordinal)));
+        }
+
+        /// <summary>Every sample of the queue depth is over this line, so the rule fires on every pod.</summary>
+        private static SustainedThresholdOptions Fires => new(
+            Threshold: 10.0,
+            MinBreachFraction: 0.5,
+            MinimumSamples: 20);
+
+        /// <summary>Far above anything the window holds, so the rule is evaluated and finds nothing.</summary>
+        private static SustainedThresholdOptions Silent => new(
+            Threshold: 1000.0,
+            MinBreachFraction: 0.5,
+            MinimumSamples: 20);
+
+        private static AnomalyGuard Guard(
+            IIncidentSink sink,
+            bool custom,
+            TimeSpan? warmUp = null,
+            SustainedThresholdOptions? customRule = null,
+            bool builtInRules = true)
         {
             var gaps = new double[(int)MetricIndex.Count];
             gaps[(int)MetricIndex.MemoryWorkingSetBytes] = 5_000_000.0;
@@ -151,10 +329,14 @@ namespace DevOnBike.Overfit.Tests.Anomalies
                     // ever spared. So the warm-up row cannot be produced without one, and a test that
                     // omitted it saw zero skips and looked like a missing trace.
                     PodTopology = warmUp is { } g && g > TimeSpan.Zero ? new FreshTopology(T0) : null,
+
+                    // Off by default for the rule tests: with the three shipped profiles left on, every
+                    // built-in metric contributes rows and "the trace is empty" could not be asserted.
+                    Rules = builtInRules ? AnomalyGuardOptions.DefaultRules : [],
                     CustomMetrics = custom
                         ? [new CustomMetricBinding(
                             Queue, Queue, MetricSourceKind.Gauge, PeerSignalKind.LoadIndependent,
-                            Class: SignalClass.Resource, MinAbsoluteGap: 5.0)]
+                            Class: SignalClass.Resource, MinAbsoluteGap: 5.0, Rule: customRule)]
                         : [],
                     Grouping = IncidentGroupingOptions.Balanced with
                     {
@@ -165,7 +347,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
                 IncidentTrackingOptions.Balanced);
         }
 
-        private static MetricWindow Window(bool custom)
+        private static MetricWindow Window(bool custom, bool fillCustom = true, double throttle = double.NaN)
         {
             var names = new List<string>(8);
 
@@ -181,6 +363,18 @@ namespace DevOnBike.Overfit.Tests.Anomalies
 
             for (var pod = 0; pod < window.Pods.Count; pod++)
             {
+                if (double.IsFinite(throttle))
+                {
+                    window.Series(pod, MetricIndex.CpuThrottleRatio).Fill(throttle);
+                }
+
+                // Declared and left at NaN: what a cycle whose query returned nothing looks like, and the
+                // reason PodsReporting is 0 without the channel being unknown to the window.
+                if (custom && !fillCustom)
+                {
+                    continue;
+                }
+
                 var series = custom
                     ? window.Series(pod, Queue)
                     : window.Series(pod, MetricIndex.MemoryWorkingSetBytes);

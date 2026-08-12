@@ -20,7 +20,11 @@ namespace DevOnBike.Overfit.Anomalies.Contracts
     /// that verdict is <c>WarmingUp</c> rather than <c>Healthy</c>. A replay too short to clear it is silent
     /// by arithmetic, which has been mistaken for a detector failure here more than once.</para>
     /// </summary>
-    /// <param name="Signal">Channel name.</param>
+    /// <param name="Signal">
+    /// Channel name — a <c>MetricIndex</c> member's name for a built-in rule, or a
+    /// <c>CustomMetricBinding.Name</c> verbatim for a custom one. A plain string in both cases, which is why
+    /// covering custom channels (<c>AN-D14</c>) needed no change to this record.
+    /// </param>
     /// <param name="Pod">The pod judged.</param>
     /// <param name="Status">The verdict, or <c>WarmingUp</c> when too few samples existed to reach one.</param>
     /// <param name="Threshold">The line, in the signal's own unit.</param>

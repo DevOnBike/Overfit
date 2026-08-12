@@ -435,19 +435,32 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
         /// tested" were the same silence, and during a rollout the second is every pod.</para>
         /// </param>
         /// <param name="ruleTrace">
-        /// Optional per-pod explanation of every absolute-threshold decision made against
-        /// <c>AnomalyGuardOptions.Rules</c> — the BUILT-IN metrics. For diagnostics.
+        /// Optional per-pod explanation of every absolute-threshold decision, over
+        /// <c>AnomalyGuardOptions.Rules</c> and over every <c>CustomMetricBinding</c> carrying a <c>Rule</c>
+        /// alike. For diagnostics.
         ///
-        /// <para><b>It does not cover custom channels, and they are not exempt from the family.</b> A
-        /// <c>CustomMetricBinding</c> carrying a <c>Rule</c> is evaluated by the same detector and its findings
-        /// reach the same pipeline, but no row is emitted here. So an empty trace means "no built-in rule was
-        /// configured", never "no rule fired", and a trace that lists every built-in metric is still not the
-        /// whole rule family. This is the one asymmetry with <paramref name="trendTrace"/>, which does report
-        /// custom channels.</para>
+        /// <para><b>What an empty trace means, which is the whole point of the callback.</b> A row is emitted
+        /// for every configured rule against every pod, for every verdict — <c>Anomalous</c>,
+        /// <c>Healthy</c>, <c>WarmingUp</c> and the <c>InsufficientData</c> of a channel nobody reported. So a
+        /// trace that came back empty says <b>no rule is configured on any channel</b> (or the window carried
+        /// no pods), and nothing else. It is not evidence that a rule ran and found nothing — that case has
+        /// its own rows.</para>
         ///
-        /// <para>A metric with no rule configured is not evaluated by this family at all and produces no row —
-        /// so an absent row is silence about three different things, and only the configuration says which.
-        /// </para>
+        /// <para><b>CORRECTION, recorded rather than quietly rewritten.</b> Until <c>AN-D14</c> this covered
+        /// only the built-in metrics: a custom binding's rule was evaluated by the same detector into the same
+        /// pipeline and emitted no row, so an empty trace meant "no BUILT-IN rule was configured" while
+        /// reading as "no rule fired" — and on a deployment whose rules are all custom, which the lab's
+        /// channels are, it was empty on every cycle. That is the silence-reads-as-health shape this
+        /// subsystem is organised against, arriving through the diagnostic instead of the detector.</para>
+        ///
+        /// <para>A channel with no rule configured is not evaluated by this family at all and produces no row.
+        /// That is the one remaining absence, and it is a statement about the configuration rather than about
+        /// the cluster.</para>
+        ///
+        /// <para><b>Empty is not the same as absent.</b> A caller passing <c>null</c> asked for no trace and
+        /// gets no rows because none were built; a caller passing a sink and receiving nothing has been told
+        /// something about the configuration. Nothing downstream can tell those apart from the rows alone, so
+        /// a diagnostic that reports this trace should say whether it was collected.</para>
         /// </param>
         public GuardCycleResult RunCycle(
             MetricWindow window,
@@ -625,7 +638,7 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
 
             blind += RunCustom(
                 window, times, pipeline, from, to, recentFrom, recent, ref partial, ref unevaluable,
-                peerTrace, trendTrace);
+                peerTrace, trendTrace, ruleTrace);
 
             // AFTER every detector, and the position is the whole point rather than a tidying-up.
             //
@@ -745,7 +758,8 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
             ref int partial,
             ref int unevaluable,
             Action<PeerDecisionTrace>? peerTrace = null,
-            Action<TrendDecisionTrace>? trendTrace = null)
+            Action<TrendDecisionTrace>? trendTrace = null,
+            Action<RuleDecisionTrace>? ruleTrace = null)
         {
             var blind = 0;
 
@@ -757,6 +771,13 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
                 if (reporting == 0)
                 {
                     blind++;
+
+                    // Traced BEFORE the continue, and this branch is the half the obvious fix misses. A
+                    // binding whose channel nobody reported skips the evaluation below entirely, so threading
+                    // the callback into the rule loop alone would still leave a configured rule producing no
+                    // row at all — and an empty trace would keep meaning two things on exactly the cycles
+                    // where the operator is looking at it.
+                    TraceUnreportedRule(window, binding, ruleTrace);
 
                     continue;
                 }
@@ -773,6 +794,24 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
                         var verdict = _rule.Evaluate(
                             Tail(window.Series(pod, binding.Name), recent), rule);
 
+                        // The same row the built-in family emits in RunRules, for every verdict rather than
+                        // only the findings. AN-D14: this path evaluated the same detector into the same
+                        // pipeline and emitted nothing, so on a deployment whose rules are ALL custom — which
+                        // the lab's channels are — the trace was empty every cycle and read as "no rule
+                        // fired".
+                        ruleTrace?.Invoke(new RuleDecisionTrace(
+                            binding.Name,
+                            window.Pods[pod],
+                            verdict.Status,
+                            rule.Threshold,
+                            rule.MinBreachFraction,
+                            verdict.BreachFraction,
+                            verdict.BreachedSamples,
+                            verdict.UsableSamples,
+                            verdict.PeakValue,
+                            verdict.MedianValue,
+                            verdict.Reason));
+
                         pipeline.ObserveRule(
                             Subject(window.Pods[pod]), binding.Name, verdict, recentFrom, to, default,
                             binding.Class);
@@ -784,6 +823,51 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
             }
 
             return blind;
+        }
+
+        /// <summary>
+        /// The row for a custom channel that carries a rule and that no pod reported this cycle.
+        ///
+        /// <para><b>An absent row and an empty trace have to mean different things, or the diagnostic has the
+        /// disease it exists to diagnose.</b> After <c>AN-D14</c> a rule trace is empty only when no rule is
+        /// configured on any channel — so every OTHER way a configured rule can fall silent needs a row, and
+        /// a channel nobody reported is the way that survives the obvious fix.</para>
+        ///
+        /// <para>The status is <c>InsufficientData</c> and never <c>Healthy</c>: no observation is silence
+        /// about the channel, not compliance with the threshold. The gates are still carried, because what an
+        /// operator wants next is what the rule WOULD have tested against.</para>
+        ///
+        /// <para><b>The series is deliberately not read.</b> <c>MetricWindow.Series(pod, name)</c> throws for
+        /// a channel the window does not carry, and a binding configured against a channel this cluster never
+        /// exports is exactly that case — evaluating the rule "anyway" for symmetry with the built-in path
+        /// would turn a silent channel into a failed cycle.</para>
+        /// </summary>
+        private static void TraceUnreportedRule(
+            MetricWindow window,
+            in CustomMetricBinding binding,
+            Action<RuleDecisionTrace>? ruleTrace)
+        {
+            if (ruleTrace == null || binding.Rule is not { } rule)
+            {
+                return;
+            }
+
+            for (var pod = 0; pod < window.Pods.Count; pod++)
+            {
+                ruleTrace(new RuleDecisionTrace(
+                    binding.Name,
+                    window.Pods[pod],
+                    DetectionStatus.InsufficientData,
+                    rule.Threshold,
+                    rule.MinBreachFraction,
+                    0.0,
+                    0,
+                    0,
+                    double.NaN,
+                    double.NaN,
+                    "No pod reported this channel this cycle, so the rule did not run. Silence about the "
+                    + "channel rather than compliance with the threshold."));
+            }
         }
 
         /// <summary>

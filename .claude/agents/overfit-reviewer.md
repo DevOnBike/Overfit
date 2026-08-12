@@ -352,6 +352,13 @@ the report rather than implied by its size.
 invocation `python D:/Overfit/.claude/do-overfit-reviewer.py`.** Write the file with `Write`, then run that one
 command. Do not issue ad-hoc `dotnet` / `grep` / `sed` / `kubectl` lines directly.
 
+**`dotnet` speaks Polish on this box, so an English-word output filter prints nothing — which reads
+exactly like a clean run.** Measured 2026-08-12: a filter looking for `Failed`/`Passed` cost two round
+trips before a single number appeared. Match **both**: failures as `(?:Niepowodzenie|Failed) (DevOnBike\S+)`
+and the summary line on `Powodzenie!` / `niepowodzenie:`. A filter that finds nothing and a suite that
+fails nothing produce the same empty output — always print the summary line itself, never only your own
+verdict about it.
+
 **The filename is yours alone, and that is the point.** The main session uses `.claude/do.py`; each agent
 gets `do-<agent>.py`. These are scratch files, rewritten per task, and two agents sharing one would
 overwrite each other mid-run — which is exactly why this rule used to exclude subagents. Per-agent files

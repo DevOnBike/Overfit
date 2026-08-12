@@ -103,7 +103,18 @@ def run():
 dirty = subprocess.run(["git", "-C", str(REPO), "diff", "--quiet", "HEAD", "--", str(TARGET)])
 print(f"--- target clean against HEAD: {dirty.returncode == 0}")
 
-original = TARGET.read_text(encoding="utf-8")
+# Read BYTES and match against LF-normalised text. This tree is CRLF; an anchor pasted
+# with "\n" matches 0 times and the run stops — six arms in a row cost a full harness
+# cycle on 2026-08-12 to exactly that. Writes restore the file's original ending.
+RAW = TARGET.read_bytes()
+CRLF = b"\r\n" in RAW
+original = RAW.decode("utf-8").replace("\r\n", "\n")
+
+
+def write(text):
+    TARGET.write_bytes((text.replace("\n", "\r\n") if CRLF else text).encode("utf-8"))
+
+
 count = original.count(ANCHOR)
 print(f"--- anchor matches {count} time(s)" + ("" if count == 1 else "   <-- MUST be exactly 1"))
 
@@ -117,7 +128,7 @@ if code != 0:
     sys.exit("STOPPED: baseline is red, so the mutation would say nothing")
 
 try:
-    TARGET.write_text(original.replace(ANCHOR, MUTATED), encoding="utf-8")
+    write(original.replace(ANCHOR, MUTATED))
     code, failed, errors = run()
 
     if errors:
@@ -132,8 +143,10 @@ try:
         caught = any(f.startswith(EXPECTED) for f in failed)
         print(f"    -> {'CAUGHT by ' + EXPECTED if caught else 'NOT CAUGHT'}")
 finally:
-    TARGET.write_text(original, encoding="utf-8")
-    print(f"--- restored byte-for-byte: {TARGET.read_text(encoding='utf-8') == original}")
+    write(original)
+    # Compared as BYTES against what was read, so a silent line-ending conversion
+    # cannot pass as a restore.
+    print(f"--- restored byte-for-byte: {TARGET.read_bytes() == RAW}")
 ```
 
 ### Step 4: Read the result
