@@ -191,7 +191,7 @@ namespace DevOnBike.Overfit.Navigator
         {
             var compilation = await project.GetCompilationAsync(cancellationToken).ConfigureAwait(false);
 
-            if (compilation is null)
+            if (compilation == null)
             {
                 return Array.Empty<UnusedCandidate>();
             }
@@ -206,7 +206,7 @@ namespace DevOnBike.Overfit.Navigator
                 var references = await FindReferencesAsync(symbol, cancellationToken).ConfigureAwait(false);
                 var verdict = Judge(references);
 
-                if (verdict is null)
+                if (verdict == null)
                 {
                     continue;
                 }
@@ -398,7 +398,7 @@ namespace DevOnBike.Overfit.Navigator
             var model = await location.Document.GetSemanticModelAsync(cancellationToken).ConfigureAwait(false);
             var root = await location.Document.GetSyntaxRootAsync(cancellationToken).ConfigureAwait(false);
 
-            if (model is null || root is null)
+            if (model == null || root == null)
             {
                 return string.Empty;
             }

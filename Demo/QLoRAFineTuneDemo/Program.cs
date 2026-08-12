@@ -84,7 +84,13 @@ namespace DevOnBike.Overfit.Demo.QLoRAFineTune
             // ── interactive chat ──
             Console.WriteLine("Ask the model anything (it now knows your text). Empty line or 'exit' to quit.\n");
 
+            // BOUND: the console session. Every pass blocks on Console.ReadLine(), so the loop advances
+            // only when the user does, and the guard below breaks on 'exit', on an empty line and on
+            // end-of-input — IsNullOrWhiteSpace covers the null ReadLine returns when stdin closes or a
+            // redirected input runs out, so a piped or detached stdin ends the loop rather than spinning.
+#pragma warning disable OVERFIT023
             while (true)
+#pragma warning restore OVERFIT023
             {
                 Console.Write("you> ");
                 var prompt = Console.ReadLine();

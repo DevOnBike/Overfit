@@ -35,6 +35,14 @@ namespace DevOnBike.Overfit.Server.AspNet
         /// embeddings and TTS are served when <paramref name="embedder"/> / <paramref name="tts"/> are supplied
         /// (501 otherwise). The pool, embedder and TTS engine are owned by the caller.
         /// </summary>
+        // OVERFIT040 on Serve: `app.Run` has a `RunAsync` sibling and this method is where the process stops
+        // being asynchronous on purpose. BOUND BY BEING THE ENTRY POINT: `Serve` is invoked from the CLI's
+        // `serve` verb, which System.CommandLine drives synchronously from the process main thread, and it
+        // blocks there for the lifetime of the host — that is its documented contract ("Blocks the calling
+        // thread"). No pool thread waits behind it, so there is none to give back; returning a task here would
+        // only move the block up to a caller that has nothing else to do with the thread either. The
+        // request-serving path below it is a separate question and is not covered by this pragma.
+#pragma warning disable OVERFIT040
         public static void Serve(
             OverfitResourcePool<OverfitClient> pool,
             string modelName,
@@ -88,5 +96,6 @@ namespace DevOnBike.Overfit.Server.AspNet
 
             app.Run($"http://{host}:{port}");
         }
+#pragma warning restore OVERFIT040
     }
 }

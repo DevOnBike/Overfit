@@ -308,7 +308,7 @@ namespace DevOnBike.Overfit.Tests.Server
                     JsonSerializer.Serialize(response, OpenAiJsonContext.Default.ChatCompletionResponse));
             }
 
-            public void Embed(EmbeddingsRequest? request, IOpenAiResponseSink sink, CancellationToken cancellationToken)
+            public Task EmbedAsync(EmbeddingsRequest? request, IOpenAiResponseSink sink, CancellationToken cancellationToken)
             {
                 if (!EmbeddingsAvailable)
                 {
@@ -316,7 +316,7 @@ namespace DevOnBike.Overfit.Tests.Server
                         JsonSerializer.Serialize(
                             new OpenAiErrorResponse { Error = new OpenAiError { Message = "no embedding model" } },
                             OpenAiJsonContext.Default.OpenAiErrorResponse));
-                    return;
+                    return Task.CompletedTask;
                 }
 
                 var response = new EmbeddingsResponse
@@ -327,10 +327,16 @@ namespace DevOnBike.Overfit.Tests.Server
                 };
                 sink.WriteBody(200, "application/json",
                     JsonSerializer.Serialize(response, OpenAiJsonContext.Default.EmbeddingsResponse));
+
+                return Task.CompletedTask;
             }
 
-            public void Synthesize(SpeechRequest? request, IOpenAiResponseSink sink, CancellationToken cancellationToken)
-                => sink.WriteBinary(200, "audio/wav", [0x52, 0x49, 0x46, 0x46]);
+            public Task SynthesizeAsync(SpeechRequest? request, IOpenAiResponseSink sink, CancellationToken cancellationToken)
+            {
+                sink.WriteBinary(200, "audio/wav", [0x52, 0x49, 0x46, 0x46]);
+
+                return Task.CompletedTask;
+            }
 
             private static string Chunk(string content)
             {

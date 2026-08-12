@@ -146,7 +146,16 @@ namespace DevOnBike.Overfit.Cli
             return endpoint;
         }
 
+        // OVERFIT040 on Dispose: `CancellationTokenSource.Cancel` has a `CancelAsync` sibling, and this method
+        // cannot use it. BOUND BY THE CONTRACT: this is `IDisposable.Dispose`, which returns void — there is
+        // nothing here for a task to be awaited from, and `IAsyncDisposable` is a different lifetime decision
+        // from a lint sweep's. What `CancelAsync` buys is not running registered callbacks on the caller's
+        // thread; `_stopping` has NO registrations at all — its token is only ever read through
+        // `_stopping.IsCancellationRequested` in ServeAsync — so Cancel here sets a flag and returns, and the
+        // asynchronous form would have nothing to move off this thread.
+#pragma warning disable OVERFIT040
         public void Dispose()
+#pragma warning restore OVERFIT040
         {
             _stopping.Cancel();
 
@@ -209,7 +218,7 @@ namespace DevOnBike.Overfit.Cli
 
                     try
                     {
-                        Respond(context);
+                        await RespondAsync(context).ConfigureAwait(false);
                     }
                     catch (Exception ex) when (ex is HttpListenerException or ObjectDisposedException or IOException)
                     {
@@ -239,40 +248,41 @@ namespace DevOnBike.Overfit.Cli
             }
         }
 
-        private void Respond(HttpListenerContext context)
+        private async Task RespondAsync(HttpListenerContext context)
         {
             var path = context.Request.Url?.AbsolutePath ?? "/";
 
             if (string.Equals(path, "/healthz", StringComparison.Ordinal))
             {
-                Write(context, 200, "text/plain; charset=utf-8", "ok\n");
+                await WriteAsync(context, 200, "text/plain; charset=utf-8", "ok\n").ConfigureAwait(false);
 
                 return;
             }
 
             if (string.Equals(path, "/suppressions", StringComparison.Ordinal))
             {
-                Suppressions(context);
+                await SuppressionsAsync(context).ConfigureAwait(false);
 
                 return;
             }
 
             if (string.Equals(path, "/ack", StringComparison.Ordinal))
             {
-                Acknowledge(context);
+                await AcknowledgeAsync(context).ConfigureAwait(false);
 
                 return;
             }
 
             if (!string.Equals(path, "/metrics", StringComparison.Ordinal))
             {
-                Write(context, 404, "text/plain; charset=utf-8",
-                    "try /metrics, /suppressions, /ack or /healthz\n");
+                await WriteAsync(context, 404, "text/plain; charset=utf-8",
+                    "try /metrics, /suppressions, /ack or /healthz\n").ConfigureAwait(false);
 
                 return;
             }
 
-            Write(context, 200, "text/plain; version=0.0.4; charset=utf-8", _telemetry.ToPrometheusText());
+            await WriteAsync(context, 200, "text/plain; version=0.0.4; charset=utf-8",
+                _telemetry.ToPrometheusText()).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -282,12 +292,12 @@ namespace DevOnBike.Overfit.Cli
         /// detector that stopped working, and the whole argument for letting an operator silence anything is
         /// that the silence stays visible and expires.</para>
         /// </summary>
-        private void Suppressions(HttpListenerContext context)
+        private async Task SuppressionsAsync(HttpListenerContext context)
         {
             if (_guard == null)
             {
-                Write(context, 501, "text/plain; charset=utf-8",
-                    "this host serves metrics only; no guard was supplied to the endpoint\n");
+                await WriteAsync(context, 501, "text/plain; charset=utf-8",
+                    "this host serves metrics only; no guard was supplied to the endpoint\n").ConfigureAwait(false);
 
                 return;
             }
@@ -310,7 +320,7 @@ namespace DevOnBike.Overfit.Cli
                     .Append("  \"").Append(s.Reason).Append("\"\n");
             }
 
-            Write(context, 200, "text/plain; charset=utf-8", text.ToString());
+            await WriteAsync(context, 200, "text/plain; charset=utf-8", text.ToString()).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -360,21 +370,21 @@ namespace DevOnBike.Overfit.Cli
                 context.Request.Headers["Authorization"], AckToken);
         }
 
-        private void Acknowledge(HttpListenerContext context)
+        private async Task AcknowledgeAsync(HttpListenerContext context)
         {
             if (_guard == null)
             {
-                Write(context, 501, "text/plain; charset=utf-8",
-                    "this host serves metrics only; no guard was supplied to the endpoint\n");
+                await WriteAsync(context, 501, "text/plain; charset=utf-8",
+                    "this host serves metrics only; no guard was supplied to the endpoint\n").ConfigureAwait(false);
 
                 return;
             }
 
             if (!string.Equals(context.Request.HttpMethod, "POST", StringComparison.OrdinalIgnoreCase))
             {
-                Write(context, 405, "text/plain; charset=utf-8",
+                await WriteAsync(context, 405, "text/plain; charset=utf-8",
                     "POST /ack?id=<n>&kind=noise|real&for=7d&reason=... — this changes what the guard "
-                    + "reports, so it is not a GET\n");
+                    + "reports, so it is not a GET\n").ConfigureAwait(false);
 
                 return;
             }
@@ -391,7 +401,7 @@ namespace DevOnBike.Overfit.Cli
                     context.Request.RemoteEndPoint?.Address,
                     configured ? "bad or missing bearer token" : "no ack token configured on this guard");
 
-                Write(
+                await WriteAsync(
                     context,
                     configured ? 401 : 503,
                     "text/plain; charset=utf-8",
@@ -400,7 +410,7 @@ namespace DevOnBike.Overfit.Cli
                           + OverfitEnvironment.GuardAckToken + "\n"
                         : "POST /ack is disabled because " + OverfitEnvironment.GuardAckToken
                           + " is not set on this guard. It suppresses findings for a caller-chosen "
-                          + "duration, so it refuses rather than serving unauthenticated writes\n");
+                          + "duration, so it refuses rather than serving unauthenticated writes\n").ConfigureAwait(false);
 
                 return;
             }
@@ -409,7 +419,8 @@ namespace DevOnBike.Overfit.Cli
 
             if (!long.TryParse(query["id"], NumberStyles.Integer, CultureInfo.InvariantCulture, out var id))
             {
-                Write(context, 400, "text/plain; charset=utf-8", "id is required and must be a number\n");
+                await WriteAsync(context, 400, "text/plain; charset=utf-8",
+                    "id is required and must be a number\n").ConfigureAwait(false);
 
                 return;
             }
@@ -419,9 +430,9 @@ namespace DevOnBike.Overfit.Cli
 
             if (!isReal && !string.Equals(kindText, "noise", StringComparison.OrdinalIgnoreCase))
             {
-                Write(context, 400, "text/plain; charset=utf-8",
+                await WriteAsync(context, 400, "text/plain; charset=utf-8",
                     "kind must be 'noise' or 'real'. There is no default: one of them silences a signal and "
-                    + "the other pins it, and guessing between those is not a thing to do quietly\n");
+                    + "the other pins it, and guessing between those is not a thing to do quietly\n").ConfigureAwait(false);
 
                 return;
             }
@@ -432,8 +443,8 @@ namespace DevOnBike.Overfit.Cli
             {
                 if (!TryParseDuration(forText, out var parsed))
                 {
-                    Write(context, 400, "text/plain; charset=utf-8",
-                        $"could not read '{forText}' as a duration; use 30m, 12h or 7d\n");
+                    await WriteAsync(context, 400, "text/plain; charset=utf-8",
+                        $"could not read '{forText}' as a duration; use 30m, 12h or 7d\n").ConfigureAwait(false);
 
                     return;
                 }
@@ -453,11 +464,11 @@ namespace DevOnBike.Overfit.Cli
                 _logger.LogWarning(
                     "Operator acknowledged incident {Incident} as {Kind}: {Outcome}", id, kindText, echo);
 
-                Write(context, 200, "text/plain; charset=utf-8", echo + "\n");
+                await WriteAsync(context, 200, "text/plain; charset=utf-8", echo + "\n").ConfigureAwait(false);
             }
             catch (ArgumentException ex)
             {
-                Write(context, 404, "text/plain; charset=utf-8", ex.Message + "\n");
+                await WriteAsync(context, 404, "text/plain; charset=utf-8", ex.Message + "\n").ConfigureAwait(false);
             }
         }
 
@@ -491,14 +502,25 @@ namespace DevOnBike.Overfit.Cli
             return value > TimeSpan.Zero;
         }
 
-        private static void Write(HttpListenerContext context, int status, string contentType, string body)
+        /// <summary>
+        /// Answers one request.
+        ///
+        /// <para><b>Asynchronous because this runs on a pool thread, on the serving path.</b> It used to be a
+        /// synchronous <c>OutputStream.Write</c> called from <see cref="ServeAsync"/>'s loop (OVERFIT040): a
+        /// scrape that connected and then stopped reading held that thread until the socket timed out, and the
+        /// endpoint serves one request at a time, so the thread held is the whole channel. The body is small —
+        /// a few hundred bytes of Prometheus text — which bounds the cost but does not remove it, because the
+        /// duration is set by the client's read rate rather than by the payload.</para>
+        /// </summary>
+        private static async Task WriteAsync(
+            HttpListenerContext context, int status, string contentType, string body)
         {
             var bytes = Encoding.UTF8.GetBytes(body);
 
             context.Response.StatusCode = status;
             context.Response.ContentType = contentType;
             context.Response.ContentLength64 = bytes.Length;
-            context.Response.OutputStream.Write(bytes, 0, bytes.Length);
+            await context.Response.OutputStream.WriteAsync(bytes).ConfigureAwait(false);
             context.Response.Close();
         }
     }

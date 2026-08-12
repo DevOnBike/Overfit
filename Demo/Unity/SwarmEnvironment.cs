@@ -4,6 +4,7 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using System.Numerics;
+using DevOnBike.Overfit.Runtime;
 
 namespace DevOnBike.Overfit.Demo.Unity.Server
 {
@@ -29,8 +30,8 @@ namespace DevOnBike.Overfit.Demo.Unity.Server
     ///     </para>
     ///     <para>
     ///         The object is thread-compatible but not thread-safe: internal storage is
-    ///         reused frame to frame. Physics stepping internally uses
-    ///         <see cref="Parallel.For"/>.
+    ///         reused frame to frame. Input building and physics stepping fan the per-bot
+    ///         work out across threads internally.
     ///     </para>
     /// </remarks>
     public sealed class SwarmEnvironment
@@ -120,7 +121,7 @@ namespace DevOnBike.Overfit.Demo.Unity.Server
                     var ptr = (IntPtr)inputsPtr;
                     var positions = _positions;
 
-                    Parallel.For(0, swarmSize, i =>
+                    OverfitParallel.For(0, swarmSize, i =>
                     {
                         var span = new Span<float>((float*)ptr, swarmSize * inputSize);
                         var pos = positions[i];
@@ -191,6 +192,17 @@ namespace DevOnBike.Overfit.Demo.Unity.Server
                     var outLen = outputs.Length;
                     var fitLen = genomeFitness.Length;
 
+                    // OVERFIT008 — raw TPL on purpose: OverfitParallel has no suppress-aware equivalent of the
+                    // thread-local-state overload (localInit / body / localFinally), and that overload is what
+                    // makes the respawn parallel-safe — one Random per worker chunk instead of one shared
+                    // instance (Random is not thread-safe and returns garbage under concurrent use). Folding the
+                    // draw into the body would allocate one Random per bot per frame: SwarmSize is 102_400 and
+                    // FramesPerGeneration is 600, so 61.4M allocations per generation to satisfy a rule about
+                    // oversubscription. The oversubscription the rule guards against also cannot arise here:
+                    // UnitySwarmServer is a standalone console exe, referenced by no other project, and neither
+                    // it nor anything it calls constructs a DataParallelTrainer — which is the only code in the
+                    // tree that sets SuppressParallelismOnCurrentThread.
+#pragma warning disable OVERFIT008
                     Parallel.For(0, _config.SwarmSize,
                         () => new Random(Guid.NewGuid().GetHashCode()),
                         (i, _, localRng) =>
@@ -199,6 +211,7 @@ namespace DevOnBike.Overfit.Demo.Unity.Server
                             return localRng;
                         },
                         _ => { });
+#pragma warning restore OVERFIT008
                 }
             }
         }
@@ -224,6 +237,10 @@ namespace DevOnBike.Overfit.Demo.Unity.Server
                     var oPtr = (IntPtr)outPtr;
                     var outLen = outputs.Length;
 
+                    // OVERFIT008 — raw TPL on purpose, same constraint as Step above: the thread-local-state
+                    // overload has no OverfitParallel equivalent, the per-worker Random is what keeps the
+                    // respawn parallel-safe, and this exe can never run inside a data-parallel replica.
+#pragma warning disable OVERFIT008
                     Parallel.For(0, _config.SwarmSize,
                         () => new Random(Guid.NewGuid().GetHashCode()),
                         (i, _, localRng) =>
@@ -232,6 +249,7 @@ namespace DevOnBike.Overfit.Demo.Unity.Server
                             return localRng;
                         },
                         _ => { });
+#pragma warning restore OVERFIT008
                 }
             }
         }

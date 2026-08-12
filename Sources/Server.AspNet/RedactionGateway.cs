@@ -6,7 +6,6 @@
 using System.Text;
 using System.Text.Json;
 using DevOnBike.Overfit.Redaction;
-using DevOnBike.Overfit.Server.AspNet.Endpoints;
 using DevOnBike.Overfit.Server.OpenAi;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
@@ -64,12 +63,13 @@ namespace DevOnBike.Overfit.Server
 
             // Terminal middleware handles EVERY request — a transparent proxy needs no routing table, and this
             // keeps the whole path reflection-free for Native AOT.
-            app.Run(ctx =>
-            {
-                EndpointHelpers.EnableSynchronousIO(ctx);
-                HandleRequest(ctx, upstream, upstreamApiKey, redactor, audit, policy, auth, scanResponses, http);
-                return Task.CompletedTask;
-            });
+            //
+            // The delegate is asynchronous and no longer enables synchronous body IO. It used to be
+            // `ctx => { EnableSynchronousIO(ctx); HandleRequest(...); return Task.CompletedTask; }` — a whole
+            // proxied exchange, upstream call included, run to completion on the Kestrel thread that accepted
+            // the request. See HandleRequestAsync for what that cost.
+            app.Run(ctx => HandleRequestAsync(
+                ctx, upstream, upstreamApiKey, redactor, audit, policy, auth, scanResponses, http));
 
             app.Urls.Add($"http://{host}:{port}");
 
@@ -184,7 +184,31 @@ namespace DevOnBike.Overfit.Server
             }
         }
 
-        private static void HandleRequest(
+        /// <summary>
+        /// Routes one proxied request.
+        ///
+        /// <para><b>This path is asynchronous, and it is the one place in the gateway where that is not a
+        /// style question.</b> It used to run synchronously end to end on the Kestrel thread that accepted the
+        /// request: <c>HttpClient.Send</c> to the upstream, then the response body read back, then the write
+        /// to the caller. The <c>HttpClient</c> built in <see cref="Serve"/> carries a 120-second timeout, and
+        /// the upstream is a language model — so each in-flight request held a request thread for the whole
+        /// generation, up to two minutes of it, doing nothing but waiting on a socket. N concurrent callers
+        /// held N threads. That is the cost OVERFIT040 names, in its worst form in this repository.</para>
+        ///
+        /// <para><b>Nothing here needs to be synchronous.</b> The gateway is a proxy: it reads frames from the
+        /// upstream, rewrites them and forwards them. The synchronous callback that genuinely forces
+        /// synchronous IO elsewhere in this assembly is the OpenAI server's decode loop
+        /// (<c>AspNetResponseSink</c>), and the gateway does not use it — it writes to
+        /// <c>HttpResponse.Body</c> directly. <c>EndpointHelpers.EnableSynchronousIO</c> is consequently no
+        /// longer called on this path; every write below is awaited, and Kestrel's default (synchronous body
+        /// IO disallowed) now holds for the gateway, so a synchronous write reintroduced here would throw
+        /// rather than quietly work.</para>
+        ///
+        /// <para><b>What did NOT change:</b> the audit sink is still written synchronously — it implements
+        /// <c>IRedactionAuditSink</c>, whose <c>Record</c> is void in Sources/Main, under a lock. One local
+        /// append per redacting request, and the remaining synchronous island on this path.</para>
+        /// </summary>
+        private static async Task HandleRequestAsync(
             HttpContext ctx,
             string upstream,
             string? upstreamApiKey,
@@ -203,36 +227,43 @@ namespace DevOnBike.Overfit.Server
                 // /health is unauthenticated so liveness probes work without a key.
                 if (method == "GET" && path == "/health")
                 {
-                    WriteText(ctx.Response, StatusCodes.Status200OK, "ok");
+                    await WriteTextAsync(ctx.Response, StatusCodes.Status200OK, "ok", ctx.RequestAborted)
+                        .ConfigureAwait(false);
                     return;
                 }
 
                 // Everything that proxies upstream requires a valid gateway client key (when auth is enabled).
                 if (!auth.IsAuthorized(ctx.Request.Headers.Authorization))
                 {
-                    WriteText(ctx.Response, StatusCodes.Status401Unauthorized,
+                    await WriteTextAsync(ctx.Response, StatusCodes.Status401Unauthorized,
                         "Unauthorized: present a valid gateway key as 'Authorization: Bearer <key>'. "
-                        + "The gateway holds the real upstream key — clients authenticate to the gateway, not upstream.");
+                        + "The gateway holds the real upstream key — clients authenticate to the gateway, not upstream.",
+                        ctx.RequestAborted).ConfigureAwait(false);
                     return;
                 }
 
                 // Chat completions get the structured path (per-message redaction + streaming SSE restore).
                 if (method == "POST" && path == "/v1/chat/completions")
                 {
-                    HandleChatCompletions(ctx, upstream, upstreamApiKey, redactor, audit, policy, scanResponses, http);
+                    await HandleChatCompletionsAsync(
+                        ctx, upstream, upstreamApiKey, redactor, audit, policy, scanResponses, http)
+                        .ConfigureAwait(false);
                     return;
                 }
 
                 // Everything else (embeddings, legacy completions, models, future endpoints) goes through the
                 // generic redacting proxy: JSON bodies are scanned + redacted (and restored on the response),
                 // GETs and non-JSON bodies pass straight through. Keeps the firewall transparent without 404s.
-                HandleGenericProxy(ctx, upstream, upstreamApiKey, redactor, audit, policy, scanResponses, http);
+                await HandleGenericProxyAsync(
+                    ctx, upstream, upstreamApiKey, redactor, audit, policy, scanResponses, http)
+                    .ConfigureAwait(false);
             }
             catch (Exception ex)
             {
                 try
                 {
-                    WriteText(ctx.Response, StatusCodes.Status502BadGateway, $"gateway error: {ex.Message}");
+                    await WriteTextAsync(ctx.Response, StatusCodes.Status502BadGateway,
+                        $"gateway error: {ex.Message}", ctx.RequestAborted).ConfigureAwait(false);
                 }
                 catch
                 {
@@ -241,7 +272,7 @@ namespace DevOnBike.Overfit.Server
             }
         }
 
-        private static void HandleChatCompletions(
+        private static async Task HandleChatCompletionsAsync(
             HttpContext ctx,
             string upstream,
             string? upstreamApiKey,
@@ -251,10 +282,13 @@ namespace DevOnBike.Overfit.Server
             bool scanResponses,
             HttpClient http)
         {
-            var req = JsonSerializer.Deserialize(ctx.Request.Body, OpenAiJsonContext.Default.ChatCompletionRequest);
+            var req = await JsonSerializer.DeserializeAsync(
+                ctx.Request.Body, OpenAiJsonContext.Default.ChatCompletionRequest, ctx.RequestAborted)
+                .ConfigureAwait(false);
             if (req == null)
             {
-                WriteText(ctx.Response, StatusCodes.Status400BadRequest, "invalid request body");
+                await WriteTextAsync(ctx.Response, StatusCodes.Status400BadRequest, "invalid request body",
+                    ctx.RequestAborted).ConfigureAwait(false);
                 return;
             }
 
@@ -264,7 +298,7 @@ namespace DevOnBike.Overfit.Server
             // ── BLOCK policy: a forbidden category must never leave the box — refuse, don't forward. ──
             if (blocked)
             {
-                RespondBlocked(ctx, audit, blockedCategories);
+                await RespondBlockedAsync(ctx, audit, blockedCategories).ConfigureAwait(false);
                 return;
             }
 
@@ -294,12 +328,15 @@ namespace DevOnBike.Overfit.Server
 
             if (streaming)
             {
-                StreamResponse(ctx, upstreamRequest, matches, redactor, policy, audit, scanResponses, http);
+                await StreamResponseAsync(
+                    ctx, upstreamRequest, matches, redactor, policy, audit, scanResponses, http)
+                    .ConfigureAwait(false);
                 return;
             }
 
-            using var upstreamResponse = http.Send(upstreamRequest);
-            var responseJson = ReadBody(upstreamResponse);
+            using var upstreamResponse =
+                await http.SendAsync(upstreamRequest, ctx.RequestAborted).ConfigureAwait(false);
+            var responseJson = await ReadBodyAsync(upstreamResponse, ctx.RequestAborted).ConfigureAwait(false);
 
             // ── Response-side scan: mask any secret/PII the MODEL produced (run before restore, while the caller's
             //    own values are still placeholders, so only genuinely model-generated content is caught). ──
@@ -320,7 +357,8 @@ namespace DevOnBike.Overfit.Server
             }
 
             ForwardResponseHeaders(upstreamResponse, ctx.Response);
-            WriteRaw(ctx.Response, (int)upstreamResponse.StatusCode, responseJson);
+            await WriteRawAsync(ctx.Response, (int)upstreamResponse.StatusCode, responseJson, ctx.RequestAborted)
+                .ConfigureAwait(false);
         }
 
         // Scans a raw response body for model-generated sensitive content, masks Redact/Block-category spans, and
@@ -345,7 +383,7 @@ namespace DevOnBike.Overfit.Server
         /// placeholder split across SSE chunks is still restored. Both detect across chunk boundaries; the token
         /// stream is never fully buffered — chunks are rewritten and forwarded as they arrive.
         /// </summary>
-        private static void StreamResponse(
+        private static async Task StreamResponseAsync(
             HttpContext ctx,
             HttpRequestMessage upstreamRequest,
             IReadOnlyList<RedactionMatch> matches,
@@ -355,7 +393,11 @@ namespace DevOnBike.Overfit.Server
             bool scanResponses,
             HttpClient http)
         {
-            using var upstreamResponse = http.Send(upstreamRequest, HttpCompletionOption.ResponseHeadersRead);
+            var cancellationToken = ctx.RequestAborted;
+
+            using var upstreamResponse = await http
+                .SendAsync(upstreamRequest, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
+                .ConfigureAwait(false);
 
             var clientResponse = ctx.Response;
             clientResponse.StatusCode = (int)upstreamResponse.StatusCode;
@@ -364,7 +406,8 @@ namespace DevOnBike.Overfit.Server
             clientResponse.ContentType = "text/event-stream";
             clientResponse.Headers["Cache-Control"] = "no-cache";
 
-            using var upstreamStream = upstreamResponse.Content.ReadAsStream();
+            using var upstreamStream = await upstreamResponse.Content
+                .ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
             using var reader = new StreamReader(upstreamStream, Encoding.UTF8);
             var output = clientResponse.Body;
 
@@ -374,13 +417,16 @@ namespace DevOnBike.Overfit.Server
             var restorers = new Dictionary<int, StreamingRestorer>();
             var scanners = scanResponses ? new Dictionary<int, StreamingResponseScanner>() : null;
 
+            // #pragma BOUND: ends when the upstream stream ends (ReadLineAsync returns null) or on the
+            // [DONE] frame; the token aborts the read itself. This is the same bound the synchronous
+            // read loop had — awaiting it does not add a way to spin.
             string? line;
-            while ((line = reader.ReadLine()) != null)
+            while ((line = await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false)) != null)
             {
                 if (!line.StartsWith("data:", StringComparison.Ordinal))
                 {
                     // Comments / blank separators — forward verbatim to preserve SSE framing.
-                    WriteLine(output, line);
+                    await WriteLineAsync(output, line, cancellationToken).ConfigureAwait(false);
                     continue;
                 }
 
@@ -389,27 +435,27 @@ namespace DevOnBike.Overfit.Server
                 if (payload == "[DONE]")
                 {
                     // Release any held-back tails before closing the stream, then audit what the scanner masked.
-                    FlushStreams(output, scanners, restorers);
+                    await FlushStreamsAsync(output, scanners, restorers, cancellationToken).ConfigureAwait(false);
                     if (scanners != null)
                     {
                         AuditStreamScanned(audit, scanners);
                     }
-                    WriteLine(output, "data: [DONE]");
-                    WriteLine(output, string.Empty);
+                    await WriteLineAsync(output, "data: [DONE]", cancellationToken).ConfigureAwait(false);
+                    await WriteLineAsync(output, string.Empty, cancellationToken).ConfigureAwait(false);
                     break;
                 }
 
                 if (matches.Count == 0 && !scanResponses)
                 {
-                    WriteLine(output, line);
-                    WriteLine(output, string.Empty);
+                    await WriteLineAsync(output, line, cancellationToken).ConfigureAwait(false);
+                    await WriteLineAsync(output, string.Empty, cancellationToken).ConfigureAwait(false);
                     continue;
                 }
 
                 var rewritten = RewriteChunk(payload, matches, redactor, policy, scanners, restorers);
-                WriteLine(output, "data: " + rewritten);
-                WriteLine(output, string.Empty);
-                output.Flush();
+                await WriteLineAsync(output, "data: " + rewritten, cancellationToken).ConfigureAwait(false);
+                await WriteLineAsync(output, string.Empty, cancellationToken).ConfigureAwait(false);
+                await output.FlushAsync(cancellationToken).ConfigureAwait(false);
             }
         }
 
@@ -469,10 +515,11 @@ namespace DevOnBike.Overfit.Server
 
         // Emits any text the scanners/restorers held back, as a final synthetic chunk per choice, before [DONE].
         // Per choice: flush the scanner (mask remaining model secrets) → feed through the restorer → flush it.
-        private static void FlushStreams(
+        private static async Task FlushStreamsAsync(
             Stream output,
             Dictionary<int, StreamingResponseScanner>? scanners,
-            Dictionary<int, StreamingRestorer> restorers)
+            Dictionary<int, StreamingRestorer> restorers,
+            CancellationToken cancellationToken)
         {
             foreach (var pair in restorers)
             {
@@ -495,8 +542,11 @@ namespace DevOnBike.Overfit.Server
                 {
                     Choices = [new ChatChoice { Index = pair.Key, Delta = new OpenAiMessage { Content = tail } }]
                 };
-                WriteLine(output, "data: " + JsonSerializer.Serialize(chunk, OpenAiJsonContext.Default.ChatCompletionChunk));
-                WriteLine(output, string.Empty);
+                await WriteLineAsync(
+                    output,
+                    "data: " + JsonSerializer.Serialize(chunk, OpenAiJsonContext.Default.ChatCompletionChunk),
+                    cancellationToken).ConfigureAwait(false);
+                await WriteLineAsync(output, string.Empty, cancellationToken).ConfigureAwait(false);
             }
         }
 
@@ -512,10 +562,10 @@ namespace DevOnBike.Overfit.Server
             AuditRedactions(audit, masked);
         }
 
-        private static void WriteLine(Stream output, string text)
+        private static async Task WriteLineAsync(Stream output, string text, CancellationToken cancellationToken)
         {
             var bytes = Encoding.UTF8.GetBytes(text + "\n");
-            output.Write(bytes, 0, bytes.Length);
+            await output.WriteAsync(bytes, cancellationToken).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -526,7 +576,7 @@ namespace DevOnBike.Overfit.Server
         /// through untouched so they are not corrupted. The gateway's own client-auth header is never forwarded;
         /// only the upstream key is injected.
         /// </summary>
-        private static void HandleGenericProxy(
+        private static async Task HandleGenericProxyAsync(
             HttpContext ctx,
             string upstream,
             string? upstreamApiKey,
@@ -536,6 +586,7 @@ namespace DevOnBike.Overfit.Server
             bool scanResponses,
             HttpClient http)
         {
+            var cancellationToken = ctx.RequestAborted;
             var request = ctx.Request;
             var method = request.Method;
             var targetUrl = BuildUpstreamUrl(upstream, request.Path.Value ?? "/") + (request.QueryString.Value ?? string.Empty);
@@ -550,7 +601,7 @@ namespace DevOnBike.Overfit.Server
                 string body;
                 using (var reader = new StreamReader(request.Body, Encoding.UTF8))
                 {
-                    body = reader.ReadToEnd();
+                    body = await reader.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
                 }
 
                 var contentType = request.ContentType ?? "application/octet-stream";
@@ -563,7 +614,7 @@ namespace DevOnBike.Overfit.Server
                     var decision = redactor.Redact(body, policy);
                     if (decision.Blocked)
                     {
-                        RespondBlocked(ctx, audit, decision.BlockedCategories);
+                        await RespondBlockedAsync(ctx, audit, decision.BlockedCategories).ConfigureAwait(false);
                         return;
                     }
 
@@ -581,8 +632,9 @@ namespace DevOnBike.Overfit.Server
                 upstreamRequest.Headers.TryAddWithoutValidation("Authorization", $"Bearer {upstreamApiKey}");
             }
 
-            using var upstreamResponse = http.Send(upstreamRequest);
-            var responseBody = ReadBody(upstreamResponse);
+            using var upstreamResponse =
+                await http.SendAsync(upstreamRequest, cancellationToken).ConfigureAwait(false);
+            var responseBody = await ReadBodyAsync(upstreamResponse, cancellationToken).ConfigureAwait(false);
 
             // Response-side scan (model-generated leaks), then restore the caller's own placeholders — same order as
             // the chat path: scan first while originals are still placeholders, restore second.
@@ -598,7 +650,9 @@ namespace DevOnBike.Overfit.Server
 
             ForwardResponseHeaders(upstreamResponse, ctx.Response);
             var responseContentType = upstreamResponse.Content.Headers.ContentType?.ToString() ?? "application/json";
-            WriteRaw(ctx.Response, (int)upstreamResponse.StatusCode, responseBody, responseContentType);
+            await WriteRawAsync(
+                ctx.Response, (int)upstreamResponse.StatusCode, responseBody, responseContentType, cancellationToken)
+                .ConfigureAwait(false);
         }
 
         // Maps an incoming gateway path to the upstream URL. The upstream base already ends in the version segment
@@ -630,28 +684,29 @@ namespace DevOnBike.Overfit.Server
         // through to the upstream so client features keep working — minus the security/framing denylist. The client's
         // Authorization (its gateway key) is dropped here; the real upstream key is injected separately by the caller.
         /// <summary>
-        /// Reads an upstream response body synchronously.
+        /// Reads an upstream response body.
         ///
-        /// <para><b>Why not <c>ReadAsStringAsync().GetAwaiter().GetResult()</c>, which is what this was.</b>
-        /// That blocks the request thread on a task while the task's continuation may need a thread to
-        /// finish — under a saturated pool the two wait for each other and the gateway stops serving with
-        /// no exception (OVERFIT039). <c>ReadAsStream</c> is genuinely synchronous, so nothing is blocked
-        /// on: the rest of this path already uses the sync APIs deliberately (<c>http.Send</c>,
-        /// <c>AllowSynchronousIO</c>), and this was the one place that reached for an async one and then
-        /// waited on it.</para>
+        /// <para><b>Two earlier shapes, and why this is the third.</b> It was
+        /// <c>ReadAsStringAsync().GetAwaiter().GetResult()</c> — blocking the request thread on a task whose
+        /// continuation may itself need a thread, which under a saturated pool is a stall with no exception
+        /// (OVERFIT039). That was repaired to a genuinely synchronous <c>ReadAsStream</c> + <c>ReadToEnd</c>,
+        /// correct in isolation but still a synchronous island: it held the request thread for the whole body
+        /// read (OVERFIT040). Now the caller is asynchronous all the way up, so this simply awaits.</para>
         ///
-        /// <para><b>One behaviour difference, stated rather than hidden.</b> <c>ReadAsStringAsync</c> honours
-        /// a <c>charset</c> from the Content-Type header; this decodes as UTF-8 with BOM detection. Both
-        /// endpoints here speak JSON, which RFC 8259 requires to be UTF-8, so the difference cannot bite on
-        /// a conforming upstream — and a non-conforming one would already be mangled downstream where the
-        /// body is parsed as JSON.</para>
+        /// <para><b>The behaviour difference from <c>ReadAsStringAsync</c> is kept deliberately.</b> That
+        /// method honours a <c>charset</c> from the Content-Type header; this decodes as UTF-8 with BOM
+        /// detection. Both endpoints here speak JSON, which RFC 8259 requires to be UTF-8, so the difference
+        /// cannot bite on a conforming upstream — and a non-conforming one would already be mangled
+        /// downstream where the body is parsed as JSON. Keeping the explicit decoder keeps that decision
+        /// visible rather than inheriting whatever header the upstream sent.</para>
         /// </summary>
-        private static string ReadBody(HttpResponseMessage response)
+        private static async Task<string> ReadBodyAsync(
+            HttpResponseMessage response, CancellationToken cancellationToken)
         {
-            using var reader = new StreamReader(
-                response.Content.ReadAsStream(), Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+            var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+            using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
 
-            return reader.ReadToEnd();
+            return await reader.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
         }
 
         private static void ForwardRequestHeaders(HttpRequest src, HttpRequestMessage dst)
@@ -717,7 +772,8 @@ namespace DevOnBike.Overfit.Server
         }
 
         // Refuses a request whose payload carried a Block-policy category: 403, audit the blocked category, no forward.
-        private static void RespondBlocked(HttpContext ctx, IRedactionAuditSink audit, IReadOnlyList<string> blockedCategories)
+        private static async Task RespondBlockedAsync(
+            HttpContext ctx, IRedactionAuditSink audit, IReadOnlyList<string> blockedCategories)
         {
             var blockCounts = new Dictionary<string, int>(StringComparer.Ordinal);
             foreach (var category in blockedCategories)
@@ -727,32 +783,36 @@ namespace DevOnBike.Overfit.Server
             audit.Record(new RedactionAuditEntry(
                 Guid.NewGuid().ToString("N"), blockedCategories.Count, blockCounts));
 
-            WriteText(ctx.Response, StatusCodes.Status403Forbidden,
+            await WriteTextAsync(ctx.Response, StatusCodes.Status403Forbidden,
                 $"Request refused by the redaction gateway: it contains forbidden category(ies) "
-                + $"[{string.Join(", ", blockedCategories)}] that must not leave the box. Nothing was forwarded.");
+                + $"[{string.Join(", ", blockedCategories)}] that must not leave the box. Nothing was forwarded.",
+                ctx.RequestAborted).ConfigureAwait(false);
         }
 
-        private static void WriteRaw(HttpResponse response, int status, string json)
+        private static Task WriteRawAsync(
+            HttpResponse response, int status, string json, CancellationToken cancellationToken)
         {
-            WriteRaw(response, status, json, "application/json");
+            return WriteRawAsync(response, status, json, "application/json", cancellationToken);
         }
 
-        private static void WriteRaw(HttpResponse response, int status, string body, string contentType)
+        private static async Task WriteRawAsync(
+            HttpResponse response, int status, string body, string contentType, CancellationToken cancellationToken)
         {
             var bytes = Encoding.UTF8.GetBytes(body);
             response.StatusCode = status;
             response.ContentType = contentType;
             response.ContentLength = bytes.Length;
-            response.Body.Write(bytes, 0, bytes.Length);
+            await response.Body.WriteAsync(bytes, cancellationToken).ConfigureAwait(false);
         }
 
-        private static void WriteText(HttpResponse response, int status, string text)
+        private static async Task WriteTextAsync(
+            HttpResponse response, int status, string text, CancellationToken cancellationToken)
         {
             var bytes = Encoding.UTF8.GetBytes(text);
             response.StatusCode = status;
             response.ContentType = "text/plain";
             response.ContentLength = bytes.Length;
-            response.Body.Write(bytes, 0, bytes.Length);
+            await response.Body.WriteAsync(bytes, cancellationToken).ConfigureAwait(false);
         }
     }
 }

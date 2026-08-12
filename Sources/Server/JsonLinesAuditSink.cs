@@ -41,7 +41,22 @@ namespace DevOnBike.Overfit.Server
             };
         }
 
+        // OVERFIT040 on Record: `StreamWriter.WriteLine` has a `WriteLineAsync` sibling and this method cannot
+        // take it. BOUND BY THE CONTRACT AND BY THE LOCK, in that order:
+        //
+        //   * this implements `IRedactionAuditSink.Record`, which is declared `void` in Sources/Main. The
+        //     signature is not this file's to choose, and changing a public interface in the library is a
+        //     different decision from a lint sweep's;
+        //   * the write is inside `lock (_gate)`, and `await` is illegal in a lock body. An asynchronous
+        //     version needs an asynchronous mutex, which is a different concurrency design, not a keyword.
+        //
+        // WHAT IS GIVEN UP, and it is real: the gateway's request path (RedactionGateway) is asynchronous, and
+        // this one `AutoFlush` write to a local append-only file happens on that request's thread, once per
+        // request that redacted anything. It is a single line to a local file, but it is a synchronous island
+        // in an otherwise asynchronous path, and it stays one until `IRedactionAuditSink` changes.
+#pragma warning disable OVERFIT040
         public void Record(in RedactionAuditEntry entry)
+#pragma warning restore OVERFIT040
         {
             ArgumentNullException.ThrowIfNull(entry.RequestId);
             ArgumentNullException.ThrowIfNull(entry.CategoryCounts);

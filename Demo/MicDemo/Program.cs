@@ -45,11 +45,17 @@ namespace DevOnBike.Overfit.Demo.MicConsole
             var whisper = WhisperTranscriber.Load(modelPath);
             Console.WriteLine($"Ready. Language: {language}. Records {seconds}s per round.\n");
 
+            // BOUND: the console session. Every pass blocks on Console.ReadLine(), so the loop advances
+            // only when the user does; it ends on 'q' or on end-of-input (ReadLine returns null when
+            // stdin closes or a redirected input runs out). The null case is not decoration — without it
+            // a piped or detached stdin makes this record-and-transcribe forever with no way to stop it.
+#pragma warning disable OVERFIT023
             while (true)
+#pragma warning restore OVERFIT023
             {
                 Console.Write("Press Enter to record (or 'q' + Enter to quit): ");
                 var line = Console.ReadLine();
-                if (line != null && line.Trim().Equals("q", StringComparison.OrdinalIgnoreCase))
+                if (line == null || line.Trim().Equals("q", StringComparison.OrdinalIgnoreCase))
                 {
                     break;
                 }

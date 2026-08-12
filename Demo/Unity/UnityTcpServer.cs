@@ -7,6 +7,7 @@ using System.Buffers.Binary;
 using System.Net;
 using System.Net.Sockets;
 using System.Numerics;
+using DevOnBike.Overfit.Runtime;
 
 namespace DevOnBike.Overfit.Demo.Unity.Server
 {
@@ -155,7 +156,7 @@ namespace DevOnBike.Overfit.Demo.Unity.Server
                 {
                     var ptr = (IntPtr)pBuf;
 
-                    Parallel.For(0, positions.Length, i =>
+                    OverfitParallel.For(0, positions.Length, i =>
                     {
                         var floats = (float*)ptr;
                         floats[(i * 2) + 0] = positions[i].X;

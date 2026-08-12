@@ -73,10 +73,33 @@
          to move, on this box and in CI. See XC-21. System.Numerics.Tensors is the other 10.0.11 pin and is
          deliberately NOT taken here: it is a decode hot-path dependency and wants a canary bench first. -->
     <PackageVersion Include="Microsoft.AspNetCore.TestHost" Version="10.0.11" />
-    <PackageVersion Include="Microsoft.Extensions.AI.Abstractions" Version="10.8.3" />
-    <PackageVersion Include="Microsoft.Extensions.AI.Evaluation" Version="10.8.0" />
-    <PackageVersion Include="Microsoft.Extensions.AI.Evaluation.Quality" Version="10.8.0" />
+    <!-- 10.9.0 taken 2026-08-12. Additive in the part we consume: one bug fix that can bite us
+         (ExcludeFromSchema was dropped when several AIFunction instances were built concurrently,
+         dotnet/extensions#7677) plus new EXPERIMENTAL routing/failover base classes (RoutingChatClient,
+         FailoverChatClient) that nothing here references. No breaking change is listed for Abstractions.
+         The one breaking item in 10.9.0 is Microsoft.Extensions.AI.OpenAI constraining OpenAI to 2.12.x —
+         a package this solution does not reference. Checked after the bump rather than assumed:
+         Sources/Extensions.AI is IsAotCompatible + IsTrimmable, and the build emits no IL2xxx/IL3xxx. -->
+    <PackageVersion Include="Microsoft.Extensions.AI.Abstractions" Version="10.9.0" />
+    <!-- 10.9.0 taken 2026-08-12 with Abstractions above (Evaluation depends on it; leaving these at 10.8.0
+         would pin two halves of one release train apart). The 10.9.0 change here is the generated report
+         UI — new Overview / Cases / History / Comparison views. Only consumer is Demo/EvaluationDemo, which
+         is not packed and not in the AOT guard, so the blast radius is a demo's HTML output. -->
+    <PackageVersion Include="Microsoft.Extensions.AI.Evaluation" Version="10.9.0" />
+    <PackageVersion Include="Microsoft.Extensions.AI.Evaluation.Quality" Version="10.9.0" />
     <PackageVersion Include="Microsoft.ML" Version="5.0.0" />
+    <!-- HELD at 1.28.0 while 1.29.0 exists, deliberately, and NOT for the usual "it might be slower" reason:
+         this package is not in any Overfit code path at all. Its only consumer is Sources/Benchmark, where it
+         is the OTHER SIDE of the comparison — InferenceBenchmark, BatchScalingBenchmark,
+         ConcurrentInferenceBenchmark, ColdStartBenchmark and ImportedOnnxMnistCnnBenchmark each pair an
+         Overfit method against an OnnxRuntime_* one. Moving the baseline moves every published
+         Overfit-vs-ORT ratio without touching a line of Overfit, and 1.29.0 is not a no-op on that side:
+         it changes CPU thread-pool defaults (ORT_INTRA_OP_NUM_THREADS / ORT_INTER_OP_NUM_THREADS now set
+         the default intra/inter-op sizes; explicit settings still win) and reworks MLAS itself — new
+         AVX2/VNNI weight kernels with vectorized dequantization, masked-Attention improvements — which is
+         the x86 CPU path these benchmarks actually exercise. On top of security hardening in path and
+         buffer handling. Take it together with a re-run of those five classes on both versions — the ORT
+         side is what has to be shown unmoved (or the ratio restated), not the Overfit side. -->
     <PackageVersion Include="Microsoft.ML.OnnxRuntime" Version="1.28.0" />
     <PackageVersion Include="Microsoft.ML.OnnxTransformer" Version="5.0.0" />
     <!-- Build/pack-time only (PrivateAssets="all"), so it adds no runtime surface to the shipped package.
@@ -95,8 +118,30 @@
          however unlikely a servicing release is to touch vectorization. What it needs is a canary run (an
          untouched path measured on both sides to prove the box did not move), not a full re-benchmark. Not
          run today: five agents were on the machine and the benchmark host takes a global mutex, so any
-         number taken now would have been measured against a contended box — which is worse than no number. -->
-    <PackageVersion Include="System.Numerics.Tensors" Version="10.0.10" />
+         number taken now would have been measured against a contended box — which is worse than no number.
+         TAKEN 2026-08-12, and NOT by running that benchmark — by removing the question. The two packages
+         were compared as artefacts: every entry by SHA-256, then the PE and ECMA-335 layout of the assembly
+         itself. For lib/net10.0 (what Sources/Main consumes) the **IL region differs by ZERO bytes**; every
+         section RVA, raw size and metadata heap size (#~, #Strings, #US, #GUID, #Blob) is byte-identical.
+         The 59 differing metadata bytes are the MVID and 10.0.10+f7d90799 -> 10.0.11+e2f47b01, and the whole
+         file-size delta is the Authenticode certificate table — confirmed to the byte from PE data directory
+         4 (net10.0 cert 10,024 -> 10,064, exactly the +40; net8.0 10,064 -> 10,024, exactly the -40).
+         Corroborated independently: dotnet/runtime's release/10.0 branch has NO commit under
+         src/libraries/System.Numerics.Tensors since 2025-10-29, before .NET 10 GA.
+
+         Identical IL on the same runtime produces identical JIT codegen, so there is no execution change to
+         measure. That is a STRONGER result than the benchmark this comment used to demand: a benchmark can
+         only fail to detect a difference, whereas the artefact comparison shows there is none.
+
+         Worth keeping, because the caution above was right in principle and only the conclusion changed:
+         TensorPrimitives is NOT cold-path here — 341 call sites across 59 files in Sources/Main, including
+         the decode path (TensorMath.Normalization 58, Gelu 27, CachedMultiHeadAttention 7). The hot-path
+         exposure is real and large. It simply does not matter when the compiled code is the same.
+
+         STILL OUTSTANDING and NOT closed by this pin: the 10.0.11 servicing release also moves the shared
+         runtime and SDK, which DOES change the JIT. That install is a separate action and does warrant a
+         canary. See XC-21. -->
+    <PackageVersion Include="System.Numerics.Tensors" Version="10.0.11" />
     <PackageVersion Include="xunit.v3" Version="3.2.2" />
     <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5" />
   </ItemGroup>

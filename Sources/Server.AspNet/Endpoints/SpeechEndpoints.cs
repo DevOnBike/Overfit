@@ -36,7 +36,7 @@ namespace DevOnBike.Overfit.Server.AspNet.Endpoints
                 }
 
                 EndpointHelpers.EnableSynchronousIO(ctx);
-                service.Synthesize(req, new AspNetResponseSink(ctx.Response), ctx.RequestAborted);
+                await service.SynthesizeAsync(req, new AspNetResponseSink(ctx.Response), ctx.RequestAborted);
             });
 
             return v1;

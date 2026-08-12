@@ -31,6 +31,24 @@ namespace DevOnBike.Overfit.Cli
     // and not one to smuggle in under a lint sweep.
 #pragma warning disable OVERFIT039
 
+    // OVERFIT040 for this file, file-scoped for the same reason the OVERFIT039 disable above is: this file
+    // is nothing but the CLI's verb handlers and their private helpers, and the constraint is a property of
+    // that whole layer rather than of any one method.
+    //
+    // THE CONSTRAINT: every method here runs on the process's MAIN THREAD. Program.cs ends in
+    // `rootCommand.Parse(args).Invoke()` (Program.cs:656) — the synchronous System.CommandLine entry point —
+    // and each verb is a synchronous action hanging off it. There is no thread-pool thread behind any of
+    // these to hold, and the thread they do hold is the one the process exists to run to completion.
+    //
+    // AND THE CALL THE RULE ACTUALLY FLAGS in all 13 of them is `Console.Out.WriteLine` /
+    // `Console.Error.WriteLine`. Those are `TextWriter.Synchronized` wrappers whose `WriteLineAsync`
+    // performs the same synchronous write and returns a completed task, so converting one changes the
+    // syntax and nothing else — the measurement the analyzer records for its own `System.Console`
+    // exclusion. The rule reaches these only because they arrive through the `TextWriter` type rather than
+    // the `Console` type; extending that exclusion to `Console.Out`/`Console.Error`/`Console.In` receivers
+    // would remove them at the source, which is where a false positive belongs.
+#pragma warning disable OVERFIT040
+
     /// <summary>Command implementations for the <c>overfit</c> CLI.</summary>
     internal static class Commands
     {
@@ -1470,5 +1488,6 @@ namespace DevOnBike.Overfit.Cli
         }
     }
 
+#pragma warning restore OVERFIT040
 #pragma warning restore OVERFIT039
 }

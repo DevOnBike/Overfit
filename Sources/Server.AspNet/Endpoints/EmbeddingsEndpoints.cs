@@ -35,7 +35,7 @@ namespace DevOnBike.Overfit.Server.AspNet.Endpoints
                 }
 
                 EndpointHelpers.EnableSynchronousIO(ctx);
-                service.Embed(req, new AspNetResponseSink(ctx.Response), ctx.RequestAborted);
+                await service.EmbedAsync(req, new AspNetResponseSink(ctx.Response), ctx.RequestAborted);
             });
 
             return v1;

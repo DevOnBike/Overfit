@@ -109,7 +109,20 @@ namespace DevOnBike.Overfit.Server.AspNet.Services
             _metrics.RecordResponseTime(started.GetElapsedTime().TotalSeconds);
         }
 
-        public void Embed(EmbeddingsRequest? request, IOpenAiResponseSink sink, CancellationToken cancellationToken)
+        /// <summary>
+        /// Embeds the request's input, one caller at a time.
+        ///
+        /// <para><b>The gate is awaited, not blocked on (OVERFIT040).</b> It used to be
+        /// <c>_embedGate.Wait(cancellationToken)</c>, and under N concurrent embedding requests that parked
+        /// N-1 Kestrel request threads on a semaphore doing nothing at all — the gate serializes by design,
+        /// so queueing is the normal case rather than the rare one. <c>WaitAsync</c> gives those threads
+        /// back for the whole time a request is only waiting its turn.</para>
+        ///
+        /// <para><b>What this does NOT change:</b> the embedding itself still runs to completion on one
+        /// thread after the gate opens, because <c>SentenceEmbedder</c> has a single scratch arena and the
+        /// path is synchronous and zero-allocation by design. The saving is the queue, not the work.</para>
+        /// </summary>
+        public async Task EmbedAsync(EmbeddingsRequest? request, IOpenAiResponseSink sink, CancellationToken cancellationToken)
         {
             if (_embedder == null)
             {
@@ -118,7 +131,7 @@ namespace DevOnBike.Overfit.Server.AspNet.Services
                 return;
             }
 
-            _embedGate.Wait(cancellationToken);
+            await _embedGate.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
                 EmbeddingsExchange.Handle(request, _embedder, _modelName, sink);
@@ -130,7 +143,12 @@ namespace DevOnBike.Overfit.Server.AspNet.Services
             }
         }
 
-        public void Synthesize(SpeechRequest? request, IOpenAiResponseSink sink, CancellationToken cancellationToken)
+        /// <summary>
+        /// Synthesizes speech, one caller at a time. The TTS gate is awaited rather than blocked on for the
+        /// same reason as <see cref="EmbedAsync"/> — and more sharply here, because a synthesis is long
+        /// enough that a second caller queues for most of it.
+        /// </summary>
+        public async Task SynthesizeAsync(SpeechRequest? request, IOpenAiResponseSink sink, CancellationToken cancellationToken)
         {
             if (_tts == null)
             {
@@ -139,7 +157,7 @@ namespace DevOnBike.Overfit.Server.AspNet.Services
                 return;
             }
 
-            _ttsGate.Wait(cancellationToken);
+            await _ttsGate.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
                 SpeechExchange.Handle(request, _tts, sink);

@@ -40,7 +40,7 @@ namespace DevOnBike.Overfit.Extensions.AI
         }
 
         /// <inheritdoc />
-        // The defaults are declared on IChatClient in Microsoft.Extensions.AI.Abstractions 10.8.3, whose
+        // The defaults are declared on IChatClient in Microsoft.Extensions.AI.Abstractions 10.9.0, whose
         // signature this adapter exists to match and which this repository does not control. Both the
         // parameter ORDER and the defaults are the package's: `options` precedes the token, so the token
         // cannot be made required without also making `options` required, and reordering would stop this
@@ -94,7 +94,7 @@ namespace DevOnBike.Overfit.Extensions.AI
 
         /// <inheritdoc />
         // Same constraint as GetResponseAsync above: the defaults and the parameter order belong to
-        // IChatClient in Microsoft.Extensions.AI.Abstractions 10.8.3, and callers reach this through the
+        // IChatClient in Microsoft.Extensions.AI.Abstractions 10.9.0, and callers reach this through the
         // interface, where the interface's defaults bind.
 #pragma warning disable OVERFIT041
         public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(

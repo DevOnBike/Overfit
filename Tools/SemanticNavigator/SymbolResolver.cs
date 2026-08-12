@@ -36,8 +36,8 @@ namespace DevOnBike.Overfit.Navigator
             CancellationToken cancellationToken)
         {
             var lastDot = name.LastIndexOf('.');
-            var simpleName = lastDot >= 0 ? name[(lastDot + 1)..] : name;
-            var qualifier = lastDot >= 0 ? name[..lastDot] : null;
+            var simpleName = lastDot >= 0 ? name.Substring(lastDot + 1) : name;
+            var qualifier = lastDot >= 0 ? name.Substring(0, lastDot) : null;
 
             // Metadata symbols are excluded: this tool answers questions about THIS repository, and a search
             // that also matched framework types would bury every real result under BCL noise.
@@ -49,7 +49,7 @@ namespace DevOnBike.Overfit.Navigator
 
             foreach (var symbol in found)
             {
-                if (qualifier is not null && !MatchesQualifier(symbol, qualifier))
+                if (qualifier != null && !MatchesQualifier(symbol, qualifier))
                 {
                     continue;
                 }
@@ -68,7 +68,7 @@ namespace DevOnBike.Overfit.Navigator
         {
             var container = symbol.ContainingSymbol;
 
-            while (container is not null && container is not IModuleSymbol)
+            while (container != null && container is not IModuleSymbol)
             {
                 var display = container.ToDisplayString();
 

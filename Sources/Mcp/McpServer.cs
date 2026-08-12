@@ -21,6 +21,26 @@ namespace DevOnBike.Overfit.Mcp
     /// <c>tools/call</c>. Requests are served strictly one at a time on the caller's thread
     /// (single-tenant model session underneath — same stance as the `overfit serve` host).
     /// </summary>
+    // OVERFIT040 for the five methods of this class, disabled at the type because they share ONE constraint
+    // rather than five: the stdio transport, and what is on the other end of it.
+    //
+    // THE CONSTRAINT: this is a single-tenant server whose whole process exists to run one read loop.
+    // `Run` is documented blocking and is called as `server.Run(Console.In, Console.Out,
+    // CancellationToken.None)` from the CLI's `mcp` verb (Cli/Commands.cs), on the process main thread; the
+    // protocol serves one message at a time on the caller's thread over a single model session that is itself
+    // synchronous. A freed thread would have nothing to serve — there is no second request, and no pool
+    // thread is held behind any of this.
+    //
+    // AND THE READER AND WRITER ARE THE CONSOLE'S. `Console.In` and `Console.Out` are the synchronised
+    // TextReader/TextWriter wrappers whose `ReadLineAsync` / `WriteLineAsync` perform the same synchronous
+    // call and hand back a completed task — the measurement behind the analyzer's own `System.Console`
+    // exclusion. Converting these would move a blocking read onto a pool thread and buy nothing; the rule
+    // reaches them only because they arrive typed as `TextReader`/`TextWriter` rather than as `Console`.
+    //
+    // WHAT IS GIVEN UP, stated rather than left to be discovered: `Run` observes cancellation only between
+    // messages, because `input.ReadLine()` cannot be interrupted. A cancelled token does not end a `Run`
+    // parked on a read; closing stdin does, which is MCP's actual shutdown signal and what the CLI relies on.
+#pragma warning disable OVERFIT040
     public sealed class McpServer
     {
         /// <summary>Spec revisions this server accepts; the first entry is what we answer with
@@ -299,4 +319,5 @@ namespace DevOnBike.Overfit.Mcp
             output.Flush();
         }
     }
+#pragma warning restore OVERFIT040
 }

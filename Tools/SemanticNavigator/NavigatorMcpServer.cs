@@ -72,7 +72,7 @@ namespace DevOnBike.Overfit.Navigator
             {
                 var line = await Console.In.ReadLineAsync(cancellationToken).ConfigureAwait(false);
 
-                if (line is null)
+                if (line == null)
                 {
                     break;
                 }
@@ -84,7 +84,7 @@ namespace DevOnBike.Overfit.Navigator
 
                 var response = await HandleAsync(line, loader, queries, cancellationToken).ConfigureAwait(false);
 
-                if (response is not null)
+                if (response != null)
                 {
                     await output.WriteLineAsync(response.ToJsonString()).ConfigureAwait(false);
                 }
@@ -111,7 +111,7 @@ namespace DevOnBike.Overfit.Navigator
                 return null;
             }
 
-            if (request is null)
+            if (request == null)
             {
                 return null;
             }
@@ -120,7 +120,7 @@ namespace DevOnBike.Overfit.Navigator
 
             // A notification has no id and must never be answered — replying to one is a protocol violation
             // that some hosts surface as a hang rather than as an error.
-            if (id is null)
+            if (id == null)
             {
                 return null;
             }
@@ -386,7 +386,7 @@ namespace DevOnBike.Overfit.Navigator
                     }
                 }
 
-                if (project is null)
+                if (project == null)
                 {
                     throw new ArgumentException($"no project named '{projectName}'");
                 }

@@ -98,7 +98,7 @@ namespace DevOnBike.Overfit.Navigator
                 return await RunUnusedAsync(options, loader, queries).ConfigureAwait(false);
             }
 
-            if (options.Target is null)
+            if (options.Target == null)
             {
                 Console.Error.WriteLine($"verb '{verb}' needs a symbol name");
                 return 2;
@@ -106,7 +106,7 @@ namespace DevOnBike.Overfit.Navigator
 
             var symbol = await ResolveOneAsync(loader.Solution, options.Target).ConfigureAwait(false);
 
-            if (symbol is null)
+            if (symbol == null)
             {
                 return 3;
             }
@@ -166,7 +166,7 @@ namespace DevOnBike.Overfit.Navigator
 
         private static async Task<int> RunUnusedAsync(Options options, WorkspaceLoader loader, NavigatorQueries queries)
         {
-            if (options.Target is null)
+            if (options.Target == null)
             {
                 Console.Error.WriteLine("verb 'unused' needs a project name");
                 return 2;
@@ -183,7 +183,7 @@ namespace DevOnBike.Overfit.Navigator
                 }
             }
 
-            if (project is null)
+            if (project == null)
             {
                 Console.Error.WriteLine($"no project named '{options.Target}'");
                 return 3;
@@ -370,7 +370,7 @@ namespace DevOnBike.Overfit.Navigator
             {
                 var dir = AppContext.BaseDirectory;
 
-                while (dir is not null)
+                while (dir != null)
                 {
                     var candidate = Path.Combine(dir, "Overfit.sln");
 
