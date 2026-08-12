@@ -558,13 +558,6 @@ out.** Measured 2026-08-12: a script that shelled out to `rg` died with `FileNot
 `CreateProcess`, costing a round trip before any work started. The script is for `dotnet`, `git` and file
 edits; **for searching, use the `Grep` and `Glob` tools directly** rather than routing a search through it.
 
-**`dotnet` speaks Polish on this box, so an English-word output filter prints nothing — which reads
-exactly like a clean run.** Measured 2026-08-12: a filter looking for `Failed`/`Passed` cost two round
-trips before a single number appeared. Match **both**: failures as `(?:Niepowodzenie|Failed) (DevOnBike\S+)`
-and the summary line on `Powodzenie!` / `niepowodzenie:`. A filter that finds nothing and a suite that
-fails nothing produce the same empty output — always print the summary line itself, never only your own
-verdict about it.
-
 **The filename is yours alone, and that is the point.** The main session uses `.claude/do.py`; each agent
 gets `do-<agent>.py`. These are scratch files, rewritten per task, and two agents sharing one would
 overwrite each other mid-run — which is exactly why this rule used to exclude subagents. Per-agent files
