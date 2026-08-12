@@ -65,6 +65,65 @@ calibrates for itself, and the operability layer that decides whether a customer
 - **A recorded window of the live cluster** (`Tests/test_fixtures/lab/lab-window-healthy-12pod.csv`): 60
   minutes, twelve replicas, 241 scrapes, 12 of 13 channels at 100% coverage.
 
+### Removed
+
+- **The feature-importance island in `Data` — seven public types, removed together because none of them
+  could be used.** Gone from the public API of `DevOnBike.Overfit`:
+  `DevOnBike.Overfit.Data.Contracts.FeatureImportanceReport`,
+  `DevOnBike.Overfit.Data.Contracts.FeatureImportanceAnalyzerConfig`,
+  `DevOnBike.Overfit.Data.Contracts.FeatureImportanceResult`,
+  `DevOnBike.Overfit.Data.Contracts.FeatureImportanceVerdict`,
+  `DevOnBike.Overfit.Data.Abstractions.IFeatureNameProvider`,
+  `DevOnBike.Overfit.Data.Features.IndexedFeatureNameProvider` and
+  `DevOnBike.Overfit.Data.Features.CustomFeatureNameProvider`, together with the commented-out
+  `FeatureImportanceAnalyzer.cs` they served. The `Data/Features/` directory is now empty and is gone with
+  them.
+
+  **`FeatureImportanceResult` and `FeatureImportanceVerdict` were reachable only from
+  `FeatureImportanceReport`**, which went with the first five: `Result` appeared solely as the element type
+  of `Report`'s four collections, and `Verdict` solely in `Report` and in `Result`'s own `Verdict` property.
+  Once `Report` was deleted the two referenced each other and nothing else, so leaving them would have
+  reproduced the defect this removal exists to close — a live public type in a shipped package that nothing
+  can reach.
+
+  **Nothing could have consumed them meaningfully.** The analyser was commented out on 2026-04-16
+  (`49d1e68`) after its only subject, `AnomalyAutoencoder`, was deleted five days earlier on 2026-04-11
+  (`d07ddc0`) — so these types have spent four months shipping a configuration object for an analyser that
+  does not exist, and a report type describing results nothing can produce. Resolved semantically rather
+  than by grep before removal: `FeatureImportanceReport`, `FeatureImportanceAnalyzerConfig` and
+  `CustomFeatureNameProvider` had **0** references; `IFeatureNameProvider` had **2**, both its own
+  implementations; `IndexedFeatureNameProvider` had **1**, a `<see cref>` inside that interface's own
+  documentation; `FeatureImportanceResult` had **4** and `FeatureImportanceVerdict` **4**, every one of
+  them inside the island's own two files. A closed island, referenced only by itself.
+
+  **`FeatureImportance` — the struct in `Data/Contracts/FeatureImportance.cs` — is NOT removed and is not
+  part of this.** It is one character from `FeatureImportanceResult`, it is a different type with a
+  different purpose, and it is live: `Statistical/GlobalShapAnalyzer.AnalyzeImportance` returns
+  `List<FeatureImportance>`. Named here because the two are easy to confuse when reading a removal list.
+
+  **This is a breaking change for any external consumer that referenced these names**, which is why it is
+  recorded here rather than treated as tidying. **Checked against nuget.org on 2026-08-12, not assumed**:
+  `DevOnBike.Overfit` is published with 27 versions (10.0.4 through 10.0.31) and all seven types are
+  present in the shipped `lib/net10.0/DevOnBike.Overfit.dll` of **10.0.31**, the current latest — while
+  the first published version, 10.0.4, contains none of them. So they have been in the public surface of
+  every recent release, and this removal is breaking in fact rather than in principle.
+
+  **Consequence for the next release, per this file's own versioning policy** (*"`MINOR` is bumped for any
+  breaking change to the public API surface"*): the next published version is **10.1.0**, not 10.0.32.
+  `Directory.Build.props` read `10.0.31` — exactly the last published version — so a build and push without
+  a deliberate bump would have republished a breaking change under a number already on nuget.org. **Bumped
+  to `10.1.0` (`Version` and `FileVersion`) on 2026-08-12 as part of this change**, because nothing in the
+  build enforces it and the two edits belong in the same commit as the removal that requires them.
+
+  **What the check does NOT establish**: whether anyone actually consumes these types. Total downloads are
+  3,375 spread evenly at roughly 150 per version, including versions published within the hour, which is
+  the signature of mirrors and automated feeds rather than of adoption. The download counter cannot answer
+  it and is not treated here as if it could.
+
+  Not a deprecation and not a move: feature importance for the learned anomaly family, if it is wanted,
+  is new work in `Sources/Anomalies` (`Main.csproj` has no `ProjectReference` and cannot see
+  `MetricSnapshot`), and is a separate decision.
+
 ### Fixed
 
 _2026-08-02 — the six defects a code review found on paths no measurement exercises, plus eighteen from

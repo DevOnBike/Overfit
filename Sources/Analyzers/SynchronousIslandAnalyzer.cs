@@ -44,7 +44,11 @@ namespace DevOnBike.Overfit.Analyzers
     /// <c>Console.Error</c> are <c>TextWriter.Synchronized</c> wrappers whose <c>WriteLineAsync</c> performs
     /// the same synchronous write and returns a completed task, so "fixing" one is a literal no-op. Eight of
     /// the eight CA1849 hits in this repository were exactly that, which is how the exclusion earned its
-    /// place.</para>
+    /// place. <b>The exclusion tests the RECEIVER, not the called type</b> — for <c>Console.Out.WriteLine</c>
+    /// the invoked symbol is <c>TextWriter.WriteLine</c>, so a check on the containing type misses every one
+    /// of them; see <see cref="IsConsoleStreamReceiver"/>, which also records what that check deliberately
+    /// does not cover. Writing to a <c>TextWriter</c> that is a parameter or a field is a real report and
+    /// stays one — the exclusion is about the console's two synchronised wrappers, not about the type.</para>
     /// </summary>
     [DiagnosticAnalyzer(LanguageNames.CSharp)]
     public sealed class SynchronousIslandAnalyzer : DiagnosticAnalyzer
@@ -121,7 +125,7 @@ namespace DevOnBike.Overfit.Analyzers
                     continue;
                 }
 
-                if (!HasAsyncSibling(called) || IsExcluded(called))
+                if (!HasAsyncSibling(called) || IsExcluded(called, invocation, context))
                 {
                     continue;
                 }
@@ -238,7 +242,8 @@ namespace DevOnBike.Overfit.Analyzers
         /// async members write synchronously and hand back a completed task, so switching changes nothing
         /// but the syntax — measured, and the reason eight of eight CA1849 hits here were noise.
         /// </summary>
-        private static bool IsExcluded(IMethodSymbol called)
+        private static bool IsExcluded(
+            IMethodSymbol called, InvocationExpressionSyntax invocation, SyntaxNodeAnalysisContext context)
         {
             // Disposal is IDisposable versus IAsyncDisposable — a lifetime contract, not a slow operation,
             // and turning `Dispose` into `DisposeAsync` is a different decision with its own rule.
@@ -247,7 +252,62 @@ namespace DevOnBike.Overfit.Analyzers
                 return true;
             }
 
-            return called.ContainingType.ToDisplayString() is "System.Console";
+            // A `called.ContainingType.ToDisplayString() is "System.Console"` branch used to sit here and
+            // was DELETED on 2026-08-12 (XC-25) because it was unreachable, and had been since the day it
+            // was written. The argument is two facts: `HasAsyncSibling` searches ONLY
+            // `called.ContainingType` for a member named `{Name}Async`, and `System.Console` declares no
+            // member ending in `Async` — checked against the net10.0 (10.0.11) and net9.0 (9.0.18)
+            // reference assemblies, zero such names in either. So the branch could never be reached, no
+            // test could cover it, and it read as a working guard that had never excluded anything. That
+            // is exactly why every `Console.Out.WriteLine` in the tree was reported for a day.
+            //
+            // WHAT IT WOULD HAVE GUARDED, and the condition to bring it back: it was a standing guard
+            // against the BCL growing a STATIC async member on `Console`. The receiver check below does
+            // NOT cover that — it matches `Console.Out.X`, never `Console.X`. If `System.Console` ever
+            // gains, say, a `WriteLineAsync` with a matching signature, this rule will start firing on
+            // plain `Console.WriteLine` calls across the tree, and the answer is to restore the branch
+            // rather than to pragma the sites.
+            return IsConsoleStreamReceiver(invocation, context);
+        }
+
+        /// <summary>
+        /// Whether the call is made ON <c>Console.Out</c>, <c>Console.Error</c> or <c>Console.In</c>. This is
+        /// the ONLY console exclusion the rule has; see <see cref="IsExcluded"/> for the containing-type
+        /// check that used to sit beside it and why it was deleted.
+        ///
+        /// <para><b>Testing the CALLED TYPE was measured wrong, 2026-08-12.</b> For
+        /// <c>Console.Out.WriteLine(x)</c> the invoked symbol is <c>System.IO.TextWriter.WriteLine</c>, so a
+        /// check on the containing type can never match it and the rule fired on precisely the case it was
+        /// written to skip: 18 of the 35 sites in the service projects were this shape, and 13 of them had
+        /// been answered with a file-scoped pragma in <c>Cli/Commands.cs</c>. The property, not the type, is
+        /// what makes the writer a synchronised wrapper, so the receiver is what has to be tested.</para>
+        ///
+        /// <para><b>The receiver is resolved semantically rather than matched by name</b>, so
+        /// <c>System.Console.Out.WriteLine(x)</c> and a <c>using static System.Console;</c> bare
+        /// <c>Out.WriteLine(x)</c> are both covered, and a local property of one's own called <c>Out</c> is
+        /// not.</para>
+        ///
+        /// <para><b>KNOWN LIMIT, deliberate:</b> a receiver that is a LOCAL ALIAS —
+        /// <c>var w = Console.Out; w.WriteLine(x);</c> — is NOT excluded and is still reported. Following
+        /// that would need dataflow through assignments, fields and parameters, which is a large change in
+        /// an analyzer; the case has not been measured to occur anywhere in this repository, and the
+        /// diagnostic remains suppressible with a pragma stating the reason. This is a documented limit, not
+        /// an oversight — do not "fix" it as a bug without a site that motivates it.</para>
+        /// </summary>
+        private static bool IsConsoleStreamReceiver(
+            InvocationExpressionSyntax invocation, SyntaxNodeAnalysisContext context)
+        {
+            if (invocation.Expression is not MemberAccessExpressionSyntax access)
+            {
+                return false;
+            }
+
+            var receiver = context.SemanticModel
+                .GetSymbolInfo(access.Expression, context.CancellationToken).Symbol;
+
+            return receiver is IPropertySymbol property
+                && property.Name is "Out" or "Error" or "In"
+                && property.ContainingType.ToDisplayString() is "System.Console";
         }
 
         private static bool IsInsideNestedFunction(SyntaxNode node, SyntaxNode body)

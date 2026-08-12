@@ -31,11 +31,19 @@ namespace DevOnBike.Overfit.Mcp
     // synchronous. A freed thread would have nothing to serve — there is no second request, and no pool
     // thread is held behind any of this.
     //
-    // AND THE READER AND WRITER ARE THE CONSOLE'S. `Console.In` and `Console.Out` are the synchronised
-    // TextReader/TextWriter wrappers whose `ReadLineAsync` / `WriteLineAsync` perform the same synchronous
-    // call and hand back a completed task — the measurement behind the analyzer's own `System.Console`
-    // exclusion. Converting these would move a blocking read onto a pool thread and buy nothing; the rule
-    // reaches them only because they arrive typed as `TextReader`/`TextWriter` rather than as `Console`.
+    // AND THE READER AND WRITER ARE THE CONSOLE'S — IN PRACTICE, WHICH IS WHY THIS PRAGMA HAS TO STAY.
+    // `Console.In` and `Console.Out` are the synchronised TextReader/TextWriter wrappers whose
+    // `ReadLineAsync` / `WriteLineAsync` perform the same synchronous call and hand back a completed task,
+    // so converting these would move a blocking read onto a pool thread and buy nothing.
+    //
+    // BUT THE ANALYZER CANNOT SEE THAT, and this comment used to claim otherwise. It said the rule reached
+    // these only because they arrive typed as `TextReader`/`TextWriter`, implying that excluding
+    // `Console.Out` receivers at the source would clear them. XC-25 (2026-08-12) made that exclusion and
+    // MEASURED THIS FILE AGAIN: still 5 sites, unchanged. The reason is that the console-ness lives at the
+    // CALL SITE — `Cli/Commands.cs` passes `Console.In` / `Console.Out` into `Run` — while inside this type
+    // they are ordinary `TextReader` / `TextWriter` PARAMETERS, and a parameter could just as well be a
+    // socket or a file. That is the same shape as the analyzer's documented limit, and it is a real report
+    // that a human is answering with the constraint above, not a false positive.
     //
     // WHAT IS GIVEN UP, stated rather than left to be discovered: `Run` observes cancellation only between
     // messages, because `input.ReadLine()` cannot be interrupted. A cancelled token does not end a `Run`

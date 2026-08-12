@@ -5,11 +5,10 @@ training on. This is the classical-ML side of the library; nothing here is on an
 
 | Directory | Role |
 |---|---|
-| `Abstractions` | `IDataLayer`, `IFeatureNormalizer`, `IFeatureNameProvider`. |
-| `Contracts` | Schemas, reports, verdicts — `TableSchema`, `FeatureImportanceReport`, `PipelineContext`. |
+| `Abstractions` | `IDataLayer`, `IFeatureNormalizer`. |
+| `Contracts` | Schemas and reports — `TableSchema`, `TrainingDataReport`, `PipelineContext`. |
 | `Prepare` | The pipeline layers: filters, scalers, selectors. |
 | `Normalizers` | Min-max, z-score, log1p, date-time expansion. |
-| `Features` | Feature-importance analysis. |
 | `Interpretation` | `ModelInterpreter` — explaining a trained model's outputs. |
 | `Tabular` | `TabularToTensorConverter`, the final step into the engine. |
 | `Serialization` | `ModelSerializer` and the source-generated JSON context. |

@@ -26,6 +26,21 @@ namespace DevOnBike.Overfit.Tests.Analyzers
     /// </summary>
     internal static class AnalyzerHarness
     {
+        /// <summary>
+        /// Framework assemblies resolved out of the test host's own trusted-platform list.
+        ///
+        /// <para>Deliberately short. <c>System.Console.dll</c> earned its place on 2026-08-12 with
+        /// OVERFIT040's console-writer exclusion, which cannot be tested without the real
+        /// <c>Console.Out</c> property to bind against — a hand-written stand-in named <c>Console</c> would
+        /// pin the test's own type name rather than the rule. Compared by file name rather than by suffix so
+        /// that adding a short name cannot silently match a longer one.</para>
+        /// </summary>
+        private static readonly HashSet<string> Referenced = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "System.Runtime.dll",
+            "System.Console.dll",
+        };
+
         /// <summary>Diagnostic ids the analyzer reports for <paramref name="source"/>, in source order.</summary>
         public static IReadOnlyList<string> Run(DiagnosticAnalyzer analyzer, string source)
         {
@@ -46,7 +61,7 @@ namespace DevOnBike.Overfit.Tests.Analyzers
 
             foreach (var path in runtime.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
             {
-                if (path.EndsWith("System.Runtime.dll", StringComparison.OrdinalIgnoreCase))
+                if (Referenced.Contains(Path.GetFileName(path)))
                 {
                     references.Add(MetadataReference.CreateFromFile(path));
                 }

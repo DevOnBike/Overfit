@@ -358,6 +358,14 @@ bugs, and each carries the incidents that produced its guards.
 
 ## Report before you go idle — never finish silently — added 2026-08-10
 
+**The mechanism, and it is the half this section was missing until 2026-08-12: send it with `SendMessage`
+to `main`.** Your plain text output is NOT visible to anyone — it goes to your own transcript and stops
+there. This rule said "never finish silently" for two days without saying HOW, and on 2026-08-12 two of
+three dispatched agents obeyed it exactly: both wrote a complete report as text, both went idle, and
+neither report reached the main session. One had to be asked twice; the other's work was reconstructed
+from the working tree while it sat finished and unread. **A report you did not `SendMessage` did not
+happen**, and from outside it is indistinguishable from an agent that did nothing.
+
 **Your final message IS the deliverable.** Work you did that nobody was told about did not happen, and three
 agents in one day signalled idle with no report — each time costing a round trip to ask for what was already
 finished.
@@ -544,6 +552,11 @@ the report rather than implied by its size.
 **Every shell command you run goes into `D:/Overfit/.claude/do-overfit-developer.py` and is executed as the single
 invocation `python D:/Overfit/.claude/do-overfit-developer.py`.** Write the file with `Write`, then run that one
 command. Do not issue ad-hoc `dotnet` / `grep` / `sed` / `kubectl` lines directly.
+
+**`rg` is not resolvable from `subprocess`, and the first call of the session is where you will find that
+out.** Measured 2026-08-12: a script that shelled out to `rg` died with `FileNotFoundError` from
+`CreateProcess`, costing a round trip before any work started. The script is for `dotnet`, `git` and file
+edits; **for searching, use the `Grep` and `Glob` tools directly** rather than routing a search through it.
 
 **The filename is yours alone, and that is the point.** The main session uses `.claude/do.py`; each agent
 gets `do-<agent>.py`. These are scratch files, rewritten per task, and two agents sharing one would

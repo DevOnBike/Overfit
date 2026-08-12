@@ -7,13 +7,12 @@ using System.Globalization;
 using System.Net;
 using System.Text;
 using DevOnBike.Overfit.Anomalies.Contracts;
-using DevOnBike.Overfit.Anomalies.Hosting;
 using DevOnBike.Overfit.Anomalies.Incidents;
 using DevOnBike.Overfit.Anomalies.Monitoring;
 using DevOnBike.Overfit.Runtime;
 using Microsoft.Extensions.Logging;
 
-namespace DevOnBike.Overfit.Cli
+namespace DevOnBike.Overfit.Anomalies.Hosting
 {
     /// <summary>
     /// Serves the guard's own metrics so Prometheus can scrape the guard.
@@ -39,7 +38,7 @@ namespace DevOnBike.Overfit.Cli
     /// dying because the port was taken is not, and would replace the problem the guard was deployed to detect
     /// with one of its own.</para>
     /// </summary>
-    internal sealed class GuardMetricsEndpoint : IDisposable
+    public sealed class GuardMetricsEndpoint : IDisposable
     {
         private readonly IClock _clock;
         private readonly HttpListener _listener = new();
@@ -79,10 +78,27 @@ namespace DevOnBike.Overfit.Cli
         /// <summary>
         /// Starts the endpoint, or returns <c>null</c> and says why.
         /// </summary>
+        /// <param name="telemetry">
+        /// The guard's counters. Read — never mutated — once per <c>/metrics</c> scrape and rendered as
+        /// Prometheus text. Borrowed: the caller that owns the guard owns this too, and the endpoint neither
+        /// disposes nor takes a copy of it.
+        /// </param>
+        /// <param name="logger">
+        /// Where this endpoint says what an operator cannot otherwise see: that the port could not be bound,
+        /// that it fell back to loopback, that a request failed for a reason which is not a transport fault,
+        /// and that the serving loop has ended. All of those are invisible in the metrics themselves,
+        /// because a channel that is not serving publishes nothing.
+        /// </param>
         /// <param name="port">Port to listen on. Zero or below disables it entirely.</param>
         /// <param name="guard">
         /// The guard, so <c>/ack</c> and <c>/suppressions</c> can be served. Null serves metrics only, which
         /// is what a host that does not want a write endpoint gets.
+        /// </param>
+        /// <param name="clock">
+        /// The instant stamped on <c>/suppressions</c> (which suppressions are active <i>now</i>) and passed
+        /// to <c>AnomalyGuard.Acknowledge</c> as the moment a mute begins. Null takes
+        /// <see cref="SystemClock.Instance"/>; a test or a replay supplies its own so those timestamps are on
+        /// the same timeline as the data being judged.
         /// </param>
         public static GuardMetricsEndpoint? TryStart(
             GuardTelemetry telemetry, ILogger logger, int port, AnomalyGuard? guard = null,
@@ -183,8 +199,8 @@ namespace DevOnBike.Overfit.Cli
         /// Accepts and answers scrapes until the endpoint is disposed.
         ///
         /// <para><b>Every exit is a logged one.</b> The two handlers below used to leave a gap between them:
-        /// anything from <see cref="Respond"/> that was not a transport fault escaped the loop, faulted the
-        /// returned task and — because that task was discarded — vanished. The reachable case is not
+        /// anything from <see cref="RespondAsync"/> that was not a transport fault escaped the loop, faulted
+        /// the returned task and — because that task was discarded — vanished. The reachable case is not
         /// hypothetical. <c>Suppressions</c> and <c>Acknowledge</c> read the guard's own state from this
         /// thread while a cycle mutates it on another, and every type in that subsystem documents itself as
         /// "not thread-safe: one guard, one cycle at a time". A <c>Collection was modified</c> is an

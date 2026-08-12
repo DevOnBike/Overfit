@@ -288,3 +288,7 @@ Demo/materials/
 
 # backups
 *.bak
+
+# Python bytecode from Scripts/ (lab helpers are imported, so importing them writes a cache)
+__pycache__/
+*.pyc
