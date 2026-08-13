@@ -203,7 +203,6 @@ namespace DevOnBike.Overfit.Text
             var required = _position + additional;
             var doubled = _chars.Length * 2;
             var capacity = required > doubled ? required : doubled;
-
             var replacement = new PooledBuffer<char>(capacity, clearMemory: false);
 
             _chars.Slice(0, _position).CopyTo(replacement.Span);
