@@ -581,8 +581,9 @@ dotnet_diagnostic.OVERFIT044.severity = error
 # name. This section is [*.cs] and comes after every directory section above, so it wins everywhere.
 #
 # WHAT PROMOTING IT IS WORTH, stated plainly because the honest version is unflattering: THE RULE SHIPS WITH
-# ZERO LIVE DEFECTS TO CATCH. Its one true positive — Cli/GuardMetricsEndpoint, whose serve loop died
-# silently on any non-transport exception — was fixed by someone else the same day, and its remaining four
+# ZERO LIVE DEFECTS TO CATCH. Its one true positive — Anomalies/Hosting/GuardMetricsEndpoint (it was under
+# Cli/ when the rule caught it; XC-22 moved it 2026-08-12), whose serve loop died silently on any
+# non-transport exception — was fixed by someone else the same day, and its remaining four
 # reports are all correct fire-and-forget that already observe their own exceptions. Each now carries a
 # pragma naming what makes the discard safe AND what is given up (2026-08-11: LabWorkload's three
 # fault-injection endpoints and LabLoadDriver's paced send).

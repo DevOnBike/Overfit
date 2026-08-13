@@ -9,11 +9,23 @@ WHY A HOOK AND NOT ONLY A DENY LIST
     An allowlist is the point. A deny list is wrong here by construction — every new mutating subcommand is
     permitted until somebody remembers to add it.
 
-FAILURE POLICY, and it is deliberate
-    On an unexpected exception this hook ALLOWS the command and prints a warning to stderr. Failing closed
-    would block every Bash call the moment this script had a bug, leaving no way to work without editing
-    settings by hand. Degrading to the settings.json deny list — which stays in place — is the safer failure.
-    A git-ish command this script cannot parse is still BLOCKED: that path is narrow enough to fail closed.
+FAILURE POLICY, and it is deliberate — REVISED 2026-08-13
+    On an unexpected exception this hook fails OPEN for ordinary work and CLOSED for anything git-ish.
+
+    The original policy allowed everything on an exception, so that one bug in this script could not block
+    every Bash call and leave no way to work without editing settings by hand. That reasoning is right for
+    `dotnet` and `python` and wrong for `git`: an exception while parsing means the parser is confused, and
+    the commands most likely to confuse it are the unusual, nested or obfuscated forms — precisely the ones
+    that must not be waved through. So the except handler now re-checks the RAW payload with the same
+    fast-path pattern and BLOCKS when it mentions git or gh.
+
+    The cost of that is close to zero here, which is what makes it worth taking: agents use git READ-ONLY,
+    and mutating git belongs to the user. If this script breaks, an agent loses `status`/`diff`/`log` —
+    annoying and instantly visible — and loses nothing it was allowed to do anyway. The asymmetry runs the
+    other way: the old policy's failure mode was a silent repository mutation.
+
+    If stdin cannot be read at all, there is no evidence of a git command and the hook allows: the
+    settings.json deny list, which stays in place, is the remaining layer.
 
 Exit codes: 0 = allow, 2 = block (stderr is shown to Claude).
 """
@@ -46,6 +58,12 @@ GH_READONLY = {
     ("auth", "status"), ("browse", None), ("search", None),
     ("label", "list"), ("cache", "list"), ("secret", "list"), ("variable", "list"),
 }
+
+# The fast path, hoisted so the failure handler can reuse the SAME test the happy path uses — two
+# different notions of "git-ish" would be a hole. `\.exe` is matched explicitly: an earlier version
+# excluded any following '.', to avoid matching paths like `foo.git`, and `git.exe push` walked
+# straight through it on Windows.
+GIT_ISH = re.compile(r"(^|[^\w.-])(git|gh)(\.exe)?([^\w-]|$)", re.IGNORECASE)
 
 BLOCK_MESSAGE = (
     "BLOCKED by .claude/hooks/git-guard.py: `{cmd}`\n"
@@ -153,15 +171,12 @@ def check_gh(tokens):
     return False, f"`gh {cmd}{' ' + sub if sub else ''}` is not a read-only operation"
 
 
-def main():
-    raw = sys.stdin.read()
+def main(raw):
     payload = json.loads(raw) if raw.strip() else {}
     command = (payload.get("tool_input") or {}).get("command", "") or ""
 
     # Fast path: nothing git-ish, nothing to do. Keeps the blast radius tiny.
-    # `\.exe` is matched explicitly — an earlier version excluded any following '.', to avoid matching paths
-    # like `foo.git`, and `git.exe push` walked straight through it on Windows.
-    if not re.search(r"(^|[^\w.-])(git|gh)(\.exe)?([^\w-]|$)", command, re.IGNORECASE):
+    if not GIT_ISH.search(command):
         return 0
 
     for segment in split_segments(command):
@@ -186,8 +201,22 @@ def main():
 
 
 if __name__ == "__main__":
+    # Read OUTSIDE main so the failure handler still has the payload to judge. Previously `raw` was local
+    # to main, so an exception in json.loads destroyed the only evidence of what was being run.
     try:
-        sys.exit(main())
+        RAW = sys.stdin.read()
+    except Exception:  # noqa: BLE001 — no payload means no evidence of a git command; see failure policy
+        RAW = ""
+
+    try:
+        sys.exit(main(RAW))
     except Exception as exc:  # noqa: BLE001 — see the failure policy at the top of this file
+        if GIT_ISH.search(RAW):
+            sys.stderr.write(
+                "BLOCKED by .claude/hooks/git-guard.py: the guard itself failed while parsing a command "
+                f"that mentions git or gh, so it is refusing rather than guessing.\nReason: {exc}\n"
+                "Run the command yourself if it is meant to happen; fix this hook if it is not.\n")
+            sys.exit(2)
+
         sys.stderr.write(f"git-guard hook error (allowing, settings.json deny list still applies): {exc}\n")
         sys.exit(0)

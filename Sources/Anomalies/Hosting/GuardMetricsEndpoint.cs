@@ -200,18 +200,27 @@ namespace DevOnBike.Overfit.Anomalies.Hosting
         ///
         /// <para><b>Every exit is a logged one.</b> The two handlers below used to leave a gap between them:
         /// anything from <see cref="RespondAsync"/> that was not a transport fault escaped the loop, faulted
-        /// the returned task and — because that task was discarded — vanished. The reachable case is not
-        /// hypothetical. <c>Suppressions</c> and <c>Acknowledge</c> read the guard's own state from this
-        /// thread while a cycle mutates it on another, and every type in that subsystem documents itself as
-        /// "not thread-safe: one guard, one cycle at a time". A <c>Collection was modified</c> is an
-        /// <see cref="InvalidOperationException"/>, which matched neither filter.
-        /// <c>_guard.ActiveSuppressions</c> is not inside any <c>try</c> at all, and
-        /// <c>_guard.Acknowledge</c> is wrapped for <see cref="ArgumentException"/> only.</para>
+        /// the returned task and — because that task was discarded — vanished.</para>
         ///
-        /// <para><b>An unexpected request failure no longer ends the channel.</b> One malformed scrape or
-        /// one unlucky interleaving used to kill metrics permanently for the life of the process. It is
-        /// logged at <c>Error</c> — not <c>Debug</c>, which is where a client hanging up mid-write belongs —
-        /// and the loop continues.</para>
+        /// <para><b>Correction, 2026-08-13: the case this paragraph used to call reachable is NOT, and the
+        /// fix stands without it.</b> It named a concrete race — <c>_guard.ActiveSuppressions</c> and
+        /// <c>_guard.Acknowledge</c> reading guard state from this thread while a cycle mutates it on
+        /// another, giving a <c>Collection was modified</c> <see cref="InvalidOperationException"/> that
+        /// matched neither filter. All three members take the same <c>lock (_gate)</c>
+        /// (<c>AnomalyGuard.RunCycle</c>, <c>Acknowledge</c>, <c>ActiveSuppressions</c>), so a scrape
+        /// arriving mid-cycle blocks rather than enumerating a moving list. Dates settle it rather than
+        /// reasoning: the lock arrived in <c>e9a5642</c> (2026-08-05) and this paragraph in <c>fc52686</c>
+        /// (2026-08-11), six days after the hazard it describes was closed.</para>
+        ///
+        /// <para><b>An unexpected request failure no longer ends the channel, whatever produced it.</b> That
+        /// is the property, and it needs no story about how the exception arises: an unhandled one out of a
+        /// request used to kill metrics permanently for the life of the process, leaving a running process
+        /// with nothing serving — which from outside is indistinguishable from a healthy guard with nothing
+        /// to report. It is logged at <c>Error</c> — not <c>Debug</c>, which is where a client hanging up
+        /// mid-write belongs — and the loop continues. Pinned by
+        /// <c>GuardMetricsEndpointTests.AnUnexpectedFailureOnOneRequestDoesNotKillTheMetricsChannel</c>,
+        /// which raises an <see cref="InvalidOperationException"/> from inside a handler and requires
+        /// <c>/metrics</c> to answer afterwards.</para>
         /// </summary>
         private async Task ServeAsync()
         {

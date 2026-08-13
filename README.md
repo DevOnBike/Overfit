@@ -172,7 +172,7 @@ Overfit is built around predictable CPU inference, Native AOT compatibility,
 explicit memory ownership and near-zero per-token allocations on the decode path —
 and, since 10.0.24+, an **allocation-free batched prefill** (0 B per request; it used
 to allocate ~748 MB of GC garbage per 272-token prompt). The discipline is enforced at
-compile time by an in-repo Roslyn analyzer suite (24 rules — per-call allocations are
+compile time by an in-repo Roslyn analyzer suite (47 rules — per-call allocations are
 build *errors* in the kernels, and `[OverfitHotPath]` escalates every per-call rule to an
 error inside a marked method) with a CI tripwire that proves the analyzer itself is
 alive ([`Sources/Analyzers/README.md`](Sources/Analyzers/README.md)).
@@ -617,7 +617,7 @@ for that.
 - **Integration** — **OpenAI-compatible server** (`/v1/chat/completions` + SSE, `/v1/embeddings`, `/v1/models`); **MCP server** (`overfit mcp` — local `ask` / `rag_query` / `transcribe` tools for Claude Code & co., [`docs/mcp.md`](docs/mcp.md)); **Microsoft.Extensions.AI** adapter — a local model as a standard `IChatClient` / `IEmbeddingGenerator`, drop-in for the .NET AI template & Semantic Kernel ([`docs/microsoft-extensions-ai.md`](docs/microsoft-extensions-ai.md)); **`dotnet new overfit-chat`** project template; **`overfit` CLI** (pull / list / chat / serve / mcp) shipped three ways — `dotnet tool install -g DevOnBike.Overfit.Cli`, a Native-AOT binary, and a ~34 MB Docker image ([`docs/docker.md`](docs/docker.md)); ASP.NET starter template.
 - **Training** — **QLoRA CPU fine-tuning** (frozen Q4_K base incl. FFN + per-head attention), gradient checkpointing, data-parallel trainer, Conv/BatchNorm/LSTM, CRNN + CTC (OCR), LR schedules.
 - **Multimodal & audio** — **Whisper speech-to-text** in pure C#; from-scratch MP3 / WAV decoders; OCR.
-- **Engineering** — Native-AOT (one ~7.8 MB self-contained binary, AVX2 codegen so the AOT binary / Docker image decodes at JIT parity); zero-allocation hot paths (decode 0 B/token AND prefill 0 B/request); **in-repo Roslyn analyzer suite** (24 rules, error-severity in kernels, CI guard-of-the-guard); AOT guard in CI; anomaly detection.
+- **Engineering** — Native-AOT (one ~7.8 MB self-contained binary, AVX2 codegen so the AOT binary / Docker image decodes at JIT parity); zero-allocation hot paths (decode 0 B/token AND prefill 0 B/request); **in-repo Roslyn analyzer suite** (47 rules, error-severity in kernels, CI guard-of-the-guard); AOT guard in CI; anomaly detection.
 
 **Current priorities:**
 

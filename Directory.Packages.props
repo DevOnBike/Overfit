@@ -99,7 +99,26 @@
          AVX2/VNNI weight kernels with vectorized dequantization, masked-Attention improvements — which is
          the x86 CPU path these benchmarks actually exercise. On top of security hardening in path and
          buffer handling. Take it together with a re-run of those five classes on both versions — the ORT
-         side is what has to be shown unmoved (or the ratio restated), not the Overfit side. -->
+         side is what has to be shown unmoved (or the ratio restated), not the Overfit side.
+
+         CORRECTION 2026-08-13: that re-run HAPPENED (PB-ORT1, 2026-08-12, six clean A/B process pairs
+         alternating AB/BA) and this comment was left describing it as pending. Two of its claims above are
+         also wrong and are kept only so the correction is legible: the env-var item does NOT change default
+         thread counts, it lets ORT_INTRA/INTER_OP_NUM_THREADS set them and neither is present here; and the
+         MLAS work is entirely MatMulNBits — 2-bit weight kernels, fp16 — plus Arm64/RISC-V, while every
+         model these benchmarks generate is dense fp32 (Gemm/Relu/Conv/MaxPool only).
+
+         THE RESULT, and it is why the pin stays: every steady-state ORT arm was faster on 1.29.0 (0.9848
+         to 0.9974) AND IT MEANS NOTHING, because the canaries moved the same way and Overfit_Batch64 moved
+         further than any ORT arm at 0.9825. Resolving power, computed before the verdict: median canary
+         spread 4.26% against an effect of 0.3-1.5%. The experiment is SILENT in that band, not negative.
+         The floor is intrinsic to cross-process measurement here, not background load — a reboot to one
+         process made it slightly WORSE (median 4.26% clean vs 3.17% loaded).
+
+         So the bump is neither justified nor refuted by performance, and the honest reason to hold is the
+         one at the top: it moves the other side of every published ratio. What that obliges instead is
+         cheap and NOT YET DONE — state the ORT version beside any published Overfit-vs-ORT number, because
+         docs/measured-baselines.md carries no ORT entry at all and a reader will assume the latest. -->
     <PackageVersion Include="Microsoft.ML.OnnxRuntime" Version="1.28.0" />
     <PackageVersion Include="Microsoft.ML.OnnxTransformer" Version="5.0.0" />
     <!-- Build/pack-time only (PrivateAssets="all"), so it adds no runtime surface to the shipped package.

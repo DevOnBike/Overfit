@@ -27,10 +27,20 @@ namespace DevOnBike.Overfit.Text
     /// and that one does not. Swapping a span-based path onto this would be a regression dressed as an
     /// optimisation.</para>
     ///
-    /// <para><b>It is not free, and small builds can be slower than <c>StringBuilder</c>.</b> A stack
-    /// buffer costs a zeroing-free reservation but the JIT cannot register-allocate it, and
-    /// <see cref="ToString"/> pays a pool return. Treat any use of it as a hypothesis until measured with
-    /// <c>MemoryDiagnoser</c> on both shapes — see <c>docs/performance-discipline.md</c>.</para>
+    /// <para><b>CORRECTION 2026-08-13 — this paragraph used to say "small builds can be slower than
+    /// <c>StringBuilder</c>", and a measurement refuted it.</b> At 64 characters this type is <b>2.4x
+    /// faster</b> than a default <c>StringBuilder</c> and 1.5x faster than a pre-sized one (15.01 ns
+    /// against 35.85 / 22.46), and it is ahead at every length measured — 64 to 16384, ratios 0.42 to 0.67
+    /// — including six growth steps. Bytes are roughly halved throughout; the span-destination form
+    /// allocates <b>zero</b>. Numbers and their caveats: <c>docs/measured-baselines.md</c>.</para>
+    ///
+    /// <para><b>What the reasoning behind the old claim got right, and where it stops.</b> A stack buffer
+    /// cannot be register-allocated and <see cref="ToString"/> does pay a pool return — both true, and both
+    /// smaller than what is saved. What the measurement does NOT license is extrapolation: it covers
+    /// repeated <c>Append</c> into one build, on this box, at these lengths. A different call shape can
+    /// still lose. <b>Treat any use as a hypothesis until measured with <c>MemoryDiagnoser</c> on both
+    /// shapes</b> — see <c>docs/performance-discipline.md</c>. The rule survives; only the direction it
+    /// predicted did not.</para>
     ///
     /// <example>
     /// <code>

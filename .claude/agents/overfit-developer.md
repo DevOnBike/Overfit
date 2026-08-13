@@ -553,6 +553,13 @@ the report rather than implied by its size.
 invocation `python D:/Overfit/.claude/do-overfit-developer.py`.** Write the file with `Write`, then run that one
 command. Do not issue ad-hoc `dotnet` / `grep` / `sed` / `kubectl` lines directly.
 
+**Print `git status --porcelain` as your LAST action and report any difference from the start of your run.**
+Added 2026-08-13 from an incident: an agent reported "I left the index alone", which was true of its own
+actions and false of the tree — its four new files were staged, by something else, while it worked. It
+noticed only because it happened to print status for an unrelated reason. **You cannot assert the state of
+a shared tree without having looked at it**, and two agents writing at once is normal here. Snapshot at the
+start, compare at the end, and say what moved even when it was not you.
+
 **`rg` is not resolvable from `subprocess`, and the first call of the session is where you will find that
 out.** Measured 2026-08-12: a script that shelled out to `rg` died with `FileNotFoundError` from
 `CreateProcess`, costing a round trip before any work started. The script is for `dotnet`, `git` and file

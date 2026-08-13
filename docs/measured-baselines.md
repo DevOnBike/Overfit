@@ -19,6 +19,87 @@ four of them.
 
 Dev box for most figures: Ryzen 9 9950X3D, Windows, .NET 10, Release.
 
+## `ValueStringBuilder` vs `StringBuilder` — 2026-08-13, and it refuted the type's own doc comment
+
+`[SimpleJob(warmupCount: 8, iterationCount: 20)]`, `MemoryDiagnoser`, deliberately **not** the shared
+`BenchmarkConfig` — its `InvocationCount=1` would leave the 64-char arm measuring timer resolution.
+Ryzen 9 9950X3D, .NET SDK 10.0.111, 12.4 min wall. Stack buffer 256 chars, so the lengths below sit at
+**0, 0, 1, 3 and 6 growth steps**. Full log: `Tests/bin/vsb-bench.log`.
+
+| length | `StringBuilder` default | pre-sized | `ValueStringBuilder` (stack) | VSB (pooled) |
+|---|---|---|---|---|
+| 64 | 35.85 ns / 496 B | 22.46 (0.63) | **15.01 (0.42) / 152 B** | 16.92 (0.47) |
+| 256 | 104.91 / 1408 B | 55.19 (0.53) | 52.77 (0.50) / 536 B | 53.95 (0.51) |
+| 512 | 149.26 / 2504 B | 124.96 (0.84) | 105.64 (0.71) / 1048 B | 100.82 (0.68) |
+| 2048 | 650.55 / 8792 B | 471.47 (0.72) | 408.05 (0.63) / 4120 B | 396.81 (0.61) |
+| 16384 | 4241.72 / 82040 B | 2808.14 (0.66) | 2852.71 (0.67) / 32792 B | 2675.73 (0.63) |
+
+**Span destination — no string produced, its own baseline, not comparable to the rows above**: VSB with
+`TryCopyTo` runs at **0.38 / 0.45 / 0.57 / 0.65 / 0.68** of `StringBuilder`+`CopyTo` and allocates
+**exactly zero bytes** against 296 / 824 / 1408 / 4624 / 49200 B. This is the shape to reach for when the
+caller can own the buffer.
+
+**A prediction was written into the benchmark file BEFORE the run, and it is one-third right — which is why
+it was worth writing.** Predicted: fewer bytes at every size (**confirmed**, decisively); faster **only**
+where it does not grow (**refuted** — it is faster at every length, including six growths); and a ratio
+that degrades as growths rise (**holds for three points**, 0.42 → 0.50 → 0.71, then breaks and settles at
+0.63-0.67).
+
+**The type's own doc comment said "small builds can be slower than `StringBuilder`". They are not** — 64
+chars is where the advantage is *largest*. The comment has been corrected in place, marked as a correction.
+
+**What this does NOT license.** It measures repeated `Append` into a single build, on one box, at these
+lengths. It is not a licence to sweep `StringBuilder` out of the tree: a separate inventory the same day
+found **71 sites and zero migration candidates**, because the two criteria (a string must really be
+produced, and the build must take several growth steps) are conjunctive and the population fails one or the
+other — most per-call sites pre-size to the answer, and the rest are one-shot.
+
+## The `[LongFact]` release gate — measured for the first time, 2026-08-13
+
+"Run it before every release" meant something unknown until today: **nobody had ever timed this gate.** Run
+batched by area (`OVERFIT_RUN_LONG=1`, `--no-build`, one `dotnet test --filter` per area, per-batch bound),
+appending to `Tests/bin/longfact-timings.log`. **27 of 49 areas completed, 165.3 minutes.**
+
+**The shape is the finding, not the total: four areas carry 152 of those 165 minutes, and nineteen carry
+6.5 between them.**
+
+| area | elapsed | outcome |
+|---|---|---|
+| `Anomalies` | **63.3 min** | hit a 20-min bound and ran on — see the bound caveat below. 620 tests, 8 reported failed |
+| `LanguageModels.Loading` | 30.0 min | hit a 30-min bound, killed cleanly |
+| `LanguageModels.LoRA` | 27.8 min | hit the bound, **0 failures inside it** — it is long, not broken |
+| `LanguageModels.Demo` | 21.1 min | hit the bound, **0 failures inside it** |
+| `LanguageModels.Diagnostics` | 9.5 min | completed, 2 failed |
+| `LanguageModels.Retrieval` | 4.1 min | clean |
+| the other 21 areas | **6.5 min total** | clean |
+| discovery alone (`--list-tests`) | **16.0 s** for 2892 tests | also never measured before |
+
+**So the gate is affordable if those four are treated separately** — which is the opposite of the usual
+conclusion that a long gate must be dropped. **22 areas remain unmeasured**, including
+`LanguageModels.Runtime`, `Tokenization` and `Training`, so the total is a lower bound.
+
+**Two measurement caveats, both mine, both worth more than the numbers:** a bound implemented with
+`subprocess.run(timeout=…)` **does not bound anything** — it kills the child and then waits on pipes the
+grandchildren hold, which turned a 20-minute bound into 63 minutes; killing the process **tree**
+(`taskkill /F /T`) made the next bound land at exactly 30.00 min. And a failure list capped at five names
+without saying so lost three of the eight from `Anomalies` permanently. Both are fixed in the runner; the
+63-minute figure is left standing because it is what a wrong bound costs.
+
+## What the comparisons are measured AGAINST — name it beside every ratio
+
+A ratio has two sides, and this file used to record only ours. **A reader assumes the other side is the
+version they would install today**, so a comparison whose baseline is not named quietly flatters us by
+however much that baseline has moved.
+
+| the other side | version used | how stale, and how much it matters |
+|---|---|---|
+| **ONNX Runtime** (`Microsoft.ML.OnnxRuntime`, `Sources/Benchmark` only — it is in **no** Overfit code path) | **1.28.0** | 1.29.0 shipped 2026-08-12 and the pin is held deliberately, because moving it moves every published Overfit-vs-ORT ratio without a line of Overfit changing. **Measured, six clean A/B process pairs (`PB-ORT1`, 2026-08-12): the two versions do not separate.** Every steady-state ORT arm was faster on 1.29.0 (0.9848–0.9974) and it means nothing — the canaries moved the same way and `Overfit_Batch64` moved further, at 0.9825. **Resolving power stated before the verdict: median cross-process canary spread 4.26%, against an effect of 0.3–1.5%.** So the experiment is *silent* in that band, not negative, and the flattery any published ratio carries is bounded at **≤1.5% — under the noise floor.** No ratio needs restating; the version needs naming. |
+| **llama.cpp** (the `~1.13× uniform` row below) | **not recorded — this is a gap** | The build, commit and quantisation of the llama.cpp side are not written down anywhere in this file, which is the same defect the ORT row above fixes. Anyone re-running that comparison should record them; anyone citing `1.13×` should say they do not know which build it was against. |
+
+**The cross-process floor is intrinsic here, not background load.** Canary spread was median 3.17% on a
+loaded box and median 4.26% after a reboot to a single process — slightly *worse* clean. An effect under a
+few percent therefore needs a different experiment shape, not a quieter machine.
+
 ---
 
 ## Reverted or regressed — do not propose again without new evidence
@@ -75,7 +156,7 @@ claim it is handled; do not fix it without the census.
 |---|---|
 | Bielik decode after the CPU sprint | 12.55 → **17 tok/s** (bit-identical output) |
 | Qwen-3B with `OVERFIT_REPACK_GEMV` | **24.4 tok/s** (+30%) |
-| gap to llama.cpp | **~1.13× uniform** — this is *not* parity; always best-of-N on both sides |
+| gap to llama.cpp | **~1.13× uniform** — this is *not* parity; always best-of-N on both sides. **Which llama.cpp build this was measured against is not recorded** — see the baseline table at the top of this file |
 | QLoRA fine-tuning, 3B | ~3 GB RAM |
 | Phi-4 14B Q4_K_M | ~3.8 tok/s |
 | Android (Motorola Edge 50 Fusion), 0.5B Q4_K | ~3.8 tok/s |

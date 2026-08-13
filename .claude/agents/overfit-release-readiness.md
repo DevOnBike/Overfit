@@ -118,13 +118,14 @@ Two constraints that are facts, not preferences:
 - **The suite takes the machine-wide measurement mutex** (`MeasurementExclusion`). It cannot run during a
   benchmark or an anomaly-guard measurement, and those take hours. Check first and defer rather than fight it.
 
-**Two preconditions, neither of which is met yet as of 2026-08-06 — do not report this gate as run until both
-are:**
+**Two preconditions were listed here as unmet on 2026-08-06. The first was met the same day and this
+paragraph went stale for a week — corrected 2026-08-13 after a run of yours re-reported a solved problem as
+open, which is its own small lesson about dated preconditions in an agent definition.**
 
-1. **A switch to run them without editing source.** `LongFact` currently sets `Skip` unconditionally and its
-   own message says "Remove the Skip property to run it". Editing an attribute to take a measurement has
-   already gone wrong here once and had to be undone by hand. The fix is the pattern this repo already uses
-   in `MeasurementExclusion` and `SmallModelFact`: an environment variable, e.g. `OVERFIT_RUN_LONG=1`.
+1. ~~A switch to run them without editing source.~~ **DONE**: `Tests/LongFact.cs` has read
+   `OVERFIT_RUN_LONG=1` since 2026-08-06, following the pattern in `MeasurementExclusion` and
+   `SmallModelFact`. Run the gate with that variable set; **never** by editing an attribute — that has gone
+   wrong here once already and had to be undone by hand.
 2. **A measured runtime for the suite.** Nobody has timed it. "Run it before every release" means something
    very different at eight minutes than at six hours, and a gate whose cost is unknown is a gate that will be
    skipped the first time it is inconvenient. Time it once, write the number down, then decide whether the

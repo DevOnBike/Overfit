@@ -633,12 +633,28 @@ namespace DevOnBike.Overfit.Cli
 
             using var audit = new JsonLinesAuditSink(auditPath);
             Console.WriteLine($"audit log: {Path.GetFullPath(auditPath)}");
-            // CancellationToken.None, and it is a real gap rather than a formality: unlike `serve` above,
-            // this command wires no Console.CancelKeyPress handler, so there is no token in scope to hand
-            // over. The gateway therefore blocks for the lifetime of the process and Ctrl+C kills it rather
-            // than unwinding it. Passing None states that plainly instead of letting a default hide it.
+
+            // Same wiring as `serve` above, and it closes a behaviour gap rather than a formality (XC-23):
+            // this command used to hand CancellationToken.None to a call that blocks for the lifetime of the
+            // process, so the only way out was the default console handler terminating it. What that skipped
+            // is the gateway's own `app.StopAsync()` — a proxied request in flight was cut rather than
+            // drained. The audit log was never at risk (JsonLinesAuditSink writes with AutoFlush), but
+            // `audit` is now disposed on the way out too.
+            //
+            // NOT COVERED BY A TEST, and deliberately not made testable: the handler below is raised by the
+            // OS console control handler, and Tests.csproj has no ProjectReference to Sources/Cli, so neither
+            // half is reachable from the suite. What IS pinned is the half that does the work —
+            // RedactionGatewayShutdownTests proves RedactionGateway.Serve returns and releases the port when
+            // its token is cancelled. Inventing a seam here whose only consumer is a test would buy nothing.
+            using var cts = new CancellationTokenSource();
+            Console.CancelKeyPress += (_, e) =>
+            {
+                e.Cancel = true;   // don't kill the process; unwind the gateway cleanly.
+                cts.Cancel();
+            };
+
             RedactionGateway.Serve(
-                host, port, resolvedUpstream, key, redactor, audit, policy, CancellationToken.None,
+                host, port, resolvedUpstream, key, redactor, audit, policy, cts.Token,
                 clientKeys: clientKeys,
                 scanResponses: resolvedScanResponses);
             return 0;

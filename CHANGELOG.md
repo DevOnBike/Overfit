@@ -65,6 +65,33 @@ calibrates for itself, and the operability layer that decides whether a customer
 - **A recorded window of the live cluster** (`Tests/test_fixtures/lab/lab-window-healthy-12pod.csv`): 60
   minutes, twelve replicas, 241 scrapes, 12 of 13 channels at 100% coverage.
 
+### Changed
+
+- **Public signatures that changed shape since 10.0.31. Every one of these is a binary break**: a compiled
+  caller fails with `MissingMethodException` even where the source still compiles. Five came from the
+  `OVERFIT041` cancellation-token sweep, where the reorder was accepted deliberately because **no reorder
+  can bind silently** — no displaced argument type converts to `CancellationToken`, so every external caller
+  gets `CS1503`/`CS7036` rather than a quiet behaviour change.
+
+  | member | change |
+  |---|---|
+  | `LanguageModels.OverfitClient.SendAsync` | `cancellationToken` moved ahead of the optional parameters; its default was removed |
+  | `Evolutionary.Runtime.EvolutionRunner.Run` (both overloads) | same reorder; `cancellationToken` default removed |
+  | `Redaction.IRedactionAuditSink.Record` | takes `in RedactionAuditEntry` instead of `RedactionAuditRecord` |
+  | `Maths.PartialSort.SortIndices` | takes `Span<int>` instead of `int[]` |
+  | `LanguageModels.Runtime.Q4KGemvKernel.GemmTiled512` | two parameters added |
+  | `DeepLearning.CheckpointedModule` constructor | one parameter added |
+  | `Audio.Tts.SyntheticSpeechMetadata.ForNow` | takes an `IClock` |
+
+- `LanguageModels.Runtime.CachedLlamaSession.StreamGenerate` **removed** — superseded by the async
+  streaming path.
+
+- **Four new overloads that a recompile may bind to instead of the old ones**, which is a source-level risk
+  rather than a defect and is listed because a consumer cannot see it coming:
+  `Diagnostics.OverfitTelemetry.RecordTensorStorageCreated`, `…RecordTensorStorageDisposed`,
+  `LanguageModels.Tokenizers.GgufTokenizer.Decode`, `…QwenTokenizer.Decode`. Whether any of them captures a
+  real call site depends on consumer code no tool here can see.
+
 ### Removed
 
 - **The feature-importance island in `Data` — seven public types, removed together because none of them
@@ -123,6 +150,38 @@ calibrates for itself, and the operability layer that decides whether a customer
   Not a deprecation and not a move: feature importance for the learned anomaly family, if it is wanted,
   is new work in `Sources/Anomalies` (`Main.csproj` has no `ProjectReference` and cannot see
   `MetricSnapshot`), and is a separate decision.
+
+- **The entire `DevOnBike.Overfit.Anomalies.*` surface — 35 public types — is no longer in this package.**
+  It moved to a separate `Sources/Anomalies` assembly in the 2026-08-05 split, and that assembly is
+  deliberately **not published**: the anomaly guard ships as a container image, and a NuGet package would
+  be a promise about a surface nobody designed for external use. The reason is recorded in
+  `Anomalies.csproj` itself.
+
+  **There is no replacement package and no type forward.** A consumer that referenced any of these names
+  from 10.0.31 cannot get them back by taking a different package — the code is in this repository under
+  AGPL, and the guard is consumed as an image or built from source. Gone from the package:
+
+  - `Anomalies.Monitoring` (13): `Abstractions.IMetricSource`, `Abstractions.IRawMetricSource`,
+    `Contracts.DataCenter`, `Contracts.MetricIndex`, `Contracts.MetricSnapshot`, `Contracts.PodKey`,
+    `Contracts.PrometheusHistoricalSourceConfig`, `Contracts.PrometheusMetricSourceConfig`,
+    `Contracts.RawMetricSeries`, `Contracts.RawSample`, `HistoricalCsvLoader`,
+    `PrometheusHistoricalSource`, `PrometheusMetricSource`
+  - `Anomalies.Alerting` (5): `Abstractions.IAlertSink`, `AlertEngine`, `Contracts.AlertEngineConfig`,
+    `Contracts.AlertEvent`, `Contracts.AlertSeverity`
+  - `Anomalies.Neuro` (5): `AnomalyFitness`, `AnomalyFitnessOptions`, `AnomalyMlp`, `AnomalyObjective`,
+    `AnomalyPopulationEvaluator`
+  - `Anomalies.Training` (4): `GptTrainingConfig`, `OfflineTrainingJob`, `OfflineTrainingResult`,
+    `TrainingProgress`
+  - `Anomalies.Gpt` (3): `AnomalyScore`, `GptAnomalyDetector`, `MetricTokenizer`
+  - `Anomalies.Adaptive` (2): `AdaptiveAnomalyMonitor`, `AdaptivePolicy`
+  - `Anomalies.Live` (2): `LiveMonitoringOptions`, `LiveMonitoringPipeline`
+  - `Anomalies.Baseline` (1): `EwmaAnomalyDetector`
+
+  **Recorded here on 2026-08-13, eight days after the fact, and only because a tool found it.** The split
+  changed the published surface and nothing said so; the API-compatibility gate added the same day compares
+  a build against the last published package and reported **58 blocking findings against 10.0.31** where the
+  notes recorded 7. That gap is the reason the gate exists, and it is why the entries below — all of them
+  real breaks that had also gone unrecorded — appear in this release rather than in the ones that made them.
 
 ### Fixed
 
