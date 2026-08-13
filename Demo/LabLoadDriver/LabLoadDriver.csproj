@@ -10,6 +10,15 @@
     <InvariantGlobalization>true</InvariantGlobalization>
     <IsAotCompatible>true</IsAotCompatible>
 
+    <!-- A lab traffic generator is not a product. Added 2026-08-13 because it was the ONE project here
+         without this line and `dotnet pack -c Release` duly produced `lab-load-driver.10.1.0.nupkg` — an
+         exe with no PackageId, no license, no readme and no description, which NuGet itself complained
+         about. Every other Demo project sets it explicitly; LabWorkload appears to and does not — it
+         inherits the default from `Microsoft.NET.Sdk.Web`, so this plain `Exe` was the only one nothing
+         protected. The release workflow packs an explicit five-project list rather than globbing, so
+         nothing leaked; this makes the intent a property of the file instead of of that list. -->
+    <IsPackable>false</IsPackable>
+
     <!-- No project references, for the same reason as LabWorkload: this stands in for whatever generates a
          client's traffic, and sharing types with the thing under test would let a mistake hide. -->
 

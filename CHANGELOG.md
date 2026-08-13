@@ -14,6 +14,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 Pre-release suffixes (e.g. `10.1.0-beta.1`) are used for surface changes that need real-world validation before the public release. Pre-releases are pushed to NuGet with the `-beta`, `-rc`, or `-preview` SemVer suffix.
 
+## What this file covers, and what it does not — measured 2026-08-13
+
+**This is a record of notable changes, not a per-release log, and the gap is larger than it looks.** Of the
+**27 versions published on nuget.org** (10.0.4 through 10.0.31), **22 have no section here**. Only
+`10.0.15`, `10.0.21`, `10.0.24`, `10.0.25` and `10.0.30` were ever stamped; everything else was folded into
+whatever `[Unreleased]` held at the time and shipped without a heading.
+
+Stated rather than quietly corrected, for two reasons. **Backfilling twenty-two sections from memory would
+manufacture a record nobody can check** — the commits exist, the intent behind each release does not.
+And a reader who assumes every published version is described here would draw a false conclusion from its
+silence, which is the thing worth preventing.
+
+**Two consequences to know when reading:**
+
+- **For twenty-two published versions this file says nothing at all.** A reader cannot learn what changed
+  in 10.0.26 through 10.0.29 from here; the commits are the only record. The `[Unreleased]` section is
+  accurate for what it describes — every one of the 58 API breaks it lists was introduced **after** 10.0.31
+  was published on 2026-07-23, so they belong to the next release and not to an earlier one.
+- **The one date in the file is unverified.** `## [10.0.30] - 2026-07-05` does not match nuget.org, which
+  records 10.0.30 as published **2026-07-20** — 2026-07-05 is 10.0.29's publish date. Either the heading
+  dates the work rather than the publish, or it is off by one release; nobody has said which, so it is left
+  as it stands with this note beside it.
+
+**Going forward: stamp `[Unreleased]` as `[<version>] - <publish date>` when the release is cut**, and use
+the nuget.org publish date so the two records agree. `Scripts/plan_gate_check.py` does not check this and
+neither does anything else — it is a habit, and this section exists because habits without a written
+statement are how twenty-two versions went unrecorded.
+
 ## [Unreleased]
 
 _The `gimli` branch, anomaly-guard track: two new detector families, a week of memory, thresholds the guard

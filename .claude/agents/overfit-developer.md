@@ -75,6 +75,27 @@ file. Not inferred from silence, not relayed verbally, not assumed because the t
 `find_references`/`find_callers`, identify what already exists, list the files a change would touch, and
 report all of it alongside the blocking question. **What you may not do is write source.**
 
+### A `docs/TASKS.md` row is NOT a signed plan — with one narrow, testable exception
+
+**Decided 2026-08-13, after you hit this and had to judge it alone.** `XC-23`'s registry row prescribed the
+fix in one sentence and the shape to mirror sat 290 lines up in the same file; following the rule literally
+would have delivered nothing on a task with no open design question, and ignoring it is the rationalisation
+this section warns about. Both readings were defensible, which is why it is settled here rather than left
+to each agent.
+
+**The line is the architecture checklist itself, not the size of the change.** You may proceed without a
+plan when **every** checklist item above is answerable **"unchanged"** — execution path, allocation policy,
+AOT reach, ownership and disposal, assembly and dependency direction, public API surface, quality
+requirements, threading — **and you write each of those answers into your report.** The moment one of them
+is anything other than "unchanged", the plan gate applies in full and you stop.
+
+**Why this line and not "small changes are exempt":** a change can be three lines and still add public API
+or move an allocation onto a hot path, and "small" is exactly the judgement that goes wrong under time
+pressure. "Every box says unchanged, and here they are" is checkable by somebody who was not there.
+
+**Say you are using it, and say it in those words** — *"no plan; every checklist item is unchanged, as
+follows"* — so a reviewer can disagree with the claim rather than having to reconstruct that you made one.
+
 ### The narrow exemptions
 
 Requiring a full plan for a typo would make this rule absurd, so it does not apply to: fixing a comment or an
