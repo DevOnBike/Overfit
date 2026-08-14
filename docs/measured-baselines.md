@@ -95,10 +95,10 @@ rebuild with all three temporarily raised to `warning` reports 0 and 0"* — and
 
 It is not hypothetical. Building the eight one at a time:
 
-- **`Sources/AndroidBench` reports 2 live `OVERFIT043` errors** (`DecodeBench.cs:64`, `:218`). It lives
+- **`Sources/AndroidBench` reported 2 live `OVERFIT043` errors** (`DecodeBench.cs:64`, `:218`) — **fixed 2026-08-14, and it also carries 5 `OVERFIT015` and 2 `OVERFIT024` warnings that no census ever counted**. It lives
   under `Sources/`, where every rule here is aimed, and it was never in the sweep that justified making
   that rule an error.
-- **`Demo/VoiceLoop` does not compile at all**: `MicCapture.cs:85` calls `GCHandleScope.Pin`, and the type
+- **`Demo/VoiceLoop` did not compile at all** (fixed 2026-08-14): `MicCapture.cs:85` called `GCHandleScope.Pin`, and the type
   has been `GcHandleScope` since a rename that swept the solution. **The same rename also left the old name
   in the type's own doc comment** (`GcHandleScope.cs:14`). A rename passed the gate and left an
   out-of-solution project uncompilable, silently, for however long.

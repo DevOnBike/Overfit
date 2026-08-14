@@ -82,7 +82,7 @@ namespace DevOnBike.Overfit.Demo.VoiceLoop
 
             var byteCount = seconds * SampleRate * 2;
             var buffer = new byte[byteCount];
-            using var gch = GCHandleScope.Pin(buffer);
+            using var gch = GcHandleScope.Pin(buffer);
             var hdrSize = (uint)Marshal.SizeOf<WaveHdr>();
             var pHdr = Marshal.AllocHGlobal((int)hdrSize);
             try

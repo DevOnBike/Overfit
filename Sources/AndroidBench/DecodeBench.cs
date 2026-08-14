@@ -61,7 +61,7 @@ namespace DevOnBike.Overfit.AndroidBench
             const string prompt = "The capital of France is";
             Span<int> promptBuffer = stackalloc int[64];
             var promptLength = tokenizer.Encode(prompt, promptBuffer);
-            var promptIds = promptBuffer[..promptLength].ToArray();
+            var promptIds = promptBuffer.Slice(0, promptLength).ToArray();
 
             using var session = client.Engine.CreateSession(2048);
             var sampling = SamplingOptions.Greedy;
@@ -215,7 +215,7 @@ namespace DevOnBike.Overfit.AndroidBench
             {
                 var stat = File.ReadAllText("/proc/self/stat");
                 var afterComm = stat.LastIndexOf(')');   // comm field can hold spaces/parens
-                var fields = stat[(afterComm + 2)..].Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                var fields = stat.Substring(afterComm + 2).Split(' ', StringSplitOptions.RemoveEmptyEntries);
                 // After comm: index 11 = utime, index 12 = stime (in clock ticks).
                 return long.Parse(fields[11]) + long.Parse(fields[12]);
             }
