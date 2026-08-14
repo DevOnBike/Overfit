@@ -69,21 +69,22 @@ time is the subject, or before handing the build to anyone.
 5. **Then distribute**: attach the APK to a GitHub Release, or upload the AAB in Play Console → Internal
    testing first. Both flows are written out further down.
 
-Everything below this line is detail: manual equivalents of the scripts, the wireless-pairing dance, and
-the two distribution paths.
+### Two properties both scripts share
 
-Both **install over** the app rather than uninstalling it: `adb uninstall` wipes app data, which deletes
-`overthink.log` and every model added by hand. Both also print which build is actually running, read from
-the app's own probe of its installed `libaot-*.so` files — a build flag says what was *requested*,
-`aotLibs=` says what is executing.
+They **install over** the app rather than uninstalling it. `adb uninstall` wipes app data, which deletes
+`overthink.log` and every model added by hand — that has already cost one session's measurements here.
 
-**`-Aot` is not only for release.** It is the only way to test anything that depends on hardware
-intrinsics — although, as measured below, on this platform the answer is the same either way.
+They both print **which build is actually running**, read from the app's own probe of its installed
+`libaot-*.so` files. A build flag says what was *requested*; `aotLibs=` says what is executing, and those
+two have already disagreed.
 
-These two replaced `deploy.cmd`, `make-apk.ps1` and `make-aab.ps1`, which were deleted on 2026-08-14. Three
+These scripts replaced `deploy.cmd`, `make-apk.ps1` and `make-aab.ps1`, deleted on 2026-08-14: three
 scripts had grown to cover overlapping cases, and the two `make-*` ones shipped AOT **without**
 `AndroidEnableProfiledAot=false` — "AOT" in name only, see below. (The unrelated `k8s\overfit\deploy.cmd`,
 which brings up the inference-server lab, is a different file and still exists.)
+
+Everything below this line is detail: manual equivalents of the scripts, the wireless-pairing dance, and
+the two distribution paths.
 
 ## Doing it by hand (what the scripts run)
 
@@ -315,6 +316,10 @@ The app loads models under ~550 MB with `quantize:false` (F32-resident). Forcing
 The cause is the last note below, and it is the single most important thing on this page.
 
 ### .NET-for-Android exposes NO ARM hardware intrinsics
+
+**Known in this repository since 2026-07-20** — `OverfitParallel.ResolveDecodePool` says so in a comment,
+and it is why the decode spin-pool is disabled on Android. It is repeated here because that is not a place
+anyone looks before planning kernel work, and it was re-found the hard way on 2026-08-14.
 
 Logged by the app at startup, in **both** JIT and full-AOT builds:
 

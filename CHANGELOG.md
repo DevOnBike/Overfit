@@ -92,6 +92,17 @@ calibrates for itself, and the operability layer that decides whether a customer
   a week, which is the failure mode that looks like success.
 - **A recorded window of the live cluster** (`Tests/test_fixtures/lab/lab-window-healthy-12pod.csv`): 60
   minutes, twelve replicas, 241 scrapes, 12 of 13 channels at 100% coverage.
+- **`SingleTokenProjectionKernel.ParallelWorkThresholdOverride`** — an additive public knob (`long?`, `null`
+  keeps the existing `ParallelWorkThreshold` constant, so no behaviour changes for anyone who ignores it).
+  It exists because the shipped constant is an absolute element count tuned on a 32-core desktop, and that
+  is **the wrong unit on a phone**: measured 2026-08-14 on a Snapdragon 7s Gen 2, SmolLM2-135M's FFN matmuls
+  are 576×1536 = **884,736** — 12% below the 1,000,000 bound — so every one of them took the sequential path
+  and ran on the calling thread, 46% of decode wall time. Lowering the bound to 100,000 took that device
+  from 8.7 to 10.1 tok/s. **The library default is unchanged on purpose**: the same lowering measured 1.2×
+  to 2.9× *slower* on the 32-core box, where 32 workers split a matrix row into cache-line-sized pieces. So
+  the value is a per-application decision, not a new default, and a rule that derives it from worker count
+  and matrix shape is still open work. Full conditions, including a benchmark that did **not** reproduce,
+  in `docs/measured-baselines.md`.
 
 ### Changed
 
@@ -216,6 +227,32 @@ calibrates for itself, and the operability layer that decides whether a customer
 _2026-08-02 — the six defects a code review found on paths no measurement exercises, plus eighteen from
 five `overfit-find-bugs-game` hunts. Everything below was verified by test; the kernel change was verified
 by parity, benchmark and an end-to-end generation on a real model._
+
+- **A race in the decode spin-pool could run one dispatch's body against another's context — and, more
+  quietly, return a partially computed token.** `OverfitParallel.ForDecode` had workers claim a chunk index
+  with a bare `Interlocked.Increment` after observing a fresh generation. A worker descheduled between the
+  two could resume *after* its dispatch had completed, released the gate and been replaced by the next one,
+  which rewrites the descriptor array wholesale — so the straggler indexed into descriptors being
+  overwritten and could pair a `Body` from one dispatch with a `Context` from another. Observed 2026-08-14
+  as a `DivideByZeroException` with an FFN dispatch frame beneath an attention body. **The silent
+  consequence was the worse one**: its extra decrement of the shared completion counter let a *later*
+  dispatch stop waiting early and return a partially written output buffer, with no exception at all.
+  The generation and the next index now occupy one 64-bit word claimed by a single compare-and-swap, so a
+  claim that loses its generation takes nothing — a failed check must not consume an index, or the chunk it
+  burned would never run and the dispatcher would wait for a completion that never arrives. **This affected
+  the default configuration on every non-Android platform** (the pool is on by default; Android already
+  disables it). Confirmed by two `[LongFact]` diagnostics going green, one of which —
+  `PrefillCallCountTests` — had been dismissed as a test-precision defect and was in fact counting the
+  duplicate executions this race produced.
+- **The decode pool's park protocol could leak wake tokens.** Workers registered in a parked count and the
+  dispatcher released exactly that many semaphore tokens; a worker that registered, then saw the generation
+  move and skipped its wait, left its token behind for ever, and a surplus token makes the *next* park
+  return immediately. Replaced with a `Monitor` wait on the generation predicate, which cannot leak: a
+  surplus pulse costs one re-check and a missed one is impossible, because the dispatcher publishes the
+  generation and pulses under the same lock. **Stated honestly: the benefit is un-quantified.** The test
+  that would show it (`DecodePoolIdleBurnTests`) measures process-wide CPU and is confounded by its
+  neighbours in a 52-test process — filed as `TG-T13`. The leak is real by inspection; its cost is not
+  measured.
 
 - **Escaping in the three learned-state stores did not round-trip, and the same defect was in all
   three.** *(2026-08-04.)* Each carried a private `Escape`/`Unescape` pair built from sequential

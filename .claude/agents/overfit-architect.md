@@ -121,6 +121,20 @@ ones that cost real money when they are wrong:
 per call, or `ComputationGraph`'s tape with `AutogradNode` ownership and `Reset()`. Mixing them is documented
 as the most common architectural mistake here. Every component in your design belongs to one; say which.
 
+**Process-global mutable state, and who else is already touching it.** For any seam, hook or test accessor
+onto `static` mutable state, run `find_callers` on the production entry point that consumes that state and
+**list the tests reaching it that are NOT `[LongFact]` and NOT fixture-gated** — those run in the fast suite,
+in parallel, on every `dotnet test`. A test seam that writes state the fast suite is concurrently using is a
+**hang risk, not a flakiness risk**, and the two need different answers: this repository's completion waits
+are pure spins with no timeout inside a lock, so the failure is a run that never returns rather than a red
+test somebody can read.
+
+Added 2026-08-14 because this check is what overturned the `XC-49` plan. The recommended seam looked immune
+— it never wrote the generation counter that wakes the pool — and was not, because the pool is *already
+awake*: eight plain `[Fact]`s reach `ForDecode` transitively, `xunit.v3` parallelises collections by default,
+and nothing in `Tests/` disables it. The repository already carries two open rows of this shape (`TG-T12`,
+`TG-T13`), so it is a recurring failure rather than a one-off.
+
 **Ownership and disposal.** Every `AutogradNode` carries an ownership tag deciding who disposes it —
 `GraphTemporary`, `GraphAuxiliary`, `Parameter`, `ExternalBorrowed`, `View`. This is *exactly* the
 "who owns this data" question, in this domain's terms. A new type that holds a buffer needs its tag decided in

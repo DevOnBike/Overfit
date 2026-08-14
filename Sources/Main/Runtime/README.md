@@ -9,7 +9,7 @@ environment knobs.
 | `GcLatencyScope` / `GcHandleScope` | Scoped GC latency mode and pinned handles. |
 | `CompositeDisposable` | One `using` for several owned things. |
 | `OverfitEnvironment` | Environment-variable knobs, read in one place so they are greppable. |
-| `PooledArray` | `ref struct` wrapping `ArrayPool` rent/return as a `using`. |
+| `PooledBuffer<T>` | Pooled scratch as a `using` scope. Lives in `Tensors/`, not here. A plain `struct` on purpose, so it can be a class field or captured. |
 
 ## `OverfitParallel` versus `Parallel.For` — measured, and it goes both ways
 

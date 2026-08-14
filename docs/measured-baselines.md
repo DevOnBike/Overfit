@@ -106,7 +106,14 @@ library compiled to 16 kB rather than 1155 kB — that build is "AOT" in name on
 Superseded by this: the July 2026 figure of 9.5 tok/s on a JIT build, which had been read as evidence
 that AOT cost throughput. It was a different (shorter, cooler) run, not a different codegen.
 
-## Android exposes NO ARM hardware intrinsics — every `Arm.*` kernel is dead code there — 2026-08-14
+## Android exposes NO ARM hardware intrinsics — every `Arm.*` kernel is dead code there
+
+**Known since 2026-07-20, not discovered on 2026-08-14.** `OverfitParallel.ResolveDecodePool` has carried
+the fact in a comment since commit `7bb8f87` — it is the documented reason the decode spin-pool is off on
+Android. It is restated here because it was re-found independently on 2026-08-14 by someone who had read
+neither, which is the definition of a fact living in the wrong place: a comment on a scheduling decision is
+not where anyone looks before planning kernel work. **What 2026-08-14 added is the price tag** (the Q4_K
+measurement below) and the consequence for the recorded `SDOT` result — not the fact itself.
 
 Logged from the app itself at startup, on a Motorola Edge 50 Fusion (Snapdragon 7s Gen 2), in **both** a
 JIT build and a full-AOT one:
@@ -147,8 +154,15 @@ validated against the existing scalar oracle for bit-identity. The prize is larg
 reads 5.4x fewer bytes and currently runs 6.4x slower — but nothing about it was measurable until the
 capability probe existed.
 
-**Check the probe, not the build flag.** This was found only because the app logs what the *runtime*
-reports at startup. A build flag says what was requested; `IsSupported` says what will execute.
+**Check the probe, not the build flag.** The measurement above exists because the app logs what the
+*runtime* reports at startup. A build flag says what was requested; `IsSupported` says what will execute.
+
+**And check whether the repository already knows.** This cost an afternoon of measuring toward a
+conclusion that was sitting in a comment a month old. The fact was in `OverfitParallel`, filed under a
+scheduling decision; nothing in `docs/` said it, so a search of the documentation found nothing and the
+work proceeded as if the question were open. Search the **source**, not only the docs — and search it with
+the semantic navigator (`find_references`, `find_callers`), which resolves symbols instead of matching
+text, rather than with a text grep.
 
 ## `ParallelWorkThreshold` is in the wrong unit — 2026-08-14
 

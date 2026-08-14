@@ -299,7 +299,7 @@ Two independent layers guard the library against trim/AOT regressions:
    - `System.Linq.Expressions.Expression`
    - `System.Activator`
    - `Array.Copy` (use `Span<T>.CopyTo`)
-   - Raw `ArrayPool<T>.Shared` (use `PooledBuffer<T>` or `PooledArray`)
+   - Raw `ArrayPool<T>.Shared` (use `PooledBuffer<T>`)
 2. **`Tests/AotSmokeTest`** is a thin console exe that the `aot-guard` CI job publishes under `PublishAot=true` + `TreatWarningsAsErrors=true`. Libraries cannot be Native-AOT compiled directly (no entry point), so the smoketest is the real AOT consumer — ILCompiler actually runs, IL2026 / IL3050 / IL31xx warnings on reachable code are promoted to errors, and the resulting native binary is executed as a smoke check. Extend `Tests/AotSmokeTest/Program.cs` cautiously: each new touched type or method widens AOT verification scope but may surface latent trim warnings that block publish until the library is fixed.
 
 Use explicit `for`/`foreach` over `Span<T>`, delegates over reflection, explicit
