@@ -5,8 +5,9 @@
 #    ./build-release.ps1 -Format aab -VersionCode 3   # signed AAB for Play Console
 #    ./build-release.ps1 -Install             # also flash it to the connected phone
 #
-#  Supersedes make-apk.ps1 and make-aab.ps1 (same signing approach, one script, and the AOT flags
-#  corrected - see below). Those two are kept for now only so nobody's muscle memory breaks.
+#  Replaced make-apk.ps1 and make-aab.ps1, deleted 2026-08-14: same signing approach, one script for both
+#  formats, and the AOT flags corrected - those two shipped RunAOTCompilation without
+#  AndroidEnableProfiledAot=false, which is "AOT" in name only (see below).
 #
 #  Why AOT here and not in build-dev.ps1. Measured 2026-08-14 on a Snapdragon 7s Gen 2, 6 launches
 #  per arm, arms verified from the installed libaot-*.so files rather than from the build flags

@@ -106,6 +106,50 @@ library compiled to 16 kB rather than 1155 kB — that build is "AOT" in name on
 Superseded by this: the July 2026 figure of 9.5 tok/s on a JIT build, which had been read as evidence
 that AOT cost throughput. It was a different (shorter, cooler) run, not a different codegen.
 
+## Android exposes NO ARM hardware intrinsics — every `Arm.*` kernel is dead code there — 2026-08-14
+
+Logged from the app itself at startup, on a Motorola Edge 50 Fusion (Snapdragon 7s Gen 2), in **both** a
+JIT build and a full-AOT one:
+
+```text
+simd: Dp=False  AdvSimd=False  AdvSimd64=False  V128hw=True  forceScalar=False
+```
+
+`AdvSimd.IsSupported` is false on an **arm64** device — that is base NEON, which every arm64 CPU has.
+The hardware is not the explanation: the kernel advertises the dot-product extension outright.
+
+```text
+/proc/cpuinfo Features: fp asimd evtstrm aes pmull sha1 sha2 crc32 atomics fphp asimdhp
+                        cpuid asimdrdm lrcpc dcpop asimddp
+```
+
+**So .NET-for-Android does not expose `System.Runtime.Intrinsics.Arm.*` at all**, in either compilation
+mode, and every kernel written against `AdvSimd` / `Dp` silently executes its scalar fallback. Nothing
+reports this: the fallback is a correctness path, so the only symptom is speed. `Vector128<T>` — the
+portable API — *is* accelerated (`V128hw=True`), which is the way to get SIMD on this platform.
+
+**Three earlier results are explained or invalidated by this:**
+
+- The recorded negative result *"ARM NEON `SDOT`: correct and pointless — decode is dequant-bound, not
+  dot-bound"* almost certainly measured code that **never ran**. Its conclusion about where decode's time
+  goes cannot be trusted; the port was not pointless, it was unreachable.
+- Q4_K decode measured **639 ms/token against 100 ms for F32** — 6.4x slower while reading 5.4x *fewer*
+  bytes, which is 0.16 GB/s against F32's 5.5 GB/s. Not remotely bandwidth-bound: it is scalar
+  dequantisation plus a scalar dot product. Per component: `ffn_gateup` 268.6 ms (was 27.3), `lm_head`
+  135.0 (was 10.5), `attention` 199.7 (was 46.8). RSS did drop as intended, 1035 -> 652 MB.
+- Keeping mobile on `quantize:false` is right, but not for the reason the code claimed. It is not that
+  "F32 beats the quantized kernels under Mono's weaker codegen" in general — it is that the quantized
+  kernels have no vector path on this platform at all.
+
+**Consequence for the roadmap.** Closing the gap to llama.cpp on mobile is not a dequantisation-cost
+problem. It is a port of the quantised GEMV kernels from `Arm.*` intrinsics to portable `Vector128<T>`,
+validated against the existing scalar oracle for bit-identity. The prize is large — the quantised path
+reads 5.4x fewer bytes and currently runs 6.4x slower — but nothing about it was measurable until the
+capability probe existed.
+
+**Check the probe, not the build flag.** This was found only because the app logs what the *runtime*
+reports at startup. A build flag says what was requested; `IsSupported` says what will execute.
+
 ## `ParallelWorkThreshold` is in the wrong unit — 2026-08-14
 
 Same phone and model as the section above, decode profiled with `DecodeProfiler` (which adds ~240
@@ -138,10 +182,24 @@ new bar, and they are parallelised head-wise one level up) and did not appear.
 **+16% for 4x the cores, because the ceiling is bandwidth.** ~540 MB of F32 weights are read per token:
 4.75 GB/s before, 5.5 GB/s after. Predicting 2-4x on the FFN was wrong for that reason.
 
-**The fix is not this constant.** An absolute element count is the wrong unit: what decides is work
-*per worker* against dispatch cost, and 1,000,000 was tuned on a 32-core desktop where both sides of
-that comparison differ. The value in the tree is an experiment, not a design — it changes desktop
-behaviour too and must not ship without a worker-aware rule and a desktop re-measurement.
+**The fix is not this constant, and the desktop measurement says so.** `DecodeProjectionThresholdBenchmark`
+streams 512 MB of distinct weight matrices (past L3, so no reuse — decode's regime, not a cache-resident
+microbenchmark) and compares the sequential path against the parallel one at three shapes and four worker
+counts. **The parallel path did not win a single one of the twelve cells**; its best result was a 1.02 tie.
+Lowering the library default would therefore buy nothing on this box and cost up to 3x.
+
+That is enough to decide the change and not enough to derive the rule, because **the benchmark did not
+reproduce**: the same configuration (32 workers, OutputSize 1536) measured 2.16 in one run and 1.02 in
+another, and `RatioSD` reached 1.40 with means and medians disagreeing two-fold (32.01 ms mean against a
+16.61 ms median). The canary — a second, identical sequential arm — stayed within 2-4% in every run, so
+the box was steady and the instability belongs to the parallel path itself. Suspected but NOT checked:
+thread placement across this CPU's two asymmetric-cache CCDs, and the strided reads that an output-band
+split produces over a row-major weight matrix.
+
+**So the resting place is a per-app override, not a new default.** `ParallelWorkThresholdOverride` is set
+to 100,000 by the Android demo, where it was measured to pay, and left null everywhere else. A rule that
+decides from worker count and matrix shape is still the right end state, but deriving it needs a harness
+that reproduces first.
 
 **Not measured, do not cite as one:** forcing `quantize:true` (Q4_K-resident, ~5.4x fewer bytes per
 token) was tried as the bandwidth lever and abandoned — time-to-first-token went ~1 s to ~6 s and the

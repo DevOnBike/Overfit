@@ -19,7 +19,11 @@
 param(
     [string]$Device,
     [switch]$Log,
-    [switch]$NoInstall
+    [switch]$NoInstall,
+    # Debug-signed AOT build. Slow (minutes), but it is the only way to test anything that depends on
+    # hardware intrinsics: on 2026-08-14 a JIT build on an arm64 phone reported Dp/AdvSimd as UNSUPPORTED,
+    # so every NEON path in the quantised kernels silently ran its scalar fallback.
+    [switch]$Aot
 )
 
 $ErrorActionPreference = 'Stop'
@@ -44,11 +48,21 @@ if ($Device) {
     & $adb connect $Device
 }
 
-Write-Host 'Building (Release, no AOT, incremental) ...'
-dotnet build $proj -c Release -f net10.0-android `
-    -p:RunAOTCompilation=false `
-    -p:AndroidSdkDirectory=$sdk `
-    -p:AcceptAndroidSDKLicenses=true
+if ($Aot) {
+    Write-Host 'Building (Release, FULL AOT — minutes) ...'
+    dotnet build $proj -c Release -f net10.0-android `
+        -p:RunAOTCompilation=true `
+        -p:AndroidEnableProfiledAot=false `
+        -p:AndroidSdkDirectory=$sdk `
+        -p:AcceptAndroidSDKLicenses=true
+}
+if (-not $Aot) {
+    Write-Host 'Building (Release, no AOT, incremental) ...'
+    dotnet build $proj -c Release -f net10.0-android `
+        -p:RunAOTCompilation=false `
+        -p:AndroidSdkDirectory=$sdk `
+        -p:AcceptAndroidSDKLicenses=true
+}
 if ($LASTEXITCODE -ne 0) { throw "Build failed (exit $LASTEXITCODE)." }
 
 if ($NoInstall) {
@@ -86,7 +100,7 @@ foreach ($attempt in 1..20) {
     $arm = $null
 }
 if ($arm) {
-    Write-Host "On device -> $arm   (expect aotLibs=0 from this script)"
+    Write-Host "On device -> $arm"
 }
 if (-not $arm) {
     Write-Host 'Could not confirm the running build from the app log (it may not have started yet).' -ForegroundColor Yellow

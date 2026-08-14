@@ -95,6 +95,11 @@ namespace DevOnBike.OverfitChat
         // The headline tok/s is a CUMULATIVE mean since the first token, which starts high and falls as it
         // converges — it cannot tell a real slowdown apart from that convergence. These marks give the rate
         // per SegmentTokens-token window, which can. Sized for the 512-token generation cap.
+        // Flip to true to log a per-component decode breakdown for every generation (see OnSend).
+        // `static readonly` rather than `const` on purpose: a const folds at compile time and the guarded
+        // block becomes CS0162 unreachable code, which is a warning nobody should have to suppress.
+        private static readonly bool ProfileDecode = false;
+
         private const int SegmentTokens = 32;
         private readonly long[] _genMarks = new long[512 / SegmentTokens + 1];
         private int _genMarkCount;
@@ -127,6 +132,17 @@ namespace DevOnBike.OverfitChat
                     aotBytes += new System.IO.FileInfo(library).Length;
                 }
                 AppLog.Write($"build: aotLibs={aotLibraries.Length} ({aotBytes / 1024} kB)");
+
+                // Which arithmetic path will the quantised kernels actually take? Q4_K decode measured 6.4x
+                // SLOWER than F32 here, and this repository has already been bitten once by a build whose
+                // instruction set silently fell back to a baseline ISA, making SIMD decode ~6x slower. Before
+                // treating that as a property of the kernel, check the kernel is the one being executed.
+                AppLog.Write(
+                    $"simd: Dp={System.Runtime.Intrinsics.Arm.Dp.IsSupported} " +
+                    $"AdvSimd={System.Runtime.Intrinsics.Arm.AdvSimd.IsSupported} " +
+                    $"AdvSimd64={System.Runtime.Intrinsics.Arm.AdvSimd.Arm64.IsSupported} " +
+                    $"V128hw={System.Runtime.Intrinsics.Vector128.IsHardwareAccelerated} " +
+                    $"forceScalar={Q4KDotKernel.ForceScalar}");
             }
             catch (Exception probeError)
             {
@@ -144,6 +160,14 @@ namespace DevOnBike.OverfitChat
                 System.Environment.SetEnvironmentVariable(OverfitEnvironment.ParallelWorkers, fastCores.ToString());
                 AppLog.Write($"OVERFIT_PARALLEL_WORKERS={fastCores}");
             }
+
+            // The library default (1,000,000 elements) keeps this model's 576x1536 FFN matmuls on the
+            // sequential path, which measured as 46% of decode wall time here; 100,000 took the phone from
+            // 8.7 to 10.1 tok/s. Set per-app rather than changed in the library because the same lowering
+            // measured 1.2x to 2.9x SLOWER on a 32-core desktop, where 32 workers split a row into
+            // cache-line-sized pieces. See docs/measured-baselines.md; this goes away once the kernel
+            // decides from worker count and shape instead of an absolute element count.
+            SingleTokenProjectionKernel.ParallelWorkThresholdOverride = 100_000;
             Android.Runtime.AndroidEnvironment.UnhandledExceptionRaiser += (_, e) =>
                 AppLog.Write("Unhandled exception", e.Exception);
             AppDomain.CurrentDomain.UnhandledException += (_, e) =>
@@ -701,14 +725,17 @@ namespace DevOnBike.OverfitChat
                         });
                     }
 
-                    // Per-component decode breakdown for this turn. `other` is the serial remainder —
-                    // norms, residuals, embed, final norm — which is the quantity under investigation:
-                    // the process uses ~1.5 of the 4 cores it is pinned to, and CPU time counts DRAM
-                    // stalls, so the missing 2.5 cores are threads PARKED, not threads waiting on memory.
-                    // Enabling this adds a Stopwatch read per hook, so the totals here run slightly slower
-                    // than an unprofiled turn; the SHARES are what this is for, not the absolute tok/s.
-                    DecodeProfiler.Reset();
-                    DecodeProfiler.Enabled = true;
+                    // Per-component decode breakdown, off by default. Flip ProfileDecode to true and the log
+                    // gains an attention / ffn / lm_head / sampler / other split per turn; `other` is the
+                    // serial remainder (norms, residuals, embed). It found the real bottleneck on
+                    // 2026-08-14 — the FFN matmuls were 12% below ParallelWorkThreshold and ran on one
+                    // thread — so it earns its place, but it costs a Stopwatch read per hook and a
+                    // multi-line log entry per message, which is not what a user's phone should be doing.
+                    if (ProfileDecode)
+                    {
+                        DecodeProfiler.Reset();
+                        DecodeProfiler.Enabled = true;
+                    }
 
                     AppLog.Write("affinity(before): " + BigCoreAffinity.Apply());
                     client.Send(text, onText: token =>
@@ -741,8 +768,11 @@ namespace DevOnBike.OverfitChat
                 }
                 finally
                 {
-                    DecodeProfiler.Enabled = false;
-                    AppLog.Write(DecodeProfiler.Report());
+                    if (ProfileDecode)
+                    {
+                        DecodeProfiler.Enabled = false;
+                        AppLog.Write(DecodeProfiler.Report());
+                    }
 
                     var toks = _genTokens;
                     var genMs = _genFirstTokenMs > 0 ? Android.OS.SystemClock.ElapsedRealtime() - _genFirstTokenMs : 0;
@@ -1063,6 +1093,18 @@ namespace DevOnBike.OverfitChat
                 // is NO tok/s figure for that arm — the run was never completed. Weak evidence, but it points
                 // the same way as the earlier note. Bytes per token are not obviously the only ceiling here;
                 // anyone re-proposing this should finish the run and get the number.
+                // RAM vs speed, chosen by model size. quantize:false = every weight F32 -> ~8x the Q4_K file
+                // size in RAM, but far faster here. quantize:true = Q4_K/Q6_K mmap'd zero-copy (low,
+                // reclaimable working set) + Q8 for the rest. Keep F32 for models small enough to fit, and
+                // switch big models to the quantized/mmap path so they do not OOM the phone.
+                //
+                // MEASURED 2026-08-14, and the reason is not the one the old comment gave. Q4_K decode ran
+                // 639 ms/token against 100 ms for F32 — 6.4x SLOWER while reading 5.4x FEWER bytes, i.e.
+                // 0.16 GB/s, nowhere near bandwidth-bound. The cause is that .NET-for-Android exposes NO ARM
+                // hardware intrinsics (AdvSimd.IsSupported is false on this arm64 device, which advertises
+                // asimddp in /proc/cpuinfo), so every NEON path in the quantised kernels runs its SCALAR
+                // fallback. Fixing that means porting those kernels to the portable Vector128<T> API, which
+                // this runtime does accelerate. Until then F32 is the right choice on mobile.
                 var quantize = fileBytes >= 550_000_000; // ~>0.7B Q4_K → mmap/quantized; smaller → fast F32
 
                 // maxNewTokens is a SAFETY cap, not the expected length — a well-behaved chat model stops at its

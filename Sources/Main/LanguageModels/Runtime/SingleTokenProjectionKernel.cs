@@ -160,12 +160,25 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// parallelise while the small per-head attention projections stay
         /// sequential (they are better parallelised head-wise, one level up).
         /// </summary>
-        // EXPERIMENT 2026-08-14, not a committed value — revert or replace with a worker-aware rule.
-        // Measured on a Snapdragon 7s Gen 2: SmolLM2-135M's FFN matmuls are 576x1536 = 884,736, i.e. 12%
-        // BELOW this threshold, so all of them ran sequentially on the calling thread. That is 46% of
-        // decode wall time, and it matches the thread accounting (decode driver 2620 jiffies against 1267
-        // for all four workers combined) and the profiler (only lm_head, at 28M work, parallelised).
-        public const long ParallelWorkThreshold = 100_000;
+        public const long ParallelWorkThreshold = 1_000_000;
+
+        /// <summary>
+        /// Overrides <see cref="ParallelWorkThreshold"/> when set; <c>null</c> uses the constant.
+        /// <para>
+        /// <b>Why this exists.</b> The constant is an absolute element count tuned on a 32-core desktop,
+        /// and that is the wrong unit: what decides is work <i>per worker</i> against dispatch cost.
+        /// Measured 2026-08-14 on a Snapdragon 7s Gen 2 (4 fast cores), SmolLM2-135M's FFN matmuls are
+        /// 576x1536 = 884,736 — 12% below the constant — so every one of them took the sequential path and
+        /// ran on the calling thread, which was 46% of decode wall time. Lowering the bound to 100,000 took
+        /// that model from 8.7 to 10.1 tok/s. See <c>docs/measured-baselines.md</c>.
+        /// </para>
+        /// <para>
+        /// It is a settable value rather than a second constant so a single benchmark process can compare
+        /// both bounds without rebuilding — comparing two builds is how a machine's drift gets attributed
+        /// to a code change. Not thread-safe by design: set it once at startup, or around a measurement.
+        /// </para>
+        /// </summary>
+        public static long? ParallelWorkThresholdOverride { get; set; }
 
         /// <summary>
         /// Parallel projection for large matmuls (FFN, LM head). Splits the
@@ -198,7 +211,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 throw new ArgumentException("Bias span is smaller than outputSize.", nameof(bias));
             }
 
-            if ((long)inputSize * outputSize < ParallelWorkThreshold
+            if ((long)inputSize * outputSize < (ParallelWorkThresholdOverride ?? ParallelWorkThreshold)
                 || OverfitParallel.WorkerCount <= 1)
             {
                 Project(input, weightsInputOutput, bias, output, inputSize, outputSize);
