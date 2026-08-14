@@ -73,4 +73,100 @@
 
     </Target>
 
+    <!--
+      A build is the third consumer of this machine, and until now it was the only one nobody had told.
+
+      `Global\DevOnBike.Overfit.MachineMeasurement` is taken by the benchmark host (Sources/Benchmark/
+      Program.cs) and by the test suite (Tests/MeasurementExclusion.cs), so benchmark-vs-benchmark,
+      benchmark-vs-tests and tests-vs-tests are all guarded. Build-vs-anything was not, and on 2026-08-13 a
+      `dotnet build` ran inside a live [LongFact] window, rewriting assemblies a test host had already
+      loaded. It is the prime suspect for the stall that followed (docs/TASKS.md, XC-42 and PB-7).
+
+      CHECK, NOT LOCK, and the distinction is the whole design. This target probes the mutex and fails; it
+      never takes it. `dotnet test` and `dotnet run` against Sources/Benchmark both BUILD FIRST, so a build
+      that held the lock would deadlock the very commands it exists to protect. Probing covers the direction
+      that caused harm — a human building while something measures — and leaves the reverse to the mutex the
+      measuring processes already share.
+
+      IT FAILS OPEN. Anything the probe cannot determine — a permissions error, an unreadable handle, a
+      platform that does not name mutexes the same way — lets the build through. A wrongly blocked build
+      costs more than one contaminated sample, and a guard that stops the whole repository compiling is
+      ripped out within a week rather than fixed.
+
+      ONCE PER BUILD, not once per project: gated on Main, the same way the prerelease check above is,
+      because this solution has 26 projects and a message printed 26 times is wallpaper. The consequence,
+      stated rather than discovered: building a project that does not reference Main is unguarded.
+
+      THREE WAYS PAST IT, each deliberate.
+        OVERFIT_ALLOW_CONCURRENT_MEASUREMENT=1  the same named escape hatch the test suite already reads.
+        OVERFIT_MEASUREMENT_OWNER=<pid>         set by the benchmark host before it starts BenchmarkDotNet.
+                                                BDN compiles a generated project per job WHILE the run holds
+                                                the mutex, and child processes inherit the environment, so
+                                                this is what stops the guard deadlocking a benchmark against
+                                                itself. Ownership rather than exemption: the build belongs to
+                                                the run in progress.
+        -p:OverfitBuildExclusionCheck=false     one build, no environment change.
+
+      Inline task rather than an analyzer, which is against this repository's direction of travel and is a
+      deliberate exception: MSBuild property functions cannot call Mutex.TryOpenExisting (it is not on the
+      allow-list), and an analyzer runs inside the compiler, which is already too late to stop a build from
+      writing over a loaded assembly. The body is ten lines with no parsing in it — unlike the 120 lines of
+      regex that were moved out of Main.csproj in 2026-08-05, which is what that comment is about.
+    -->
+    <UsingTask TaskName="OverfitMeasurementProbe"
+               TaskFactory="RoslynCodeTaskFactory"
+               AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.Core.dll">
+        <ParameterGroup>
+            <MutexName ParameterType="System.String" Required="true" />
+            <Held ParameterType="System.Boolean" Output="true" />
+        </ParameterGroup>
+        <Task>
+            <Using Namespace="System" />
+            <Using Namespace="System.Threading" />
+            <Code Type="Fragment" Language="cs"><![CDATA[
+                Held = false;
+
+                try
+                {
+                    Mutex existing;
+
+                    // Existence is the signal, not ownership: both participants create the mutex and
+                    // acquire it immediately, and hold the handle for the whole run. A handle that exists
+                    // therefore means a run is in progress.
+                    if (Mutex.TryOpenExisting(MutexName, out existing))
+                    {
+                        using (existing)
+                        {
+                            Held = true;
+                        }
+                    }
+                }
+                catch (Exception)
+                {
+                    // Fail OPEN, deliberately. A permissions error on a Global\ handle would otherwise
+                    // block every build on this machine for a reason nobody could see.
+                    Held = false;
+                }
+            ]]></Code>
+        </Task>
+    </UsingTask>
+
+    <Target Name="OverfitBuildExclusionCheck"
+            BeforeTargets="CoreCompile"
+            Condition="'$(OverfitBuildExclusionCheck)' != 'false'
+                       AND '$(MSBuildProjectName)' == 'Main'
+                       AND '$(OVERFIT_ALLOW_CONCURRENT_MEASUREMENT)' != '1'
+                       AND '$(OVERFIT_MEASUREMENT_OWNER)' == ''">
+
+        <OverfitMeasurementProbe MutexName="Global\DevOnBike.Overfit.MachineMeasurement">
+            <Output TaskParameter="Held" PropertyName="_OverfitMeasurementHeld" />
+        </OverfitMeasurementProbe>
+
+        <Error Condition="'$(_OverfitMeasurementHeld)' == 'true'"
+               Code="OVERFITMEASURING"
+               File="$(MSBuildThisFileDirectory)Directory.Build.targets"
+               Text="A benchmark or a test run holds Global\DevOnBike.Overfit.MachineMeasurement, so this build is refusing to start: it would rewrite assemblies a live test host has already loaded (that cost an hour on 2026-08-13) and land a compile inside somebody's sampling window. SOMETHING ALIVE holds it - a holder that died raises AbandonedMutexException, which both participants treat as free.%0AFind it by NAME PATTERN, never by process class; a healthy run is a matched pair (DevOnBike.Overfit.Tests.exe beside a testhost.exe), and the test executable alive with NO testhost beside it is an orphan. Kill the process TREE, not the runner.%0A  Get-CimInstance Win32_Process | Where-Object { $_.Name -match 'Overfit|Tests' } | Select-Object ProcessId,ParentProcessId,Name,CreationDate,CommandLine%0AWait for the run to finish, or set OVERFIT_ALLOW_CONCURRENT_MEASUREMENT=1 if you know they are not sharing a box." />
+
+    </Target>
+
 </Project>

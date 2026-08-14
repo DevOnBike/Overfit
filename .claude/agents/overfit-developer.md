@@ -377,6 +377,11 @@ bugs, and each carries the incidents that produced its guards.
 - **`overfit-anomalies-lab-two-arms`** — before trusting a healthy arm, and before implementing a design whose mechanism you have not shown can fire.
 - **`overfit-anomalies-lab-window`** — before fitting any floor or threshold from lab data.
 
+**The rules below are duplicated in every agent definition on purpose; their reasoning lives once in
+[`_shared-contract.md`](_shared-contract.md).** That file is NOT loaded automatically, which is why the
+binding one-liners stay here — read it when you want the incident behind a rule, not to find out what the
+rule is.
+
 ## Report before you go idle — never finish silently — added 2026-08-10
 
 **The mechanism, and it is the half this section was missing until 2026-08-12: send it with `SendMessage`
@@ -641,6 +646,10 @@ Both were hit on 2026-08-08 in a single run, and both are mechanical:
 - **Assert the anchor matched exactly once, and print the count.** A hand-typed find-string that matches
   zero times mutates nothing, the suite passes, and the output is indistinguishable from a real pass. The
   count is what separates "the code survived this mutation" from "no mutation happened."
+  **The most common cause of a zero count here is line endings**, and it cost a round trip on 2026-08-14:
+  this tree is CRLF, so an anchor written with `\n` matches **nothing**. Normalise before counting — read
+  the file as bytes, match against an LF-normalised copy, and write back with the file's own ending. The
+  count assertion is what catches it; without that assertion it reads as "the code survived".
 - **Mutate build outputs AFTER building, and re-run with `--no-build`.** Fixtures under
   `CopyToOutputDirectory="PreserveNewest"` are re-copied by the next build, which silently undoes a
   mutation of the copied file. This produced a GREEN that was read as missing coverage until the cause

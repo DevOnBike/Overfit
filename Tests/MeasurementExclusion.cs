@@ -54,6 +54,13 @@ namespace DevOnBike.Overfit.Tests
     /// <para>So a script keying on exit code 2 no longer works through <c>dotnet test</c>, and a human who
     /// hits this reads something unintelligible instead of the sentence written for them. Recorded rather
     /// than papered over: a refusal nobody can interpret is only half a guard. Tracked as <c>XC-17</c>.</para>
+    ///
+    /// <para><b>So the refusal writes itself down instead.</b> Since 2026-08-14 it leaves
+    /// <c>Tests/bin/measurement-refusal.txt</c> — see <see cref="MeasurementRefusalMarker"/> — naming the
+    /// lock, the timestamp, the run that was refused and every live process that could be holding it. The
+    /// console cannot carry the message; a file can, and a script can read it. This does not fix
+    /// <c>XC-17</c>'s exit code, and is not meant to: it makes the reason legible, which is the half that
+    /// cost an hour on 2026-08-13 (<c>XC-42</c>).</para>
     /// </summary>
     public sealed class MeasurementExclusion : XunitTestFramework
     {
@@ -109,6 +116,17 @@ namespace DevOnBike.Overfit.Tests
                     + "start: thirty-two cores of test load inside a benchmark's sampling window produces a "
                     + "wrong number that looks like a measurement. Wait for it to finish, or set "
                     + "OVERFIT_ALLOW_CONCURRENT_MEASUREMENT=1 if you know the two are not sharing a box.");
+
+                // Written down because the sentence above does not survive the VSTest bridge — see XC-17,
+                // and see XC-42 for the hour it cost when it did not. The marker names the live holder,
+                // which is the fact the console cannot deliver.
+                var marker = MeasurementRefusalMarker.Write(MutexName);
+
+                if (marker is not null)
+                {
+                    Console.Error.WriteLine($"Details written to {marker}");
+                }
+
                 Console.Error.Flush();
 
                 Environment.Exit(2);

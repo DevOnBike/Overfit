@@ -546,6 +546,11 @@ bugs, and each carries the incidents that produced its guards.
 
 - **`overfit-anomalies-lab-two-arms`** — your design must be provable by two arms, and each arm capable of a verdict — quote the gates the intended input has to clear.
 
+**The rules below are duplicated in every agent definition on purpose; their reasoning lives once in
+[`_shared-contract.md`](_shared-contract.md).** That file is NOT loaded automatically, which is why the
+binding one-liners stay here — read it when you want the incident behind a rule, not to find out what the
+rule is.
+
 ## Report before you go idle — never finish silently — added 2026-08-10
 
 **The mechanism, and it is the half this section was missing until 2026-08-12: send it with `SendMessage`

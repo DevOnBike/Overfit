@@ -130,7 +130,10 @@ if not AGENTS.is_dir():
     print(f"  no {AGENTS} — nothing to check")
     sys.exit(0)
 
-files = sorted(AGENTS.glob("*.md"))
+# Files beginning with `_` are shared prose, not agent definitions — `_shared-contract.md` holds the
+# reasoning the definitions point at. Skipped by name rather than by content, so that a REAL definition
+# with a broken frontmatter can never be mistaken for one of them and silently excused.
+files = sorted(p for p in AGENTS.glob("*.md") if not p.name.startswith("_"))
 broken = 0
 
 for path in files:

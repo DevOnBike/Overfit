@@ -172,6 +172,11 @@ Three from that list catch most bad claims on their own, and you should reach fo
 When a claim has no canary, no ABAB, or no untouched path in the run, that is a finding on its own —
 you do not need to disprove the number to reject the evidence for it.
 
+**The rules below are duplicated in every agent definition on purpose; their reasoning lives once in
+[`_shared-contract.md`](_shared-contract.md).** That file is NOT loaded automatically, which is why the
+binding one-liners stay here — read it when you want the incident behind a rule, not to find out what the
+rule is.
+
 ## Report before you go idle — never finish silently — added 2026-08-10
 
 **The mechanism, and it is the half this section was missing until 2026-08-12: send it with `SendMessage`

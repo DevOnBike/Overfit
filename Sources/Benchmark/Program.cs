@@ -76,6 +76,16 @@ namespace Benchmarks
                     return BusyExitCode;
                 }
 
+                // Claim ownership of the machine for the build guard in Directory.Build.targets, which
+                // refuses any build while this mutex is held. BenchmarkDotNet compiles a generated project
+                // per job while this process holds it, and those compilers are children that inherit this
+                // environment — so without the claim the guard would deadlock the benchmark against itself
+                // rather than against a human. Ownership rather than exemption: a build carrying this pid
+                // belongs to the run in progress.
+                Environment.SetEnvironmentVariable(
+                    MeasurementOwnerVariable,
+                    Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture));
+
                 OverfitLicense.SuppressNotice = true;
                 OverfitLicense.MessageSink = _ => { };
 
@@ -115,6 +125,16 @@ namespace Benchmarks
 
         /// <summary>Exit code for "someone else is measuring" — distinct from a benchmark failure.</summary>
         private const int BusyExitCode = 2;
+
+        /// <summary>
+        /// Environment variable naming the process that owns the machine for the duration of a run, read by
+        /// the <c>OverfitBuildExclusionCheck</c> target in <c>Directory.Build.targets</c>.
+        ///
+        /// <para>It exists so the build guard can tell "a human started a build during a benchmark" from
+        /// "BenchmarkDotNet is compiling its own generated project", which are the same event to a mutex
+        /// probe and opposite events to a human.</para>
+        /// </summary>
+        private const string MeasurementOwnerVariable = "OVERFIT_MEASUREMENT_OWNER";
 
         /// <summary>
         /// Whether a lab measurement holds its watcher lock.
