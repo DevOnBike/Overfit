@@ -34,10 +34,14 @@ if ([string]::IsNullOrEmpty($keyPass)) { $keyPass = $storePass }
 $env:OVERTHINK_STOREPASS = $storePass
 $env:OVERTHINK_KEYPASS   = $keyPass
 
+# AndroidEnableProfiledAot=false is required whenever AOT is on, not cosmetic: at its default only the
+# startup profile is compiled, and the engine library came out at 16 kB instead of 1155 kB when measured
+# on 2026-08-14 — ~1.4% compiled, "AOT" in name only. Superseded by build-release.ps1.
 Write-Host "Building signed APK (AOT=$Aot — AOT takes a few minutes) ..."
 dotnet publish $proj -c Release -f net10.0-android `
     -p:AndroidPackageFormat=apk `
     -p:RunAOTCompilation=$Aot `
+    -p:AndroidEnableProfiledAot=false `
     -p:AndroidSdkDirectory=$sdk `
     -p:AcceptAndroidSDKLicenses=true `
     -p:AndroidKeyStore=true `

@@ -16,8 +16,8 @@ using Android.Widget;
 using DevOnBike.Overfit.LanguageModels;
 using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Loading;
-
 using DevOnBike.Overfit.LanguageModels.Whisper;
+using DevOnBike.Overfit.Runtime;
 
 namespace DevOnBike.OverfitChat
 {
@@ -74,8 +74,15 @@ namespace DevOnBike.OverfitChat
         private volatile bool _busy;
         private bool _inChat; // true while the chat screen is shown (drives Back → welcome instead of exit)
 
-        // After this much idle time the model is unloaded (frees ~RAM) and the user returns to model select.
+        // After this much idle time the model's weights are released. On the chat screen the conversation
+        // STAYS on screen and the next message reloads the model — freeing ~1 GB of RAM must not cost the
+        // user their conversation, which is what returning to model select used to do while they were
+        // simply reading a long answer.
         private const int IdleUnloadMs = 30_000;
+
+        // Set when the idle timer released the weights while the chat stayed up: "the conversation is still
+        // here, the model is not". Non-null is the signal for OnSend to reload before generating.
+        private string? _suspendedModelPath;
         private readonly Android.OS.Handler _idleHandler = new(Android.OS.Looper.MainLooper!);
 
         // Live on-device CPU/RAM/tok-per-sec readout shown in the header subtitle while the model generates.
@@ -133,7 +140,7 @@ namespace DevOnBike.OverfitChat
             var fastCores = BigCoreAffinity.FastestCoreCount();
             if (fastCores > 0)
             {
-                System.Environment.SetEnvironmentVariable("OVERFIT_PARALLEL_WORKERS", fastCores.ToString());
+                System.Environment.SetEnvironmentVariable(OverfitEnvironment.ParallelWorkers, fastCores.ToString());
                 AppLog.Write($"OVERFIT_PARALLEL_WORKERS={fastCores}");
             }
             Android.Runtime.AndroidEnvironment.UnhandledExceptionRaiser += (_, e) =>
@@ -514,10 +521,13 @@ namespace DevOnBike.OverfitChat
         // Builds the SamplingOptions for the chosen preset and installs it on the client (preserving the other
         // GenerationOptions fields). DRY (Don't-Repeat-Yourself) is on for all three — it penalises would-be
         // verbatim repetitions before sampling, so it breaks loops even under the deterministic "Precise" preset.
-        private void ApplySampling(int mode)
+        private void ApplySampling(int mode) => ApplySampling(mode, _client);
+
+        // Overload taking the client explicitly: the lazy reload has to configure the new client BEFORE
+        // publishing it to the field, so it cannot go through the field-reading form.
+        private void ApplySampling(int mode, OverfitClient? client)
         {
             _samplingMode = mode;
-            var client = _client;
             if (client == null)
             {
                 return;
@@ -632,7 +642,9 @@ namespace DevOnBike.OverfitChat
             {
                 return;
             }
-            if (_client == null)
+            // A suspended model is not a missing one — the idle timer released the weights and the path to
+            // reload them is known, so the send proceeds and the reload happens below.
+            if (_client == null && _suspendedModelPath == null)
             {
                 Toast.MakeText(this, "Model is still loading…", ToastLength.Short)!.Show();
                 return;
@@ -655,11 +667,28 @@ namespace DevOnBike.OverfitChat
             AddUserBubble(text);
             var update = AddStreamingAssistantBubble();
             var client = _client;
+            var suspendedPath = _suspendedModelPath;
 
             System.Threading.Tasks.Task.Run(() =>
             {
                 try
                 {
+                    if (client == null)
+                    {
+                        // Reload the weights the idle timer released. Configured BEFORE being published to
+                        // the field, so no other code can observe a client without its sampling preset.
+                        RunOnUiThread(() => _subtitle.Text = "⏳ reloading model…");
+                        var reloaded = CreateClient(suspendedPath!, DisplayName(suspendedPath!));
+                        ApplySampling(_samplingMode, reloaded.Client);
+                        client = reloaded.Client;
+                        RunOnUiThread(() =>
+                        {
+                            _client = reloaded.Client;
+                            _modelInfo = reloaded.Info;
+                            _suspendedModelPath = null;
+                        });
+                    }
+
                     AppLog.Write("affinity(before): " + BigCoreAffinity.Apply());
                     client.Send(text, onText: token =>
                     {
@@ -969,6 +998,31 @@ namespace DevOnBike.OverfitChat
         {
             try
             {
+                var loaded = CreateClient(path, displayName);
+                RunOnUiThread(() =>
+                {
+                    _client?.Dispose();
+                    _client = loaded.Client;
+                    _modelInfo = loaded.Info;
+                    _suspendedModelPath = null;
+                    ApplySampling(_samplingMode); // wire the chosen preset (incl. DRY) into the fresh client
+                    Prefs.Edit()!.PutString("last_model_path", path)!.Apply();
+                    ShowChat();
+                });
+            }
+            catch (Exception ex)
+            {
+                AppLog.Write("Model load failed", ex);
+                RunOnUiThread(() => SetWelcomeError(ex.Message));
+            }
+        }
+
+        // The load itself, with no UI and no field side effects, so the first load and the lazy reload after
+        // an idle unload cannot drift apart in the parameters they pass (context length, quantisation policy,
+        // token cap). Runs on a background thread; throws on failure for the caller to report.
+        private (OverfitClient Client, ModelInfo Info) CreateClient(string path, string displayName)
+        {
+            {
                 // quantize:false keeps Q4_K resident (measured ~4× faster on-device than the Q8 requant path);
                 // 4096 context + sliding window so long multi-turn chats don't error on "context full".
                 // RAM vs speed, chosen by model size. quantize:false = every weight F32 → ~8× the Q4_K file
@@ -984,21 +1038,7 @@ namespace DevOnBike.OverfitChat
                 var client = OverfitClient.LoadGguf(
                     path, maxContextLength: 4096, mmap: true, quantize: quantize, maxNewTokens: 512, slidingWindow: true);
                 AppLog.Write($"Model load: {System.IO.Path.GetFileName(path)} ({fileBytes / (1024 * 1024)} MB, quantize={quantize})");
-                var info = BuildInfo(path, client, displayName);
-                RunOnUiThread(() =>
-                {
-                    _client?.Dispose();
-                    _client = client;
-                    _modelInfo = info;
-                    ApplySampling(_samplingMode); // wire the chosen preset (incl. DRY) into the fresh client
-                    Prefs.Edit()!.PutString("last_model_path", path)!.Apply();
-                    ShowChat();
-                });
-            }
-            catch (Exception ex)
-            {
-                AppLog.Write("Model load failed", ex);
-                RunOnUiThread(() => SetWelcomeError(ex.Message));
+                return (client, BuildInfo(path, client, displayName));
             }
         }
 
@@ -1094,7 +1134,9 @@ namespace DevOnBike.OverfitChat
             _idleHandler.PostDelayed(UnloadIfIdle, IdleUnloadMs);
         }
 
-        // Fired 30s after the last activity: free the model and send the user back to model select.
+        // Fired 30s after the last activity: free the model's weights. On the chat screen that is ALL it
+        // does — the conversation stays and the next message reloads. Only off the chat screen does it also
+        // return to model select.
         private void UnloadIfIdle()
         {
             if (_client == null)
@@ -1112,11 +1154,24 @@ namespace DevOnBike.OverfitChat
                 return;
             }
 
-            AppLog.Write("Model unloaded after 30s idle.");
+            var lastPath = Prefs.GetString("last_model_path", null);
             _client.Dispose();
             _client = null;
-            _modelInfo = null;
             _whisper = null; // free the speech model's RAM too
+
+            // In the chat: keep the screen, keep `_modelInfo` so the header still names the model, and
+            // remember what to reload. Without a known path there is nothing to reload from, so fall back
+            // to the old behaviour rather than stranding the user in a chat that can never answer.
+            if (_inChat && !string.IsNullOrEmpty(lastPath) && System.IO.File.Exists(lastPath))
+            {
+                _suspendedModelPath = lastPath;
+                AppLog.Write("Model unloaded after 30s idle (chat kept, reloads on next message).");
+                _subtitle.Text = "💤 model unloaded — send a message to reload";
+                return;
+            }
+
+            AppLog.Write("Model unloaded after 30s idle.");
+            _modelInfo = null;
             ShowWelcome();
         }
 
