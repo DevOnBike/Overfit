@@ -38,5 +38,82 @@ namespace DevOnBike.Overfit.Tests.TestSupport.Helpers
                 $"(tolerating < {OneTimeJitNoiseFloorBytes} B one-time JIT/tier-up bookkeeping; a real per-call " +
                 $"leak would be hundreds of KB).");
         }
+
+        /// <summary>
+        /// Runs <paramref name="body"/> <paramref name="iterations"/> times and asserts it allocated nothing
+        /// per call — <b>and, when it did, says enough to tell which of the three mechanisms it was without
+        /// a second sighting.</b>
+        ///
+        /// <para><b>Why the loop lives in here rather than at the call site.</b> The overload above reports
+        /// one total, which is enough to fail but not enough to diagnose: a total of, say, 4 KB is equally
+        /// consistent with a one-time tier-up blip that outgrew the floor, with a warm-up that never
+        /// completed, and with a genuine allocation on a rarely-taken path. Those need different fixes and
+        /// the run that catches them is, by construction, the run that does not reproduce. Recorded
+        /// 2026-08-14 for `XC-38`: four non-reproducing failures are on record here with no numbers between
+        /// them, and the next one has to be diagnostic on its own.</para>
+        ///
+        /// <para><b>The discriminator is the split.</b> The loop is measured in two halves. Tier-up, OSR and
+        /// PGO bookkeeping are front-loaded — they land in the first half and the second half is clean. A
+        /// real per-call allocation is uniform, so both halves carry roughly the same bytes per iteration.
+        /// The GC collection counts are the third arm: a collection inside the window means another thread
+        /// was allocating hard, which is the load-sensitivity these intermittent failures are suspected of.
+        /// None of this costs anything on the passing path — two extra counter reads.</para>
+        /// </summary>
+        /// <param name="label">What is under measurement, quoted verbatim in the failure message.</param>
+        /// <param name="iterations">Total calls; split evenly between the two measured halves.</param>
+        /// <param name="body">
+        /// The operation under test. Create the delegate <b>before</b> calling — the closure allocates once,
+        /// at the call site, outside the measured window.
+        /// </param>
+        public static void NoPerCallAllocation(string label, int iterations, Action body)
+        {
+            var half = iterations / 2;
+
+            var gen0 = GC.CollectionCount(0);
+            var gen1 = GC.CollectionCount(1);
+            var gen2 = GC.CollectionCount(2);
+
+            var start = GC.GetAllocatedBytesForCurrentThread();
+
+            for (var i = 0; i < half; i++)
+            {
+                body();
+            }
+
+            var mid = GC.GetAllocatedBytesForCurrentThread();
+
+            for (var i = half; i < iterations; i++)
+            {
+                body();
+            }
+
+            var end = GC.GetAllocatedBytesForCurrentThread();
+
+            var total = end - start;
+
+            if (total >= 0 && total < OneTimeJitNoiseFloorBytes)
+            {
+                return;
+            }
+
+            var firstHalf = mid - start;
+            var secondHalf = end - mid;
+            var perCall = iterations > 0 ? (double)total / iterations : 0d;
+            var secondHalfPerCall = iterations - half > 0 ? (double)secondHalf / (iterations - half) : 0d;
+
+            Assert.Fail(
+                $"{label}: {total} B allocated over {iterations} calls — expected none per call "
+                + $"(tolerating < {OneTimeJitNoiseFloorBytes} B one-time JIT/tier-up bookkeeping).\n"
+                + $"  first half:  {firstHalf} B over {half} calls\n"
+                + $"  second half: {secondHalf} B over {iterations - half} calls "
+                + $"({secondHalfPerCall:F1} B/call)\n"
+                + $"  overall:     {perCall:F1} B/call\n"
+                + $"  GC while measuring: gen0 +{GC.CollectionCount(0) - gen0}, "
+                + $"gen1 +{GC.CollectionCount(1) - gen1}, gen2 +{GC.CollectionCount(2) - gen2}\n"
+                + "  Reading it: a clean second half means the first half caught one-time JIT/tier-up work "
+                + "and the floor, not the code, is what to look at. Both halves allocating means a real "
+                + "per-call allocation. Gen collections above zero mean another thread was allocating "
+                + "hard during the window.");
+        }
     }
 }

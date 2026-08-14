@@ -579,6 +579,13 @@ the report rather than implied by its size.
 invocation `python D:/Overfit/.claude/do-overfit-developer.py`.** Write the file with `Write`, then run that one
 command. Do not issue ad-hoc `dotnet` / `grep` / `sed` / `kubectl` lines directly.
 
+**When the Edit tool says a file changed on disk since you last read it, STOP editing that file.** Read it,
+work out what the other writer did, and **report the collision** — do not carry on editing over it. Added
+2026-08-14 from an incident where two agents edited the same new script within minutes; it ended well only
+because the second one noticed the notice and adopted the first one's design, which was better than its
+own. That was judgement, not procedure, and judgement is what fails when the file is large or the change
+looks trivial.
+
 **Print `git status --porcelain` as your LAST action and report any difference from the start of your run.**
 Added 2026-08-13 from an incident: an agent reported "I left the index alone", which was true of its own
 actions and false of the tree — its four new files were staged, by something else, while it worked. It

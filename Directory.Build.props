@@ -2,6 +2,16 @@
     <PropertyGroup>
         <Version>10.1.0</Version>
         <FileVersion>10.1.0</FileVersion>
+
+        <!-- The last version actually ON nuget.org, which is NOT the same thing as `Version` above and is
+             the only correct anchor for anything that must reference a published package — today just
+             `Templates/content/OverfitChat`, whose content may not point into this repository at all.
+             Added 2026-08-14 after the template was found pinned at 10.0.29 while nuget held 10.0.31 and
+             this file said 10.1.0: a checker anchored on `Version` would have bumped the template to an
+             unpublished package and broken `dotnet new overfit-chat` on first restore.
+             UPDATE THIS WHEN YOU PUBLISH, in the same commit that stamps the CHANGELOG.
+             `Scripts/check_template_pins.py` reads it; it is not consumed by any build. -->
+        <LastPublishedVersion>10.0.31</LastPublishedVersion>
         <InformationalVersion>release+id</InformationalVersion>
         <Authors>DevOnBike</Authors>
         <Company>Sharp IT</Company>

@@ -85,6 +85,31 @@ grandchildren hold, which turned a 20-minute bound into 63 minutes; killing the 
 without saying so lost three of the eight from `Anomalies` permanently. Both are fixed in the runner; the
 63-minute figure is left standing because it is what a wrong bound costs.
 
+## What the analyzer census can actually see — 26 of 34 projects
+
+**Every "the tree was swept to zero" claim in this repository is a claim about `Overfit.sln`**, and the
+solution holds **26 of the 34 `.csproj` on disk**. Measured 2026-08-14 (`XC-27`). This matters because the
+escalations recorded in `.editorconfig:559-565` were locked on exactly that evidence — *"a whole-solution
+rebuild with all three temporarily raised to `warning` reports 0 and 0"* — and a whole-solution rebuild
+**structurally cannot see the other eight**.
+
+It is not hypothetical. Building the eight one at a time:
+
+- **`Sources/AndroidBench` reports 2 live `OVERFIT043` errors** (`DecodeBench.cs:64`, `:218`). It lives
+  under `Sources/`, where every rule here is aimed, and it was never in the sweep that justified making
+  that rule an error.
+- **`Demo/VoiceLoop` does not compile at all**: `MicCapture.cs:85` calls `GCHandleScope.Pin`, and the type
+  has been `GcHandleScope` since a rename that swept the solution. **The same rename also left the old name
+  in the type's own doc comment** (`GcHandleScope.cs:14`). A rename passed the gate and left an
+  out-of-solution project uncompilable, silently, for however long.
+- **`Demo/VoiceClone`'s `OVERFIT040` pragma is live** — 0 sites with it, **1 site with it neutralised**
+  (`Program.cs:376`). A sweep reading the census's "0 sites" as "the pragma protects nothing" would have
+  deleted a real suppression.
+
+**So when citing a zero from an analyzer census, say what it covered.** The number is true of the solution
+and says nothing about `Sources/AndroidBench`, `Demo/{AndroidBenchApp,OverfitChatApp,SkillEvalConsole,VoiceClone,VoiceLoop}`
+or the two `Templates` projects.
+
 ## What the comparisons are measured AGAINST — name it beside every ratio
 
 A ratio has two sides, and this file used to record only ours. **A reader assumes the other side is the

@@ -9,9 +9,24 @@
   <ItemGroup>
     <!-- The Overfit runtime (pure .NET, in-process) + its Microsoft.Extensions.AI adapter, and the
          Microsoft.Extensions.AI DI package that gives you AddChatClient(...). No Ollama, no Docker. -->
-    <PackageReference Include="DevOnBike.Overfit" Version="10.0.29" />
-    <PackageReference Include="DevOnBike.Overfit.Extensions.AI" Version="10.0.29" />
-    <PackageReference Include="Microsoft.Extensions.AI" Version="10.8.0" />
+    <!-- Pinned to the LAST PUBLISHED version, kept in `Directory.Build.props` as
+         `<LastPublishedVersion>`, NOT to this repository's `<Version>`. The two differ whenever work is in
+         flight: on 2026-08-14 the repo built 10.1.0 while nuget.org held 10.0.31, and pinning the former
+         would have made `dotnet new overfit-chat` fail to restore. Template content may reference only
+         published packages — see `Directory.Build.props` for why this project is outside the solution and
+         outside Central Package Management. `Scripts/check_template_pins.py` compares these against that
+         property; run it after every publish. -->
+    <PackageReference Include="DevOnBike.Overfit" Version="10.0.31" />
+    <PackageReference Include="DevOnBike.Overfit.Extensions.AI" Version="10.0.31" />
+    <!-- 10.9.0 (2026-08-11), matching the release train pinned in `Directory.Packages.props`. Surveyed
+         before bumping: the one breaking item in that release caps `Microsoft.Extensions.AI.OpenAI`'s
+         OpenAI dependency, and neither this template nor the repository references that package; the new
+         routing/failover clients are additive and experimental. This project calls `AddChatClient` and
+         `IChatClient` only. Its dependency floor moves to >= 10.0.11, which is the .NET security patch a
+         customer restoring today gets anyway. NOT VERIFIED BY BUILDING: nothing in this repository can
+         build this project (`NU1008` under CPM), so scaffolding from the published package is the only
+         way to check it. -->
+    <PackageReference Include="Microsoft.Extensions.AI" Version="10.9.0" />
   </ItemGroup>
 
 </Project>

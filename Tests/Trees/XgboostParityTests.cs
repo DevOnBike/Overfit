@@ -143,17 +143,19 @@ namespace DevOnBike.Overfit.Tests.Trees
             // Per-thread counter: thread-isolated (not polluted by parallel xUnit collections). The
             // calling thread participates in a parallel chunk, so a per-row allocation would surface here;
             // OverfitParallel.For's dispatch is independently proven 0 B/call.
-            var before = GC.GetAllocatedBytesForCurrentThread();
-
-            for (var i = 0; i < 50; i++)
+            //
+            // The loop is handed to the helper rather than measured here so that a failure carries the
+            // half-by-half split and the GC counts — this test failed once on 2026-08-13 and did not
+            // reproduce in five subsequent runs, and the byte count from that run was never captured
+            // (`XC-38`). The closure is built here, before the helper takes its first sample.
+            var body = () =>
             {
                 model.PredictBatch(flat, rows, output);
                 model.PredictBatchParallel(flat, rows, output);
                 model.Predict(io.Features[0], single);
-            }
+            };
 
-            var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
-            AllocationAssert.NoPerCallAllocation(allocated, "XGBoost batch + parallel + single predict");
+            AllocationAssert.NoPerCallAllocation("XGBoost batch + parallel + single predict", 50, body);
         }
 
         [Fact]

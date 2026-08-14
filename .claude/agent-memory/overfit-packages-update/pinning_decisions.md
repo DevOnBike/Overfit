@@ -61,4 +61,60 @@ Overfit deliberately does not depend on; zero `PackageReference`. The role defin
 same change, because it had listed `TorchSharp-cpu` among the parity-test backers and that was the reason
 this looked like an oversight rather than dead weight. Nothing to flag on future surveys.
 
+**2026-08-14 survey.** Box was not busy (only `overfit.exe` PID 15512 running, no `testhost`/`Tests.exe`/
+`Benchmarks.exe` — safe to restore/list). SDK now has **10.0.111** installed alongside 10.0.110 (default,
+no `global.json`); runtime shared frameworks (NETCore/AspNetCore/WindowsDesktop) now have **10.0.11**
+installed alongside 10.0.10 — the 2026-08-11 security servicing release (10 CVEs, one CVSS 7.0
+`CVE-2026-62897`) **is now installed on this box**, where the 2026-08-11 survey found it not yet installed.
+`dotnet list Overfit.sln package --vulnerable --include-transitive` is clean (0) across all 26 projects —
+now 3 days past the same-day Advisory-DB lag concern, so this clean result is trustworthy for NuGet-level
+CVEs. Caveat still applies: that check is about *packages*, not the shared runtime itself, so it would never
+have reported CVE-2026-62897 either way — the runtime/SDK install (confirmed above) is what actually closes
+it, not any `PackageVersion` edit. `--deprecated` clean.
+
+Re-verified the Roslyn pin survives the SDK patch: `csc.dll` in the new SDK 10.0.111 reports ProductVersion
+`5.0.0-2.26373.116+e2f47b01...` (vs `5.0.0-2.26326.116+f7d90799...` in 10.0.110) — same `5.0.0` major.minor.patch,
+different build stamp (the `e2f47b01`/`f7d90799` hashes match the ones already recorded against
+`System.Numerics.Tensors` 10.0.11/10.0.10 above — same servicing wave). **`Microsoft.CodeAnalysis.CSharp` @
+5.0.0 pin is still correct post-patch.** `dotnet msbuild -version` on the default (10.0.111) SDK still
+reports `18.0.11` — `Microsoft.Build.Framework`/`Microsoft.NET.StringTools` @ 18.9.6 remain comfortably
+above the SDK's own MSBuild, consistent with the 2026-08-11 "tested rather than reasoned" verdict above.
+
+`dotnet list Overfit.sln package --outdated` now shows exactly **4** outdated top-level entries, all in the
+"pinned on purpose" bucket already documented: `Microsoft.CodeAnalysis.CSharp`/`.CSharp.Workspaces`/
+`.Workspaces.MSBuild` 5.0.0→5.6.0 (Tests/Analyzers/SemanticNavigator) and `Microsoft.ML.OnnxRuntime`
+1.28.0→1.29.0 (Benchmarks, see the PB-ORT1 note above). Everything else in the solution is at feed latest —
+confirms the 2026-08-11 batch of bumps (Build.Framework/StringTools 18.9.6, TestHost/Tensors 10.0.11,
+SourceLink.GitHub 10.0.400, System.CommandLine 2.0.11) landed and nothing new appeared since.
+
+**New this survey: `Scripts/check_template_pins.py` (task `XC-24`, added 2026-08-12) exists and does exactly
+this job for the template** — offline, compares `Templates/**/*.csproj` pins against CPM/`<LastPublishedVersion>`/
+release-train siblings. Ran it 2026-08-14: self-test passes, and it reports exactly one drift —
+`Templates/content/OverfitChat/OverfitChat.csproj`: `Microsoft.Extensions.AI 10.8.0` is behind `10.9.0`, the
+version its release-train siblings (`.Abstractions`/`.Evaluation`/`.Evaluation.Quality`) are pinned to in
+`Directory.Packages.props`. `DevOnBike.Overfit*` pins in the template (10.0.31) agree with
+`<LastPublishedVersion>` — clean. **Run this script first on any future "does the template need a bump"
+question** — it is the tool built for exactly that, and re-deriving the comparison by hand each time is the
+waste it was written to stop.
+
+**Microsoft.Extensions.AI 10.8.0 → 10.9.0, checked directly (not inferred from the `.Abstractions` sibling
+note)**: published 2026-08-11 (same day as the .NET security release). New in 10.9.0: `RoutingChatClient`/
+`SemanticRoutingChatClient` + `FailoverChatClient`/`OrderedFailoverChatClient` (dotnet/extensions#7662,
+#7685) — additive, experimental. One breaking item, and it does not apply to this package: 10.9.0 caps the
+**`Microsoft.Extensions.AI.OpenAI`** package's OpenAI dependency at 2.12.x — a package neither the template
+nor this repo references. Dependency floor did move: `net10.0` deps now require
+`Microsoft.Extensions.{Caching,DependencyInjection,Logging}.Abstractions`/`System.Numerics.Tensors` **>=
+10.0.11** (was >= 10.0.10 in 10.8.0) — ties the package to the same-day .NET security patch level, which a
+customer restoring today gets regardless. Checked what the template's `Program.cs` actually calls:
+`AddChatClient(...)` + `IChatClient` only (`Templates/content/OverfitChat/Program.cs:28,36`) — the most basic
+surface, untouched by either change. **Verdict: safe to bump to 10.9.0.** Not verified: whether
+`dotnet new overfit-chat` + restore + build actually succeeds post-bump (nothing in this repo builds the
+template — see `XC-24`'s own rationale) — that check has no automated home yet and would need to be run by
+hand against the template output.
+
+**Also flagged, not a package but load-bearing on this question**: the template's `DevOnBike.Overfit*` pins
+now move via `<LastPublishedVersion>` in `Directory.Build.props` (currently 10.0.31, `<Version>` is 10.1.0
+unpublished) rather than a hand comparison — same 2026-08-14/`XC-24` mechanism, already clean per the
+checker run above.
+
 See also [[test-only-packages]] for the cheap-bump bucket.

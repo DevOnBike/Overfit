@@ -3,6 +3,8 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Linq;
+using BenchmarkDotNet.Reports;
 using BenchmarkDotNet.Running;
 using DevOnBike.Overfit.Licensing;
 
@@ -34,6 +36,12 @@ namespace Benchmarks
         /// and "am I measuring or waiting?" is worth more than the convenience. BenchmarkDotNet's
         /// per-benchmark child processes are generated programs with their own entry point, so they never
         /// re-enter this method and cannot deadlock against the parent.</para>
+        ///
+        /// <para><b>Exit codes.</b> <c>0</c> at least one benchmark produced a measurement, or the caller
+        /// asked an informational question (<c>--list</c>, <c>--info</c>, <c>--help</c>);
+        /// <see cref="BusyExitCode"/> something else is measuring; <see cref="NothingRanExitCode"/> the host
+        /// started and nothing was measured. The last one exists because BenchmarkDotNet reports a failed
+        /// build as log text and returns normally — see <see cref="NothingRanExitCode"/>.</para>
         /// </summary>
         private static int Main(string[] args)
         {
@@ -89,11 +97,12 @@ namespace Benchmarks
                 OverfitLicense.SuppressNotice = true;
                 OverfitLicense.MessageSink = _ => { };
 
-                BenchmarkSwitcher
+                var summaries = BenchmarkSwitcher
                     .FromAssembly(typeof(Program).Assembly)
-                    .Run(args);
+                    .Run(args)
+                    .ToList();
 
-                return 0;
+                return ExitCodeFor(summaries, args);
             }
             finally
             {
@@ -125,6 +134,161 @@ namespace Benchmarks
 
         /// <summary>Exit code for "someone else is measuring" — distinct from a benchmark failure.</summary>
         private const int BusyExitCode = 2;
+
+        /// <summary>
+        /// Exit code for "the host started, but nothing was measured".
+        ///
+        /// <para><b>Why this exists.</b> BenchmarkDotNet reports a failed build as log text and then returns
+        /// normally, so before 2026-08-14 a run whose build errored printed <c>// Build Error: …</c>,
+        /// <c>executed benchmarks: 0</c> and then <b>exit code 0</b>. A script, a CI step or an agent keying
+        /// on the exit code could not tell that from a real run — a green signal over an empty result, which
+        /// is the worst shape a failure can take because nothing downstream looks again.</para>
+        ///
+        /// <para>Distinct from <see cref="BusyExitCode"/> on purpose: "someone else is measuring" is an
+        /// expected outcome a caller may retry, while "nothing ran" means the caller's premise was wrong and
+        /// retrying will produce the same nothing.</para>
+        /// </summary>
+        private const int NothingRanExitCode = 3;
+
+        /// <summary>
+        /// Turns the run's summaries into an exit code, and says on stderr <b>which</b> kind of nothing
+        /// happened when nothing did.
+        ///
+        /// <para>Three outcomes are deliberately kept apart, because they call for three different actions:
+        /// a filter that matched no benchmark is a mistake in the command line; an empty selection with no
+        /// filter is a picker that was dismissed; and cases that were selected but produced no measurement
+        /// is a build or validation failure whose detail is in the log above. They share
+        /// <see cref="NothingRanExitCode"/> — a caller only needs to know the run is void — but a human
+        /// reading stderr should not have to guess which one they hit.</para>
+        /// </summary>
+        /// <param name="summaries">Everything <see cref="BenchmarkSwitcher.Run"/> returned.</param>
+        /// <param name="args">The command line, used only to tell the three outcomes apart.</param>
+        /// <returns>0 if at least one benchmark produced a measurement, otherwise <see cref="NothingRanExitCode"/>.</returns>
+        private static int ExitCodeFor(IReadOnlyList<Summary> summaries, string[] args)
+        {
+            // --help / --list / --info are answered by BenchmarkDotNet with no summaries at all, and they
+            // are not failures: the caller asked a question and got an answer. Checked first so the
+            // "nothing ran" code never fires on a successful query.
+            if (IsInformationalInvocation(args))
+            {
+                return 0;
+            }
+
+            var selectedCases = 0;
+            var measured = 0;
+
+            foreach (var summary in summaries)
+            {
+                selectedCases += summary.BenchmarksCases.Length;
+
+                // A report exists for a benchmark that failed to build or failed to run, and it carries no
+                // measurements. Counting measurements rather than reports is what separates "it ran" from
+                // "it was attempted".
+                measured += summary.Reports.Count(report => report.AllMeasurements.Count > 0);
+            }
+
+            if (measured > 0)
+            {
+                return 0;
+            }
+
+            if (selectedCases > 0)
+            {
+                Console.Error.WriteLine(
+                    $"No benchmark produced a measurement: {selectedCases} case(s) were selected and none of "
+                    + "them ran.");
+                Console.Error.WriteLine(
+                    "Look above for '// Build Error', a validation error or a crashed child process — that is "
+                    + "where the run stopped. The results, if any were written, are from an earlier run.");
+
+                return NothingRanExitCode;
+            }
+
+            Console.Error.WriteLine("No benchmark was selected, so this run measured nothing.");
+
+            var filter = FilterArgument(args);
+
+            if (filter is not null)
+            {
+                Console.Error.WriteLine(
+                    $"If the filter '{filter}' matched nothing: BenchmarkDotNet matches the fully-qualified "
+                    + "name, so a class name normally needs a star on both sides — "
+                    + "--filter \"*SingleInferenceBenchmark*\". Use --list flat to see the names this "
+                    + "assembly actually exposes.");
+            }
+
+            if (filter is null)
+            {
+                Console.Error.WriteLine(
+                    "Pass --filter \"*\" to run everything, or a pattern to run a subset; --list flat prints "
+                    + "the available names.");
+            }
+
+            // Measured 2026-08-14 while proving this exit path: a REJECTED command line produces exactly the
+            // same empty result as a filter that matched nothing — `--cli <missing path>` prints "The
+            // provided CliPath … does NOT exist" and returns zero summaries. Nothing in the return value
+            // separates the two, so the message above says "if" rather than asserting the filter is at
+            // fault, and this line names the other cause instead of leaving the reader to be misled.
+            Console.Error.WriteLine(
+                "If the log above reports a rejected or unknown option instead, that is the cause — "
+                + "BenchmarkDotNet returns the same empty result for a command line it could not parse.");
+
+            return NothingRanExitCode;
+        }
+
+        /// <summary>
+        /// Whether the command line asks BenchmarkDotNet a question rather than asking it to measure.
+        ///
+        /// <para>These all return zero summaries by design, so without this they would be indistinguishable
+        /// from a run that measured nothing. Prefix matching rather than equality because the switches take
+        /// a value in both forms — <c>--list flat</c> and <c>--list=flat</c>.</para>
+        /// </summary>
+        private static bool IsInformationalInvocation(string[] args)
+        {
+            foreach (var arg in args)
+            {
+                if (arg.StartsWith("--list", StringComparison.OrdinalIgnoreCase)
+                    || arg.StartsWith("--info", StringComparison.OrdinalIgnoreCase)
+                    || arg.StartsWith("--help", StringComparison.OrdinalIgnoreCase)
+                    || arg.StartsWith("--version", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(arg, "-h", StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// The filter pattern the caller passed, or <see langword="null"/> if they passed none. Used only to
+        /// pick the right message; <c>-f</c> and <c>--filter</c> are BenchmarkDotNet's two spellings, and
+        /// either may carry its value in the next argument or after an <c>=</c>.
+        /// </summary>
+        private static string FilterArgument(string[] args)
+        {
+            for (var i = 0; i < args.Length; i++)
+            {
+                var arg = args[i];
+
+                if (arg.StartsWith("--filter=", StringComparison.OrdinalIgnoreCase))
+                {
+                    return arg["--filter=".Length..];
+                }
+
+                if (!string.Equals(arg, "--filter", StringComparison.OrdinalIgnoreCase)
+                    && !string.Equals(arg, "-f", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                // A trailing --filter with no value: report the switch itself rather than an empty string,
+                // which would read as "matched nothing" when the real problem is a missing argument.
+                return i + 1 < args.Length ? args[i + 1] : arg;
+            }
+
+            return null;
+        }
 
         /// <summary>
         /// Environment variable naming the process that owns the machine for the duration of a run, read by
