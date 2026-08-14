@@ -84,6 +84,13 @@ namespace DevOnBike.OverfitChat
         private int _genTokens;          // streamed tokens this turn (one onText callback ≈ one token)
         private long _genFirstTokenMs;   // timestamp of the first token, so tok/s excludes the prefill wait
 
+        // The headline tok/s is a CUMULATIVE mean since the first token, which starts high and falls as it
+        // converges — it cannot tell a real slowdown apart from that convergence. These marks give the rate
+        // per SegmentTokens-token window, which can. Sized for the 512-token generation cap.
+        private const int SegmentTokens = 32;
+        private readonly long[] _genMarks = new long[512 / SegmentTokens + 1];
+        private int _genMarkCount;
+
         // Models live as individual *.gguf files here (the bundled SmolLM2 + any the user added).
         private string ModelsDir => System.IO.Path.Combine(GetExternalFilesDir(null)!.AbsolutePath, "models");
         private const string BuiltInAsset = "smollm2-135m.gguf";
@@ -98,6 +105,37 @@ namespace DevOnBike.OverfitChat
             base.OnCreate(savedInstanceState);
 
             AppLog.Init(GetExternalFilesDir(null)!.AbsolutePath);
+
+            // Which arm is this? An AOT build ships libaot-*.so next to the runtime; a JIT build ships
+            // none. Recorded from the installed files rather than from a build-time constant, so a log
+            // line cannot claim an arm the APK does not actually contain.
+            try
+            {
+                var nativeLibraryDir = ApplicationInfo!.NativeLibraryDir!;
+                var aotLibraries = System.IO.Directory.GetFiles(nativeLibraryDir, "libaot-*.so");
+                var aotBytes = 0L;
+                foreach (var library in aotLibraries)
+                {
+                    aotBytes += new System.IO.FileInfo(library).Length;
+                }
+                AppLog.Write($"build: aotLibs={aotLibraries.Length} ({aotBytes / 1024} kB)");
+            }
+            catch (Exception probeError)
+            {
+                AppLog.Write("build: AOT probe failed", probeError);
+            }
+
+            // One worker per fast core. BigCoreAffinity confines decode to the big cluster (4 cores here),
+            // and the engine otherwise spawns Environment.ProcessorCount (8) workers — a 2x oversubscription
+            // that hurts barrier-synchronised kernels, because a preempted worker makes every other one wait
+            // at the barrier. Read before the engine is first touched: OverfitParallel resolves this once, in
+            // its static constructor, and ignores later changes.
+            var fastCores = BigCoreAffinity.FastestCoreCount();
+            if (fastCores > 0)
+            {
+                System.Environment.SetEnvironmentVariable("OVERFIT_PARALLEL_WORKERS", fastCores.ToString());
+                AppLog.Write($"OVERFIT_PARALLEL_WORKERS={fastCores}");
+            }
             Android.Runtime.AndroidEnvironment.UnhandledExceptionRaiser += (_, e) =>
                 AppLog.Write("Unhandled exception", e.Exception);
             AppDomain.CurrentDomain.UnhandledException += (_, e) =>
@@ -611,32 +649,45 @@ namespace DevOnBike.OverfitChat
             _idleHandler.RemoveCallbacksAndMessages(null);
             _genTokens = 0;
             _genFirstTokenMs = 0;
+            _genMarkCount = 0;
             StartStatsUpdater();
 
             AddUserBubble(text);
             var update = AddStreamingAssistantBubble();
-            var sb = new StringBuilder();
             var client = _client;
 
             System.Threading.Tasks.Task.Run(() =>
             {
                 try
                 {
+                    AppLog.Write("affinity(before): " + BigCoreAffinity.Apply());
                     client.Send(text, onText: token =>
                     {
-                        if (System.Threading.Interlocked.Increment(ref _genTokens) == 1)
+                        var n = System.Threading.Interlocked.Increment(ref _genTokens);
+                        if (n == 1)
                         {
                             _genFirstTokenMs = Android.OS.SystemClock.ElapsedRealtime();
+                            // The engine's worker threads are created on the first dispatch, so they did
+                            // not exist for the call above and would otherwise stay unpinned.
+                            AppLog.Write("affinity(decoding): " + BigCoreAffinity.Apply());
                         }
-                        sb.Append(token);
-                        RunOnUiThread(() => update(sb.ToString()));
+                        if (n % SegmentTokens == 0 && _genMarkCount < _genMarks.Length)
+                        {
+                            _genMarks[_genMarkCount++] = Android.OS.SystemClock.ElapsedRealtime();
+                        }
+                        // Post the new token only. Accumulating the answer here and re-sending the whole
+                        // string was the other half of the O(n²) — it allocated the full text per token.
+                        RunOnUiThread(() => update.Append(token));
                     });
-                    RunOnUiThread(() => update(sb.Length > 0 ? sb.ToString() : "(no output)"));
+                    if (_genTokens == 0)
+                    {
+                        RunOnUiThread(() => update.Replace("(no output)"));
+                    }
                 }
                 catch (Exception ex)
                 {
                     AppLog.Write("Generation failed", ex);
-                    RunOnUiThread(() => update("⚠ " + ex.Message));
+                    RunOnUiThread(() => update.Replace("⚠ " + ex.Message));
                 }
                 finally
                 {
@@ -644,7 +695,19 @@ namespace DevOnBike.OverfitChat
                     var genMs = _genFirstTokenMs > 0 ? Android.OS.SystemClock.ElapsedRealtime() - _genFirstTokenMs : 0;
                     var tps = genMs > 0 && toks > 1 ? (toks - 1) * 1000.0 / genMs : 0;
                     var (_, rssMb) = _sampler.Sample();
-                    AppLog.Write($"LLM gen: {toks} tok, {tps:F1} tok/s, RSS {rssMb} MB");
+                    // Per-window rates, oldest first. A flat series means the cumulative headline was only
+                    // converging; a falling series means decode really is slowing down as the answer grows.
+                    var segments = new System.Text.StringBuilder();
+                    var previousMs = _genFirstTokenMs;
+                    for (var i = 0; i < _genMarkCount; i++)
+                    {
+                        var windowMs = _genMarks[i] - previousMs;
+                        var windowTps = windowMs > 0 ? SegmentTokens * 1000.0 / windowMs : 0;
+                        segments.Append(i == 0 ? string.Empty : " ").Append(windowTps.ToString("F1"));
+                        previousMs = _genMarks[i];
+                    }
+                    AppLog.Write(
+                        $"LLM gen: {toks} tok, {tps:F1} tok/s, RSS {rssMb} MB, seg/{SegmentTokens}: {segments}");
                     RunOnUiThread(() =>
                     {
                         _busy = false;
@@ -729,7 +792,15 @@ namespace DevOnBike.OverfitChat
         }
 
         // Assistant bubble that starts as thinking-dots and swaps to streamed text on the first update.
-        private Action<string> AddStreamingAssistantBubble()
+        // Returns two callbacks: `Append` adds one streamed token, `Replace` overwrites the whole bubble
+        // (an error, or "(no output)"). They are separate on purpose. Assigning `TextView.Text` rebuilds
+        // the entire StaticLayout — measure + layout + draw of the whole answer — so doing it once per
+        // token makes streaming O(n²) in the answer length. Measured on a Snapdragon 7s Gen 2 on
+        // 2026-08-14: a 342-token answer ran at 3.4 tok/s while a 194-token one ran at 4.9, and
+        // RenderThread burned 28750 jiffies against 14470 for all eight inference workers combined —
+        // the phone was rendering, not computing. Appending into an Editable re-flows only the tail, so
+        // the per-token cost stops growing with the text already on screen.
+        private (Action<string> Append, Action<string> Replace) AddStreamingAssistantBubble()
         {
             var bubble = new FrameLayout(this);
             bubble.SetPadding(Dp(15), Dp(11), Dp(15), Dp(11));
@@ -741,22 +812,54 @@ namespace DevOnBike.OverfitChat
             var tv = new TextView(this) { Visibility = ViewStates.Gone };
             tv.SetTextColor(Color.White);
             tv.TextSize = 16f;
+            tv.SetText(string.Empty, TextView.BufferType.Editable);
             bubble.AddView(tv);
 
             AttachBubble(bubble, isUser: false);
 
             var swapped = false;
-            return text =>
+            var scrollPending = false;
+
+            void Reveal()
             {
-                if (!swapped)
+                if (swapped)
                 {
-                    swapped = true;
-                    bubble.RemoveView(dots);
-                    tv.Visibility = ViewStates.Visible;
+                    return;
                 }
-                tv.Text = text;
-                ScrollToBottom();
-            };
+                swapped = true;
+                bubble.RemoveView(dots);
+                tv.Visibility = ViewStates.Visible;
+            }
+
+            // At most one scroll in flight. Every token used to post its own FullScroll, and each of those
+            // forces a layout pass over the scroll container — the same per-token tax as the text rebuild.
+            void ScrollSoon()
+            {
+                if (scrollPending)
+                {
+                    return;
+                }
+                scrollPending = true;
+                _scroll.Post(() =>
+                {
+                    scrollPending = false;
+                    _scroll.FullScroll(FocusSearchDirection.Down);
+                });
+            }
+
+            return (
+                Append: delta =>
+                {
+                    Reveal();
+                    tv.Append(delta);
+                    ScrollSoon();
+                },
+                Replace: text =>
+                {
+                    Reveal();
+                    tv.SetText(text, TextView.BufferType.Editable);
+                    ScrollSoon();
+                });
         }
 
         private TextView NewBubbleText(string text)
@@ -973,6 +1076,18 @@ namespace DevOnBike.OverfitChat
                 .Show();
         }
 
+        // Any touch on the chat screen counts as activity. Without this the countdown measured time since
+        // the last KEYSTROKE, so scrolling or tapping while reading an answer did not postpone it — and the
+        // unload does not merely free RAM, it returns to model select and discards the conversation.
+        public override bool DispatchTouchEvent(MotionEvent? e)
+        {
+            if (_inChat && e != null && e.Action == MotionEventActions.Down)
+            {
+                ScheduleIdleUnload();
+            }
+            return base.DispatchTouchEvent(e);
+        }
+
         private void ScheduleIdleUnload()
         {
             _idleHandler.RemoveCallbacksAndMessages(null);
@@ -982,8 +1097,18 @@ namespace DevOnBike.OverfitChat
         // Fired 30s after the last activity: free the model and send the user back to model select.
         private void UnloadIfIdle()
         {
-            if (_busy || _client == null)
+            if (_client == null)
             {
+                return;
+            }
+
+            // Working is "ask again later", not "never mind": returning without re-arming used to drop the
+            // timer for good, so a session that happened to be generating when it fired never unloaded.
+            // `_transcribing` belongs here too — unloading clears `_whisper`, which the speech-to-text pass
+            // is using at that moment, and it was not checked at all.
+            if (_busy || _transcribing)
+            {
+                _idleHandler.PostDelayed(UnloadIfIdle, IdleUnloadMs);
                 return;
             }
 

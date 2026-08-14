@@ -19,6 +19,93 @@ four of them.
 
 Dev box for most figures: Ryzen 9 9950X3D, Windows, .NET 10, Release.
 
+## big.LITTLE: sizing the worker pool to `ProcessorCount` costs 2x on a phone — 2026-08-14
+
+Measured in `Demo/OverfitChatApp` on a Motorola Edge 50 Fusion (Snapdragon 7s Gen 2: 4x A78 up to
+2.4 GHz on cpu4-7, 4x A55 up to 1.96 GHz on cpu0-3), SmolLM2-135M Q4_K loaded with `quantize:false`
+(F32-resident), .NET-for-Android, full AOT (`RunAOTCompilation=true`,
+`AndroidEnableProfiledAot=false`), same prompt ("what is rabbit") each run, ~300 generated tokens.
+`seg/32` is the decode rate per 32-token window, oldest first — the headline tok/s is a cumulative
+mean and **cannot distinguish a real slowdown from its own convergence**, which is why the series
+exists.
+
+| Arm | tok/s | `seg/32` |
+|-----|-------|----------|
+| Baseline: 8 workers (`ProcessorCount`), no affinity | 4.1 | `10.0 3.1 3.2 3.8 3.3 3.9 4.8 4.9 4.2` |
+| + threads pinned to the fast cluster | 6.3 | `10.1 7.8 6.3 6.6 6.5 5.7 5.4 5.7` |
+| + one worker per fast core (4) | **8.5** | `9.8 9.3 8.8 8.9 8.4 8.3 8.1 8.2 7.8` |
+
+**The mechanism.** In the baseline, all four big cores sat at their 691 MHz idle floor for the whole
+generation while the little cores ran near their ceiling — the model was executing entirely on the A55
+cluster. The first 32-token window still rides the post-tap boost on a big core, hence 10.0; the boost
+expires and the work settles onto the little cluster and stays there. The 2.5-3x A78-over-A55 gap is
+exactly the 10.0 to 3.1 step. Each of the eight workers ran in short bursts and parked on a semaphore
+between dispatches, so no thread ever accumulated the utilisation signal that earns a big core. With
+four workers pinned to four big cores, each thread stays continuously busy and all four cores hold
+2.4 GHz — the governor needs a sustained thread, not a busy machine.
+
+**Refuted along the way, each by its own measurement — do not re-propose without new evidence:**
+
+- *Thermal throttling.* 30-39 C during the slow runs; the fast pinned runs are HOTTER (41-48 C).
+- *Confinement by the system.* The process is in cpuset `top-app` with cpus 0-7 allowed. It was never
+  restricted; it was merely placed badly.
+- *Memory reclaim / zram.* `VmSwap` 5 MB and **zero** major faults across a sampled generation window.
+- *Cost growing with context length.* The `seg/32` series is flat after the first window, so nothing
+  proportional to sequence position (attention over the KV cache) can be responsible.
+- *O(n^2) UI streaming.* Real and fixed — `MainActivity` assigned the whole accumulated answer to
+  `TextView.Text` per token, rebuilding the full `StaticLayout` each time, and `RenderThread` burned
+  28750 jiffies against 14470 for all eight workers combined. Fixing it (append into an `Editable`,
+  one pending scroll) changed throughput by **nothing measurable**: 3.9 tok/s before, 3.9 after. A
+  genuine waste that was not the bottleneck.
+- *Cumulative-average artefact.* Plausible enough to be worth instrumenting, and wrong: the first
+  window really is 3x the second.
+
+**Do not read this as "pin threads on mobile".** The pin is a blunt instrument that spends more energy
+per token, and it is applied here in the demo app, not in the engine. The transferable finding is that
+`Environment.ProcessorCount` is the wrong pool size on an asymmetric SoC, because it counts cores that
+the work should not be spread across. Open at the time of writing: the process used only ~1.5 cores of
+the four it was pinned to, so the remaining headroom is in the serial decode driver, not in placement.
+
+### Full AOT vs JIT on device: no difference — 2026-08-14
+
+Same source in both arms (the only lever is `RunAOTCompilation`), same prompt, both after the affinity
+and worker-count fixes above, both with all four big cores held at 2.4 GHz for the whole run:
+
+| Arm | tok/s | `seg/32` |
+|-----|-------|----------|
+| JIT (`aotLibs=0`) | 8.6 | `10.1 9.1 9.1 8.7 8.8 8.3 8.2 8.3` |
+| Full AOT (`aotLibs=23`, 7345 kB) | 8.5 | `10.1 9.0 8.8 8.9 8.4 8.3 8.4 7.9 7.8` |
+
+1.2% apart, with three AOT samples at 8.5 and the windowed series overlapping at every point — inside
+run-to-run noise. **Full AOT buys no decode throughput here**, which is consistent with decode being
+stalled rather than code-bound: the process used ~1.5 of the 4 cores it was pinned to at full clock.
+
+**Cold start, however, is where it pays.** `am start -W`, 6 force-stopped launches per arm, same device
+and session:
+
+| Arm | cold start (ms) |
+|-----|-----------------|
+| JIT | min 627, median 647, max 665 |
+| Full AOT | min 397, median **401**, max 435 |
+
+The ranges do not overlap: 246 ms saved, 38% shorter, against ~1% (noise) on decode. So **keep AOT for
+release builds and turn it off for development** — it buys launch latency, not tokens, and it costs
+7.3 MB of native libraries plus a much slower build. `TotalTime` here is time to first frame and
+excludes model load, so this is the launch cost only.
+
+Whichever way it is set, set `AndroidEnableProfiledAot=false` with it: with profiled AOT left at its
+default, `libaot-DevOnBike.Overfit.dll.so` came out at **16 kB instead of 1155 kB** — the engine was
+~1.4% compiled and the build was "AOT" in name only. Any earlier conclusion drawn about "AOT" on a
+default-profiled build is about that 1.4%, not about AOT.
+
+The arm is recorded from the installed `libaot-*.so` files at startup, not from a build-time constant,
+because a run whose arm is asserted rather than observed is a run that can silently measure the other
+one. Note the default matters: with profiled AOT left on (`AndroidEnableProfiledAot` unset), the engine
+library compiled to 16 kB rather than 1155 kB — that build is "AOT" in name only.
+
+Superseded by this: the July 2026 figure of 9.5 tok/s on a JIT build, which had been read as evidence
+that AOT cost throughput. It was a different (shorter, cooler) run, not a different codegen.
+
 ## `ValueStringBuilder` vs `StringBuilder` — 2026-08-13, and it refuted the type's own doc comment
 
 `[SimpleJob(warmupCount: 8, iterationCount: 20)]`, `MemoryDiagnoser`, deliberately **not** the shared
