@@ -16,6 +16,7 @@ using Android.Widget;
 using DevOnBike.Overfit.LanguageModels;
 using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Loading;
+using DevOnBike.Overfit.LanguageModels.Runtime;
 using DevOnBike.Overfit.LanguageModels.Whisper;
 using DevOnBike.Overfit.Runtime;
 
@@ -455,6 +456,16 @@ namespace DevOnBike.OverfitChat
             _screenRoot.AddView(column, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.MatchParent));
 
+            // Repopulate the composer with the last prompt. This app doubles as its own benchmark harness,
+            // and every A/B arm reinstalls and restarts it — retyping the prompt each time is tedious and,
+            // worse, lets the arms drift apart on the one input that has to stay identical.
+            var lastPrompt = Prefs.GetString("last_prompt", null);
+            if (!string.IsNullOrEmpty(lastPrompt))
+            {
+                _input.Text = lastPrompt;
+                _input.SetSelection(lastPrompt.Length);
+            }
+
             var hint = AddAssistantBubble("Say hi — tokens stream as the model generates.");
             hint.PostDelayed(() =>
             {
@@ -655,6 +666,7 @@ namespace DevOnBike.OverfitChat
             }
 
             _busy = true;
+            Prefs.Edit()!.PutString("last_prompt", text)!.Apply(); // so the next chat entry pre-fills it
             _gradient.Pause();
             _input.Text = string.Empty;
             SetComposerEnabled(false);
@@ -689,6 +701,15 @@ namespace DevOnBike.OverfitChat
                         });
                     }
 
+                    // Per-component decode breakdown for this turn. `other` is the serial remainder —
+                    // norms, residuals, embed, final norm — which is the quantity under investigation:
+                    // the process uses ~1.5 of the 4 cores it is pinned to, and CPU time counts DRAM
+                    // stalls, so the missing 2.5 cores are threads PARKED, not threads waiting on memory.
+                    // Enabling this adds a Stopwatch read per hook, so the totals here run slightly slower
+                    // than an unprofiled turn; the SHARES are what this is for, not the absolute tok/s.
+                    DecodeProfiler.Reset();
+                    DecodeProfiler.Enabled = true;
+
                     AppLog.Write("affinity(before): " + BigCoreAffinity.Apply());
                     client.Send(text, onText: token =>
                     {
@@ -720,6 +741,9 @@ namespace DevOnBike.OverfitChat
                 }
                 finally
                 {
+                    DecodeProfiler.Enabled = false;
+                    AppLog.Write(DecodeProfiler.Report());
+
                     var toks = _genTokens;
                     var genMs = _genFirstTokenMs > 0 ? Android.OS.SystemClock.ElapsedRealtime() - _genFirstTokenMs : 0;
                     var tps = genMs > 0 && toks > 1 ? (toks - 1) * 1000.0 / genMs : 0;
@@ -1031,6 +1055,14 @@ namespace DevOnBike.OverfitChat
                 // working set) + Q8 for the rest. So keep F32 for models small enough to fit comfortably, and
                 // switch big models to the quantized/mmap path so they don't OOM the phone.
                 var fileBytes = new System.IO.FileInfo(path).Length;
+                // MEASURED AGAIN 2026-08-14 and the F32 choice above still holds. Decode is bandwidth-bound
+                // (~540 MB of F32 weights per token, 4.75 -> 5.5 GB/s once the FFN matmuls reached the
+                // worker pool), so Q4_K-resident weights — ~5.4x fewer bytes — looked like the next lever.
+                // Forcing quantize:true was tried and abandoned: time-to-first-token went from ~1 s to ~6 s
+                // (measured from the log) and generation was slow enough to be called off by hand, so there
+                // is NO tok/s figure for that arm — the run was never completed. Weak evidence, but it points
+                // the same way as the earlier note. Bytes per token are not obviously the only ceiling here;
+                // anyone re-proposing this should finish the run and get the number.
                 var quantize = fileBytes >= 550_000_000; // ~>0.7B Q4_K → mmap/quantized; smaller → fast F32
 
                 // maxNewTokens is a SAFETY cap, not the expected length — a well-behaved chat model stops at its

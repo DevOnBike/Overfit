@@ -160,7 +160,12 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// parallelise while the small per-head attention projections stay
         /// sequential (they are better parallelised head-wise, one level up).
         /// </summary>
-        public const long ParallelWorkThreshold = 1_000_000;
+        // EXPERIMENT 2026-08-14, not a committed value — revert or replace with a worker-aware rule.
+        // Measured on a Snapdragon 7s Gen 2: SmolLM2-135M's FFN matmuls are 576x1536 = 884,736, i.e. 12%
+        // BELOW this threshold, so all of them ran sequentially on the calling thread. That is 46% of
+        // decode wall time, and it matches the thread accounting (decode driver 2620 jiffies against 1267
+        // for all four workers combined) and the profiler (only lm_head, at 28M work, parallelised).
+        public const long ParallelWorkThreshold = 100_000;
 
         /// <summary>
         /// Parallel projection for large matmuls (FFN, LM head). Splits the

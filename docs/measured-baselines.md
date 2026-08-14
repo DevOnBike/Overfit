@@ -106,6 +106,47 @@ library compiled to 16 kB rather than 1155 kB — that build is "AOT" in name on
 Superseded by this: the July 2026 figure of 9.5 tok/s on a JIT build, which had been read as evidence
 that AOT cost throughput. It was a different (shorter, cooler) run, not a different codegen.
 
+## `ParallelWorkThreshold` is in the wrong unit — 2026-08-14
+
+Same phone and model as the section above, decode profiled with `DecodeProfiler` (which adds ~240
+timestamp reads per token, ~7 µs against a ~110 ms token — immaterial, and the shares are what it is
+for). The hypothesis under test was that decode was dominated by inherently serial work (norms,
+residuals, embed), inferred from the process using ~1.5 of its 4 pinned cores and from the decode
+driver thread burning 2620 jiffies against 1267 for all four workers combined.
+
+**The profiler refuted it.** `other` — precisely those serial stages — measured **-2.8%**, i.e. zero.
+92% of per-token time sat in `attention` (46.4%) and `ffn` (46.1%), the two components that were
+supposed to be parallel already.
+
+The cause was `SingleTokenProjectionKernel.ParallelWorkThreshold = 1_000_000`. SmolLM2-135M's FFN
+matmuls are 576x1536 = **884,736** — 12% below it — so every one of them took the sequential path and
+ran on the calling thread. Only `lm_head` (576x49152 = 28M) cleared the bar, which is exactly the one
+component the profiler showed as a small share.
+
+Lowering the threshold to 100,000, one lever, same prompt:
+
+| | tok/s | ms/token | attention | ffn | lm_head |
+|---|---|---|---|---|---|
+| threshold 1,000,000 | 8.7 | 113.6 | 52.7 | 52.4 | 11.3 |
+| threshold 100,000 | **10.1** | 97.6 | 44.9 | 43.8 | 11.1 |
+
+The thread accounting flipped with it — driver 2620 / workers 1267 became driver 1885 / workers 3298 —
+and `lm_head`, already parallel, did not move, which is the internal control that this is not machine
+drift. A nested-dispatch regression in attention was expected (its 576x576 projections also cleared the
+new bar, and they are parallelised head-wise one level up) and did not appear.
+
+**+16% for 4x the cores, because the ceiling is bandwidth.** ~540 MB of F32 weights are read per token:
+4.75 GB/s before, 5.5 GB/s after. Predicting 2-4x on the FFN was wrong for that reason.
+
+**The fix is not this constant.** An absolute element count is the wrong unit: what decides is work
+*per worker* against dispatch cost, and 1,000,000 was tuned on a 32-core desktop where both sides of
+that comparison differ. The value in the tree is an experiment, not a design — it changes desktop
+behaviour too and must not ship without a worker-aware rule and a desktop re-measurement.
+
+**Not measured, do not cite as one:** forcing `quantize:true` (Q4_K-resident, ~5.4x fewer bytes per
+token) was tried as the bandwidth lever and abandoned — time-to-first-token went ~1 s to ~6 s and the
+run was called off by hand, so there is **no tok/s figure** for that arm.
+
 ## `ValueStringBuilder` vs `StringBuilder` — 2026-08-13, and it refuted the type's own doc comment
 
 `[SimpleJob(warmupCount: 8, iterationCount: 20)]`, `MemoryDiagnoser`, deliberately **not** the shared
