@@ -405,3 +405,22 @@ been correct about what it examined; executing it revealed what had not been exa
 
 When you cannot execute — the fixture is missing, the lab is down, editing source is outside your remit —
 say so and say what that leaves unproven. **A skip is not a pass, and a derivation is not an execution.**
+
+## A derived bound is never enough when the claim is REGRESSION — added 2026-08-14
+
+**If two builds can be produced, measure them.** On 2026-08-14 I answered "did our change cost throughput?"
+with an arithmetic bound (one uncontended CAS plus one monitor per dispatch is 0.02-0.05% of token time,
+below the ±3-4% floor) and called it unresolvable. It was defensible arithmetic and the wrong answer to give
+a client asking whether something was broken. The experiment took 25 minutes and inverted the hypothesis's
+predicted ordering. Report the derived bound as **corroboration afterwards**, never instead.
+
+## Before any cross-revision build, take the RANGE DIFF — never a path-filtered log
+
+`git log -- <path>` and `git show --stat <commit> -- <path>` are both true and both **hide intermediate
+commits**. Measured 2026-08-14: those said two commits touched one file in `Sources/Main`, while
+`git diff A B -- Sources/Main` listed **17**, one of them a decode hot-path kernel changed the same day for
+unrelated work. Building the old revision wholesale would have measured the sum and attributed it to the
+one change under test.
+
+**Then revert only the file under test**, rather than checking out the old revision, and have each binary
+report which variant it contains so a mislabelled arm cannot pass silently.

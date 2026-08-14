@@ -13,9 +13,13 @@ environment knobs.
 
 ## `OverfitParallel` versus `Parallel.For` — measured, and it goes both ways
 
-On a fair sustained benchmark of the decode path, `OverfitParallel.ForDecode` ran **455 µs and 0 B**
-against `Parallel.For` at **2059 µs and 925 KB** — 4.5× faster and allocation-free, because it reuses
-a spin pool instead of dispatching per call.
+On the decode path `OverfitParallel.ForDecode` runs **2.3-2.7× faster** than `Parallel.For` and allocates
+**0 B** against its hundreds of KB, because it reuses a spin pool instead of dispatching per call.
+**Which `Parallel.For` you compare against is most of that ratio**: 2.43× against an arm capped at
+`DecodeMaxWorkers` — which is what `OVERFIT_DECODE_POOL=0` actually falls back to — and 3.60× against an
+uncapped one. The **4.5×** stated here until 2026-08-14 quoted the uncapped pair and is retired. The
+numbers, the box and the model this does **not** hold for (Phi-3.5 is neutral to negative) live in
+[`docs/measured-baselines.md`](../../../docs/measured-baselines.md), re-audited 2026-08-14 under `PB-12`.
 
 That does **not** generalise. Migrating Conv2D onto it measured **+13% wall-clock** on MNIST and was
 reverted; Conv2D stays on `Parallel.For`. The decode pool assumes dedicated cores and is sensitive to

@@ -141,14 +141,31 @@ that sounded good.
 
 ## Two more measured results worth not re-discovering
 
-- **`OverfitParallelFor` in decode, `Parallel.For` everywhere else.** A fair sustained benchmark:
-  `ForDecode` **455 µs / 0 B** against `Parallel.For` at **2059 µs / 925 KB** — 4.5x and allocation-free.
-  It does not generalise: migrating `Conv2D` to it measured **+13% MNIST wall time** and was reverted. The
-  decode spin-pool assumes dedicated cores, which decode has and a training epoch does not.
+- **`OverfitParallelFor` in decode, `Parallel.For` everywhere else.** Re-audited 2026-08-14 (`PB-12`,
+  9950X3D, .NET 10.0.8, Release, HEAD `e21e7c3`): `ForDecode` **617 µs / 0 B** against `Parallel.For` at
+  **1502 µs / 505 KB** capped and **2223 µs / 862 KB** uncapped — **2.3-2.7x** at dispatch level and
+  allocation-free, ~+25% end-to-end on Qwen3-0.6B. The **4.5x** published here until 2026-08-14 quoted the
+  *uncapped* arm, which the `OVERFIT_DECODE_POOL=0` fallback does not use; full table, the models it does
+  **not** hold for and the method are in [`measured-baselines.md`](measured-baselines.md). It does not
+  generalise: migrating `Conv2D` to it measured **+13% MNIST wall time** and was reverted. The decode
+  spin-pool assumes dedicated cores, which decode has and a training epoch does not.
 - **Loop shape is not the lever; the declared type is.** `for` vs `foreach` over an array is ~2 ns and the
   direction reverses with size. An interface costs **2.4x** (`foreach`) to **4.6x** (indexing) plus 32 B for
   the enumerator. Monomorphism does **not** guarantee zero allocation — that refuted an earlier explanation
   of my own. Do not "tidy" a `T[]` into `IReadOnlyList<T>`.
+
+## Three of four decode-pool figures did not survive their first audit — 2026-08-14
+
+`PB-12` re-measured every published decode-pool number. `4.5x` became 2.3-2.7x against the comparator the
+product actually uses; `+3%` on Phi-3.5 **reversed sign** to −1.9%; Bielik's `+11%` became **+3.8%** once
+isolated to its original mechanism. Only Qwen3-0.6B held (`+28%` → **+25.1%** Q8_0).
+
+The cause is structural rather than arithmetic: **`ForDecode` has never had a benchmark class.**
+`git log -S "ForDecode" -- Sources/Benchmark` returns zero commits, and `OverfitParallelBenchmark` measures
+`OverfitParallel.For`, not the pool. All four figures came from `[ModelFact]`-gated diagnostics that
+`dotnet test` never runs — single arm, one process, no canary. **A number nothing in `Sources/Benchmark`
+can reproduce is a number that gets re-cited long after the code under it moved**, which is exactly what
+happened across five files here. Details in [`measured-baselines.md`](measured-baselines.md).
 
 ## The cross-process floor on this box is ~3-4%, and a quiet machine does not fix it
 

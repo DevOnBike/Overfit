@@ -173,14 +173,29 @@ namespace DevOnBike.Overfit.Runtime
         /// <summary>
         /// Worker cap for small, numerous single-token decode dispatches (the FFN
         /// projection matmuls). These ~0.2 ms matmuls are dispatch-overhead bound, not
-        /// bandwidth bound: measured on a 32-core box, fanning a 12.7 MB FFN matrix across
-        /// all 32 workers runs it at ~11 GB/s, while a handful of workers hits ~37 GB/s
-        /// (≈3×) — and end-to-end Bielik-4.5B Q4_K_M decode goes 12.55 → 14.0 tok/s (+11%).
-        /// The tok/s-vs-cap curve plateaus around 10-12 on a 32-core box (6→11.8, 8→13.4,
-        /// 10→14.0, 12→14.1, 32→12.5). Defaults to <c>min(WorkerCount, 10)</c>; override
-        /// with <c>OVERFIT_DECODE_WORKERS</c>. Prefill / training are unaffected (they pass
-        /// the full <see cref="WorkerCount"/>).
+        /// bandwidth bound: measured 2026-06-11 on a 32-core box (not re-audited since),
+        /// fanning a 12.7 MB FFN matrix across all 32 workers runs it at ~11 GB/s, while a
+        /// handful of workers hits ~37 GB/s (≈3×). Defaults to <c>min(WorkerCount, 10)</c>;
+        /// override with <c>OVERFIT_DECODE_WORKERS</c>. Prefill / training are unaffected
+        /// (they pass the full <see cref="WorkerCount"/>).
         /// </summary>
+        /// <remarks>
+        /// What the cap is worth end-to-end, re-audited 2026-08-14 (<c>PB-12</c>): Bielik-4.5B Q4_K_M on a
+        /// Ryzen 9 9950X3D (32 logical), .NET 10.0.8, Release, HEAD e21e7c3, ABAB, best-of-3.
+        /// Isolated to this cap's ORIGINAL mechanism — decode pool OFF, cap 10 against 32 — it is
+        /// <c>+3.8%</c>, every paired cycle positive (1.025 / 1.057 / 1.038). The <c>+11%</c>
+        /// (12.55 → 14.0 tok/s) published here from 2026-06-11 is NOT supported as stated: the sign is
+        /// real, the magnitude is not.
+        /// <para>
+        /// At HEAD's default the same knob measures <c>+87%</c>, because the cap now also sizes the decode
+        /// spin pool — it is no longer one lever, and the two figures are not comparable. Correspondingly
+        /// <c>OVERFIT_DECODE_WORKERS=32</c> costs <c>-47%</c> today (15.17 → 8.10 tok/s), which supersedes
+        /// the ~-11% implied by the 2026-06-11 cap curve (6→11.8, 8→13.4, 10→14.0, 12→14.1, 32→12.5). That
+        /// curve was measured before the pool existed and only its <c>32</c> endpoint has been re-measured;
+        /// the plateau at 10-12 is the reason for the default and has NOT been re-checked point by point.
+        /// Canonical copy: <c>docs/measured-baselines.md</c>.
+        /// </para>
+        /// </remarks>
         public static int DecodeMaxWorkers { get; set; } = ResolveDecodeMaxWorkers();
 
         private static int ResolveDecodeMaxWorkers()
@@ -356,14 +371,25 @@ namespace DevOnBike.Overfit.Runtime
 
         private static bool ResolveDecodePool()
         {
-            // Default ON — measured best-of-3: Qwen3-0.6B +28% (56.7→72.3 tok/s), Phi-3.5-3.8B +3% (13.27→13.69),
-            // 0 B/token preserved, bit-identical. Bigger win on small models (dispatch overhead is a larger fraction
-            // of their small matmuls). Set OVERFIT_DECODE_POOL=0/false to opt out. The pool spins-then-parks
-            // (see _decodeParkLock) so idle cost is meant to be ~0 — but that has NOT been demonstrated:
-            // `DecodePoolIdleBurnTests` measures the whole PROCESS, so inside a 52-test run it charges other
-            // tests' threads to the pool and reports 15-17 cores; run alone it is green. See `TG-T13`. The
-            // headline throughput numbers above also predate the 2026-08-14 claim-protocol change on this
-            // exact path and have not been re-measured against it.
+            // Default ON. Re-measured 2026-08-14 (`PB-12`) on a Ryzen 9 9950X3D (32 logical), .NET 10.0.8,
+            // Release, HEAD e21e7c3 — 24 processes, ABAB at process level, best-of-3 within each, a canary
+            // before and after every timed block: Qwen3-0.6B Q8_0 +25.1% (56.56→70.75 tok/s), Q4_K_M +23.0%;
+            // 0 B/token preserved, bit-identical. This supersedes the `+28% (56.7→72.3)` published here from
+            // 2026-06-11, which recorded no quantisation.
+            //
+            // Phi-3.5-mini 3.8B is NEUTRAL TO NEGATIVE, not the `+3%` published here until 2026-08-14: the
+            // sign reversed, to -1.9% (13.38→13.12 tok/s). That point estimate is itself inside this box's
+            // +-3-4% cross-process floor, so no number is quoted — but it is not the box moving, because the
+            // untouched arm reproduced to 0.8% while the treated arm fell 4.2%. The mechanism is a WRONG
+            // DENOMINATOR: on Phi-3.5 the pool captures only ~75% of dispatches, because 52 per token still
+            // go through OverfitParallel.For via the GQA For(0, KvHeadCount, ...) in CachedMultiHeadAttention.
+            //
+            // Bigger win on small models (dispatch overhead is a larger fraction of their small matmuls).
+            // Set OVERFIT_DECODE_POOL=0/false to opt out. The pool spins-then-parks (see _decodeParkLock) so
+            // idle cost is meant to be ~0 — but that has NOT been demonstrated: `DecodePoolIdleBurnTests`
+            // measures the whole PROCESS, so inside a 52-test run it charges other tests' threads to the pool
+            // and reports 15-17 cores; run alone it is green. See `TG-T13`. Full table, dispatch census and
+            // method: docs/measured-baselines.md.
             var raw = Environment.GetEnvironmentVariable(DecodePoolEnvVar);
             if (!string.IsNullOrEmpty(raw))
             {
@@ -779,9 +805,16 @@ namespace DevOnBike.Overfit.Runtime
         // `WaitAsync` would hand the continuation back to the thread pool and reintroduce exactly the
         // scheduling latency this pool exists to avoid.
         //
-        // WHAT IT IS WORTH, measured: the decode pool runs 455 us / 0 B against `Parallel.For`'s
-        // 2059 us / 925 KB on the same sustained decode workload — 4.5x, and zero allocation instead of
-        // 925 KB. That number is the reason the answer here is not "await it".
+        // WHAT IT IS WORTH, measured — re-audited 2026-08-14 (`PB-12`) on a Ryzen 9 9950X3D (32 logical),
+        // .NET 10.0.8, Release, HEAD e21e7c3, single-process ABAB, 183 dispatches over a 4096 range:
+        // the decode pool runs 617 us / 0 B against `Parallel.For` at 1502 us / 505 KB when that arm is
+        // capped at DecodeMaxWorkers — which is the arm OVERFIT_DECODE_POOL=0 actually falls back to — and
+        // 2223 us / 862 KB uncapped. So 2.4x against the comparison the product makes and 3.6x against the
+        // one it no longer makes anywhere; ~+25% end-to-end on Qwen3-0.6B. The `455 us vs 2059 us = 4.5x`
+        // published here until 2026-08-14 quoted the UNCAPPED pair and is retired — see
+        // docs/measured-baselines.md, which is the canonical copy. Zero allocation instead of hundreds of KB
+        // (862 KB - 1.13 MB, shape-dependent) is the other half, and together they are the reason the answer
+        // here is not "await it".
         //
         // WHAT IS GIVEN UP: one OS thread per pool slot, parked, for as long as the process runs. The pool is
         // sized to the decode cap (<= core count), which is the bound that makes that acceptable.

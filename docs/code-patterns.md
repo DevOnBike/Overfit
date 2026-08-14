@@ -95,8 +95,11 @@ contradict the obvious answer.
 - **`for` vs `foreach` over an array is NOT a lever** (~2 ns, and the direction reverses with size). The
   lever is the **declared type**: an interface costs 2.4× (`foreach`) to 4.6× (indexing) plus 32 B for the
   enumerator. Do not "tidy" a `T[]` into `IReadOnlyList<T>`.
-- **`OverfitParallelFor` in decode** — 455 µs / 0 B against `Parallel.For` at 2059 µs / 925 KB. **Everywhere
-  else use `Parallel.For`**: migrating `Conv2D` to it measured +13% wall and was reverted.
+- **`OverfitParallelFor` in decode** — **2.3-2.7×** faster than `Parallel.For` at dispatch level and
+  allocation-free (**0 B**), re-audited 2026-08-14. The exact pair, the comparator the ratio depends on and
+  the model where it goes the *other* way are in
+  [`measured-baselines.md`](measured-baselines.md) — do not restate the number here. **Everywhere else use
+  `Parallel.For`**: migrating `Conv2D` to it measured +13% wall and was reverted.
 - **`TensorPrimitives` beats a hand-written micro-kernel**, and the simple register-blocked GEMM beat the
   cache-blocked one. The structure of the data around a technique decides, not the technique — so **never
   extrapolate a win from one kernel to another** without measuring it there.

@@ -372,8 +372,87 @@ claim it is handled; do not fix it without the census.
 | monomorphism | does **not** guarantee zero allocation — this refuted an earlier explanation of my own |
 | extracting a method when the JIT does not inline it | **2.25×** — which is why `else` removal prefers restructuring in place over extraction |
 | ternary, `continue`, condition inversion | free |
-| `OverfitParallelFor` vs `Parallel.For`, **decode** | **455 µs / 0 B** vs **2059 µs / 925 KB** |
+| `OverfitParallelFor` vs `Parallel.For`, **decode** | **617 µs / 0 B** vs **1502 µs / 505 KB** capped and **2223 µs / 862 KB** uncapped = **2.43×** / **3.60×**. 183 dispatches over a 4096 range, 9950X3D, .NET 10.0.8, Release, HEAD `e21e7c3`, 2026-08-14. Supersedes **455 / 2059 µs (4.5×)**, which compared against the *uncapped* path — see the decode-pool section below |
 | `OverfitParallelFor` vs `Parallel.For`, **Conv2D** | the opposite — see the regression table |
+
+## The decode spin pool: what it is actually worth — audited 2026-08-14 (`PB-12`)
+
+Ryzen 9 9950X3D (32 logical / 16 physical), Windows 11 26200, .NET 10.0.8, Release, HEAD `e21e7c3`.
+**24 measurement processes, ABAB at process level, best-of-3 within each process, a single-thread canary
+before and after every timed block, and a dispatch-count liveness probe in every process.**
+
+This section supersedes `455 µs / 2059 µs (4.5×)`, `+28%`, `+3%` and `+11%`, which were carried in source
+comments from 2026-06-11 (`8a28bdb`) and copied into four documents between 2026-08-01 and 2026-08-10 —
+**not one of them recording a model, quantisation, comparator configuration, box or build.**
+
+### Dispatch level: `ForDecode` vs `Parallel.For`
+
+Single process, ABAB, 183 dispatches over a 4096-element range.
+
+| arm | time | allocated | ratio vs the pool |
+|---|---|---|---|
+| `OverfitParallel.ForDecode` (spin pool) | **617 µs** | **0 B** | — |
+| `Parallel.For`, **capped** at `DecodeMaxWorkers` | 1502 µs | 505 KB | **2.43×** |
+| `Parallel.For`, **uncapped** | 2223 µs | 862 KB | **3.60×** |
+
+**Which comparator you pick is most of the ratio, and that is what made `4.5×` wrong.** The retired pair
+sat on the *uncapped* arm — but with `OVERFIT_DECODE_POOL=0` today's `ForDecode` falls back to the
+**capped** path, so `4.5×` described a comparison the product no longer makes anywhere on the decode path.
+Honest figure: **2.3-2.7× at dispatch level**, or **+25% end-to-end**. The `0 B` holds; the `925 KB` is
+shape-dependent and measured **862 KB - 1.13 MB** here.
+
+### End to end, decode pool ON vs OFF
+
+| model | measured | against the retired figure |
+|---|---|---|
+| Qwen3-0.6B **Q8_0** | **+25.1%** (56.56 → 70.75 tok/s); paired ratios 1.251 / 1.274 / 1.226 | `+28%` **supported**, re-stamped — the old comment recorded no quantisation |
+| Qwen3-0.6B **Q4_K_M** | **+23.0%** | as above |
+| Phi-3.5-mini 3.8B | **−1.9%** (13.38 → 13.12 tok/s); paired 0.986 / 0.968 / 0.965 / 1.005 | `+3%` **refuted — sign reversed** |
+
+Phi-3.5's point estimate is itself inside this box's ±3-4% cross-process floor, so the claim that survives
+is **"neutral to negative on Phi-3.5"**, not a number. It is not the box moving: the untouched arm
+reproduced to 0.8% while the treated arm fell 4.2%. **The mechanism is a wrong denominator** — on Phi-3.5
+the pool captures only ~75% of dispatches, because **52 per token still go through `OverfitParallel.For`**
+via the GQA `For(0, KvHeadCount, ...)` at `CachedMultiHeadAttention.cs:284`.
+
+### The decode worker cap (`OVERFIT_DECODE_WORKERS`), Bielik-4.5B Q4_K_M
+
+| arm | measured |
+|---|---|
+| cap 10 vs 32 with the **pool off** — the cap's original mechanism, isolated | **+3.8%**, every paired cycle positive (1.025 / 1.057 / 1.038) |
+| the same knob at HEAD's default (pool on) | **+87%** — the cap now also sizes the spin pool, so it is no longer one lever and the two are not comparable |
+| `OVERFIT_DECODE_WORKERS=32` today | **−47%** (15.17 → 8.10 tok/s) |
+
+`+11%` is **not supported as stated**: the sign is real, the magnitude is not. The `−47%` supersedes the
+~−11% implied by the 2026-06-11 cap curve (`6→11.8, 8→13.4, 10→14.0, 12→14.1, 32→12.5`); only that curve's
+`32` endpoint was re-measured, so the 10-12 plateau that sets the default still rests on the 2026-06-11 run.
+
+### Dispatch census per token — previously unwritten anywhere
+
+| model | dispatches/token |
+|---|---|
+| Qwen3-0.6B Q8_0 | **183.1** |
+| Qwen3-0.6B Q4_K_M | 137.6 |
+| Bielik-4.5B Q4_K_M | 383.6 |
+| Phi-3.5-mini 3.8B | 209.1 |
+
+### The finding that outlives the numbers
+
+**`ForDecode` has never had a benchmark class.** `git log -S "ForDecode" -- Sources/Benchmark` returns zero
+commits. All four retired figures came from `[ModelFact]`-gated diagnostics that `dotnet test` never runs
+(`ModelFact : LongFact` sets `Skip` at discovery) — single arm, one process, no canary. `OverfitParallelBenchmark`
+exercises `OverfitParallel.For`, not the decode pool, so **none of these numbers was measurable by anything
+in `Sources/Benchmark`, before this audit or after it.**
+
+**Do not cite** `Sources/Benchmark/BenchmarkDotNet.Artifacts/results/Benchmarks.OverfitParallelForBenchmark-report-github.md`
+— 2026-05-15, the class has since been deleted, `InvocationCount=1`, `RatioSD` up to 11.83, and it shows the
+*opposite* result at dispatch-bound sizes. It is not the source of any published figure.
+
+**The 2026-08-14 claim-protocol change's own cost is DERIVED, not measured, and deliberately so.** One
+uncontended CAS plus one monitor enter/pulse per dispatch is tens of ns against a ~3.4 µs dispatch and
+~14 ms/token — **0.02-0.05% of token time**, three orders of magnitude below the ±3-4% cross-process floor.
+No experiment on this box can resolve it, and building the pre-change revision would have produced a number
+with no meaning.
 
 ## Throughput and memory
 
