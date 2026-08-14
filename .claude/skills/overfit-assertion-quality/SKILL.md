@@ -25,6 +25,25 @@ Low assertion diversity signals shallow testing. Tests may pass while bugs hide 
 | No structural checks | Only assert top-level value | Bugs in nested objects go unnoticed |
 | Assertion-free tests | Tests that call but don't verify | Code coverage lies; false security |
 
+## A negative assertion must pin WHICH guard produced the refusal — added 2026-08-14
+
+**"It was rejected" is not an assertion about your subject unless you say what rejected it.** A test that
+asserts only *"the call returned false"* / *"nothing was claimed"* / *"the request was denied"* passes
+whenever **any** guard on the path fires — including one the test knows nothing about and one that fires by
+accident. It reads as protection and pins nothing.
+
+The incident, and it was caught by a mutation rather than by review. A packed-word protocol has two guards on
+its accept path — a generation tag and a bounds check — and a test claimed to pin the bound by asserting the
+claim was refused. Under a mutation that set the count to `chunkCount - 1`, the test **stayed green for the
+wrong reason**: `((long)(-1) << 16)` is `0xFFFF_FFFF_FFFF_0000`, so the sign bits smeared out of the count
+field and into the **tag** field, and the refusal came from the generation check. The property the test
+named was never exercised; a second mutation had to be run to establish that it was pinned at all.
+
+**The general form, which is the part worth carrying:** where more than one mechanism can produce the same
+negative outcome, the assertion must distinguish them — by the failure message, by an out parameter, by the
+observable state left behind, or by asserting the *positive* case that only the intended guard can allow. Ask
+of every negative assertion: **how many different bugs would leave this test green?**
+
 ## When to Use
 
 - User asks to evaluate assertion quality or depth

@@ -175,6 +175,14 @@ conditions**, because they name the environment you must reproduce; and **write 
 down first, in both directions** — what must be quiet and what must fire. A channel observed only staying
 quiet is indistinguishable from a broken one, and a task was one sentence from being closed in that state.
 
+**A victim set that WIDENS is expected; one that SHRINKS is the finding.** Do not be asked, or ask, for
+"the victim sets must not change" — that is not achievable: adding any test that calls a mutated
+function widens that mutation's victim set by construction, and on 2026-08-14 six of nine arms widened
+for exactly that reason. What is diagnostic is the **direction**. A set that shrinks means a new test
+masked an old one, which is the regression worth catching. Report widenings **with their cause**, and
+note which arms still isolate a single test — those are the ones whose victim is evidence about one
+behaviour rather than about the whole suite.
+
 **When a change exists because an existing check missed something, run the mutation against the PRE-CHANGE
 code too, and report both outcomes.** "My new test goes red on this corruption" and "the old test did not"
 are different claims, and only the second establishes that you added coverage rather than moved it. The
@@ -384,13 +392,21 @@ rule is.
 
 ## Report before you go idle — never finish silently — added 2026-08-10
 
-**The mechanism, and it is the half this section was missing until 2026-08-12: send it with `SendMessage`
-to `main`.** Your plain text output is NOT visible to anyone — it goes to your own transcript and stops
-there. This rule said "never finish silently" for two days without saying HOW, and on 2026-08-12 two of
-three dispatched agents obeyed it exactly: both wrote a complete report as text, both went idle, and
-neither report reached the main session. One had to be asked twice; the other's work was reconstructed
-from the working tree while it sat finished and unread. **A report you did not `SendMessage` did not
-happen**, and from outside it is indistinguishable from an agent that did nothing.
+**The mechanism depends on how you were dispatched, and getting this wrong costs a round trip either way.**
+
+- **If `SendMessage` is among your tools, use it** — send the report to `main`. Your plain text would
+  otherwise go to your own transcript and stop there. This rule said "never finish silently" for two days
+  without saying HOW, and on 2026-08-12 two of three dispatched agents obeyed it exactly: both wrote a
+  complete report as text, both went idle, and neither reached the main session. One had to be asked twice;
+  the other's work was reconstructed from the working tree while it sat finished and unread.
+- **If `SendMessage` is NOT among your tools, your final text message IS the report** and it does reach the
+  caller. Do not go looking for a tool you were not given, and do not truncate the report on the assumption
+  that something else will carry it. Added 2026-08-14, after a developer run correctly flagged that its
+  instructions named a tool its session did not have — the report landed anyway, but the agent had no way to
+  know that, and an agent unsure whether it has delivered is one that pads or repeats.
+
+**Either way: a report nobody received did not happen**, and from outside it is indistinguishable from an
+agent that did nothing.
 
 **Your final message IS the deliverable.** Work you did that nobody was told about did not happen, and three
 agents in one day signalled idle with no report — each time costing a round trip to ask for what was already
@@ -460,6 +476,22 @@ and what not to build at all.
 library runs inside somebody else's process, on their CPU, often ahead-of-time compiled with no JIT to
 rescue it. Read it, then write.
 
+## A coverage figure without its arm is not evidence — added 2026-08-14
+
+**Always say which run produced the number: a filter, or the full suite.** Your instructions already demand
+the model, quantisation, build and box beside a performance figure; coverage has an equivalent load-bearing
+condition and it is the **test selection**, which nothing was requiring you to state.
+
+**On a concurrent path, "unasserted" and "uncovered" are different claims and only one of them is usually
+true.** A branch reached only by a race reads as *partial* under a narrow filter and *fully covered* under
+the whole suite, because other tests happen to drive it. Measured 2026-08-14 on `DecodeChunkClaim`'s
+lost-CAS retry: branch-rate **0.833** under a three-test filter, **1.000 in 3 of 3 samples** under the full
+suite. The branch executes; nothing arranges it and no assertion depends on it. "Never taken by any test"
+was written into a finding, nearly copied into a source comment, and was simply false — while "nothing
+asserts on it" was true and is the sentence worth keeping.
+
+Prefer **unasserted** when you mean nobody checks it, and say what would have to run to reach it.
+
 ## New code carries at least 80% coverage — added 2026-08-10 by the user
 
 **Every non-trivial piece of code you add is covered to at least 80%, measured on the lines you wrote**, not
@@ -474,7 +506,11 @@ dotnet test ./Tests/Tests.csproj -c Release --settings coverlet.runsettings --co
 
 **`coverlet.runsettings` is not optional and its exclusions are load-bearing.** Instrumenting this codebase's
 hot loops costs a 10x to 900x slowdown, so `Ops`, `Kernels`, `Maths`, `Intrinsics`, `Autograd`, `Optimizers`,
-`Tensors` and `LanguageModels.Runtime` are excluded. Two consequences you must state rather than let the
+`Tensors` and `LanguageModels.Runtime` are excluded. **`LanguageModels.Runtime` only — `DevOnBike.Overfit.Runtime`
+IS measured**, and the two are one word apart: read quickly, that last entry looks like it excludes both.
+Added 2026-08-14 after a run nearly reported "coverage cannot be measured here" for a new file in
+`Sources/Main/Runtime/` and then measured it at 100%. Check `coverlet.runsettings` rather than this sentence
+if it matters. Two consequences you must state rather than let the
 reader assume: code you add **inside** those namespaces cannot be measured this way, so cover it with a
 named test per behaviour and say so in your report; and a coverage figure quoted without these settings is
 a different number from the one this rule means.
@@ -633,6 +669,12 @@ subprocess.run(..., encoding="utf-8", errors="replace")
 
 Measured 2026-08-08: two consecutive invocations lost to exactly these two errors, in that order, before
 any real work ran.
+
+**A file you CREATE has line endings too, and nothing here will tell you they are wrong.** `Write` a new
+`.cs` and it lands LF-only in a CRLF tree; the build, the tests and `git status` are all indifferent, so the
+mismatch is invisible until it shows up as a whole-file diff for somebody else. Normalise a newly written
+source file to CRLF before you finish. Added 2026-08-14 after two new files landed LF-only and the agent
+that wrote them noticed only because it went looking — no check in this repository would have caught it.
 
 **When the script edits repository files, open them in BINARY mode.** This tree has mixed CRLF and LF,
 and `open(path).read()` / `open(path, "w")` rewrites every line ending in the file — the content diff is

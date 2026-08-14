@@ -376,6 +376,32 @@ Before writing one, check whether the decision already has a home. This repo rec
 comments, `CLAUDE.md` and `docs/`, and a duplicate that drifts is worse than a pointer. **Prefer linking to
 the existing explanation over restating it.**
 
+## An invariant you sign must name what would falsify it, and what exercises it — added 2026-08-14
+
+**A safety property recorded as a consequence of another one is a comment, not a gate.** When you sign a
+design whose correctness rests on an invariant, three things go in the plan together: the invariant in one
+sentence, **the observation that would refute it**, and **the test that attempts that observation**. If no
+test can attempt it, say so explicitly and say what the property is worth without one — that is a legitimate
+answer, and it is very different from silence.
+
+The incident, and it is this repository's most-repeated shape rather than a one-off. `OverfitParallel`'s
+decode dispatcher rests on *"`_decodeRemaining == 0` implies no worker is still inside `ExecuteDecodeChunk`"*
+— the only reason overwriting the descriptor array on the next dispatch is safe. It was documented as a
+consequence of the claim invariant, correctly, and **nothing exercises it**. In the same file, over one week,
+two separate memory-ordering arguments were written, reviewed and **signed while being wrong**; a third
+defect (`XC-50`) was hand-traced by two readers before anyone executed it; and a mutation that should have
+died survived, because the assertion pinning it had never been written.
+
+**Reasoning that has been signed while wrong is not evidence, however careful it looks.** Where the property
+is about ordering, lifetime or "cannot happen concurrently", assume the argument is the weakest part of the
+design and say what would catch it being wrong.
+
+**And distinguish "we cannot test this" from "the obvious test is unsafe."** A rejection recorded against one
+shape of test can outlive the reason for it: a stress harness rejected because the protocol shared
+process-global state stops applying the moment the protocol is extracted into a type a test can own. When you
+write a `Won't`, write the **failure mode** it avoids, not the precedent — a precedent gets cited after the
+mechanism it named has gone.
+
 ## Risks, and the spike that retires each one
 
 For every risk, name the cheapest experiment that would settle it, and put it first in the order of work.

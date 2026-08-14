@@ -237,9 +237,11 @@ by parity, benchmark and an end-to-end generation on a real model._
   as a `DivideByZeroException` with an FFN dispatch frame beneath an attention body. **The silent
   consequence was the worse one**: its extra decrement of the shared completion counter let a *later*
   dispatch stop waiting early and return a partially written output buffer, with no exception at all.
-  The generation and the next index now occupy one 64-bit word claimed by a single compare-and-swap, so a
-  claim that loses its generation takes nothing — a failed check must not consume an index, or the chunk it
-  burned would never run and the dispatcher would wait for a completion that never arrives. **This affected
+  The generation, the chunk count and the next index now occupy one 64-bit word claimed by a single
+  compare-and-swap, so a claim that loses its generation takes nothing — a failed check must not consume an
+  index, or the chunk it burned would never run and the dispatcher would wait for a completion that never
+  arrives. (The first version of this fix packed only the generation and the index, leaving the count in a
+  separate field; that left a narrower window of the same defect and is recorded below as `XC-50`.) **This affected
   the default configuration on every non-Android platform** (the pool is on by default; Android already
   disables it). Confirmed by two `[LongFact]` diagnostics going green, one of which —
   `PrefillCallCountTests` — had been dismissed as a test-precision defect and was in fact counting the

@@ -368,5 +368,39 @@ namespace DevOnBike.Overfit.Tests.Core.Runtime
                 Assert.Equal(i, buffer[i]);
             }
         }
+
+        /// <summary>
+        /// XC-50 §9 (amended) — the decode pool's size is clamped to what a claim word's count field can
+        /// carry (<see cref="DecodeChunkClaim.MaxChunkCount"/>), and that clamp is exercised here rather
+        /// than inferred.
+        ///
+        /// <para><b>Why the test drives the expression instead of reading <c>_decodePoolSize</c>.</b> On
+        /// every real box the clamp is inert — the resolved worker count is capped at
+        /// <see cref="Environment.ProcessorCount"/>, five orders of magnitude below the field's limit — so
+        /// a test that read the resolved field would assert nothing about the clamp <i>and</i> would make
+        /// its own verdict depend on the machine it ran on. An unexercised clamp is the same defect class
+        /// as an untested bound: it is the one thing standing between a future configuration path and
+        /// silent truncation of the count field, which revives `XC-50` from the other side.</para>
+        /// </summary>
+        [Fact]
+        public void ClampDecodePoolSize_CapsAtWhatTheClaimWordCanCarry()
+        {
+            const int max = DecodeChunkClaim.MaxChunkCount;
+
+            Assert.Equal(max, OverfitParallel.ClampDecodePoolSize(max + 1));
+            Assert.Equal(max, OverfitParallel.ClampDecodePoolSize(int.MaxValue));
+            Assert.Equal(max, OverfitParallel.ClampDecodePoolSize(max));
+
+            // Below the cap it must be the identity — a clamp that also floors or rounds would silently
+            // change the pool size on every real machine.
+            Assert.Equal(1, OverfitParallel.ClampDecodePoolSize(1));
+            Assert.Equal(32, OverfitParallel.ClampDecodePoolSize(32));
+            Assert.Equal(max - 1, OverfitParallel.ClampDecodePoolSize(max - 1));
+
+            _output.WriteLine(
+                $"MaxChunkCount {max}; clamp({int.MaxValue}) -> {OverfitParallel.ClampDecodePoolSize(int.MaxValue)}; "
+                + $"this box resolves {OverfitParallel.DecodeMaxWorkers} decode workers, which is why the "
+                + "clamp cannot be observed through the resolved field");
+        }
     }
 }

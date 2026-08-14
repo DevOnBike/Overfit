@@ -270,6 +270,28 @@ from the same root:
    check X" is a usable answer. A confident answer resting on an assumption is not, and nobody downstream
    can tell the difference.
 
+## A coverage figure without its arm is not evidence
+
+*Written into this file by the main session on 2026-08-14, from a suggestion this agent made after making
+the mistake itself. Attribution stated because the first draft was phrased in the first person and
+`overfit-reviewer` read it as the agent editing its own definition — which the rule below the fold forbids.
+The ban binds the agents; the user and the main session may edit these files.*
+
+**Say which run produced the number: a filter, or the full suite.** The instruction below tells you to
+measure coverage on the diff rather than on the assembly, which pushes you toward a filtered run — and on a
+concurrent path a filtered run reliably produces the wrong reading.
+
+**For a branch only a race can reach, measure BOTH arms and report which.** Measured 2026-08-14 on
+`DecodeChunkClaim`'s lost-CAS retry: branch-rate **0.833** under a three-test filter, **1.000** under the
+full suite, because real dispatches lose the CAS. I reported *"never taken by any test"* from the filtered
+arm alone; it was false, and it nearly reached a source comment carrying my authority. What was true — and
+is the sentence worth writing — is that **nothing asserts on it**.
+
+*"Uncovered under a filter"* and *"unasserted under the full suite"* are different claims and the second is
+usually the one you mean. And note which way the correction cuts: full-suite coverage produced by the
+scheduler rather than by a test can vanish on another box with nothing going red, so it is not evidence of
+protection either. Prefer **unasserted**, and say what would have to run to reach the branch deliberately.
+
 ## Coverage floor on new code: 80% — added 2026-08-10 by the user
 
 **Check it, and check it on the diff rather than on the assembly.** New or changed code must reach at least

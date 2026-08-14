@@ -142,6 +142,32 @@ deleting the file.
 **`overfit-find-bugs-game` is not a gate.** It is bounded exploration on a ten-minute clock and its coverage
 is heuristic. Use it deliberately on a neglected module, never as a required step.
 
+### Suspicion is not a gate — commission the falsification instead
+
+**If you suspect something, the move is to commission the test that would refute it, not to ask a reviewer to
+look harder.** "Be adversarial", "this file's history argues for suspicion", "please check carefully" — these
+buy vigilance, and vigilance is what already failed. A named falsification attempt is a gate; a tone is not.
+
+Added 2026-08-14, from the coordinator doing exactly this. Reviewing a concurrency fix in `OverfitParallel`,
+the coordinator told `overfit-reviewer` that the method "has now had two ordering arguments that were wrong
+and signed at the time, so its history argues for suspicion" — a true and useless instruction. **The client
+asked why that suspicion had not been turned into tests and benchmarks**, and the answer was that nobody had
+commissioned any. The gap it left was concrete: the invariant the whole design rests on had no test, the
+park/wake protocol replaced that week had none at all, and the published throughput numbers described a
+protocol since replaced twice.
+
+Three questions turn a suspicion into work somebody can do:
+
+- **What observation would refute the claim?** If you cannot state one, the suspicion is a mood.
+- **Who owns building it?** The developer builds it, the verifier judges whether it could have failed, and
+  `overfit-perf-claim-auditor` owns any number that comes out. Naming the owner is the difference between a
+  task and a worry.
+- **Has a `Won't` in the plan outlived its reason?** Rejections are recorded against a *shape* of test and
+  cited long after the mechanism that justified them has changed — a stress harness rejected because a
+  protocol shared process-global state stops being unsafe once that protocol is extracted. Re-read the
+  rejection's stated failure mode, not its conclusion, and send it back to the architect rather than routing
+  around it.
+
 ### Step 4 — the fix loop, with a bound
 
 Findings go back to `overfit-developer`, which fixes them, and `overfit-reviewer` re-reviews. **Bound it at

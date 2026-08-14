@@ -88,11 +88,30 @@ MUTATED = """REPLACE_ME"""
 
 
 def run():
-    proc = subprocess.run(
-        ["dotnet", "test", str(REPO / "Tests" / "Tests.csproj"), "-c", "Release", "--nologo",
-         "--filter", FILTER],
-        capture_output=True, text=True, encoding="utf-8", errors="replace")
-    text = (proc.stdout or "") + (proc.stderr or "")
+    # Output goes to a FILE, never a pipe, and the run carries its own hang timeout.
+    #
+    # A mutation can HANG the suite rather than redden it — this repository's decode dispatcher waits on
+    # an untimed spin inside a lock, so a protocol mutated to never exhaust spins for ever. With
+    # `capture_output=True` that is unrecoverable: the child exits, a GRANDCHILD keeps the pipe open, and
+    # `communicate(timeout=...)` blocks straight past its own timeout. Measured 2026-08-14 — a harness sat
+    # 30+ minutes, the `finally` that restores the mutated file was never reached, and an orphaned
+    # DevOnBike.Overfit.Tests.exe burned 2268 CPU-seconds and then failed every later build with
+    # OVERFITMEASURING, a message about a concurrent measurement that did not exist. The same shape cost
+    # the main session a whole release-gate run the same day.
+    #
+    # A file handle cannot be held open by a grandchild in a way that blocks the parent, and
+    # `--blame-hang` turns a hang into a REPORTED RESULT instead of a stuck process.
+    log = REPO / "Tests" / "bin" / "mutate-arm.log"
+    log.parent.mkdir(parents=True, exist_ok=True)
+
+    with log.open("wb") as sink:
+        proc = subprocess.run(
+            ["dotnet", "test", str(REPO / "Tests" / "Tests.csproj"), "-c", "Release", "--nologo",
+             "--filter", FILTER,
+             "--blame-hang", "--blame-hang-timeout", "5m"],
+            stdout=sink, stderr=subprocess.STDOUT)
+
+    text = log.read_bytes().decode("utf-8", errors="replace")
 
     return (proc.returncode,
             sorted({n.split(".")[-1] for n in
@@ -187,3 +206,9 @@ mutation, the victim, and whether the restore was verified.
 | Assuming a broken guard hangs rather than reds | It can go either way. A cycle-detection guard was expected to hang under mutation and produced a clean red — check, do not assume |
 | Mutating until something goes red | That is fitting the harness to the answer. One prediction, one run, one verdict |
 | Calling a test weak because its assertion looks thin | Shape is not failability. Five `Assert.NotNull`-only tests in `CheckpointedModuleSegmentWalkTests` were reddened by mutation, and `overfit-assertion-quality`'s rubric calls them trivial. **This skill owns that verdict** |
+
+**When you re-run a matrix after adding tests: a victim set that WIDENS is expected, one that SHRINKS is
+the finding.** Adding a test that calls the mutated function widens its victim set by construction —
+measured 2026-08-14, six of nine arms widened and nothing was wrong. A set that shrinks means a new
+test masked an old one. Report widenings with their cause, and say which arms still isolate a single
+test, because only those carry evidence about one behaviour.

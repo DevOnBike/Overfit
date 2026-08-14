@@ -284,11 +284,41 @@ namespace DevOnBike.Overfit.Runtime
         // 2026-08-14 as a DivideByZeroException with an FFN dispatch frame beneath an attention body.
         // The quieter consequence was worse: its extra decrement of _decodeRemaining let a LATER
         // dispatch's wait finish early, returning a partially written output buffer with no exception at
-        // all. The generation and the next index now live in ONE word (_decodeClaim) so both are read
-        // and advanced by a single CAS.
+        // all. The generation, the chunk count AND the next index now live in ONE word (_decodeClaim) so
+        // all three are read and advanced by a single CAS. The chunk count joined them on 2026-08-14
+        // (`XC-50`): while it lived in its own field it was published BEFORE the tag, so for the length of
+        // that window the word said "generation G" while the bound already said "G+1" — see
+        // DecodeChunkClaim for the full account.
         private const string DecodePoolEnvVar = OverfitEnvironment.DecodePool;
         private static readonly bool _decodePool = ResolveDecodePool();
-        private static readonly int _decodePoolSize = ResolveDecodeMaxWorkers();
+
+        // Clamped to what a claim word's count field can carry. chunkCount is Math.Min(_decodePoolSize,
+        // totalWork) and travels INSIDE the claim word, so bounding the pool size here — once, at
+        // resolution — makes an over-wide count unrepresentable instead of something every dispatch has to
+        // test for. ResolveDecodeMaxWorkers already caps at Environment.ProcessorCount, so on any real box
+        // this clamp is inert; it exists so that silent truncation of the bound (which would revive
+        // `XC-50`) cannot become the failure mode if that cap ever changes.
+        private static readonly int _decodePoolSize = ClampDecodePoolSize(ResolveDecodeMaxWorkers());
+
+        /// <summary>
+        /// Clamps a resolved decode-pool size to what a claim word's count field can carry
+        /// (<see cref="DecodeChunkClaim.MaxChunkCount"/>).
+        ///
+        /// <para><b>It is a named method rather than an inline <c>Math.Min</c> so it can be driven from a
+        /// test.</b> On every real box the clamp is inert — <see cref="ResolveDecodeMaxWorkers"/> already
+        /// caps at <see cref="Environment.ProcessorCount"/>, which is five orders of magnitude below the
+        /// field's limit — so a test that reads <c>_decodePoolSize</c> would assert nothing about the
+        /// clamp and would additionally depend on the machine it ran on. An unexercised clamp is the same
+        /// defect class as an untested bound: if <see cref="ResolveDecodeMaxWorkers"/> ever grows a
+        /// configuration path, silent truncation of the count field revives `XC-50`.</para>
+        /// </summary>
+        /// <param name="resolvedWorkers">The pool size before clamping.</param>
+        /// <returns>The pool size, never above <see cref="DecodeChunkClaim.MaxChunkCount"/>.</returns>
+        internal static int ClampDecodePoolSize(int resolvedWorkers)
+        {
+            return Math.Min(resolvedWorkers, DecodeChunkClaim.MaxChunkCount);
+        }
+
         private static readonly Lock _decodeGate = new();
         private static ChunkState[] _decodeChunks = [];
         private static long _decodeGen;
@@ -321,7 +351,6 @@ namespace DevOnBike.Overfit.Runtime
         // per-token dispatches (so a token in flight never parks), while a quiet server parks
         // within a couple of milliseconds of the last token.
         private const int DecodeSpinBudgetIterations = 20_000;
-        private static int _decodeChunkCount;
         private static PaddedClaim _decodeClaim;
         private static PaddedCounter _decodeRemaining;
 
@@ -623,7 +652,25 @@ namespace DevOnBike.Overfit.Runtime
             {
                 var generation = _decodeGen + 1;
 
-                _decodeChunkCount = chunkCount;
+                // Resetting the completion counter BEFORE the dispatch is published looks wrong and is
+                // not, but it is safe only as a CONSEQUENCE of the claim invariant, so the reasoning is
+                // recorded here rather than left to be re-derived. _decodeRemaining is decremented exactly
+                // once per SUCCESSFUL claim (ExecuteDecodeChunk's finally). Claims tagged G total exactly
+                // chunkCount_G, because the bound they test against is G's own and travels in G's word.
+                // So when G's dispatcher observed _decodeRemaining == 0 below, every G execution had
+                // already decremented and no further G claim can succeed — no G decrement can survive into
+                // G+1 and land on this reset value. That argument holds ONLY while the claim's bound is
+                // generation-correct: under the pre-`XC-50` shape the extra claim a straggler could win is
+                // precisely what broke it.
+                //
+                // WHY THAT PREMISE HOLDS ACROSS TWO DIFFERENT ForDecode CALLS — the step the paragraph
+                // above assumes and never states: `_decodeGate` serialises dispatches end to end. G's
+                // dispatcher takes the lock, publishes, drains, and only LEAVES it after its own spin
+                // below has observed _decodeRemaining == 0; G+1's dispatcher cannot reach this line until
+                // then, because it is still waiting on the same lock. So "G observed zero" is not a
+                // property of some earlier call in the abstract — it is a fact established before this
+                // reset can execute at all. Remove the lock, or move the completion spin outside it, and
+                // this reset stops being safe.
                 Volatile.Write(ref _decodeRemaining.Value, chunkCount);
 
                 for (var i = 0; i < chunkCount; i++)
@@ -638,10 +685,22 @@ namespace DevOnBike.Overfit.Runtime
                     _decodeChunks[i].Error = null;
                 }
 
-                // Publish the claim word first, then the generation: both writes are releases, and a worker
-                // only starts claiming once it has seen the new generation, so it can never observe a claim
-                // word that still belongs to the previous dispatch.
-                Volatile.Write(ref _decodeClaim.Value, generation << 32);
+                // Publish the claim word first, then the generation. Both writes are releases, so the
+                // descriptors above are visible to anyone who acquires the word.
+                //
+                // THIS COMMENT USED TO ARGUE THAT A WORKER "only starts claiming once it has seen the new
+                // generation, so it can never observe a claim word that still belongs to the previous
+                // dispatch". That reasoning is about the wrong worker and it is what hid `XC-50`. The hole
+                // belongs to a straggler still draining the OLD generation, which never looks at
+                // _decodeGen again — it is holding G in a local and re-entering the claim. Nothing about
+                // publication order restrains it.
+                //
+                // What restrains it is that everything its claim tests is in the one word: tag, bound and
+                // next index are written here by a single store, so it either sees G's word (its own tag,
+                // its own exhausted bound) or G+1's (tag mismatch). While the bound lived in a separate
+                // field published earlier, a third state existed — G's tag with G+1's bound — and a
+                // straggler drove straight through it.
+                DecodeChunkClaim.Publish(ref _decodeClaim.Value, chunkCount, generation);
                 Volatile.Write(ref _decodeGen, generation);
 
                 // Wake parked workers. Unconditional — see _decodeParkLock for why a "is anybody parked"
@@ -652,7 +711,8 @@ namespace DevOnBike.Overfit.Runtime
                 }
 
                 // Calling thread participates — greedy drain (safe under _decodeGate).
-                // BOUND: _decodeChunkCount. Every successful claim advances the shared index, so the loop
+                // BOUND: the chunk count carried in the claim word — this dispatch's `chunkCount`, just
+                // published above. Every successful claim advances the word's index field, so the loop
                 // runs at most chunkCount times before TryClaimDecodeChunk returns false. No OVERFIT023
                 // suppression needed any more — the condition is no longer `true`.
                 while (TryClaimDecodeChunk(generation, out var index))
@@ -675,58 +735,17 @@ namespace DevOnBike.Overfit.Runtime
         }
 
         /// <summary>
-        /// Claims the next chunk of <paramref name="generation"/>, or returns <c>false</c> once that
-        /// generation is drained — or has been superseded by a later dispatch.
+        /// Binds this class's claim word to the claim protocol, which lives in
+        /// <see cref="DecodeChunkClaim.TryClaim"/> — see there for why the generation, the chunk count and
+        /// the index share one word.
         ///
-        /// <para><b>Why one word and a CAS.</b> The generation and the next index are packed into a single
-        /// 64-bit value so that "is this still my dispatch?" and "take the next index" happen atomically.
-        /// Reading them separately is what allowed a descheduled worker to take an index out of the NEXT
-        /// dispatch: it would run that dispatch's <c>Body</c>, decrement that dispatch's completion
-        /// counter, and — because <c>_decodeChunks[]</c> was being rewritten underneath it — could pair a
-        /// <c>Body</c> from one dispatch with a <c>Context</c> from another.</para>
-        ///
-        /// <para>Failing the generation check must NOT consume an index, which is why this is a
-        /// compare-and-swap rather than an increment followed by a test: an increment would burn a chunk
-        /// of the new generation that nobody then executes, and the dispatcher would wait for a completion
-        /// that never arrives.</para>
-        ///
-        /// <para>The tag is the low 32 bits of the generation. Wrapping needs 2^32 dispatches to pass while
-        /// one straggler stays descheduled — at ~180 dispatches per token and this repository's measured
-        /// decode rates that is days to months of continuous decoding, against a straggler that survives
-        /// microseconds. (An earlier draft of this line said "years"; the margin is ample either way, but
-        /// the number was wrong by about two orders of magnitude.)</para>
+        /// <para>The word is the only thing that crosses: nothing else about the dispatch is passed, and
+        /// nothing else could be, since this class's dispatch state is private to it. Any future parameter
+        /// added here is `XC-50` returning.</para>
         /// </summary>
         private static bool TryClaimDecodeChunk(long generation, out int index)
         {
-            var tag = (uint)generation;
-
-            // BOUND: retries only on a lost CAS, and every lost CAS means another thread made progress on
-            // the same word — so the loop is bounded by the number of chunks in flight.
-#pragma warning disable OVERFIT023
-            while (true)
-#pragma warning restore OVERFIT023
-            {
-                var current = Volatile.Read(ref _decodeClaim.Value);
-
-                if ((uint)(current >> 32) != tag)
-                {
-                    index = 0;
-                    return false;
-                }
-
-                var next = (int)current;
-                if (next >= _decodeChunkCount)
-                {
-                    index = 0;
-                    return false;
-                }
-
-                if (Interlocked.CompareExchange(ref _decodeClaim.Value, current + 1, current) == current)
-                {
-                    index = next;
-                    return true;
-                }
-            }
+            return DecodeChunkClaim.TryClaim(ref _decodeClaim.Value, generation, out index);
         }
 
         private static void ExecuteDecodeChunk(int index)
@@ -943,13 +962,15 @@ namespace DevOnBike.Overfit.Runtime
         }
 
         /// <summary>
-        /// Cache-line-padded 64-bit work claim: the dispatch generation in the high 32 bits, the next
-        /// unclaimed chunk index in the low 32. Padded for the same reason as <see cref="PaddedCounter"/>
-        /// — every worker hammers it with a compare-and-swap.
+        /// Cache-line-padded 64-bit work claim: the dispatch generation in the high 32 bits, the chunk
+        /// count in the next 16, the next unclaimed chunk index in the low 16 (layout owned by
+        /// <see cref="DecodeChunkClaim"/>). Padded for the same reason as <see cref="PaddedCounter"/> —
+        /// every worker hammers it with a compare-and-swap.
         ///
-        /// <para>One word rather than two fields so that <see cref="TryClaimDecodeChunk"/> can verify the
-        /// generation and take the index in a single atomic operation; see that method for what went wrong
-        /// when the two were read separately.</para>
+        /// <para>One word rather than three fields so that <see cref="TryClaimDecodeChunk"/> can verify the
+        /// generation, test the bound and take the index in a single atomic operation; see
+        /// <see cref="DecodeChunkClaim"/> for what went wrong each time one of the three was read from
+        /// somewhere else.</para>
         /// </summary>
         [StructLayout(LayoutKind.Explicit, Size = 128)]
         private struct PaddedClaim
