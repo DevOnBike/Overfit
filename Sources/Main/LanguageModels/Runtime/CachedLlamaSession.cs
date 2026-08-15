@@ -20,8 +20,26 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
     ///   - Token embedding lookup is a direct row-read from embed_weights.
     ///   - RoPE table is passed into stack.Decode per step.
     ///   - GQA cache uses kvHeadCount &lt; nHeads slots.
+    ///   - The transformer scratch (<see cref="CachedGptStack"/>) belongs to the ENGINE and is shared by
+    ///     every session it creates; a GPT-1/2 session builds its own. See the thread-safety note below.
     ///
-    /// Thread-safety: one session per thread.
+    /// <para><b>Thread-safety — NOT one session per thread.</b> A session is a cheap view over the scratch
+    /// owned by the <see cref="CachedLlamaInferenceEngine"/> that created it: only the
+    /// <see cref="KeyValueCache"/> is per session. <b>Two sessions of the same engine must not decode
+    /// concurrently.</b> Doing so corrupts both forward passes — silently, with no exception, because the
+    /// per-session KV caches make the sharing invisible.</para>
+    ///
+    /// <para>Supported: sequential use, and interleaving sessions of one engine on a single thread. A decode
+    /// step is atomic with respect to the shared scratch and carries nothing between steps, so two sessions
+    /// taking turns produce exactly the results each would produce alone.</para>
+    ///
+    /// <para>For concurrent streams, create <b>one engine per stream</b> (what <c>overfit serve</c> does), or
+    /// serialise the decodes yourself around a shared engine (what the ASP.NET host does with a
+    /// <c>SemaphoreSlim(1, 1)</c>).</para>
+    ///
+    /// <para><see cref="LastHiddenState"/> — and the engine's interpretability readers — reflect the most
+    /// recent decode through the engine, <b>by whichever session made it</b>. On an engine with more than one
+    /// session they do not answer a question about "this session".</para>
     /// </summary>
     public sealed class CachedLlamaSession : ISlmSession
     {
@@ -974,6 +992,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// Hidden state AFTER all transformer layers, BEFORE final RMSNorm.
         /// Matches Python: x before rms_norm(x, fg2, eps).
         /// Previously incorrectly returned _hidden (token embedding input).
+        ///
+        /// <para>This reads the ENGINE's shared scratch, so it reflects the most recent decode through the
+        /// engine by <b>any</b> of its sessions — not necessarily this one. It answers "this session" only
+        /// while the engine has a single session, or immediately after this session decoded.</para>
         /// </summary>
         public ReadOnlySpan<float> LastHiddenState => _stack.LastFinalHidden;
 

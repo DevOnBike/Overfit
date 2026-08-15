@@ -187,7 +187,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         // layer's hidden and project it through the head with the logit lens to see the prediction form.
 
         /// <summary>Turns on/off per-layer residual-stream capture for subsequent decodes. Off by default
-        /// (zero hot-path cost). See <see cref="GetLayerActivation"/> / <see cref="LogitLens"/>.</summary>
+        /// (zero hot-path cost). See <see cref="GetLayerActivation"/> / <see cref="LogitLens"/>.
+        /// <para>Engine-wide, not per session: the capture buffers live in the shared scratch, so this
+        /// affects every session created from this engine.</para></summary>
         public void EnableActivationCapture(bool enabled)
         {
             ThrowIfDisposed();
@@ -196,7 +198,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
         /// <summary>Copies the captured residual stream after transformer <paramref name="layer"/> (0-based,
         /// pre-final-norm) for the most recent decoded token into <paramref name="destination"/> (length DModel).
-        /// Requires <see cref="EnableActivationCapture"/>(true) before the decode.</summary>
+        /// Requires <see cref="EnableActivationCapture"/>(true) before the decode.
+        /// <para>"Most recent" means through this ENGINE, by whichever session decoded last — the capture
+        /// buffers are shared. On an engine with more than one session this does not answer a question about
+        /// a particular session.</para></summary>
         public void GetLayerActivation(int layer, Span<float> destination)
         {
             ThrowIfDisposed();
@@ -371,6 +376,13 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// (default, full precision) or <see cref="KvCacheDType.Q8"/> (per-vector int8 — ~4× less KV RAM and
         /// attention read traffic, for long-context / low-memory decode). When null it falls back to the
         /// <c>OVERFIT_KV_DTYPE</c> env var (<c>q8</c> → Q8, anything else → F32).
+        ///
+        /// <para><b>The session is not independent of this engine.</b> Only its <see cref="KeyValueCache"/>
+        /// is per session; the transformer scratch belongs to the engine and is shared by every session
+        /// created from it. <b>Sessions of one engine must not decode concurrently</b> — that corrupts both
+        /// forward passes silently. Sequential use, and interleaving sessions on one thread, are supported.
+        /// For concurrent streams create one engine per stream, or serialise around a shared engine. See
+        /// <see cref="CachedLlamaSession"/> for the full contract.</para>
         /// </summary>
         public CachedLlamaSession CreateSession(int? maxContextLength = null, KvCacheDType? kvCacheDType = null)
         {

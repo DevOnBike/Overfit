@@ -448,6 +448,20 @@ by parity, benchmark and an end-to-end generation on a real model._
   75%, so the effect does not clear its own noise; and the affine fit was **indistinguishable from plain
   division** on the only real data available. Details and what would settle it in `ROADMAP.md`.
 
+### Known limitation
+
+- **Sessions created from one `CachedLlamaInferenceEngine` share the engine's transformer scratch and must
+  not decode concurrently.** Only the `KeyValueCache` is per session; the one `CachedGptStack` built by the
+  engine is handed to every session `CreateSession` returns — which is what makes the sharing invisible. Two
+  sessions of one engine decoding at the same time corrupt **both** forward passes, silently, with no
+  exception. Sequential use and interleaving on a single thread are unaffected. For concurrent streams,
+  create one engine per stream (what `overfit serve` does), or serialise around the shared engine (what the
+  ASP.NET host does with its `SemaphoreSlim(1, 1)` gates). **This is pre-existing in every published version,
+  not new in 10.1.0** — what is new is that it is written down: the XML doc shipped in the package said
+  *"Thread-safety: one session per thread"*, which named the shape that corrupts. Nothing in this repository
+  decodes two sessions of one engine concurrently. The guard that turns the misuse into a thrown
+  `OverfitRuntimeException` is task `XC-58` and is **not** in this release.
+
 ## [10.0.30] - 2026-07-05
 
 _The `frodo` branch: an on-device Android chat app, an advanced sampler suite, offline prefill acceleration, a local skill-eval harness, a `dotnet new` template + Microsoft.Extensions.AI drop-in, and CI-guard hardening._

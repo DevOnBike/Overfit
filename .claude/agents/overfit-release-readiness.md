@@ -191,9 +191,20 @@ dotnet publish ./Tests/AotSmokeTest/AotSmokeTest.csproj -c Release -r linux-x64 
 ```
 
 `IsAotCompatible=true` in a csproj turns on analysers; **only ILCompiler actually verifies the graph**, and
-this smoketest is the only place it runs. Needs a C++ toolchain — if it is unavailable locally, say so
-plainly and check that CI's `aot-guard` job passed on this branch instead. **Do not report AOT as verified
-because a csproj claims it.**
+this smoketest is the only place it runs. **Do not report AOT as verified because a csproj claims it.**
+
+**Before declaring `CANNOT TELL` on the toolchain, run `docker info`. Added 2026-08-15, because this agent
+reported AOT unverifiable twice and both times it was a container away.** The 2026-08-13 run recorded "no
+C++ toolchain on this box" into its own memory and the next run nearly repeated it from that note; on
+2026-08-15 Docker's Linux engine was simply running, and a `sdk:10.0` + clang container executed the real
+guard in **~25 s of compile** — ILCompiler ran, a native ELF was produced and **executed**. Then the whole
+CLI through `Sources/Cli/Dockerfile` (Kestrel, Minimal API, Server, Mcp, Anomalies, Main) compiled clean
+with no `IL2026`/`IL3050`/`IL31xx`, which is far stronger evidence than the smoketest alone — the smoketest
+only touches `OverfitClient` and `GenerationOptions`, so "AOT-verified" for the library means that graph
+and no more. **The general failure this records is not about AOT**: a *capability* was recorded as a
+*property of the box*, and the note outlived the condition that made it true. Re-check the capability, do
+not read it out of memory. Only if `docker info` fails too is this a genuine `CANNOT TELL` — then say so
+plainly and check CI's `aot-guard` job on this branch instead.
 
 Watch specifically for `IL2026`/`IL3050` on reachable code, and for a method that acquired reflection without
 a `[RequiresUnreferencedCode]`/`[RequiresDynamicCode]` annotation — an unannotated warning is a promise the

@@ -93,12 +93,14 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
         [Fact]
         public void IncrementalDecode_PreservesSpaces_LikeChatSession()
         {
-            const string dir = @"C:\qwen3b";
-            if (!Directory.Exists(dir))
-            {
-                _out.WriteLine($"missing {dir}");
-                return;
-            }
+            // A skip, not a return: without the tokenizer this test asserts nothing, and a pass would be
+            // indistinguishable from "checked and correct" on a box with no fixtures (i.e. on CI).
+            // Gated on the FILE, not on the directory: an existing but empty fixture directory passes a
+            // Directory.Exists check and then throws inside QwenTokenizer.Load — measured, that arm went
+            // red rather than skipping.
+            var dir = TestModelPaths.Qwen3B.Dir;
+            Assert.SkipWhen(!File.Exists(TestModelPaths.Qwen3B.TokenizerJsonPath),
+                $"tokenizer.json not present in {dir} (set OVERFIT_QWEN3B_DIR).");
 
             var tok = QwenTokenizer.Load(dir);
             const string phrase = "The capital of France is Paris.";
