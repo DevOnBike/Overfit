@@ -26,8 +26,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
     /// <para><b>Thread-safety — NOT one session per thread.</b> A session is a cheap view over the scratch
     /// owned by the <see cref="CachedLlamaInferenceEngine"/> that created it: only the
     /// <see cref="KeyValueCache"/> is per session. <b>Two sessions of the same engine must not decode
-    /// concurrently.</b> Doing so corrupts both forward passes — silently, with no exception, because the
-    /// per-session KV caches make the sharing invisible.</para>
+    /// concurrently.</b> Doing so corrupted both forward passes silently in every version before 10.1.0,
+    /// because the per-session KV caches make the sharing invisible; the shared scratch now refuses the
+    /// second caller with an <see cref="OverfitRuntimeException"/> naming the cause instead.</para>
     ///
     /// <para>Supported: sequential use, and interleaving sessions of one engine on a single thread. A decode
     /// step is atomic with respect to the shared scratch and carries nothing between steps, so two sessions

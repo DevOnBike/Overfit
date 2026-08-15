@@ -119,6 +119,18 @@ by hand for seven of them.
 
 ### Changed
 
+- **Sessions created from one `CachedLlamaInferenceEngine` now throw `OverfitRuntimeException` when two of
+  them decode concurrently, instead of silently corrupting both forward passes.** They share the engine's
+  transformer scratch — only the `KeyValueCache` is per session — so overlapping decodes produced wrong
+  logits for both, with no signal of any kind. The guard is an exclusive-use flag taken per synchronous
+  entry to the shared stack and released in a `finally`, so an exception inside a decode cannot leave the
+  engine refusing every later call. **Sequential and single-threaded interleaved use is unaffected**: a
+  decode step is atomic with respect to the scratch, so two sessions taking turns produce exactly what each
+  produces alone — measured on a real Qwen engine with two different prompts, tokens identical to each
+  session run standalone. For concurrent streams create one engine per stream (what `overfit serve` does),
+  or serialise around the shared engine (what the ASP.NET host does with its `SemaphoreSlim(1, 1)` gates).
+  **`Scripts/api_compat_check.py` cannot see this change** — the public surface is unchanged and the
+  behaviour is not, which is exactly the class of break an assembly comparator is blind to (`XC-58`).
 - **Public signatures that changed shape since 10.0.31. Every one of these is a binary break**: a compiled
   caller fails with `MissingMethodException` even where the source still compiles. Five came from the
   `OVERFIT041` cancellation-token sweep, where the reorder was accepted deliberately because **no reorder
@@ -454,13 +466,16 @@ by parity, benchmark and an end-to-end generation on a real model._
   not decode concurrently.** Only the `KeyValueCache` is per session; the one `CachedGptStack` built by the
   engine is handed to every session `CreateSession` returns — which is what makes the sharing invisible. Two
   sessions of one engine decoding at the same time corrupt **both** forward passes, silently, with no
-  exception. Sequential use and interleaving on a single thread are unaffected. For concurrent streams,
-  create one engine per stream (what `overfit serve` does), or serialise around the shared engine (what the
-  ASP.NET host does with its `SemaphoreSlim(1, 1)` gates). **This is pre-existing in every published version,
-  not new in 10.1.0** — what is new is that it is written down: the XML doc shipped in the package said
-  *"Thread-safety: one session per thread"*, which named the shape that corrupts. Nothing in this repository
-  decodes two sessions of one engine concurrently. The guard that turns the misuse into a thrown
-  `OverfitRuntimeException` is task `XC-58` and is **not** in this release.
+  exception **until this release** — see `Changed`. Sequential use and interleaving on a single thread are
+  unaffected. For concurrent streams, create one engine per stream (what `overfit serve` does), or serialise
+  around the shared engine (what the ASP.NET host does with its `SemaphoreSlim(1, 1)` gates). **The sharing
+  is pre-existing in every published version, not new in 10.1.0** — what is new is that it is written down
+  and now refused: the XML doc shipped in the package said *"Thread-safety: one session per thread"*, which
+  named the shape that corrupts. Nothing in this repository decodes two sessions of one engine concurrently.
+  **What remains a limitation is the sharing itself**: `session.LastHiddenState` and the engine's
+  interpretability readers still answer about the most recent decode through the engine, **by whichever
+  session made it**, and giving each session its own stack is deferred behind the scratch right-sizing in
+  `XC-60`.
 
 ## [10.0.30] - 2026-07-05
 

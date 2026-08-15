@@ -379,8 +379,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         ///
         /// <para><b>The session is not independent of this engine.</b> Only its <see cref="KeyValueCache"/>
         /// is per session; the transformer scratch belongs to the engine and is shared by every session
-        /// created from it. <b>Sessions of one engine must not decode concurrently</b> — that corrupts both
-        /// forward passes silently. Sequential use, and interleaving sessions on one thread, are supported.
+        /// created from it. <b>Sessions of one engine must not decode concurrently</b> — the second caller
+        /// is refused with an <see cref="OverfitRuntimeException"/> (before 10.1.0 it silently corrupted both
+        /// forward passes). Sequential use, and interleaving sessions on one thread, are supported.
         /// For concurrent streams create one engine per stream, or serialise around a shared engine. See
         /// <see cref="CachedLlamaSession"/> for the full contract.</para>
         /// </summary>
