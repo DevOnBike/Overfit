@@ -33,6 +33,21 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         private readonly float[] _layerActivations;   // [LayerCount × DModel] residual-stream capture (opt-in via the flag)
         private readonly float[] _lensScratch;        // [DModel] logit-lens normalized-hidden scratch
 
+        // Exclusive-use flag. Every session of a CachedLlamaInferenceEngine decodes through THIS instance —
+        // the engine builds one stack in its constructor and hands it to every session CreateSession makes —
+        // so all the scratch above (_currentHidden, _nextHidden, _finalHidden, _lastFinalHidden, _lastLogits,
+        // the LM-head quantization buffers, plus every block's attention/FFN scratch) is shared between them.
+        // Two sessions inside a decode at the same instant corrupt each other's forward pass and nothing says
+        // so; this flag turns that into a named exception at the moment of misuse.
+        //
+        // Taken and released per SYNCHRONOUS entry, never held across an await — cooperative interleaving of
+        // two sessions on one thread is supported (a step is atomic with respect to the scratch) and must not
+        // trip. Nesting (Decode → DecodeWithoutLogits → ProjectLogits → ProjectLogitsFrom) is resolved
+        // structurally: each guarded method is a thin facade over a private unguarded *Core, and no core ever
+        // calls a facade. A reentrancy DEPTH counter is deliberately not used — depth without owner identity
+        // admits a second session while the first is nested, which is the bug the guard exists to catch.
+        private int _inUse;
+
         public CachedGptStack(
             int layerCount,
             int dModel,
@@ -169,6 +184,40 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         }
 
         /// <summary>
+        /// Takes the stack's exclusive-use flag for one synchronous entry, or throws
+        /// <see cref="OverfitRuntimeException"/> when another caller is already inside one. The winner is
+        /// decided by a single <see cref="Interlocked.CompareExchange(ref int, int, int)"/> rather than by a
+        /// read followed by a write, which two callers can both pass; that atomicity is reasoned, not tested
+        /// (no deterministic test exists for it here — see the plan's M4).
+        ///
+        /// <para>Every caller must release in a <c>finally</c> via <see cref="ExitExclusive"/>. Without one, a
+        /// single mid-decode exception would leave the stack refusing every later call for the rest of the
+        /// engine's life — an availability bug in place of the correctness one.</para>
+        /// </summary>
+        internal void EnterExclusive(string entryPoint)
+        {
+            if (Interlocked.CompareExchange(ref _inUse, 1, 0) != 0)
+            {
+                ThrowConcurrentUse(entryPoint);
+            }
+        }
+
+        /// <summary>
+        /// Releases the flag taken by <see cref="EnterExclusive"/>. Only ever called from the <c>finally</c>
+        /// of the entry that took it.
+        /// </summary>
+        internal void ExitExclusive() => Volatile.Write(ref _inUse, 0);
+
+        private static void ThrowConcurrentUse(string entryPoint)
+        {
+            throw new OverfitRuntimeException(
+                $"Concurrent use of one CachedGptStack: another caller is already inside this stack while " +
+                $"{entryPoint} was entered. Sessions created from one CachedLlamaInferenceEngine share the " +
+                "engine's transformer scratch and must not decode at the same time. Create one engine per " +
+                "concurrent stream, or serialize the sessions — interleaving them on one thread is supported.");
+        }
+
+        /// <summary>
         /// Decodes one token through all transformer layers + LM head using KV-cache.
         /// Zero allocations — all weights accessed via StackWeights references.
         /// </summary>
@@ -180,14 +229,35 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             Span<float> logits,
             RopeTable? rope = null)
         {
+            EnterExclusive(nameof(Decode));
+
+            try
+            {
+                DecodeCore(inputHidden, weights, cache, position, logits, rope);
+            }
+            finally
+            {
+                ExitExclusive();
+            }
+        }
+
+        /// <summary>Unguarded body of <see cref="Decode"/>.</summary>
+        private void DecodeCore(
+            ReadOnlySpan<float> inputHidden,
+            StackWeights weights,
+            KeyValueCache cache,
+            int position,
+            Span<float> logits,
+            RopeTable? rope)
+        {
             if (logits.Length < VocabSize)
             {
                 throw new ArgumentException($"logits length {logits.Length} < VocabSize {VocabSize}.");
             }
 
-            DecodeWithoutLogits(inputHidden, weights, cache, position, rope);
+            DecodeWithoutLogitsCore(inputHidden, weights, cache, position, rope);
             var profLm = DecodeProfiler.Start();
-            ProjectLogits(weights, logits);
+            ProjectLogitsCore(weights, logits);
             DecodeProfiler.Stop(DecodeProfiler.Component.LmHead, profLm);
         }
 
@@ -208,6 +278,26 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             KeyValueCache cache,
             int position,
             RopeTable? rope = null)
+        {
+            EnterExclusive(nameof(DecodeWithoutLogits));
+
+            try
+            {
+                DecodeWithoutLogitsCore(inputHidden, weights, cache, position, rope);
+            }
+            finally
+            {
+                ExitExclusive();
+            }
+        }
+
+        /// <summary>Unguarded body of <see cref="DecodeWithoutLogits"/>.</summary>
+        private void DecodeWithoutLogitsCore(
+            ReadOnlySpan<float> inputHidden,
+            StackWeights weights,
+            KeyValueCache cache,
+            int position,
+            RopeTable? rope)
         {
             if (inputHidden.Length < DModel)
             {
@@ -306,6 +396,27 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             int basePosition,
             RopeTable? rope = null)
         {
+            EnterExclusive(nameof(PrefillBatched));
+
+            try
+            {
+                PrefillBatchedCore(inputHidden, rows, weights, cache, basePosition, rope);
+            }
+            finally
+            {
+                ExitExclusive();
+            }
+        }
+
+        /// <summary>Unguarded body of <see cref="PrefillBatched"/>.</summary>
+        private void PrefillBatchedCore(
+            ReadOnlySpan<float> inputHidden,
+            int rows,
+            StackWeights weights,
+            KeyValueCache cache,
+            int basePosition,
+            RopeTable? rope)
+        {
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(rows);
 
             if (inputHidden.Length < (long)rows * DModel)
@@ -389,6 +500,27 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             int basePosition,
             RopeTable? rope = null)
         {
+            EnterExclusive(nameof(PrefillBatchedQuant));
+
+            try
+            {
+                PrefillBatchedQuantCore(inputHidden, rows, weights, cache, basePosition, rope);
+            }
+            finally
+            {
+                ExitExclusive();
+            }
+        }
+
+        /// <summary>Unguarded body of <see cref="PrefillBatchedQuant"/>.</summary>
+        private void PrefillBatchedQuantCore(
+            ReadOnlySpan<float> inputHidden,
+            int rows,
+            StackWeights weights,
+            KeyValueCache cache,
+            int basePosition,
+            RopeTable? rope)
+        {
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(rows);
             if (inputHidden.Length < (long)rows * DModel)
             {
@@ -419,6 +551,28 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             int basePosition,
             Span<float> finalNormAllRows,
             RopeTable? rope = null)
+        {
+            EnterExclusive(nameof(PrefillBatchedQuantAllRows));
+
+            try
+            {
+                PrefillBatchedQuantAllRowsCore(inputHidden, rows, weights, cache, basePosition, finalNormAllRows, rope);
+            }
+            finally
+            {
+                ExitExclusive();
+            }
+        }
+
+        /// <summary>Unguarded body of <see cref="PrefillBatchedQuantAllRows"/>.</summary>
+        private void PrefillBatchedQuantAllRowsCore(
+            ReadOnlySpan<float> inputHidden,
+            int rows,
+            StackWeights weights,
+            KeyValueCache cache,
+            int basePosition,
+            Span<float> finalNormAllRows,
+            RopeTable? rope)
         {
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(rows);
             if (finalNormAllRows.Length < (long)rows * DModel)
@@ -503,7 +657,22 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// </summary>
         internal void ProjectLogits(StackWeights weights, Span<float> logits)
         {
-            ProjectLogitsFrom(_finalHidden, weights, logits);
+            EnterExclusive(nameof(ProjectLogits));
+
+            try
+            {
+                ProjectLogitsCore(weights, logits);
+            }
+            finally
+            {
+                ExitExclusive();
+            }
+        }
+
+        /// <summary>Unguarded body of <see cref="ProjectLogits"/>.</summary>
+        private void ProjectLogitsCore(StackWeights weights, Span<float> logits)
+        {
+            ProjectLogitsFromCore(_finalHidden, weights, logits);
             logits.Slice(0, VocabSize).CopyTo(_lastLogits);
         }
 
@@ -513,6 +682,21 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// Dispatches on the head's residency (Q6_K / Q4_K / Q8_0 / F32); allocation-free.
         /// </summary>
         internal void ProjectLogitsFrom(ReadOnlySpan<float> finalNorm, StackWeights weights, Span<float> logits)
+        {
+            EnterExclusive(nameof(ProjectLogitsFrom));
+
+            try
+            {
+                ProjectLogitsFromCore(finalNorm, weights, logits);
+            }
+            finally
+            {
+                ExitExclusive();
+            }
+        }
+
+        /// <summary>Unguarded body of <see cref="ProjectLogitsFrom"/>.</summary>
+        private void ProjectLogitsFromCore(ReadOnlySpan<float> finalNorm, StackWeights weights, Span<float> logits)
         {
             var lmHead = weights.LmHeadWeights;
             // Resident-format dispatch, classified once (see BatchedQuantProjection).
@@ -568,6 +752,22 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// <c>rows × VocabSize</c>.
         /// </summary>
         internal void ProjectLogitsBatched(
+            ReadOnlySpan<float> finalNormAllRows, int rows, StackWeights weights, Span<float> logitsAllRows)
+        {
+            EnterExclusive(nameof(ProjectLogitsBatched));
+
+            try
+            {
+                ProjectLogitsBatchedCore(finalNormAllRows, rows, weights, logitsAllRows);
+            }
+            finally
+            {
+                ExitExclusive();
+            }
+        }
+
+        /// <summary>Unguarded body of <see cref="ProjectLogitsBatched"/>.</summary>
+        private void ProjectLogitsBatchedCore(
             ReadOnlySpan<float> finalNormAllRows, int rows, StackWeights weights, Span<float> logitsAllRows)
         {
             BatchedQuantProjection.Dispatch(
@@ -657,10 +857,19 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// </summary>
         internal void LogitLensFromHidden(ReadOnlySpan<float> layerHidden, StackWeights weights, Span<float> logits)
         {
-            // Normalize into the lens scratch (never the live _finalHidden, which holds the real last state),
-            // then run the same head projection the real next-token logits use.
-            ApplyFinalNorm(layerHidden, weights, _lensScratch);
-            ProjectLogitsFrom(_lensScratch, weights, logits);
+            EnterExclusive(nameof(LogitLensFromHidden));
+
+            try
+            {
+                // Normalize into the lens scratch (never the live _finalHidden, which holds the real last state),
+                // then run the same head projection the real next-token logits use.
+                ApplyFinalNorm(layerHidden, weights, _lensScratch);
+                ProjectLogitsFromCore(_lensScratch, weights, logits);
+            }
+            finally
+            {
+                ExitExclusive();
+            }
         }
 
         /// <summary>Exposes internal blocks for testing.</summary>

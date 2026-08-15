@@ -146,27 +146,74 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
             Console.WriteLine($"Logits OK. Max logit={maxLogit:F3} at token={maxIdx}");
         }
 
-        [LongFact("7s")]
-        public void MultipleSessionsFromSameEngine_Independenet()
+        /// <summary>
+        /// Two sessions of ONE engine, interleaved on one thread, each produce exactly the tokens they
+        /// produce alone. This is the supported half of the shared-stack contract (XC-58): sessions share the
+        /// engine's transformer scratch, so they must not decode concurrently — but a decode step is atomic
+        /// with respect to that scratch, so taking turns is fine and must keep working.
+        ///
+        /// <para>This replaces <c>MultipleSessionsFromSameEngine_Independenet</c>, which gave both sessions
+        /// the SAME prompt and asserted the two greedy tokens were equal — an assertion that holds identically
+        /// whether the sessions are independent or share every buffer, so it could not distinguish the two
+        /// while its name signed off on the property.</para>
+        /// </summary>
+        [LongFact("20s")]
+        public void MultipleSessionsFromSameEngine_InterleavedOnOneThread_MatchStandaloneRuns()
         {
             var path = RequireCheckpoint();
 
             using var engine = CachedLlamaInferenceEngine.Load(path!);
 
+            var sampling = SamplingOptions.Greedy;
+            int[] promptA = [151643, 3838];
+            int[] promptB = [151643, 15191];
+            const int steps = 3;
+
+            // Baseline: each prompt on a session that is the only live decoder on this engine.
+            var aloneA = RunAlone(engine, promptA, steps, in sampling);
+            var aloneB = RunAlone(engine, promptB, steps, in sampling);
+
+            // Different prompts must diverge, or the comparison below would hold vacuously.
+            Assert.NotEqual(aloneA, aloneB);
+
             using var s1 = engine.CreateSession(maxContextLength: 32);
             using var s2 = engine.CreateSession(maxContextLength: 32);
 
-            var sampling = SamplingOptions.Greedy;
+            s1.Reset(promptA);
+            s2.Reset(promptB);
 
-            s1.Reset([151643]);
-            s2.Reset([151643]);
+            var interleavedA = new int[steps];
+            var interleavedB = new int[steps];
 
-            var t1 = s1.GenerateNextToken(in sampling);
-            var t2 = s2.GenerateNextToken(in sampling);
+            for (var i = 0; i < steps; i++)
+            {
+                interleavedA[i] = s1.GenerateNextToken(in sampling);
+                interleavedB[i] = s2.GenerateNextToken(in sampling);
+            }
 
-            // Same prompt → same greedy output
-            Assert.Equal(t1, t2);
-            Console.WriteLine($"Session 1: {t1}, Session 2: {t2} — match: {t1 == t2}");
+            Assert.Equal(aloneA, interleavedA);
+            Assert.Equal(aloneB, interleavedB);
+
+            Console.WriteLine(
+                $"A alone [{string.Join(',', aloneA)}] interleaved [{string.Join(',', interleavedA)}]; " +
+                $"B alone [{string.Join(',', aloneB)}] interleaved [{string.Join(',', interleavedB)}]");
+        }
+
+        private static int[] RunAlone(
+            CachedLlamaInferenceEngine engine, int[] prompt, int steps, in SamplingOptions sampling)
+        {
+            using var session = engine.CreateSession(maxContextLength: 32);
+
+            session.Reset(prompt);
+
+            var tokens = new int[steps];
+
+            for (var i = 0; i < steps; i++)
+            {
+                tokens[i] = session.GenerateNextToken(in sampling);
+            }
+
+            return tokens;
         }
 
         [LongFact("8s")]
