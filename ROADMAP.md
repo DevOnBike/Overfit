@@ -543,8 +543,10 @@ itself rather than against a human.
 The fix is ownership rather than exemption: the benchmark host sets `OVERFIT_MEASUREMENT_OWNER` to its own
 process id before starting BenchmarkDotNet, child processes inherit the environment, and the build guard
 allows a build that belongs to the run in progress while refusing every other. Implemented as a target in
-`Directory.Build.props` — the same shape as the existing `BanJaggedFloatArrays` and
-`BanMultipleTopLevelTypes` guards, which already fail builds from MSBuild.
+`Directory.Build.props` — the same shape as `OverfitBuildExclusionCheck` and `OverfitPrereleaseCheck`,
+which already fail builds from MSBuild. (This named `BanJaggedFloatArrays` / `BanMultipleTopLevelTypes`
+until 2026-08-15; those MSBuild tasks were replaced by the `OVERFIT033` / `OVERFIT034` analyzers on
+2026-08-05, so they are no longer a precedent for anything that must run *before* the compiler.)
 
 **Two things this must get right or it will be ripped out within a week.** A guard that stops the whole
 repository from building is a severe failure mode, so it needs the same named escape hatch as the suite

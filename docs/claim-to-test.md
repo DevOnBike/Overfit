@@ -96,7 +96,7 @@ subclass that auto-skips); see `Tests/README.md` for the test-runtime discipline
 |-------|----------|------|
 | **Zero-allocation decode** (≈ 1 B / token on the hot path) | `LanguageModels/Diagnostics/PrefillAllocationTests.cs` (asserts the per-request `GC.GetAllocatedBytesForCurrentThread` delta); the per-family smoke tests print `alloc … B` per generation | real-model `[LongFact]` |
 | **Native AOT** — compiles, trims, runs as a native binary with no IL2026/IL3050 warnings | `Tests/AotSmokeTest/Program.cs` published under `PublishAot=true` + `TreatWarningsAsErrors=true` by the CI `aot-guard` job, then executed | CI guard |
-| No LINQ / reflection / hidden allocation in `Sources/Main` runtime | `Sources/Main/BannedSymbols.txt` (RS0030=error) + the `BanJaggedFloatArrays` / `BanMultipleTopLevelTypes` MSBuild guards + the `OVERFIT0xx` analyzers | CI guard (build-time) |
+| No LINQ / reflection / hidden allocation in `Sources/Main` runtime | `Sources/Main/BannedSymbols.txt` (RS0030=error) + the `OVERFIT033` / `OVERFIT034` analyzers (MSBuild tasks until 2026-08-05) + the rest of the `OVERFIT0xx` set | CI guard (build-time) |
 | Decode throughput vs llama.cpp (same GGUF) | `LanguageModels/Loading/QwenDecodeSpeedTests.cs`, `BielikSpeedTests.cs` | benchmark / real-model |
 | CNN inference vs ONNX Runtime (honest: ORT is faster on compute-heavy CNNs) | `Sources/Benchmark/LargeCnnComparisonBenchmark.cs` (with an ORT-parity cosine check) | benchmark |
 

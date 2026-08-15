@@ -1,16 +1,17 @@
 ﻿# DevOnBike.Overfit.Analyzers
 
-In-repo **Roslyn performance analyzers** for `Sources/Main` — the third guard layer next to
-`BannedSymbols.txt` (named APIs, RS0030) and the MSBuild structural guards (jagged arrays,
-one-type-per-file). Wired into `Main.csproj` as an analyzer reference (`OutputItemType="Analyzer"`,
+In-repo **Roslyn performance analyzers** for `Sources/Main` — the second guard layer next to
+`BannedSymbols.txt` (named APIs, RS0030). The structural guards that were MSBuild tasks until 2026-08-05
+(jagged arrays, one-type-per-file) are now analyzer rules themselves, `OVERFIT033` and `OVERFIT034`.
+Wired into `Main.csproj` as an analyzer reference (`OutputItemType="Analyzer"`,
 nothing ships); tests and benchmarks are deliberately NOT covered.
 
 ## Rules
 
 | Id | What it flags | Status |
 |---|---|---|
-| `OVERFIT001` | Heap array allocation (`new T[n]`, `new[]{…}`, `[…]` targeting an array) in **per-call** code — use `PooledBuffer<T>` / `PooledArray` (pooled scratch), `TensorStorage<T>` (tensor data) or `stackalloc` (small fixed-size) | ✅ shipped |
-| `OVERFIT002` | Jagged array allocation (`new T[n][]` — N+1 heap objects, pointer-chase per row) in per-call code — flat `T[]` Span-sliced per row (`float[][]` is a build ERROR via the MSBuild guard regardless) | ✅ shipped |
+| `OVERFIT001` | Heap array allocation (`new T[n]`, `new[]{…}`, `[…]` targeting an array) in **per-call** code — use `PooledBuffer<T>` (pooled scratch, value element types), `TensorStorage<T>` (tensor data) or `stackalloc` (small fixed-size) | ✅ shipped |
+| `OVERFIT002` | Jagged array allocation (`new T[n][]` — N+1 heap objects, pointer-chase per row) in per-call code — flat `T[]` Span-sliced per row (`float[][]` is a build ERROR via `OVERFIT033` regardless) | ✅ shipped |
 | `OVERFIT003` | Boxing conversions (value type → `object`/interface) in per-call code | ✅ shipped |
 | `OVERFIT004` | Closure/delegate allocation in per-call code: **capturing** lambdas (non-capturing are compiler-cached → silent) and **instance** method groups (static are cached since C# 11 → silent) — `OverfitParallel` takes function pointers for a reason | ✅ shipped |
 | `OVERFIT005` | `foreach` over an interface-typed collection (heap enumerator + interface dispatch per element; arrays/`List<T>`/`Span` are fine) | ✅ shipped |
@@ -54,7 +55,8 @@ break a build.
 | `OVERFIT019` | Non-capturing lambda without the `static` keyword — `static` makes the no-capture contract enforced (a future accidental capture becomes a compile error). Shares the capture analysis with `OVERFIT004` via `OverfitPerfAnalysis.LambdaCapturesEnclosingState` | #46h | ✅ shipped |
 | `OVERFIT020` | A primitive-array parameter (`float[]`/`int[]`/`byte[]`/…) of a **private/internal**, non-async, non-iterator, non-ctor method that is only read/indexed and **provably does not escape** (no field/return/array-argument/lambda capture) → take a `ReadOnlySpan<T>` (or `Span<T>` if it writes elements) so callers pass arrays, slices or `stackalloc` without a copy. Intra-method escape analysis via `RegisterOperationBlockAction`; conservative (skips ctors/public surface so it never suggests breaking a stored-weights API) | span-friendly APIs | ✅ shipped |
 
-**This table stops at `OVERFIT020` and the family now runs to `OVERFIT038`.** The rules added since — the
+**This table stops at `OVERFIT020` and the family now runs to `OVERFIT046`, plus `OVERFIT900`** (47 ids in
+[`AnalyzerReleases.Unshipped.md`](AnalyzerReleases.Unshipped.md), 47 descriptors in the source). The rules added since — the
 `else` ban, the two NASA reliability rules, the `stackalloc` pair, the async tier, the design guards and
 `OVERFIT038` below — are described where they are enforced rather than here:
 [`AnalyzerReleases.Unshipped.md`](AnalyzerReleases.Unshipped.md) carries one line each, `.editorconfig`
@@ -147,3 +149,11 @@ the suite caught). Remaining suggestion-level backlog (repo-wide): OVERFIT001 ~3
   syntax variants; skip `IsImplicit` operations.
 - Each rule: `EnableConcurrentExecution`, `ConfigureGeneratedCodeAnalysis(None)`, category
   `Performance`, default severity Warning (the editorconfig ratchet scopes it down/up per path).
+- **A message may compose an identifier from a format placeholder only when the composition (a) echoes a
+  symbol the developer wrote, (b) names a symbol the analyzer resolved before reporting, or (c) names a
+  symbol the fix will create. Never assert that a symbol exists without having resolved it.** `OVERFIT015`
+  did: it emitted `CpuFeatures.Has{0}` from the containing type's name, so `Avx512F.IsSupported` was
+  answered with `CpuFeatures.HasAvx512F` against a field called `HasAvx512`, and `Sse2`/`AdvSimd` have no
+  field at all. Nothing can catch that shape — the composed name is never written down, so neither a text
+  search nor `Tests/Analyzers/DiagnosticMessageNamesResolveTests.cs` can see it. The seven other composing
+  messages are safe by construction and are not the target of this rule.

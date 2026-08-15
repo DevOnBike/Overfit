@@ -366,6 +366,16 @@ gate, because peer gaps are measured between **medians** and the median of a 0/1
 above 50% coverage. Fifteen minutes of reading beat a day of implementation, and both defects would have
 passed a healthy-arm test perfectly.
 
+**This applies to each MUTATION the plan specifies, not only to its design — a mutation is a mechanism too.
+Added 2026-08-15, proposed by the agent that nearly missed it.** Before running a specified mutation, read
+whether the anchor feeds the **subject only**, or the subject **and its oracle together**. If it feeds both,
+the mutation cannot redden the assertion it was written to pin, and its green result reads as *"the test is
+vacuous"* when the truth is *"the mutation was ill-chosen"* — the opposite conclusion. Measured on `XC-55`:
+the plan specified `rows - 1` → `0` in `CachedGptStack.PrefillBatchedQuant`, where one local slice is copied
+to the field the test observes **and** passed to the norm the oracle comes from, so the mutation moved both
+and `max|logit - lens|` stayed exactly `0`. The index was in fact pinned — by a different test than the plan
+believed. **Report both**: the plan's literal mutation and the one matching its intent, with the numbers.
+
 **The mutation harness is the `overfit-mutate` skill, and it is written down rather than re-derived.** Five guards, each of
 which has fired in this repository: refuse to start against a target already modified (a harness killed
 mid-run makes the next run verify a restore against a mutated baseline); assert the anchor matches **exactly

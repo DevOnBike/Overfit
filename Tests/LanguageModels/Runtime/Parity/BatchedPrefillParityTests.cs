@@ -7,6 +7,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using DevOnBike.Overfit.LanguageModels.Runtime;
 using DevOnBike.Overfit.LanguageModels.Tokenizers;
+using DevOnBike.Overfit.Tests.TestSupport;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
 {
@@ -335,28 +336,14 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
             _out.WriteLine($"TTFT {prompt.Length}-token prompt: single={single:F1} ms  batched={batched:F1} ms  speedup={single / batched:F2}×");
         }
         /// <summary>
-        /// Forces the NON-repacked batched kernels for the duration of the scope.
+        /// Forces the NON-repacked batched kernels for the duration of the scope — see
+        /// <see cref="NonRepackedKernelScope"/>, which carries the reasoning and is now the only writer of
+        /// the flag in the test tree. This wrapper is kept only so the call sites below still read as prose.
         ///
-        /// <para>Without this a batched-vs-single-token parity test silently stops testing what it claims.
-        /// The repacked <c>block_q*_Kx8</c> GEMMs associate their reduction differently from the per-row
-        /// kernels the single-token path uses, so they are NOT bit-identical - measured at
-        /// <c>maxAbsLogitDiff ~ 0.44</c> on Qwen-3B, enough to flip an argmax. Worse, a <c>*.gguf.repack</c>
-        /// sidecar sets <c>IsPrepacked</c> and switches that path on regardless of the env flag, which is
-        /// how this test came to fail unnoticed for two days (it is <c>[LongFact]</c>, so it never ran).
-        /// The repacked kernels are held to end-to-end coherence instead - see
-        /// <see cref="RepackedPrefill_AgreesWithNonRepacked_OnArgmax"/>.</para>
-        ///
-        /// <para>The flag is process-global, so these tests must not run concurrently with other prefill
-        /// tests - they are <c>[LongFact]</c> and run one at a time in practice.</para>
+        /// <para>The private near-twin that used to live here reset the flag to <c>false</c> rather than
+        /// restoring it, and the flag was process-global: with collections running in parallel it switched
+        /// the kernel under other tests mid-assertion.</para>
         /// </summary>
-        private static NonRepackedScope UseNonRepackedKernels() => new();
-
-        private readonly struct NonRepackedScope : IDisposable
-        {
-            public NonRepackedScope() => BatchedQuantProjection.DisableRepackedKernelsForParity = true;
-
-            public void Dispose() => BatchedQuantProjection.DisableRepackedKernelsForParity = false;
-        }
-
+        private static NonRepackedKernelScope UseNonRepackedKernels() => new();
     }
 }

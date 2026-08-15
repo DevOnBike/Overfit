@@ -589,11 +589,25 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
 
         /// <summary>
-        /// Hidden state AFTER all transformer layers, BEFORE final RMSNorm.
-        /// Matches Python forward_multitoken.py: x before rms_norm(x, fg2, eps).
+        /// Hidden state AFTER all transformer layers, BEFORE final RMSNorm — <b>pre</b>-norm.
+        /// Matches Python forward_multitoken.py: x before rms_norm(x, fg2, eps). This is the vector
+        /// <see cref="LogitLensFromHidden"/> expects, and the one <c>CachedLlamaSession.LastHiddenState</c>
+        /// exposes.
+        ///
+        /// <para><b>Not the same tensor as <see cref="GetLastFinalHidden"/></b>, one prefix away, which copies
+        /// the <b>post</b>-norm <c>_finalHidden</c> — the input to the LM head. Reading this file quickly, the
+        /// two names look like an accessor and its span-filling twin; they are not. The names are wrong and are
+        /// staying wrong: <see cref="GetLastFinalHidden"/> is <c>public</c> on a <c>public</c> class, so a
+        /// rename is an API break, and this release already carries enough of those. Read the summary, not the
+        /// name.</para>
         /// </summary>
         internal ReadOnlySpan<float> LastFinalHidden => _lastFinalHidden.AsSpan(0, DModel);
 
+        /// <summary>
+        /// Copies the <b>post</b>-final-norm hidden — <c>rms_norm(x, fg2, eps)</c>, the LM head's input — into
+        /// <paramref name="destination"/> (length <c>DModel</c>). Despite the name this is <b>not</b>
+        /// <see cref="LastFinalHidden"/>, which is the <b>pre</b>-norm vector; see that member's remarks.
+        /// </summary>
         public void GetLastFinalHidden(Span<float> destination)
             => _finalHidden.AsSpan(0, DModel).CopyTo(destination);
 

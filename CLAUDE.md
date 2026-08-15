@@ -27,6 +27,32 @@ so tests can reach internals directly. Versions are pinned centrally in
 `NuGetAudit` and promotes vulnerability warnings (`NU1901-1904`) plus `CS4014`
 to errors.
 
+## Package versioning — Semantic Versioning, with one deliberate deviation
+
+**Package versions follow [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html).** The
+authority is the *Versioning policy* section at the top of [`CHANGELOG.md`](CHANGELOG.md); read it before
+bumping anything. The version itself lives in `Directory.Build.props` (`<Version>`), and the published
+package is `DevOnBike.Overfit`.
+
+**Know the deviation before you apply the rule, because it inverts the answer SemVer would give.** Here
+`MAJOR` is pinned to the targeted .NET runtime major — currently `10` for `net10.0` — so a `MAJOR` bump
+means the runtime target moved, nothing else. **A breaking change to the public API therefore bumps
+`MINOR`, not `MAJOR`.** `PATCH` covers backwards-compatible fixes, performance work, internal changes,
+extra model architectures inside an existing loader family, and documentation. Pre-release suffixes
+(`-beta.1`, `-rc`, `-preview`) are used for surface changes needing real-world validation.
+
+"Public API" means the surface inside `DevOnBike.Overfit.*` reachable **without** `InternalsVisibleTo`.
+Anything reached through `InternalsVisibleTo` (`DevOnBike.Overfit.Tests`, `Benchmarks`) is not part of the
+contract and may change between any two patches.
+
+**Do not decide a bump by eye — the comparison is mechanical and it exists.** `Scripts/api_compat_check.py`
+resolves the latest published version, downloads the `.nupkg` and diffs the public surface against the
+build, and a breaking verdict requires an explicit decision recorded in the CHANGELOG. This is not
+theoretical: on 2026-08-12/13 **42 public types left the package** and the CHANGELOG recorded seven, which
+nobody noticed until the comparator ran — and 10.0.31 was already on nuget.org, so a push without the
+manual bump would have republished a breaking change under an existing number. **With the tool unset the
+test reports `Skipped`, never `Passed`**; treat a skip as "not checked", never as "no breaks".
+
 ## Git / GitHub boundary (hard rule)
 
 Claude is **read-only** on git history and GitHub. Never run `git commit` / `git push` / `git rebase` /
@@ -119,7 +145,16 @@ control is not looking.
 **This applies to the main session AND to subagents, but through different files.** The main session uses
 `.claude/do.py`; each agent in `.claude/agents/**` uses its own `.claude/do-<agent-name>.py`, declared in its
 own definition. Per-agent files exist because a single shared scratch file is overwritten by two agents
-running at once — which is why this rule excluded subagents until 2026-08-08. The rule is discipline, not a
+running at once — which is why this rule excluded subagents until 2026-08-08.
+
+**That file is per agent TYPE, not per agent INSTANCE, and on 2026-08-15 that gap bit.** Two
+`overfit-developer` instances were dispatched concurrently (`XC-51` and `XC-54`); both resolve to
+`.claude/do-overfit-developer.py`, and the second overwrote the first mid-task. No damage this time — the
+first agent's runs had finished, and it noticed and reported the overwrite rather than trusting the file —
+but with a few minutes' different overlap one would have executed the other's commands and reported the
+output under its own conclusions. **So: when dispatching two instances of the same agent type at once, give
+each a distinct scratch path in its prompt** (`.claude/do-<agent-name>-<task>.py`), or do not overlap them.
+The dispatcher owns this, because only the dispatcher knows another instance is running. The rule is discipline, not a
 permission boundary: `settings.json` allow-lists `Bash(python *)` broadly, so nothing here is about
 suppressing prompts.
 
@@ -311,22 +346,32 @@ no LINQ in runtime code, no hidden allocations in inference, no `.ToArray()`,
 no `model.Forward(...)` in the inference hot path — go through
 `InferenceEngine.Run(input, output)` with caller-owned buffers.
 
-## Source-file guards (MSBuild, build-time errors)
+## Source-file guards (Roslyn analyzers, build-time errors)
 
-`Main.csproj` runs two `RoslynCodeTaskFactory` guards `BeforeTargets="CoreCompile"`
-(BannedApiAnalyzers can only ban named symbols, so these structural rules are MSBuild
-tasks that scan `@(Compile)` and `Log.LogError` — they fail every `dotnet build`):
+Two structural rules that BannedApiAnalyzers cannot express, because it can only ban *named symbols*.
+Both are **`error` in `Sources/Main` and `Sources/Anomalies`, and silent everywhere else** — the ladder
+is at the end of `.editorconfig`, which also carries the reasoning:
 
-- **`BanJaggedFloatArrays`** — `float[][]` (jagged) is banned in `Sources/Main`
-  (`OVERFIT-JAGGED`). Use a flat `float[]` (Span-sliced per row — one allocation,
-  cache-friendly) or an Overfit buffer (`PooledBuffer<float>`, `TensorStorage<float>`).
-  `int[][]`, `Parameter[][]`, etc. are still allowed.
-- **`BanMultipleTopLevelTypes`** — one top-level type per file (`OVERFIT-ONETYPE`):
-  each `.cs` declares at most one namespace-level `class`/`struct`/`interface`/`enum`/
-  `record`. **Nested types are fine**, and **`partial` declarations of the same type
-  across files are fine** (collapsed by name). Assumes block-scoped namespaces
-  (top-level types indented 4 spaces). Split helper enums/records/contexts into their
-  own files named after the type.
+- **`OVERFIT033`** — jagged `float[][]` is banned. Use a flat `float[]` (Span-sliced per row — one
+  allocation, cache-friendly) or an Overfit buffer (`PooledBuffer<float>`, `TensorStorage<float>`).
+  `int[][]`, `Parameter[][]` etc. are still allowed.
+- **`OVERFIT034`** — one top-level type per file: each `.cs` declares at most one namespace-level
+  `class`/`struct`/`interface`/`enum`/`record`. **Nested types are fine**, and **`partial` declarations
+  of the same type across files are fine** (collapsed by name). Split helper enums/records/contexts into
+  their own files named after the type.
+
+**Until 2026-08-05 these were `RoslynCodeTaskFactory` MSBuild tasks — roughly 120 lines of C# embedded in
+XML — under the ids `OVERFIT-JAGGED` and `OVERFIT-ONETYPE`. Both names, both ids and the whole mechanism
+are gone**; `Main.csproj` keeps a comment where they were, and this section still described them as live
+until 2026-08-15, which is worth more attention than the move itself. **They failed in opposite
+directions, and that is the lesson.** The jagged check stripped only `//` comments, so `float[][]` inside
+a `/* ... */` block was **reported** — an error about code that does not exist, which teaches people the
+rule is noise. The one-type check anchored on exactly four spaces of indentation, so under a file-scoped
+namespace it matched nothing and **reported nothing, silently, forever**. *A guard that cries wolf and a
+guard that quietly stops are the same defect wearing different clothes* — and only the second one is
+invisible. Writing the tests during the move found a third defect the embedded version had shipped with:
+`OVERFIT033` missed `float[][][]`, because the first version compared one level down instead of walking
+to the innermost element.
 
 ## Code style
 

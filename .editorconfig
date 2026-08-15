@@ -56,7 +56,7 @@ csharp_space_around_binary_operators = before_and_after
 
 file_header_template = Copyright (c) 2026 DevOnBike.\nThis file is part of DevonBike Overfit.\nDevonBike Overfit is licensed under the GNU AGPLv3.\nFor commercial licensing options, contact: devonbike@gmail.com
 # ── Overfit custom performance analyzer (Sources/Analyzers) — RATCHET rollout ──────────────
-# OVERFIT001 (per-call heap array allocation → PooledBuffer<T>/PooledArray/TensorStorage<T>/
+# OVERFIT001 (per-call heap array allocation → PooledBuffer<T>/TensorStorage<T>/
 # stackalloc): IDE suggestion everywhere; build WARNING in the zero-alloc hot directories.
 # Policy: clean a directory → flip it to warning below. Never loosen a flipped directory.
 # Backlog at introduction (2026-06-11): 432 unique sites; Runtime 85 (mostly batched-prefill,

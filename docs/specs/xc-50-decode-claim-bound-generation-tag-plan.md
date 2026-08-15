@@ -560,3 +560,25 @@ judgement is missing — and no scope question for an analyst: the row names one
 protocol and §5 establishes that the class contains exactly one instance. The single cross-task item (§7,
 `XC-49` sequencing and the correction to a sentence I signed) is a **coordination decision for the main
 session**, is stated with a recommendation and a fallback, and does not block implementation of this plan.
+
+---
+
+## Retired figures cited in this plan — added by the main session 2026-08-15
+
+**This plan quotes decode-pool performance figures that `PB-12` retired on 2026-08-14. They are left in
+place because a signed plan is a record of what was decided and on what basis, and silently rewriting its
+evidence would make the decision unreviewable. Do not carry them forward.**
+
+| cited here | measured 2026-08-14, 24-36 processes, ABAB, canary |
+|---|---|
+| `455 µs` vs `2059 µs`, "4.5x" | **2.43x** against the capped `Parallel.For` that `OVERFIT_DECODE_POOL=0` actually falls back to, 3.60x against an uncapped one. The published pair was the uncapped comparison, which the product no longer makes on the decode path |
+| Qwen3-0.6B `+28%` | **+25.1%** (Q8_0) / **+23.0%** (Q4_K_M) — supported, but no site recorded the quantisation |
+| Phi-3.5 `+3%` | **−1.9%**, i.e. neutral to negative; the pool captures only 75% of that model's dispatches |
+| Bielik `+11%` | **+3.8%** isolated to its own mechanism; at today's default the same knob is worth +87% because it now also sizes the spin pool |
+
+Two things worth more than the corrections. **`ForDecode` has never had a benchmark class** — all four
+figures came from `[ModelFact]` diagnostics that `dotnet test` never runs, single-arm, one process, no
+canary. And the client's regression hypothesis was **tested and refuted**: the 2026-08-14 claim/park change
+did not cost throughput, and the old figures do not reproduce on the old code either.
+
+Canonical numbers: `docs/measured-baselines.md`. Verdict and method: the `PB-12` row in `docs/TASKS.md`.

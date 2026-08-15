@@ -14,7 +14,8 @@ namespace DevOnBike.Overfit.Analyzers
     /// OVERFIT001 — heap array allocation in per-call code.
     ///
     /// The Overfit hot-path contract is "no hidden allocations in inference": scratch memory comes
-    /// from <c>PooledBuffer&lt;T&gt;</c> / <c>PooledArray</c> (pooled), long-lived tensor data from
+    /// from <c>PooledBuffer&lt;T&gt;</c> (pooled, value element types only — it is constrained
+    /// <c>where T : struct</c>), long-lived tensor data from
     /// <c>TensorStorage&lt;T&gt;</c>, and small fixed-size scratch from <c>stackalloc</c>. A bare
     /// <c>new T[n]</c> inside a method body defeats all of that and wakes the GC on every call.
     ///
@@ -32,11 +33,11 @@ namespace DevOnBike.Overfit.Analyzers
         private static readonly DiagnosticDescriptor Rule = new(
             DiagnosticId,
             title: "Heap array allocation in per-call code",
-            messageFormat: "Allocates 'new {0}[]' on the heap in per-call code — use PooledBuffer<T>/PooledArray (pooled scratch), TensorStorage<T> (tensor data), or stackalloc (small fixed-size)",
+            messageFormat: "Allocates 'new {0}[]' on the heap in per-call code — use PooledBuffer<T> (pooled scratch), TensorStorage<T> (tensor data) or stackalloc (small fixed-size); all three need a value element type, so a per-call array of a reference type must be hoisted or restructured away",
             category: "Performance",
             defaultSeverity: DiagnosticSeverity.Warning,
             isEnabledByDefault: true,
-            description: "Per-call heap array allocations cause GC pressure on hot paths. Rent pooled memory or stackalloc instead; one-time allocations (field initializers, constructors, static constructors) are not flagged.");
+            description: "Per-call heap array allocations cause GC pressure on hot paths. Rent pooled memory or stackalloc instead; one-time allocations (field initializers, constructors, static constructors) are not flagged. PooledBuffer<T> is constrained where T : struct, TensorStorage<T> where T : unmanaged, and stackalloc needs an unmanaged type — there is no pooled option for an array of a reference type, so the fix there is to allocate it once in a field or constructor (which this rule does not flag) or to remove the need for the array.");
 
         public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = [Rule, OverfitPerfAnalysis.HotPathRule];
 

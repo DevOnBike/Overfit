@@ -275,6 +275,17 @@ claim "the only caller in the guard is `RunPeer`", established by reading and te
 returns `RunPeer` **and** `RunCustomPeer`, the second being the path every customer-added channel takes; the
 proposed change would have left that half of the system untouched.
 
+**ITS SNAPSHOT CAN PREDATE AN UNCOMMITTED WORKING-TREE CHANGE — trust the reference SET, verify positions
+and existence. Added 2026-08-15, from a review that nearly reported a false finding.** Reviewing an
+uncommitted change, the navigator gave the declaration at `:56` and `:393` where the file had `:77` and
+`:414`, listed **two deleted files as live writers**, and omitted the two new files entirely. Its *reference
+set* was correct and decisive — every read site it named was real and the argument turned on that. Its
+*positions and freshness* were not. Reporting "the old scope still writes this flag" from that output would
+have been a fabricated finding against work that had in fact deleted it. **So: any claim of the form "this
+still exists", "this is still called", "nothing was deleted" gets confirmed with a `Grep` of the file before
+it goes in a report** — cheap, and it is the one direction where the navigator fails silently rather than
+loudly. Line numbers from it are a starting point for a `Read`, never a citation.
+
 **Grep is still right, and reaching for the navigator there is the same mistake reversed.** The navigator
 knows C# symbols and nothing else. Use `Grep` for: text and prose, `.editorconfig` and analyzer ids, MSBuild
 and `.csproj`, YAML and Kubernetes manifests, JSON config, PromQL, file headers, TODO markers, and anything

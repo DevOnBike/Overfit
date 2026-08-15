@@ -153,7 +153,7 @@ namespace DevOnBike.Overfit.Onnx
             }
 
             // ── Allocate buffers ────────────────────────────────────────────
-            // TensorStorage rents from ArrayPool<T>.Shared (via PooledBuffer.RentArray)
+            // TensorStorage rents from ArrayPool<T>.Shared (via its PooledBuffer<T> field)
             // — buffers are returned to the pool on OnnxGraphModel.Dispose(), avoiding GC pressure.
             var buffers = new TensorStorage<float>[bufferSizes.Count];
 

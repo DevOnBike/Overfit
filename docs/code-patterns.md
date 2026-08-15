@@ -24,10 +24,10 @@ These are not preferences and there is nothing to discuss at review time. They f
 | `System.Linq` in `Sources/Main` | explicit `for` / `foreach` over `Span<T>` | `RS0030` error + `<Using Remove>` |
 | `System.Reflection`, `System.Activator`, `Expression` | delegates; explicit `new` | `RS0030` error |
 | `Array.Copy` | `Span<T>.CopyTo` | `BannedSymbols.txt` |
-| raw `ArrayPool<T>.Shared` | `PooledBuffer<T>` scoped (`using`), `.RentArray`/`.ReturnArray` for class lifetime | `BannedSymbols.txt` |
+| raw `ArrayPool<T>.Shared` | `PooledBuffer<T>` scoped (`using`), or held as a field and disposed by its owner for class lifetime | `BannedSymbols.txt` |
 | `Stopwatch.StartNew` / `new Stopwatch()` | `ValueStopwatch.StartNew` → `GetElapsedTime` (alloc-free) | `BannedSymbols.txt` |
-| jagged `float[][]` in `Sources/Main` | flat `float[]` sliced per row, or `PooledBuffer<float>` / `TensorStorage<float>` | MSBuild task `OVERFIT-JAGGED` |
-| two top-level types in one file | one file per type, named after it. Nested types and same-name `partial` are fine | MSBuild task `OVERFIT-ONETYPE` |
+| jagged `float[][]` in `Sources/Main` | flat `float[]` sliced per row, or `PooledBuffer<float>` / `TensorStorage<float>` | `OVERFIT033` |
+| two top-level types in one file | one file per type, named after it. Nested types and same-name `partial` are fine | `OVERFIT034` |
 | `else` / `else if` | guard clause, early `return`/`continue`, ternary | `OVERFIT021` |
 | recursion without a stated bound | an explicit stack/worklist, or `#pragma warning disable OVERFIT022` whose comment starts `BOUND:` and names the bound | `OVERFIT022` |
 | `while (true)` / a loop with no exit in its header | a counter or condition in the header, or the same `BOUND:` pragma | `OVERFIT023` |

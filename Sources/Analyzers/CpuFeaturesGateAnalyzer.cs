@@ -27,7 +27,7 @@ namespace DevOnBike.Overfit.Analyzers
         private static readonly DiagnosticDescriptor Rule = new(
             DiagnosticId,
             title: "Direct intrinsics IsSupported — use CpuFeatures",
-            messageFormat: "Direct '{0}.{1}' — gate ISA and vector-width checks through CpuFeatures (CpuFeatures.Has{0}): one audit point, composed flags, same JIT constant-folding",
+            messageFormat: "Direct '{0}.{1}' — gate ISA and vector-width checks through CpuFeatures (see DevOnBike.Overfit.Intrinsics.CpuFeatures for the declared flags): one audit point, composed flags, same JIT constant-folding",
             category: "Performance",
             defaultSeverity: DiagnosticSeverity.Warning,
             isEnabledByDefault: true,

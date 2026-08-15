@@ -52,7 +52,32 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// <para>A <c>*.gguf.repack</c> sidecar sets <c>IsPrepacked</c> and therefore turns the repacked path
         /// on regardless of the env flag — which is exactly how <c>BatchedPrefillParityTests</c> came to be
         /// failing unnoticed for two days, being <c>[LongFact]</c>.</para>
+        ///
+        /// <para><b><see cref="ThreadStaticAttribute"/>, and this field alone.</b> xunit runs collections in
+        /// parallel, so as a plain <c>static</c> this switched the kernel under whatever else was mid-assertion:
+        /// measured as <c>6.63813305</c> vs <c>6.63813257</c> in a fast-suite test that passed when run alone.
+        /// Per-thread state confines a parity scope to the thread that opened it. It is admissible here because
+        /// every one of the <b>five</b> production reads happens on the calling thread before any fan-out: the two
+        /// dispatcher reads (<c>DispatchQ6K</c>, <c>DispatchQ4K</c>) are plain; the two tiled ones
+        /// (<c>DispatchTiledQ4K</c>, <c>DispatchTiledQ6K</c>) are evaluated while <i>constructing</i> the context
+        /// that <c>OverfitParallel.For</c> then receives by pointer; and the fifth is
+        /// <c>CachedMultiHeadAttention.DecodeBatchedQuant</c>'s <c>useWholeO</c>, a local computed once before the
+        /// projections run. So no worker body reads the field and the flag cannot go inert inside the parallel
+        /// region. (Count it with <c>find_references</c> if you change this — an auditor coming up one short is
+        /// how a sound argument gets doubted.)</para>
+        ///
+        /// <para><b>Do not copy the attribute onto the sibling flags above.</b> A <c>[ThreadStatic]</c> field
+        /// initialiser runs on the first thread only; this field's correct default is <c>default(bool)</c> and
+        /// it has no initialiser, while <see cref="UseWeightStationaryQ4K"/>, <see cref="UseTiledPrefillQ4K"/>
+        /// and <see cref="UseTiledPrefillQ6K"/> all do and would silently lose theirs on every other thread.</para>
+        ///
+        /// <para><b>Failure mode this buys, named rather than assumed away:</b> the flag must be set on the
+        /// thread that drives the prefill. A test that opens the scope and then runs the engine from another
+        /// thread — an <c>async</c> continuation, <c>Task.Run</c>, <c>GenerateStreamAsync</c>'s
+        /// <c>await Task.Yield()</c> — silently gets the repacked kernel, and its parity assertion then compares
+        /// two different kernels instead of two runs of one.</para>
         /// </summary>
+        [ThreadStatic]
         internal static bool DisableRepackedKernelsForParity;
 
         /// <summary>Forces a specific prefill column-tile width; 0 leaves <see cref="ResolveTileCols"/> to choose.</summary>

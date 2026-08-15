@@ -223,9 +223,24 @@ def classify(trx_text):
 
             continue
 
-        failures.append(name)
+        # Carry the MESSAGE, not just the name. A name says which test broke; only the message says
+        # whether it is a missing fixture, an unreachable lab, a real assertion or a timeout — and those
+        # four have four different owners. Added 2026-08-15 after a 41-area campaign reported 19 failures
+        # across 5 areas and identified the cause of none of them, because every per-area TRX had been
+        # overwritten by the next area before anybody read it.
+        failures.append((name, " ".join(message.split())))
 
-    return sorted(set(failures)), sorted(set(lab))
+    # De-duplicate on the name while keeping the first message seen for it.
+    seen, unique = set(), []
+
+    for name, message in sorted(failures):
+        if name in seen:
+            continue
+
+        seen.add(name)
+        unique.append((name, message))
+
+    return unique, sorted(set(lab))
 
 
 def main():
@@ -251,7 +266,12 @@ def main():
               "script before concluding the change is untested.")
         sys.exit(0)
 
-    trx = ROOT / "Tests" / "bin" / "longfact.trx"
+    # ONE TRX PER AREA. A single shared name is overwritten by the next area, so on a multi-area campaign
+    # every failure message is destroyed by the run that follows it — which is exactly what happened on
+    # 2026-08-15, leaving 19 failures with names and no causes. The file is the only place the assertion
+    # text survives, so it must not be a shared name.
+    trx_stem = "-".join(a.replace(".", "_") for a in areas) if areas else "all"
+    trx = ROOT / "Tests" / "bin" / f"longfact-{trx_stem[:80]}.trx"
     cmd = ["dotnet", "test", "./Tests/Tests.csproj", "-c", "Release",
            "--logger", f"trx;LogFileName={trx}"]
 
@@ -323,9 +343,14 @@ def main():
               "language-dependent")
 
     if failed:
-        print(f"\nFAILING TESTS ({len(failed)}) — names, because a count is not actionable:")
-        for f in failed[:40]:
-            print("   ", f)
+        print(f"\nFAILING TESTS ({len(failed)}) — name AND message, because a name is not a diagnosis:")
+
+        for entry in failed[:40]:
+            name, message = entry if isinstance(entry, tuple) else (entry, "")
+            print("   ", name)
+
+            if message:
+                print(f"        {message[:400]}")
 
     # THE LAB IS REPORTED, NOT COUNTED. These tests skipped rather than failed, which is correct on a
     # machine with no cluster — but a skip that disappears into a total is a decision nobody made, and the

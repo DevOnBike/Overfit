@@ -26,8 +26,8 @@ subtly wrong rather than by an exception.
 The target includes low-end hardware, so the load path is written to minimise **peak** RAM, not just
 what is retained afterwards. Concretely: prefer unpooled allocation for weights that live forever
 (pooling a permanent buffer only fragments the pool), and do not stage a file through a scratch
-`byte[]` when it can be read into its destination. `PooledArray` in `../../Runtime` is the `using`-shaped
-wrapper the `try/finally` rental sites here were swept onto.
+`byte[]` when it can be read into its destination. `PooledBuffer<T>` in `../../Tensors` is the
+`using`-shaped wrapper the `try/finally` rental sites here were swept onto.
 
 `RepackedWeightsFile` reads the `*.gguf.repack` sidecar that the decode kernels use; note that its
 presence short-circuits some kernel selection flags, which has invalidated an A/B before.

@@ -334,6 +334,26 @@ namespace DevOnBike.Overfit.Runtime
             return Math.Min(resolvedWorkers, DecodeChunkClaim.MaxChunkCount);
         }
 
+        /// <summary>
+        /// Diagnostics only: the resolved decode-pool size actually in force, after
+        /// <see cref="ResolveDecodeMaxWorkers"/> and <see cref="ClampDecodePoolSize"/>.
+        ///
+        /// <para><b>It exists so a test can tell whether it exercised the dispatcher at all.</b> When this
+        /// is <c>1</c> — a 2-vCPU box, or <c>OVERFIT_DECODE_WORKERS=1</c> — <see cref="ForDecode"/> runs the
+        /// body inline and never publishes a dispatch, so every assertion a dispatcher test makes passes
+        /// without the subject having run. <see cref="DecodeMaxWorkers"/> is <b>not</b> a substitute: it is
+        /// a settable public property that the resolved field does not track.</para>
+        /// </summary>
+        internal static int DecodePoolSize => _decodePoolSize;
+
+        /// <summary>
+        /// Diagnostics only: whether the decode spin pool is on (<c>OVERFIT_DECODE_POOL=0</c> turns it off,
+        /// and it is off by default on Android). When it is off, <see cref="ForDecode"/> delegates to the
+        /// capped park path and the decode claim protocol never runs — the other half of the capability
+        /// question <see cref="DecodePoolSize"/> answers.
+        /// </summary>
+        internal static bool DecodePoolEnabled => _decodePool;
+
         private static readonly Lock _decodeGate = new();
         private static ChunkState[] _decodeChunks = [];
         private static long _decodeGen;
