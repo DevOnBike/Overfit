@@ -23,7 +23,7 @@ namespace DevOnBike.Overfit.Server.AspNet.Endpoints
             v1.MapPost("/chat/completions", static async (HttpContext ctx, IOpenAiInferenceService service) =>
             {
                 ChatCompletionRequest? req;
-                
+
                 try
                 {
                     req = await JsonSerializer.DeserializeAsync(ctx.Request.Body, OpenAiJsonContext.Default.ChatCompletionRequest, ctx.RequestAborted);

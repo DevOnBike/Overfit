@@ -186,9 +186,18 @@ namespace DevOnBike.Overfit.Ops
                 LogPnb = logPnb;
             }
 
-            public int[] Labels { get; }
-            public double LogPb { get; set; }
-            public double LogPnb { get; set; }
+            public int[] Labels
+            {
+                get;
+            }
+            public double LogPb
+            {
+                get; set;
+            }
+            public double LogPnb
+            {
+                get; set;
+            }
         }
 
         private static Beam GetOrAdd(Dictionary<string, Beam> beams, string key, int[] labels)

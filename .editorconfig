@@ -49,7 +49,15 @@ csharp_prefer_braces = true:warning
 # body-on-newline, closing-brace-on-newline form. Enforced by IDE0055 (=warning above) and auto-applied
 # by `dotnet format` / update-code-headers.cmd.
 csharp_new_line_before_open_brace = all
-csharp_preserve_single_line_blocks = false
+# true since 2026-08-16, measured rather than assumed. With `false` the formatter EXPANDS every block
+# written on one line, including auto-properties: `public int SampleRate { get; }` became four lines, and
+# one run rewrote 28 files that way. Three arms on a scratch project using this exact .editorconfig:
+# false -> expanded; true -> stayed inline; true fed already-expanded input -> STAYED expanded.
+# That last arm is the one to know: this setting stops the expansion happening, it never undoes it.
+# The price, also measured: a body written as `if (x) { return; }` now formats to the brace on its own
+# line with `{ return; }` beside the statement, instead of being fully expanded. Fully-expanded bodies
+# remain the house style (see the braces rule) — the formatter simply no longer enforces it there.
+csharp_preserve_single_line_blocks = true
 csharp_preserve_single_line_statements = false
 
 csharp_space_around_binary_operators = before_and_after

@@ -235,7 +235,10 @@ namespace DevOnBike.Overfit.Anomalies.Contracts
         /// been fed the wrong distribution; see the note on <c>LevelShiftDetector.StepSize</c> for the
         /// first two.</para>
         /// </summary>
-        public IReadOnlyList<double>? MinAbsoluteStepChange { get; init; }
+        public IReadOnlyList<double>? MinAbsoluteStepChange
+        {
+            get; init;
+        }
 
         /// <summary>
         /// Turns on the peer-novelty gate, which stops a replica's <i>standing</i> difference from being

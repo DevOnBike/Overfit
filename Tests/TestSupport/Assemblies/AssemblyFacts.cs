@@ -91,36 +91,69 @@ namespace DevOnBike.Overfit.Tests.TestSupport.Assemblies
         }
 
         /// <summary>A label for reporting — the file name, or whatever the caller passed.</summary>
-        internal string Name { get; }
+        internal string Name
+        {
+            get;
+        }
 
         /// <summary>The assembly's own simple name. Changing it breaks every compiled consumer.</summary>
-        internal string AssemblyName { get; private set; }
+        internal string AssemblyName
+        {
+            get; private set;
+        }
 
         /// <summary>The public key, hex encoded, or empty when the assembly is not strong-named.</summary>
         internal string PublicKey { get; private set; } = string.Empty;
 
         /// <summary>The module version id: a fresh GUID on every build, identical source or not.</summary>
-        internal Guid Mvid { get; private set; }
+        internal Guid Mvid
+        {
+            get; private set;
+        }
 
-        internal Version AssemblyVersion { get; private set; }
+        internal Version AssemblyVersion
+        {
+            get; private set;
+        }
 
         /// <summary>The <c>AssemblyInformationalVersion</c> attribute, which source-linked builds stamp the commit into.</summary>
-        internal string InformationalVersion { get; private set; }
+        internal string InformationalVersion
+        {
+            get; private set;
+        }
 
-        internal int PeTimeDateStamp { get; private set; }
+        internal int PeTimeDateStamp
+        {
+            get; private set;
+        }
 
-        internal uint PeCheckSum { get; private set; }
+        internal uint PeCheckSum
+        {
+            get; private set;
+        }
 
         /// <summary>Size of PE data directory 4 — the Authenticode certificate table. Zero when unsigned.</summary>
-        internal int CertificateTableSize { get; private set; }
+        internal int CertificateTableSize
+        {
+            get; private set;
+        }
 
-        internal int StrongNameSignatureSize { get; private set; }
+        internal int StrongNameSignatureSize
+        {
+            get; private set;
+        }
 
         /// <summary>Debug directory entries rendered as text: PDB checksum, CodeView GUID and path.</summary>
-        internal string DebugDirectory { get; private set; }
+        internal string DebugDirectory
+        {
+            get; private set;
+        }
 
         /// <summary><see langword="false"/> when the image carries precompiled native code alongside its IL.</summary>
-        internal bool IsIlOnly { get; private set; }
+        internal bool IsIlOnly
+        {
+            get; private set;
+        }
 
         /// <summary>
         /// <see langword="true"/> when the image carries a ReadyToRun / NGen native header.
@@ -129,16 +162,28 @@ namespace DevOnBike.Overfit.Tests.TestSupport.Assemblies
         /// an R2R image does <b>not</b> imply identical execution, because the precompiled native code is a
         /// separate payload this comparison never reads.</para>
         /// </summary>
-        internal bool HasPrecompiledNativeCode { get; private set; }
+        internal bool HasPrecompiledNativeCode
+        {
+            get; private set;
+        }
 
         /// <summary>Methods with no managed body: abstract, extern, P/Invoke or runtime-implemented.</summary>
-        internal int MethodsWithoutManagedBody { get; private set; }
+        internal int MethodsWithoutManagedBody
+        {
+            get; private set;
+        }
 
         /// <summary>Total bytes of method-body IL across the assembly — the "IL region" figure.</summary>
-        internal int TotalIlByteCount { get; private set; }
+        internal int TotalIlByteCount
+        {
+            get; private set;
+        }
 
         /// <summary>Sizes of the metadata heaps, for the "is this bit-identical" question the IL compare drops.</summary>
-        internal string MetadataHeapSizes { get; private set; }
+        internal string MetadataHeapSizes
+        {
+            get; private set;
+        }
 
         /// <summary>Referenced assemblies as <c>Name/Version</c>, sorted.</summary>
         internal IReadOnlyList<string> ReferencedAssemblies { get; private set; } = Array.Empty<string>();
@@ -150,11 +195,17 @@ namespace DevOnBike.Overfit.Tests.TestSupport.Assemblies
         /// this set the classifier would report every forwarded type as a removal, which is the single
         /// most-reported false positive against <c>ApiCompat</c> itself.</para>
         /// </summary>
-        internal IReadOnlySet<string> ForwardedTypes { get; private set; } =
+        internal IReadOnlySet<string> ForwardedTypes
+        {
+            get; private set;
+        } =
             new HashSet<string>(StringComparer.Ordinal);
 
         /// <summary>SHA-256 of the normalised IL of every method, keyed by <see cref="MetadataNames.MethodKey"/>.</summary>
-        internal IReadOnlyDictionary<string, string> MethodIl { get; private set; } =
+        internal IReadOnlyDictionary<string, string> MethodIl
+        {
+            get; private set;
+        } =
             new Dictionary<string, string>();
 
         /// <summary>Every externally visible member.</summary>
@@ -944,13 +995,25 @@ namespace DevOnBike.Overfit.Tests.TestSupport.Assemblies
 
             internal string Accessors { get; set; } = string.Empty;
 
-            internal bool IsStatic { get; set; }
+            internal bool IsStatic
+            {
+                get; set;
+            }
 
-            internal bool IsAbstract { get; set; }
+            internal bool IsAbstract
+            {
+                get; set;
+            }
 
-            internal bool IsVirtual { get; set; }
+            internal bool IsVirtual
+            {
+                get; set;
+            }
 
-            internal bool IsFinal { get; set; }
+            internal bool IsFinal
+            {
+                get; set;
+            }
         }
     }
 }

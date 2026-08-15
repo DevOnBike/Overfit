@@ -30,11 +30,20 @@ namespace DevOnBike.Overfit.Tests.TestSupport.Assemblies
         }
 
         /// <summary>What differs: <c>Mvid</c>, <c>PE.TimeDateStamp</c>, <c>AssemblyInformationalVersion</c>, …</summary>
-        internal string Kind { get; }
+        internal string Kind
+        {
+            get;
+        }
 
-        internal string Left { get; }
+        internal string Left
+        {
+            get;
+        }
 
-        internal string Right { get; }
+        internal string Right
+        {
+            get;
+        }
 
         public override string ToString()
         {

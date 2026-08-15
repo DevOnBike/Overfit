@@ -161,7 +161,10 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             private int _cycle;
 
             /// <summary>Every pod identical, so the peer-gap distribution is degenerate and proposes nothing.</summary>
-            public bool Flat { get; init; }
+            public bool Flat
+            {
+                get; init;
+            }
 
             public IReadOnlyList<string> StalePodsExcluded => [];
 

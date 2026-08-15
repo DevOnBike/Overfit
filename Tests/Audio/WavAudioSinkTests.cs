@@ -73,7 +73,10 @@ namespace DevOnBike.Overfit.Tests.Audio
                 SampleRate = sampleRate;
             }
 
-            public int SampleRate { get; }
+            public int SampleRate
+            {
+                get;
+            }
 
             public void Synthesize(ReadOnlySpan<char> text, VoiceProfile voice, IAudioSink output, TtsOptions options)
             {

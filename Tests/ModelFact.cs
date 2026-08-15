@@ -30,10 +30,19 @@ namespace DevOnBike.Overfit.Tests
     /// <see cref="SmallModelFact"/> and <see cref="Gpt2ModelFact"/> both set <c>Skip</c> from a file check
     /// at discovery time — but it predates most of these tests and never reached them.</para>
     ///
-    /// <para><b>Why an attribute and not an assertion inside the test.</b> xUnit 2.9.3 has no dynamic skip
-    /// (<c>Assert.Skip</c> arrived in v3; trying it here is a compile error, measured). Asserting instead
-    /// would turn every missing fixture into a red gate on any developer machine without a full model
-    /// collection, which is how a gate gets ignored.</para>
+    /// <para><b>Why an attribute and not an assertion inside the test.</b> The skip is decided at DISCOVERY
+    /// time, so a missing fixture costs nothing: the body never starts, and the test reports as not-run
+    /// without loading, allocating or timing anything. An <c>Assert</c> would turn every missing fixture
+    /// into a red gate on any developer machine without a full model collection, which is how a gate gets
+    /// ignored.</para>
+    ///
+    /// <para><b>Dynamic skip IS available here, and this comment said otherwise until 2026-08-15.</b> It
+    /// claimed xUnit 2.9.3 has no <c>Assert.Skip</c> and that using it is a compile error; the repository is
+    /// on <c>xunit.v3</c> 3.2.2, where <c>Assert.Skip</c> and <c>Assert.SkipWhen</c> compile and run
+    /// (<c>DecodePoolIdleBurnTests</c> uses <c>Assert.SkipWhen</c> to report "could not measure" when its
+    /// canary window is contaminated). Reach for it when the condition is only knowable at run time — a
+    /// measured baseline, a value returned by a helper; keep this attribute for a compile-time constant
+    /// path, which is the case it was built for.</para>
     ///
     /// <para><b>Paths must be compile-time constants</b>, because attribute arguments are. That is a real
     /// limitation and it is why this does not cover all 66: roughly half guard on a local variable

@@ -32,12 +32,18 @@ namespace DevOnBike.Overfit.Tests.TestSupport.Assemblies
 
         internal MetadataReader Reader
         {
-            get { return _reader; }
+            get
+            {
+                return _reader;
+            }
         }
 
         internal SignatureTypeNameProvider Provider
         {
-            get { return _provider; }
+            get
+            {
+                return _provider;
+            }
         }
 
         /// <summary>

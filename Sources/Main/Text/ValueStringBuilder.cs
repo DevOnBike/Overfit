@@ -115,7 +115,7 @@ namespace DevOnBike.Overfit.Text
             }
 
             value.CopyTo(_chars.Slice(_position));
-            
+
             _position += value.Length;
         }
 

@@ -49,7 +49,7 @@ namespace DevOnBike.Overfit.Server.AspNet.Endpoints
             var body = new OpenAiErrorResponse { Error = new OpenAiError { Message = message } };
             var json = JsonSerializer.Serialize(body, OpenAiJsonContext.Default.OpenAiErrorResponse);
             var bytes = Encoding.UTF8.GetBytes(json);
-            
+
             response.StatusCode = status;
             response.ContentType = "application/json";
             response.ContentLength = bytes.Length;

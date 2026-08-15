@@ -21,9 +21,15 @@ namespace DevOnBike.Overfit.Tests.TestSupport.Assemblies
         }
 
         /// <summary>The method key: declaring type, name, generic arity, parameter types and return type.</summary>
-        internal string Method { get; }
+        internal string Method
+        {
+            get;
+        }
 
-        internal DifferenceKind Kind { get; }
+        internal DifferenceKind Kind
+        {
+            get;
+        }
 
         public override string ToString()
         {

@@ -6,8 +6,8 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using DevOnBike.Overfit.Text;
 using DevOnBike.Overfit.Tensors;
+using DevOnBike.Overfit.Text;
 
 namespace DevOnBike.Overfit.LanguageModels.Tokenizers
 {

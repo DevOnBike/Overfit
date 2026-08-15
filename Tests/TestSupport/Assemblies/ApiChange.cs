@@ -23,19 +23,31 @@ namespace DevOnBike.Overfit.Tests.TestSupport.Assemblies
             Message = message;
         }
 
-        internal ChangeLevel Level { get; }
+        internal ChangeLevel Level
+        {
+            get;
+        }
 
         /// <summary>
         /// This tool's rule id, with the equivalent <c>Microsoft.DotNet.ApiCompat</c> diagnostic in brackets
         /// where one exists — so a disagreement with the tool Microsoft ships can be looked up rather than
         /// argued about.
         /// </summary>
-        internal string RuleId { get; }
+        internal string RuleId
+        {
+            get;
+        }
 
         /// <summary>The type or member the finding is about.</summary>
-        internal string Target { get; }
+        internal string Target
+        {
+            get;
+        }
 
-        internal string Message { get; }
+        internal string Message
+        {
+            get;
+        }
 
         public override string ToString()
         {

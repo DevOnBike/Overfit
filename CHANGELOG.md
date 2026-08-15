@@ -29,9 +29,10 @@ silence, which is the thing worth preventing.
 **Two consequences to know when reading:**
 
 - **For twenty-two published versions this file says nothing at all.** A reader cannot learn what changed
-  in 10.0.26 through 10.0.29 from here; the commits are the only record. The `[Unreleased]` section is
-  accurate for what it describes — every one of the 58 API breaks it lists was introduced **after** 10.0.31
-  was published on 2026-07-23, so they belong to the next release and not to an earlier one.
+  in 10.0.26 through 10.0.29 from here; the commits are the only record. The **`[10.1.0]`** section (this
+  was `[Unreleased]` until it was stamped on 2026-08-16) is accurate for what it describes — every one of
+  the 58 API breaks it lists was introduced **after** 10.0.31 was published on 2026-07-23, so they belong
+  to that release and not to an earlier one.
 - **The one date in the file is unverified.** `## [10.0.30] - 2026-07-05` does not match nuget.org, which
   records 10.0.30 as published **2026-07-20** — 2026-07-05 is 10.0.29's publish date. Either the heading
   dates the work rather than the publish, or it is off by one release; nobody has said which, so it is left
@@ -44,8 +45,20 @@ statement are how twenty-two versions went unrecorded.
 
 ## [Unreleased]
 
+_Nothing yet._
+
+## [10.1.0] - 2026-08-16
+
 _The `gimli` branch, anomaly-guard track: two new detector families, a week of memory, thresholds the guard
 calibrates for itself, and the operability layer that decides whether a customer keeps it after month one._
+
+**`MINOR` per this file's own versioning policy, which bumps `MINOR` — not `MAJOR` — for a public break,
+because `MAJOR` tracks the targeted .NET runtime.** This release carries **58 breaking changes** against
+10.0.31, itemised under `### Removed` and `### Changed` below; the largest block is the whole
+`DevOnBike.Overfit.Anomalies.*` namespace, which left the package in the 2026-08-05 assembly split and has
+**no replacement package and no type forward**. They were found by `Scripts/api_compat_check.py` on
+2026-08-13, eight days after the fact and only because a tool looked — the version had already been bumped
+by hand for seven of them.
 
 ### Added
 

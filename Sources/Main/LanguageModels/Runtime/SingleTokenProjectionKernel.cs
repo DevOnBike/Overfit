@@ -178,7 +178,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// to a code change. Not thread-safe by design: set it once at startup, or around a measurement.
         /// </para>
         /// </summary>
-        public static long? ParallelWorkThresholdOverride { get; set; }
+        public static long? ParallelWorkThresholdOverride
+        {
+            get; set;
+        }
 
         /// <summary>
         /// Parallel projection for large matmuls (FFN, LM head). Splits the

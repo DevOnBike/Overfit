@@ -41,7 +41,10 @@ namespace DevOnBike.Overfit.Tests.Audio
                 SampleRate = sampleRate;
             }
 
-            public int SampleRate { get; }
+            public int SampleRate
+            {
+                get;
+            }
             public int Count
             {
                 get; private set;

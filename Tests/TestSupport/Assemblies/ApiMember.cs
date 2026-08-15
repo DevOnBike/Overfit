@@ -26,15 +26,30 @@ namespace DevOnBike.Overfit.Tests.TestSupport.Assemblies
     /// </summary>
     internal sealed class ApiMember
     {
-        internal required string DeclaringType { get; init; }
+        internal required string DeclaringType
+        {
+            get; init;
+        }
 
-        internal required ApiMemberKind Kind { get; init; }
+        internal required ApiMemberKind Kind
+        {
+            get; init;
+        }
 
-        internal required string Name { get; init; }
+        internal required string Name
+        {
+            get; init;
+        }
 
-        internal int GenericArity { get; init; }
+        internal int GenericArity
+        {
+            get; init;
+        }
 
-        internal int ParameterCount { get; init; }
+        internal int ParameterCount
+        {
+            get; init;
+        }
 
         /// <summary>Parameter types and return type, with no names — the binary call shape.</summary>
         internal string Signature { get; init; } = string.Empty;
@@ -51,41 +66,77 @@ namespace DevOnBike.Overfit.Tests.TestSupport.Assemblies
         /// <summary>Accessibility as ECMA-335 spells it: <c>Public</c>, <c>Family</c>, <c>FamORAssem</c>.</summary>
         internal string Accessibility { get; init; } = string.Empty;
 
-        internal bool IsStatic { get; init; }
+        internal bool IsStatic
+        {
+            get; init;
+        }
 
-        internal bool IsAbstract { get; init; }
+        internal bool IsAbstract
+        {
+            get; init;
+        }
 
-        internal bool IsVirtual { get; init; }
+        internal bool IsVirtual
+        {
+            get; init;
+        }
 
         /// <summary><c>final</c> in IL: the member cannot be overridden further.</summary>
-        internal bool IsFinal { get; init; }
+        internal bool IsFinal
+        {
+            get; init;
+        }
 
         /// <summary><c>initonly</c> on a field. Adding it is breaking; removing it is allowed.</summary>
-        internal bool IsInitOnly { get; init; }
+        internal bool IsInitOnly
+        {
+            get; init;
+        }
 
         /// <summary><c>literal</c> on a field: a <c>const</c>, or an enum member.</summary>
-        internal bool IsLiteral { get; init; }
+        internal bool IsLiteral
+        {
+            get; init;
+        }
 
         /// <summary>The compile-time constant of a <c>const</c> field or enum member, copied into consumers.</summary>
-        internal string ConstantValue { get; init; }
+        internal string ConstantValue
+        {
+            get; init;
+        }
 
         /// <summary>
         /// An interface member that carries a body. Decides whether adding it to an interface is a binary break
         /// or an allowed addition, which is the difference between a usable tool and one that cries wolf on
         /// every modern library.
         /// </summary>
-        internal bool HasDefaultImplementation { get; init; }
+        internal bool HasDefaultImplementation
+        {
+            get; init;
+        }
 
         /// <summary>Generic parameter constraints, rendered in order.</summary>
         internal string Constraints { get; init; } = string.Empty;
 
-        internal bool IsInterface { get; init; }
+        internal bool IsInterface
+        {
+            get; init;
+        }
 
-        internal bool IsSealed { get; init; }
+        internal bool IsSealed
+        {
+            get; init;
+        }
 
-        internal bool IsValueType { get; init; }
+        internal bool IsValueType
+        {
+            get; init;
+        }
 
-        internal bool IsEnum { get; init; }
+        internal bool IsEnum
+        {
+            get; init;
+        }
 
         internal string BaseType { get; init; } = string.Empty;
 
@@ -99,15 +150,24 @@ namespace DevOnBike.Overfit.Tests.TestSupport.Assemblies
         /// <b>allowed</b> when no accessible constructor exists, because nobody outside can have derived from
         /// it. A classifier that skips this check reports a break on types that cannot be broken.</para>
         /// </summary>
-        internal bool HasAccessibleConstructor { get; init; }
+        internal bool HasAccessibleConstructor
+        {
+            get; init;
+        }
 
         internal string EnumUnderlyingType { get; init; } = string.Empty;
 
         /// <summary>Instance fields of any accessibility — the input to the struct definite-assignment rule.</summary>
-        internal int InstanceFieldCount { get; init; }
+        internal int InstanceFieldCount
+        {
+            get; init;
+        }
 
         /// <summary>Instance fields that are not public. Zero is the case where adding a field is breaking.</summary>
-        internal int NonPublicInstanceFieldCount { get; init; }
+        internal int NonPublicInstanceFieldCount
+        {
+            get; init;
+        }
 
         /// <summary>The coarse identity used to pair members up across two builds.</summary>
         internal string MatchKey

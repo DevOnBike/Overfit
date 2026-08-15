@@ -190,6 +190,8 @@ mutation, the victim, and whether the restore was verified.
 - [ ] The baseline was green before the mutation was applied
 - [ ] A compile error was distinguished from "not caught"
 - [ ] The restore was **verified** byte-for-byte, not merely attempted
+- [ ] `git show HEAD:<path>` was checked for the anchor **after** restoring — "restored" and "the mutant is
+      not in history" are different facts
 - [ ] A green mutation was reported as a finding rather than retried until it went red
 
 ## Common Pitfalls
@@ -197,6 +199,7 @@ mutation, the victim, and whether the restore was verified.
 | Pitfall | Solution |
 |---|---|
 | A harness killed mid-run leaves the source mutated | Guard 1 refuses to start when the target differs from `HEAD`. Without it the next run treats the mutated file as its baseline and reports *restore verified* |
+| **A commit lands while the file is mutated** | Neither existing guard sees it: guard 1 compares the target to `HEAD` *before* starting, and the restore check compares the working tree to what was read in. Both pass while the mutant sits in history. On 2026-08-15 a commit landed mid-run here and swept in a half-written test file, leaving `HEAD` **not compiling** — the same window would have committed a mutant. After restoring, run `git show HEAD:<path>` and assert the anchor is the original. One command, and it is the only thing separating *restored* from *the mutant is now permanent* |
 | Anchor matches twice | On 2026-08-10 an anchor matched twice because `RunCustomTrend` carries a line byte-identical to `RunTrend`'s. Print the count and stop |
 | Anchor matches zero times | A multi-line anchor that does not account for CRLF. It reads as "not caught" if the count is not printed |
 | Red baseline | Cannot distinguish "the test caught it" from "it was already failing" |

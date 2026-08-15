@@ -15,18 +15,30 @@ namespace DevOnBike.Overfit.Tests.TestSupport.Assemblies
             Right = right;
         }
 
-        internal DifferenceKind Kind { get; }
+        internal DifferenceKind Kind
+        {
+            get;
+        }
 
         /// <summary>The member as it was, or <see langword="null"/> for an addition.</summary>
-        internal ApiMember Left { get; }
+        internal ApiMember Left
+        {
+            get;
+        }
 
         /// <summary>The member as it is now, or <see langword="null"/> for a removal.</summary>
-        internal ApiMember Right { get; }
+        internal ApiMember Right
+        {
+            get;
+        }
 
         /// <summary>The member key both sides agreed on, or the one side that exists.</summary>
         internal string MatchKey
         {
-            get { return (Right ?? Left).MatchKey; }
+            get
+            {
+                return (Right ?? Left).MatchKey;
+            }
         }
 
         public override string ToString()

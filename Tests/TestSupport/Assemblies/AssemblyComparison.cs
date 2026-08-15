@@ -35,24 +35,42 @@ namespace DevOnBike.Overfit.Tests.TestSupport.Assemblies
             Notes = notes;
         }
 
-        internal string LeftName { get; }
+        internal string LeftName
+        {
+            get;
+        }
 
-        internal string RightName { get; }
+        internal string RightName
+        {
+            get;
+        }
 
         /// <summary>Methods added, removed, or whose normalised body moved.</summary>
-        internal IReadOnlyList<MethodDifference> MethodDifferences { get; }
+        internal IReadOnlyList<MethodDifference> MethodDifferences
+        {
+            get;
+        }
 
         /// <summary>Externally visible members added, removed or changed, before classification.</summary>
-        internal IReadOnlyList<ApiDifference> ApiDifferences { get; }
+        internal IReadOnlyList<ApiDifference> ApiDifferences
+        {
+            get;
+        }
 
         /// <summary>
         /// Every surface difference classified by severity, worst first — see
         /// <see cref="BreakingChangeClassifier"/>.
         /// </summary>
-        internal IReadOnlyList<ApiChange> Changes { get; }
+        internal IReadOnlyList<ApiChange> Changes
+        {
+            get;
+        }
 
         /// <summary>Differences that are present on every rebuild and mean nothing.</summary>
-        internal IReadOnlyList<InertDifference> InertDifferences { get; }
+        internal IReadOnlyList<InertDifference> InertDifferences
+        {
+            get;
+        }
 
         /// <summary>
         /// Things the reader must not assume this comparison covered — precompiled native code above all.
@@ -61,7 +79,10 @@ namespace DevOnBike.Overfit.Tests.TestSupport.Assemblies
         /// logic changed" and "no <i>managed</i> logic changed, and there is a second payload I did not
         /// read".</para>
         /// </summary>
-        internal IReadOnlyList<string> Warnings { get; }
+        internal IReadOnlyList<string> Warnings
+        {
+            get;
+        }
 
         /// <summary>
         /// Facts that are neither a finding nor a blind spot — the assembly version, the referenced-assembly
@@ -69,7 +90,10 @@ namespace DevOnBike.Overfit.Tests.TestSupport.Assemblies
         /// <see cref="BreaksNoConsumer"/>: every release moves the assembly version, so counting it would make
         /// both answers useless on exactly the comparisons this tool exists for.
         /// </summary>
-        internal IReadOnlyList<string> Notes { get; }
+        internal IReadOnlyList<string> Notes
+        {
+            get;
+        }
 
         /// <summary>
         /// The single answer: the worst thing found.
@@ -160,7 +184,10 @@ namespace DevOnBike.Overfit.Tests.TestSupport.Assemblies
         /// </summary>
         internal bool BreaksNoConsumer
         {
-            get { return HighestLevel <= ChangeLevel.Additive && Warnings.Count == 0; }
+            get
+            {
+                return HighestLevel <= ChangeLevel.Additive && Warnings.Count == 0;
+            }
         }
 
         /// <summary>
@@ -171,13 +198,19 @@ namespace DevOnBike.Overfit.Tests.TestSupport.Assemblies
         /// </summary>
         internal bool RequiresRetest
         {
-            get { return HighestLevel >= ChangeLevel.InternalOnly || Warnings.Count > 0; }
+            get
+            {
+                return HighestLevel >= ChangeLevel.InternalOnly || Warnings.Count > 0;
+            }
         }
 
         /// <summary>No method was added, removed, or had its body change.</summary>
         internal bool IlIdentical
         {
-            get { return MethodDifferences.Count == 0; }
+            get
+            {
+                return MethodDifferences.Count == 0;
+            }
         }
 
         /// <summary>
@@ -206,7 +239,10 @@ namespace DevOnBike.Overfit.Tests.TestSupport.Assemblies
 
         internal bool PublicApiIdentical
         {
-            get { return ApiDifferences.Count == 0; }
+            get
+            {
+                return ApiDifferences.Count == 0;
+            }
         }
 
         /// <summary>Method keys whose bodies changed — the "where did it change" answer.</summary>
