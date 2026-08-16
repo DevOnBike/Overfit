@@ -29,12 +29,16 @@
              errors) keeps ONLY the IL* trim/AOT diagnostics fatal under the guard. OVERFIT008 / OVERFIT015 are
              deliberately omitted — they are error-severity hard conventions and must stay fatal (the
              analyzer-guard CI job's tripwire depends on OVERFIT008 firing).
-             RS0030 is also here for one narrow reason: the System.Text.Json source-generated
-             OverfitJsonContext legitimately uses System.Reflection internally (the AOT-safe source-gen path)
-             and is analysed under a synthetic path no .editorconfig section matches, so RS0030 falls back to
-             its default Warning there and TreatWarningsAsErrors would promote it. Exempting the *warning*
-             does NOT weaken RS0030 on real code, which stays error-severity via the [*.cs] editorconfig
-             section (a genuine error, not a promoted warning, so WarningsNotAsErrors cannot downgrade it). -->
+             RS0030 IS NOT IN THIS LIST, and must not be added — a long paragraph here used to explain why it
+             was, and outlived the entry by describing a state that had not been true for some time. What it
+             described is real and is a different problem: .editorconfig severities are matched per syntax
+             tree against the csc command line, so no section reaches a SOURCE-GENERATED tree and RS0030
+             falls back to its analyzer default Warning there, which TreatWarningsAsErrors promotes. Putting
+             the id here does fix that — and, per the note immediately below, ALSO disarms the ban on real
+             code, which is the 2026-08-08 incident that must not be repeated. The correct instrument is a
+             per-project global AnalyzerConfig, which the compiler consults only for the trees the per-path
+             map misses: see Sources/Anomalies/SourceGenerated.globalconfig, added 2026-08-16 for the
+             configuration-binder generator, which carries the measurement and the two-arm proof. -->
         <!-- Do NOT add an ID here that .editorconfig promotes to `error` anywhere: this maps to
              -warnaserror-:ID, which reverts the diagnostic to warning EVEN in directories where
              .editorconfig says error, silently neutering the per-directory ratchet. Measured 2026-07-19:

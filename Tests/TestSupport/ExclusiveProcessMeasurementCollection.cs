@@ -25,9 +25,21 @@ namespace DevOnBike.Overfit.Tests.TestSupport
     /// <para><b>What this does and does not buy.</b> It gives the measurement a quiet window, which makes
     /// process CPU a fair proxy for the subject's CPU. It does <b>not</b> make the instrument able to tell
     /// the subject from the environment — a leaked pool from an earlier test, a GC storm, or a background
-    /// thread still lands in the same counter. A member of this collection must still carry its own canary
-    /// (measure the same quantity before the subject is woken) and report "could not measure" rather than
-    /// pass or fail when the baseline is already busy.</para>
+    /// thread still lands in the same counter. A member whose instrument really is process-wide must
+    /// therefore carry its own canary (measure the same quantity before the subject is woken) and report
+    /// "could not measure" rather than pass or fail when the baseline is already busy.</para>
+    ///
+    /// <para><b>A scoped member needs the serialisation for a different reason, and must not carry the
+    /// canary</b> (<c>TG-T13</c>, 2026-08-16). <c>DecodePoolIdleBurnTests</c> now sums
+    /// <see cref="System.Diagnostics.ProcessThread.TotalProcessorTime"/> over the decode pool's own worker
+    /// threads, so ambient process CPU no longer reaches it — measured in one window: <b>0.01 cores for the
+    /// pool against 4.01 for the process</b>, with four burner threads running. What it still cannot
+    /// survive is a <i>neighbour driving the same static pool</i> — <c>DecodeDispatcherConcurrentSoakTests</c>
+    /// runs 600 000 dispatches over 36 seconds — because that CPU is genuinely the subject's and is
+    /// genuinely not this test's. That, and not ambient noise, is what membership buys a scoped test. The
+    /// canary must then be <b>dropped</b> rather than kept for safety: once the instrument is scoped, the
+    /// only thing that can make a pre-wake window busy is the pool failing to park, which is a RED, and a
+    /// canary would report it as "could not measure".</para>
     /// </summary>
     [CollectionDefinition(Name, DisableParallelization = true)]
     public sealed class ExclusiveProcessMeasurementCollection

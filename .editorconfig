@@ -302,11 +302,20 @@ dotnet_diagnostic.OVERFIT001.severity = suggestion
 # to obj/ only, which demoted OVERFIT008 to its analyzer-default warning on real code and broke the
 # analyzer-guard CI job. Keep new global [*.cs] rules ABOVE this block.
 #
-# The SDK AssemblyInfo / System.Text.Json JsonSerializerContext / GlobalUsings under obj/ are not ours and
-# legitimately use System.Reflection, so scope the banned-API rule off for generated files (BannedApiAnalyzers
-# 3.3.4 skipped them automatically; 5.6.0 analyses them). The STJ source-gen context itself is analysed under
-# a synthetic path no section matches — that residual RS0030 warning is handled via <WarningsNotAsErrors> in
-# Directory.Build.props. Real .cs code still gets RS0030 = error from the [*.cs] section at the top.
+# The SDK AssemblyInfo / GlobalUsings files that sit under obj/ ON DISK are not ours and legitimately use
+# System.Reflection, so scope the banned-API rule off for them (BannedApiAnalyzers 3.3.4 skipped generated
+# files automatically; 5.6.0 analyses them). Real .cs code still gets RS0030 = error from the [*.cs] section
+# at the top.
+#
+# THIS SECTION DOES NOT — AND CANNOT — REACH A SOURCE-GENERATED TREE, whatever its path looks like.
+# Measured 2026-08-16: the configuration-binder generator's BindingExtensions.g.cs is reported at a path
+# under obj/ that ends in .g.cs, so it matches this section AND [*.g.cs] at the end of the file, and both
+# say `none` — yet a build with PublishAot=true and no TreatWarningsAsErrors still reports
+# `warning RS0030` on it. Neither `none` applied, and the [*.cs] `error` did not either: that is the
+# BannedApiAnalyzers default severity showing through. Severities are resolved per syntax tree from a map
+# the compiler builds out of the csc command line, and a generator adds its trees after that map exists,
+# so a generated tree matches no section by identity. The fallback that DOES reach it is a global
+# AnalyzerConfig — see Sources/Anomalies/SourceGenerated.globalconfig.
 [**/obj/**]
 dotnet_diagnostic.RS0030.severity = none
 
@@ -602,12 +611,19 @@ dotnet_diagnostic.OVERFIT044.severity = error
 # discard. Every future one has to be signed.
 dotnet_diagnostic.OVERFIT046.severity = error
 
-# ── Source-generated files, by name ───────────────────────────────────────────────────────────────────
-# The System.Text.Json source generator emits its context under a path the [**/obj/**] section does not
-# match, so RS0030 fell through to its default Warning there. Directory.Build.props used to handle that by
-# exempting RS0030 from TreatWarningsAsErrors globally — which ALSO downgraded it on real code, measured
-# 2026-08-08: three System.Reflection sites and one banned Array.Copy sat as warnings in Sources/Main while
-# both files asserted in comments that this could not happen. Scoping by filename is narrow enough to leave
-# the ban armed everywhere it matters.
+# ── Files named *.g.cs that exist ON DISK ─────────────────────────────────────────────────────────────
+# Added to catch the System.Text.Json source-generated context, whose RS0030 fell through to its default
+# Warning. It was the right instinct — the alternative then in use, exempting RS0030 from
+# TreatWarningsAsErrors globally, ALSO downgraded the ban on real code (measured 2026-08-08: three
+# System.Reflection sites and one banned Array.Copy sat as warnings in Sources/Main while both files
+# asserted in comments that this could not happen), and that entry is now correctly gone.
+#
+# BUT IT DOES NOT DO WHAT ITS NAME SAYS, and nothing had checked. A filename glob cannot reach a
+# source-generated tree either: severities are resolved per syntax tree from a map built out of the csc
+# command line, and generated trees are added afterwards, so they match no section regardless of path.
+# Measured 2026-08-16 on BindingExtensions.g.cs — matches this section, still reports `warning RS0030`.
+# Generated trees are handled by a global AnalyzerConfig (Sources/Anomalies/SourceGenerated.globalconfig).
+# What is left for this section is files that really are on disk and end in .g.cs; those under obj/ are
+# already covered above, so keep it only as a cheap net for one outside obj/.
 [*.g.cs]
 dotnet_diagnostic.RS0030.severity = none

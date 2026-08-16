@@ -77,6 +77,16 @@
 
 	<ItemGroup>
 		<AdditionalFiles Include="BannedSymbols.txt" />
+		<!--
+          A GLOBAL AnalyzerConfig, which is a different thing from .editorconfig and is here for one
+          reason: .editorconfig severities are matched per syntax tree against the csc command line, so
+          they never reach a SOURCE-GENERATED tree. The configuration-binder generator runs only under
+          PublishAot/PublishTrimmed and emits LINQ, so RS0030 fell through to its default Warning and the
+          aot-guard's TreatWarningsAsErrors turned it into an error. The file itself carries the
+          measurement and the reason a NoWarn/WarningsNotAsErrors fix is forbidden.
+          Named so it is NOT auto-discovered as `.globalconfig`; it must be included explicitly.
+        -->
+		<EditorConfigFiles Include="SourceGenerated.globalconfig" />
 		<Using Remove="System.Linq" />
 		<Using Include="DevOnBike.Overfit.Exceptions" />
 	</ItemGroup>
