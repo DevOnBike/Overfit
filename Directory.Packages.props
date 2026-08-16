@@ -125,7 +125,12 @@
          10.0.400 is an SDK-feature-band-aligned re-release; no changelog was found for it, which is stated
          rather than glossed — the verdict rests on the asset scope, not on having read release notes. -->
     <PackageVersion Include="Microsoft.SourceLink.GitHub" Version="10.0.400" />
-    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.8.1" />
+    <!-- 18.8.1 -> 18.9.0 on 2026-08-16, taken ALONE and deliberately ahead of the xunit question: bug fixes
+         only (TerminalLogger character corruption, TRX attachment paths, data-collector protocol negotiation
+         using the negotiated version rather than V1, AOT-compatible TranslationLayer), nothing touching
+         discovery. Kept separate from `xunit.v3` 4.0.0 precisely so any test-runner surprise here is
+         attributable — that one is a build-and-CI change, not a bump, and is deferred under `XC-70`. -->
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />
     <PackageVersion Include="Moq" Version="4.20.72" />
     <PackageVersion Include="Swashbuckle.AspNetCore" Version="10.2.3" />
     <!-- 2.0.11 is SOURCE-IDENTICAL to 2.0.10 — verified against the upstream v2.0.10...v2.0.11 comparison,

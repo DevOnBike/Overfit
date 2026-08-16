@@ -97,6 +97,17 @@ Test-only and tooling packages whose blast radius stops at the test project: `xu
 that changes discovery can hide tests rather than fail them, which is this repo's least favourite failure
 shape.
 
+**For a test-framework MAJOR version this bucket is WRONG, and reading the notes does not save you. Read
+the transitive BUILD ASSETS — `build/`, `buildTransitive/`, `buildMultiTargeting/` `.props` and `.targets`
+— before assigning a bucket.** Added 2026-08-16, from the survey that found it. `xunit.v3` 4.0.0 changes
+nothing about discovery and breaks no API this repository calls, yet it would fail `dotnet test` outright:
+it swapped its dependency from `mtp-v1` to `mtp-v2`, which pulls `Microsoft.Testing.Platform` 2.3.3, whose
+props defaults `IsTestingPlatformApplication` to `true`, and whose targets add a `_MTPBeforeVSTest` that
+hard-errors on SDK 10 and later. **Three packages away, in MSBuild, invisible to a changelog and to a
+version number alike.** A test framework can break the build without touching a single API you call — so
+for a major, the deliverable is the target chain quoted out of the package, and the honest label on it is
+*derived, not executed*, unless you were able to run it.
+
 
 ## Prerelease and beta pins — report every one, every time
 
