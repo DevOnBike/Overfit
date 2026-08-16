@@ -3,6 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Globalization;
 using System.Runtime.InteropServices;
 using DevOnBike.Overfit.Anomalies.Contracts;
 using DevOnBike.Overfit.Anomalies.Rules;
@@ -499,13 +500,19 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
             // Both, because a percentage alone hides "14% of a 0.004 ratio" and an absolute figure alone
             // hides how unusual it is for this group.
             var size = double.IsFinite(finding.RelativeGap)
-                ? $"by {finding.RelativeGap:P0} ({finding.AbsoluteGap:G3})"
-                : $"by {finding.AbsoluteGap:G3} (the peers' median is zero, so there is no proportion to take)";
+                ? string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"by {finding.RelativeGap:P0} ({finding.AbsoluteGap:G3})")
+                : string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"by {finding.AbsoluteGap:G3} (the peers' median is zero, so there is no proportion to take)");
 
-            return $"'{finding.Name}' sits {direction} the other {peers} peers {size}: "
-                   + $"Cliff's delta {Math.Abs(comparison.EffectSize):F2}, p {comparison.PValueCandidateWorse:G3} "
-                   + $"against a Bonferroni-corrected alpha of {result.CorrectedAlpha:G3} "
-                   + $"({finding.UsableSamples} usable samples).";
+            return string.Create(
+                CultureInfo.InvariantCulture,
+                $"'{finding.Name}' sits {direction} the other {peers} peers {size}: "
+                + $"Cliff's delta {Math.Abs(comparison.EffectSize):F2}, p {comparison.PValueCandidateWorse:G3} "
+                + $"against a Bonferroni-corrected alpha of {result.CorrectedAlpha:G3} "
+                + $"({finding.UsableSamples} usable samples).");
         }
     }
 }

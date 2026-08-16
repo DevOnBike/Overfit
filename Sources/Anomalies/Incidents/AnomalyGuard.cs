@@ -3,6 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Globalization;
 using DevOnBike.Overfit.Anomalies.Contracts;
 using DevOnBike.Overfit.Anomalies.Incidents.Abstractions;
 using DevOnBike.Overfit.Anomalies.Monitoring;
@@ -529,8 +530,10 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
 
                 if (kind == OperatorLabelKind.Real || mute is not { } window)
                 {
-                    return $"recorded {kind} on {finding.Signal} "
-                           + $"(magnitude {finding.Magnitude:G4}); no suppression opened";
+                    return string.Create(
+                        CultureInfo.InvariantCulture,
+                        $"recorded {kind} on {finding.Signal} "
+                        + $"(magnitude {finding.Magnitude:G4}); no suppression opened");
                 }
 
                 Suppressions.Add(
@@ -546,8 +549,10 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
 
                 var who = finding.Subject.Pod.Length > 0 ? finding.Subject.Pod : finding.Subject.Workload;
 
-                return $"recorded {kind} on {finding.Signal} (magnitude {finding.Magnitude:G4}) and muted it "
-                       + $"for {who} until {now + window:u}";
+                return string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"recorded {kind} on {finding.Signal} (magnitude {finding.Magnitude:G4}) and muted it "
+                    + $"for {who} until {now + window:u}");
             }
         }
 

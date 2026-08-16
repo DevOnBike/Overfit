@@ -531,6 +531,27 @@ diagnostic and an unparseable value is refused rather than silently replaced.
 per-document state faults in, the second 3–23 ms. A single sample would have reported a number two orders of
 magnitude too high.
 
+## Analyzer capability: what a built-in rule does NOT catch — measured 2026-08-16 (`XC-64`)
+
+**`CA1305` cannot see a culture-sensitive plain interpolation, so it is not a guard against this defect
+class.** Measured rather than assumed, because *"just turn on CA1305"* is the obvious proposal and it does
+not work: `dotnet build Sources/Anomalies -p:AnalysisMode=All -t:Rebuild` produces **exactly 2 `CA1305`
+diagnostics in the entire project, and neither is one of the 42 defective sites** — both are
+`StringBuilder.Append(ref AppendInterpolatedStringHandler)` (`AnomalyGuardConfigReader.cs:348`,
+`MetricMap.cs:240`), both benign. The rule fires on `IFormatProvider` **overload selection**; a bare
+`$"…{value:P0}…"` selects no overload at all, so there is nothing for it to flag.
+
+**What that leaves.** The 42 sites were fixed and are pinned by
+`Tests/Anomalies/DiagnosticTextIsCultureInvariantTests.cs`, which compares the same producer's output under
+the invariant culture against `pl-PL` and `tr-TR`. That test protects **today's** sites; it cannot see site
+43. A durable guard has to be an `OVERFIT0xx` analyzer with its own `AnalyzerReleases.Unshipped.md` entry,
+`.editorconfig` severity and `Tests/Analyzers/` case — not yet written.
+
+**The general point, which is why this sits in a measured-baselines file rather than a task comment**: a
+built-in analyzer's *name* describes its intent, not its reach. Before adopting one as a guard, run it
+against known-defective code and count how many of the known defects it names. Two hits and zero relevant
+is a capability measurement, and it is worth as much as a timing.
+
 ## Measurement traps already paid for
 
 - **Cross-process before/after does not work on this box.** A prefill change read +5% while the *untouched*

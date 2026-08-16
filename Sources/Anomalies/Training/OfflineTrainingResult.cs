@@ -3,6 +3,8 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Globalization;
+
 namespace DevOnBike.Overfit.Anomalies.Training
 {
     /// <summary>Result returned after OfflineTrainingJob.RunAsync completes.</summary>
@@ -31,7 +33,9 @@ namespace DevOnBike.Overfit.Anomalies.Training
         }
 
         public override string ToString() =>
-            $"Snapshots: {SnapshotsLoaded:N0} | ValLoss: {FinalValLoss:F4} | " +
-            $"Time: {TrainingTime:mm\\:ss} | Checkpoint: {CheckpointPath}";
+            string.Create(
+                CultureInfo.InvariantCulture,
+                $"Snapshots: {SnapshotsLoaded:N0} | ValLoss: {FinalValLoss:F4} | " +
+                $"Time: {TrainingTime:mm\\:ss} | Checkpoint: {CheckpointPath}");
     }
 }

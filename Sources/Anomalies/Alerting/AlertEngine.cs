@@ -4,6 +4,7 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using System.Collections.Concurrent;
+using System.Globalization;
 using System.Threading.Channels;
 using DevOnBike.Overfit.Anomalies.Alerting.Abstractions;
 using DevOnBike.Overfit.Anomalies.Contracts;
@@ -90,15 +91,21 @@ namespace DevOnBike.Overfit.Anomalies.Alerting
 
             if (_config.AlertThreshold <= 0f || _config.AlertThreshold > 1f)
             {
-                throw new ArgumentException($"AlertThreshold must be in (0, 1], got {_config.AlertThreshold}.", nameof(config));
+                throw new ArgumentException(
+                    string.Create(
+                        CultureInfo.InvariantCulture,
+                        $"AlertThreshold must be in (0, 1], got {_config.AlertThreshold}."),
+                    nameof(config));
             }
 
             if (_config.CriticalThreshold < _config.AlertThreshold)
             {
                 throw new ArgumentException(
-                $"CriticalThreshold ({_config.CriticalThreshold}) must be >= " +
-                $"AlertThreshold ({_config.AlertThreshold}).",
-                nameof(config));
+                    string.Create(
+                        CultureInfo.InvariantCulture,
+                        $"CriticalThreshold ({_config.CriticalThreshold}) must be >= " +
+                        $"AlertThreshold ({_config.AlertThreshold})."),
+                    nameof(config));
             }
 
             _queue = Channel.CreateBounded<AlertEvent>(new BoundedChannelOptions(_config.DispatchQueueCapacity)

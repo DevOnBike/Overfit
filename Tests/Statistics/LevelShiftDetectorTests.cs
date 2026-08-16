@@ -83,7 +83,10 @@ namespace DevOnBike.Overfit.Tests.Statistics
 
             Assert.Equal(DetectionStatus.Healthy, result.Status);
             Assert.InRange(result.EffectSize, 0.9, 1.0);
-            Assert.Contains("below the 25%", result.Reason, StringComparison.Ordinal);
+            // "25 %", with the space: the reason is built under the invariant culture (XC-64), which is what
+            // the Linux runner already produced and the Windows dev box did not. The expectation moved to the
+            // one rendering every machine now emits, not to whichever one the local box happens to prefer.
+            Assert.Contains("below the 25 %", result.Reason, StringComparison.Ordinal);
         }
 
         [Fact]

@@ -3,6 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Globalization;
 using DevOnBike.Overfit.Anomalies.Contracts;
 using DevOnBike.Overfit.Statistics;
 using DevOnBike.Overfit.Tensors;
@@ -119,8 +120,12 @@ namespace DevOnBike.Overfit.Anomalies.Rules
                 return new SustainedThresholdResult(
                     DetectionStatus.Healthy,
                     breached == 0
-                        ? $"No sample reached {Describe(options.Threshold)} across {kept} observations."
-                        : $"{fraction:P0} of the window reached {Describe(options.Threshold)}, under the {options.MinBreachFraction:P0} required to call it sustained (peak {peak:G3}).",
+                        ? string.Create(
+                            CultureInfo.InvariantCulture,
+                            $"No sample reached {Describe(options.Threshold)} across {kept} observations.")
+                        : string.Create(
+                            CultureInfo.InvariantCulture,
+                            $"{fraction:P0} of the window reached {Describe(options.Threshold)}, under the {options.MinBreachFraction:P0} required to call it sustained (peak {peak:G3})."),
                     fraction,
                     breached,
                     kept,
@@ -130,8 +135,10 @@ namespace DevOnBike.Overfit.Anomalies.Rules
 
             return new SustainedThresholdResult(
                 DetectionStatus.Anomalous,
-                $"Held {Describe(options.Threshold)} for {fraction:P0} of the window ({breached} of {kept} "
-                + $"observations, median {median:G3}, peak {peak:G3}).",
+                string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"Held {Describe(options.Threshold)} for {fraction:P0} of the window ({breached} of {kept} "
+                    + $"observations, median {median:G3}, peak {peak:G3})."),
                 fraction,
                 breached,
                 kept,
@@ -149,13 +156,17 @@ namespace DevOnBike.Overfit.Anomalies.Rules
         /// mean "any non-zero reading at all" — a perfectly good way to express the rule in code and a
         /// terrible one to put in front of somebody at three in the morning. A threshold that small is not a
         /// number anybody compares against; it is a statement that the event happened.</para>
+        ///
+        /// <para>Invariant, like every other operator-facing string here: <c>{threshold:G3}</c> is
+        /// <c>0.05</c> under the invariant culture and <c>0,05</c> under a European one, and an alert rule
+        /// matching on this text would diverge between two machines running the same build.</para>
         /// </summary>
         private static string Describe(double threshold)
         {
             // Anything under a millionth of a percent is a stand-in for "greater than zero", not a level.
             return threshold <= 1e-9
                 ? "above zero"
-                : $"at or above {threshold:G3}";
+                : string.Create(CultureInfo.InvariantCulture, $"at or above {threshold:G3}");
         }
 
     }

@@ -3,6 +3,8 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Globalization;
+
 namespace DevOnBike.Overfit.Anomalies.Gpt
 {
     /// <summary>Result of scoring one MetricSnapshot.</summary>
@@ -44,7 +46,9 @@ namespace DevOnBike.Overfit.Anomalies.Gpt
         public override string ToString() =>
             IsWarmup
                 ? $"[{PodName}] warmup"
-                : $"[{PodName}] score={Score:F2} worst={WorstMetric} " +
-                  $"expected={ExpectedValue:F1} actual={ActualValue:F1}";
+                : string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"[{PodName}] score={Score:F2} worst={WorstMetric} " +
+                    $"expected={ExpectedValue:F1} actual={ActualValue:F1}");
     }
 }

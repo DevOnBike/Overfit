@@ -3,6 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Globalization;
 using DevOnBike.Overfit.Anomalies.Gpt;
 using DevOnBike.Overfit.Anomalies.Monitoring;
 using DevOnBike.Overfit.Autograd;
@@ -54,7 +55,9 @@ namespace DevOnBike.Overfit.Anomalies.Training
 
             progress?.Report(new TrainingProgress
             {
-                Phase = $"Loaded {snapshots.Count:N0} snapshots, {skipped} skipped",
+                Phase = string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"Loaded {snapshots.Count:N0} snapshots, {skipped} skipped"),
                 Step = 0,
                 TotalSteps = _cfg.Steps,
             });

@@ -3,6 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Globalization;
 using DevOnBike.Overfit.Tensors;
 
 namespace DevOnBike.Overfit.Statistics
@@ -300,7 +301,9 @@ namespace DevOnBike.Overfit.Statistics
 
                 return new PeerOutlierResult(
                     DetectionStatus.Inconclusive,
-                    $"{departures} of {comparable} members sit more than {options.MinRelativeGap:P0} from the group's own median ({rawHigh} above and {rawLow} below their peers): the group has no coherent norm, which points to a workload-level change rather than an outlier. Compare against the workload's own history to attribute it.{Dropped(starved, peers.Count)}",
+                    string.Create(
+                        CultureInfo.InvariantCulture,
+                        $"{departures} of {comparable} members sit more than {options.MinRelativeGap:P0} from the group's own median ({rawHigh} above and {rawLow} below their peers): the group has no coherent norm, which points to a workload-level change rather than an outlier. Compare against the workload's own history to attribute it.{Dropped(starved, peers.Count)}"),
                     correctedAlpha,
                     comparable,
                     rawHigh,

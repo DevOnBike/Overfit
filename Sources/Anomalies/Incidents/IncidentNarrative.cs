@@ -243,20 +243,24 @@ namespace DevOnBike.Overfit.Anomalies.Incidents
             return true;
         }
 
-        /// <summary>Whole units, because a window measured to the second reads as false precision.</summary>
+        /// <summary>
+        /// Whole units, because a window measured to the second reads as false precision. Invariant, like
+        /// the timestamps above it: <c>{x:F1}</c> is <c>1.5</c> here and <c>1,5</c> on a European desktop,
+        /// and this text is grepped.
+        /// </summary>
         private static string Humanise(TimeSpan span)
         {
             if (span.TotalMinutes < 1.0)
             {
-                return $"{span.TotalSeconds:F0}s";
+                return string.Create(CultureInfo.InvariantCulture, $"{span.TotalSeconds:F0}s");
             }
 
             if (span.TotalHours < 1.0)
             {
-                return $"{span.TotalMinutes:F0} min";
+                return string.Create(CultureInfo.InvariantCulture, $"{span.TotalMinutes:F0} min");
             }
 
-            return $"{span.TotalHours:F1} h";
+            return string.Create(CultureInfo.InvariantCulture, $"{span.TotalHours:F1} h");
         }
     }
 }

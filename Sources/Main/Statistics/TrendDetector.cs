@@ -3,6 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Globalization;
 using DevOnBike.Overfit.Tensors;
 
 namespace DevOnBike.Overfit.Statistics
@@ -640,19 +641,28 @@ namespace DevOnBike.Overfit.Statistics
             // median was zero the gate used the window's peak instead, and saying "of typical" there would
             // describe a proportion of a number the series never held.
             var size = scaleIsUsable
-                ? $"{relative * 100.0:F1}% of typical"
-                : $"{relative * 100.0:F1}% of the window's peak (the median is zero, so there is no typical)";
+                ? string.Create(CultureInfo.InvariantCulture, $"{relative * 100.0:F1}% of typical")
+                : string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"{relative * 100.0:F1}% of the window's peak (the median is zero, so there is no typical)");
 
             var window = TimeSpan.FromSeconds(windowSeconds);
-            var message =
-                $"Series {moving} by {size} across {window:g} (tau {tau:F2}, lag-1 autocorrelation {autocorrelation:F2}).";
+
+            // Invariant throughout: see LevelShiftDetector.Explain for why these strings must not move
+            // between machines. TimeSpan's "g" is culture-sensitive too — it takes its decimal separator
+            // from the culture, so "0:20:00.5" becomes "0:20:00,5" on a European desktop.
+            var message = string.Create(
+                CultureInfo.InvariantCulture,
+                $"Series {moving} by {size} across {window:g} (tau {tau:F2}, lag-1 autocorrelation {autocorrelation:F2}).");
 
             if (timeToLimit == null)
             {
                 return message;
             }
 
-            return $"{message} At this rate the limit is reached in {timeToLimit.Value:g}.";
+            return string.Create(
+                CultureInfo.InvariantCulture,
+                $"{message} At this rate the limit is reached in {timeToLimit.Value:g}.");
         }
 
         private static TrendResult Undecidable(DetectionStatus status, string reason, int count)

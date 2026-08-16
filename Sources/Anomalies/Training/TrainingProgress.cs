@@ -3,6 +3,8 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Globalization;
+
 namespace DevOnBike.Overfit.Anomalies.Training
 {
     /// <summary>Progress callback payload reported during <see cref="OfflineTrainingJob"/>.</summary>
@@ -31,6 +33,8 @@ namespace DevOnBike.Overfit.Anomalies.Training
         }
 
         public override string ToString() =>
-            $"[{Phase}] {Step}/{TotalSteps} train={TrainLoss:F4} val={ValLoss:F4} {Elapsed:mm\\:ss}";
+            string.Create(
+                CultureInfo.InvariantCulture,
+                $"[{Phase}] {Step}/{TotalSteps} train={TrainLoss:F4} val={ValLoss:F4} {Elapsed:mm\\:ss}");
     }
 }

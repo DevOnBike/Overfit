@@ -3,6 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Globalization;
 using DevOnBike.Overfit.Tensors;
 
 namespace DevOnBike.Overfit.Statistics
@@ -99,8 +100,10 @@ namespace DevOnBike.Overfit.Statistics
                 return new LevelShiftResult(
                     DetectionStatus.InsufficientData,
                     TrendDirection.None,
-                    $"{written} usable observation(s); {Math.Max(options.MinimumSamples, 4)} are required "
-                    + "before the halves can be compared.",
+                    string.Create(
+                        CultureInfo.InvariantCulture,
+                        $"{written} usable observation(s); {Math.Max(options.MinimumSamples, 4)} are required "
+                        + $"before the halves can be compared."),
                     0.0,
                     1.0,
                     double.NaN,
@@ -147,16 +150,18 @@ namespace DevOnBike.Overfit.Statistics
             {
                 var word = direction == TrendDirection.Rising ? "rose" : "fell";
                 var proportionText = double.IsFinite(relative)
-                    ? $"{relative:P0}"
+                    ? string.Create(CultureInfo.InvariantCulture, $"{relative:P0}")
                     : "an unmeasurable proportion (it started from zero)";
 
                 return new LevelShiftResult(
                     DetectionStatus.Anomalous,
                     direction,
-                    $"The level {word} from {beforeMedian:G4} to {afterMedian:G4} part-way through the window "
-                    + $"— {proportionText} of where it started, with the halves separating at delta "
-                    + $"{effect:F2} (p {chosen.PValueCandidateWorse:G3}). This is a step, not a drift: it "
-                    + "affects the workload as a whole rather than any one replica.",
+                    string.Create(
+                        CultureInfo.InvariantCulture,
+                        $"The level {word} from {beforeMedian:G4} to {afterMedian:G4} part-way through the window "
+                        + $"— {proportionText} of where it started, with the halves separating at delta "
+                        + $"{effect:F2} (p {chosen.PValueCandidateWorse:G3}). This is a step, not a drift: it "
+                        + $"affects the workload as a whole rather than any one replica."),
                     effect,
                     chosen.PValueCandidateWorse,
                     beforeMedian,
@@ -178,6 +183,15 @@ namespace DevOnBike.Overfit.Statistics
         /// <summary>
         /// Says which gate refused, because "healthy" has four causes here and they call for different
         /// responses — one of them is "your floor is above the change you are looking for".
+        ///
+        /// <para><b>Every reason string in this namespace is built through
+        /// <c>string.Create(CultureInfo.InvariantCulture, $"…")</c></b>, and that is not decoration:
+        /// <c>{x:P0}</c> renders <c>25 %</c> under the
+        /// invariant culture a Linux container gets from <c>LANG=C.UTF-8</c> and <c>25%</c> on a European
+        /// desktop, and <c>{x:G4}</c> renders <c>1,5</c> against <c>1.5</c>. These strings are grepped by
+        /// operators and matched by alert rules, so the same build has to emit the same bytes wherever it
+        /// runs. Wrapping the whole string rather than each hole covers the ones with no format specifier
+        /// too, and it keeps the handler-based lowering — no boxing, no <c>object[]</c>.</para>
         /// </summary>
         private static string Explain(
             bool significant, bool large, bool proportional, bool material,
@@ -190,21 +204,29 @@ namespace DevOnBike.Overfit.Statistics
 
             if (!large)
             {
-                return $"The halves differ consistently but only weakly (delta {effect:F2}, below "
-                       + $"{options.MinEffectSize:F2}) — the level moved less than it wandered.";
+                return string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"The halves differ consistently but only weakly (delta {effect:F2}, below "
+                    + $"{options.MinEffectSize:F2}) — the level moved less than it wandered.");
             }
 
             if (!proportional)
             {
-                var text = double.IsFinite(relative) ? $"{relative:P0}" : "immeasurable";
+                var text = double.IsFinite(relative)
+                    ? string.Create(CultureInfo.InvariantCulture, $"{relative:P0}")
+                    : "immeasurable";
 
-                return $"The level moved by {text}, below the {options.MinRelativeChange:P0} worth reporting.";
+                return string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"The level moved by {text}, below the {options.MinRelativeChange:P0} worth reporting.");
             }
 
             _ = material;
 
-            return $"The level moved by {absolute:G4}, below the {options.MinAbsoluteChange:G4} worth "
-                   + "reporting in this signal's own units.";
+            return string.Create(
+                CultureInfo.InvariantCulture,
+                $"The level moved by {absolute:G4}, below the {options.MinAbsoluteChange:G4} worth "
+                + $"reporting in this signal's own units.");
         }
 
         /// <summary>
