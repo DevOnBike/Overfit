@@ -23,13 +23,13 @@ namespace DevOnBike.Overfit.Audio.Tts.Snac
             SnacActivations.Snake1dInPlace(h, w[prefix + "snake1.alpha"], dim, t);
 
             var pad = 3 * dilation; // (kernel-1)*dilation/2 with kernel=7
-            var c1 = new float[dim * t];
+            var c1 = new float[(long)dim * t];
             SnacConv.Conv1d(h, w[prefix + "conv1.weight"], w[prefix + "conv1.bias"], c1,
                 inC: dim, tIn: t, outC: dim, kSize: 7, stride: 1, pad: pad, dilation: dilation, groups: dim, tOut: t);
 
             SnacActivations.Snake1dInPlace(c1, w[prefix + "snake2.alpha"], dim, t);
 
-            var c2 = new float[dim * t];
+            var c2 = new float[(long)dim * t];
             SnacConv.Conv1d(c1, w[prefix + "conv2.weight"], w[prefix + "conv2.bias"], c2,
                 inC: dim, tIn: t, outC: dim, kSize: 1, stride: 1, pad: 0, dilation: 1, groups: 1, tOut: t);
 

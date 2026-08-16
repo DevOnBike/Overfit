@@ -7,7 +7,6 @@ using System.Diagnostics;
 using System.Runtime.Intrinsics.X86;
 using DevOnBike.Overfit.LanguageModels.Loading;
 using DevOnBike.Overfit.LanguageModels.Runtime;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
 {
@@ -34,14 +33,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
 
         public TinyBlasTiledGemmBenchPhase2Tests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [FixtureFact(TestFixture.Avx2AndFma, "236ms")]
         public void Phase2_TiledVsPerColumnGemv_SingleThread()
         {
-            if (!Avx2.IsSupported || !Fma.IsSupported)
-            {
-                _out.WriteLine("AVX2/FMA not supported — skipping");
-                return;
-            }
 
             var nb = InputSize / 256;
             var bsumsPerRow = nb * Q4KDotKernel.GroupsPerSuperBlock;

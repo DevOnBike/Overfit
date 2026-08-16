@@ -82,7 +82,8 @@ namespace DevOnBike.Overfit.Tests.Redaction
                         "sk-not-leaked",
                         Redactor.CreateDefault(),
                         new NullAuditSink(),
-                        RedactionPolicy.Default());
+                        RedactionPolicy.Default(),
+                        CancellationToken.None);
                 }
                 catch
                 {
@@ -171,7 +172,7 @@ namespace DevOnBike.Overfit.Tests.Redaction
 
         private sealed class NullAuditSink : IRedactionAuditSink
         {
-            public void Record(RedactionAuditRecord record)
+            public void Record(in RedactionAuditEntry entry)
             {
             }
         }

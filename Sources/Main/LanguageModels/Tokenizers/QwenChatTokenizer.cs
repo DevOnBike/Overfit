@@ -31,7 +31,10 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
         public int UnknownTokenId => QwenTokenizer.EndOfText;
 
         public bool SupportsZeroAllocationEncode => false;
-        public bool SupportsZeroAllocationDecode => false;
+        // True since 2026-08-11: QwenTokenizer.Decode(tokens, Span<char>) writes into the caller's
+        // buffer and allocates 0 B once the pool is warm. Encode has no such path, so its flag stays
+        // false — the two are independent and both were honest before.
+        public bool SupportsZeroAllocationDecode => true;
 
         public int CountTokens(ReadOnlySpan<char> text) => _inner.Encode(new string(text)).Length;
 
@@ -49,17 +52,7 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
         }
 
         public int Decode(ReadOnlySpan<int> tokens, Span<char> destination)
-        {
-            var text = _inner.Decode(tokens);
-            if (destination.Length < text.Length)
-            {
-                throw new ArgumentException(
-                    $"Destination ({destination.Length}) is smaller than the decoded char count ({text.Length}).",
-                    nameof(destination));
-            }
-            text.AsSpan().CopyTo(destination);
-            return text.Length;
-        }
+            => _inner.Decode(tokens, destination);
 
         public string DecodeToString(ReadOnlySpan<int> tokens) => _inner.Decode(tokens);
     }

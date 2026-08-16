@@ -4,7 +4,6 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using DevOnBike.Overfit.LanguageModels;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
 {
@@ -23,7 +22,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
         private readonly ITestOutputHelper _out;
         public AttentionWholeMatrixM2PlumbingTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("862ms")]
         public void Qwen3B_Q4KM_Mmap_BuildsWholeAttnHandles()
         {
             if (!File.Exists(Model))

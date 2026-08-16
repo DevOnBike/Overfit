@@ -1,0 +1,157 @@
+# The lab workload: many identical replicas of a stand-in application, with faults injectable at runtime.
+#
+# Why this replaced the inference server as the lab's subject. The server was a poor instrument for three
+# measured reasons: it loads a 0.5B model, so a 32-core node fits four replicas at faithful load and the
+# between-pod statistic stays a range over three draws; it offers exactly one injectable fault, a CPU limit,
+# whose behaviour turned out to be a stall-and-catch-up rather than the uniform slowdown everyone assumed;
+# and its latency tracks how busy the machine is, so the operating point drifted between runs and cost three
+# of them. None of that has anything to do with what the guard measures.
+#
+#   dotnet publish Demo/LabWorkload/LabWorkload.csproj -c Release -o Demo/LabWorkload/publish
+#   docker build -f Demo/LabWorkload/Dockerfile -t lab-workload:latest Demo/LabWorkload
+#   kubectl apply -f k8s/lab/workload.yaml
+#
+# The build context is Demo/LabWorkload, NOT the repository root, and the publish step is not optional —
+# the Dockerfile is runtime-only and does `COPY publish/ .`. This block used to say `docker build ... .`,
+# which fails with "/publish: not found" after the whole repo has been sent to the daemon. The reason the
+# image is not built from source inside a container is in the Dockerfile's own header: this solution's
+# Directory.*.props pull in the analyzer projects and central package management, so a repo-root context
+# drags all of that into an SDK stage that has nothing to do with this app.
+#
+# Every replica starts healthy. Faults are POSTed to a running pod — see Demo/LabWorkload/FaultState.cs for
+# why that matters: injecting a fault by editing this file costs a restart, and a restart is itself a fault
+# (cold working set, restart counter, no history in the window), so the reaction could never be attributed.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: lab
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lab-workload
+  namespace: lab
+  labels:
+    app.kubernetes.io/name: lab-workload
+spec:
+  # Twelve, which is the number the inference server could never reach. Between-pod spread is (max - min)
+  # over the replicas' medians — a range over three draws is one of the noisiest statistics available, and
+  # measuring it was blocked until the model came out of the lab.
+  replicas: 12
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: lab-workload
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: lab-workload
+        # Read by the guard as the peer-group key once that lands. The cluster carrying the fact is the whole
+        # point: a hand-written list goes stale the moment leadership moves, and no code can infer whether a
+        # replica differs by design or by fault.
+        role: member
+    spec:
+      containers:
+        - name: workload
+          image: lab-workload:latest
+          # Docker Desktop shares the daemon's image store, so nothing is pulled — and a missing image should
+          # fail loudly rather than silently reaching for Docker Hub.
+          imagePullPolicy: Never
+          ports:
+            - name: http
+              containerPort: 8080
+          resources:
+            requests:
+              cpu: 100m
+              memory: 96Mi
+            limits:
+              # Deliberately tight. The baseline working set is ~59 MB, so POST /fault/oom reaches the limit
+              # in a couple of allocations — an OOM that takes ten minutes to arrive is not a test anyone
+              # runs. 512Mi rather than 256 so a leak also has room: at 5 MB/s a 256Mi ceiling is reached
+              # in forty seconds, which measures an OOM and never a trend.
+              # A limit is also mandatory for that endpoint to be safe at all: without one it would allocate
+              # until the node died.
+              memory: 512Mi
+              # A CPU limit exists for one reason and it is not resource management: CFS accounting only
+              # exists on containers that carry a quota, so without this `container_cpu_cfs_periods_total`
+              # has NO SERIES on these pods and CpuThrottleRatio is counted blind in every single cycle —
+              # 292 of 292 on one measured run. The guard cannot be shown to detect throttling on a cluster
+              # where throttling cannot happen.
+              #
+              # ONE CORE, and the 200m it replaced was wrong in a way worth keeping written down.
+              #
+              # 200m was defended as "83x above the 0.0018-0.0022 cores a healthy pod uses". That
+              # arithmetic is right and answers the wrong question: **CFS throttles on bursts inside a
+              # 100 ms period**, so average cores is not the unit that governs throttling. A pod
+              # averaging 0.002 cores can still exhaust its slice inside one period and be throttled,
+              # and headroom measured against an average says nothing about whether that happens.
+              # Raised on 2026-08-09 after reading `SustainedThresholdOptions.ForCpuThrottling`, which
+              # states the mechanism.
+              #
+              # **The live cluster has carried `1` since that day and this file did not** — found
+              # 2026-08-10 by `overfit-analyst` reading the cluster while building the coverage map.
+              # Re-applying the old value would have silently restored a limit the CPU fault cannot
+              # reach: the fault is sized at 2500 ms/request against a one-core quota, and against
+              # 200m it is a different experiment with the same name.
+              cpu: "1"
+          env:
+            - name: LAB_ROLE
+              value: member
+            - name: LAB_LATENCY_MS
+              value: "40"
+            - name: LAB_LATENCY_JITTER
+              value: "0.30"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 20
+            # Tolerant, because a stall is a fault this app injects on purpose. A liveness probe that killed
+            # a stalling pod would turn every latency experiment into a restart experiment.
+            timeoutSeconds: 5
+            failureThreshold: 12
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: lab-workload
+  namespace: lab
+  labels:
+    app.kubernetes.io/name: lab-workload
+spec:
+  # Headless, so every replica keeps an individually addressable endpoint. The peer comparison needs per-pod
+  # series, which a load-balanced ClusterIP would blur into one.
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: lab-workload
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: lab-workload
+  namespace: lab
+  labels:
+    app.kubernetes.io/name: lab-workload
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: lab-workload
+  namespaceSelector:
+    matchNames:
+      - lab
+  endpoints:
+    - port: http
+      path: /metrics
+      # Matches the cluster-wide interval on purpose. A finer one here would let windows fill faster than
+      # they would in production and hide sample-count problems until a pilot.
+      interval: 15s

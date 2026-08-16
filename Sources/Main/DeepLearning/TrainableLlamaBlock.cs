@@ -196,7 +196,7 @@ namespace DevOnBike.Overfit.DeepLearning
         private static AutogradNode Proj(ComputationGraph graph, AutogradNode x, IDequantRowSource w, LoRAAdapter? lora)
         {
             var baseOut = graph.FrozenQuantizedLinear(x, w);
-            return lora is null ? baseOut : graph.Add(baseOut, lora.Apply(graph, x));
+            return lora == null ? baseOut : graph.Add(baseOut, lora.Apply(graph, x));
         }
 
         public int FeedForwardWidthCached => _wGate.OutputSize;
@@ -319,14 +319,17 @@ namespace DevOnBike.Overfit.DeepLearning
             _ = row; // dequant scratch is now per-thread inside DequantMatVec
             DequantMatVec.Run(x, w, dst.Slice(0, outDim));
 
-            if (lora is null)
+            if (lora == null)
             {
                 return;
             }
             var rank = lora.Rank;
             var a = lora.A.DataView.AsReadOnlySpan(); // [inDim, rank]
             var b = lora.B.DataView.AsReadOnlySpan(); // [rank, outDim]
-            Span<float> tmp = stackalloc float[rank];
+            using var tmpBuffer = rank <= 256 ? default : new PooledBuffer<float>(rank, clearMemory: false);
+#pragma warning disable OVERFIT026 // BOUND: guarded at 256 floats = 1 KB. LoRA rank is caller-supplied and validated only as positive upstream, so the bound lives here; ranks above 256 (unheard of in practice) take the pooled branch instead of the stack.
+            Span<float> tmp = rank <= 256 ? stackalloc float[rank] : tmpBuffer.Span;
+#pragma warning restore OVERFIT026
             tmp.Clear();
             for (var i = 0; i < inDim; i++)
             {

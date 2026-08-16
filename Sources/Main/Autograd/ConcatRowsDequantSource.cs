@@ -22,7 +22,7 @@ namespace DevOnBike.Overfit.Autograd
 
         public ConcatRowsDequantSource(IReadOnlyList<IDequantRowSource> parts)
         {
-            if (parts is null || parts.Count == 0)
+            if (parts == null || parts.Count == 0)
             {
                 throw new ArgumentException("ConcatRowsDequantSource needs at least one part.", nameof(parts));
             }

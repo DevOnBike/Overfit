@@ -23,7 +23,7 @@ namespace DevOnBike.Overfit.Server
 
         public GatewayClientAuth(IReadOnlyCollection<string>? clientKeys)
         {
-            if (clientKeys is null || clientKeys.Count == 0)
+            if (clientKeys == null || clientKeys.Count == 0)
             {
                 _hashes = [];
                 return;

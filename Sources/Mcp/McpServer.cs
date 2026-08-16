@@ -21,6 +21,34 @@ namespace DevOnBike.Overfit.Mcp
     /// <c>tools/call</c>. Requests are served strictly one at a time on the caller's thread
     /// (single-tenant model session underneath — same stance as the `overfit serve` host).
     /// </summary>
+    // OVERFIT040 for the five methods of this class, disabled at the type because they share ONE constraint
+    // rather than five: the stdio transport, and what is on the other end of it.
+    //
+    // THE CONSTRAINT: this is a single-tenant server whose whole process exists to run one read loop.
+    // `Run` is documented blocking and is called as `server.Run(Console.In, Console.Out,
+    // CancellationToken.None)` from the CLI's `mcp` verb (Cli/Commands.cs), on the process main thread; the
+    // protocol serves one message at a time on the caller's thread over a single model session that is itself
+    // synchronous. A freed thread would have nothing to serve — there is no second request, and no pool
+    // thread is held behind any of this.
+    //
+    // AND THE READER AND WRITER ARE THE CONSOLE'S — IN PRACTICE, WHICH IS WHY THIS PRAGMA HAS TO STAY.
+    // `Console.In` and `Console.Out` are the synchronised TextReader/TextWriter wrappers whose
+    // `ReadLineAsync` / `WriteLineAsync` perform the same synchronous call and hand back a completed task,
+    // so converting these would move a blocking read onto a pool thread and buy nothing.
+    //
+    // BUT THE ANALYZER CANNOT SEE THAT, and this comment used to claim otherwise. It said the rule reached
+    // these only because they arrive typed as `TextReader`/`TextWriter`, implying that excluding
+    // `Console.Out` receivers at the source would clear them. XC-25 (2026-08-12) made that exclusion and
+    // MEASURED THIS FILE AGAIN: still 5 sites, unchanged. The reason is that the console-ness lives at the
+    // CALL SITE — `Cli/Commands.cs` passes `Console.In` / `Console.Out` into `Run` — while inside this type
+    // they are ordinary `TextReader` / `TextWriter` PARAMETERS, and a parameter could just as well be a
+    // socket or a file. That is the same shape as the analyzer's documented limit, and it is a real report
+    // that a human is answering with the constraint above, not a false positive.
+    //
+    // WHAT IS GIVEN UP, stated rather than left to be discovered: `Run` observes cancellation only between
+    // messages, because `input.ReadLine()` cannot be interrupted. A cancelled token does not end a `Run`
+    // parked on a read; closing stdin does, which is MCP's actual shutdown signal and what the CLI relies on.
+#pragma warning disable OVERFIT040
     public sealed class McpServer
     {
         /// <summary>Spec revisions this server accepts; the first entry is what we answer with
@@ -77,7 +105,7 @@ namespace DevOnBike.Overfit.Mcp
         /// Serves newline-delimited JSON-RPC until <paramref name="input"/> ends (host closed our
         /// stdin — the standard MCP shutdown signal) or the token is cancelled. Blocking.
         /// </summary>
-        public void Run(TextReader input, TextWriter output, CancellationToken cancellationToken = default)
+        public void Run(TextReader input, TextWriter output, CancellationToken cancellationToken)
         {
             ArgumentNullException.ThrowIfNull(input);
             ArgumentNullException.ThrowIfNull(output);
@@ -299,4 +327,5 @@ namespace DevOnBike.Overfit.Mcp
             output.Flush();
         }
     }
+#pragma warning restore OVERFIT040
 }

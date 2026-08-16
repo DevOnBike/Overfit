@@ -139,9 +139,21 @@ namespace DevOnBike.Overfit.Data.Prepare
             }
         }
 
+        /// <summary>
+        /// Keeps a column when at least <c>rows * minUniqueRatio</c> of its values are distinct.
+        ///
+        /// <para><b>The comparison was strict, which made the strictest available setting a no-op.</b> At
+        /// <c>minUniqueRatio = 1.0</c> - a value the constructor validates and accepts - the bar became
+        /// "more than <c>rows</c> distinct values in <c>rows</c> values", which no column can clear. Every
+        /// column was then dropped, the "kept nothing, so keep everything" fallback fired, and the filter
+        /// turned itself off. Worse than an error: the constant columns this layer exists to remove are
+        /// exactly what makes a later scaler divide by a zero range.</para>
+        /// </summary>
         private void IdentifyByUniqueRatio(ReadOnlySpan<float> span, int rows, int cols, List<int> keptIndices)
         {
-            var minUnique = (int)(rows * _minUniqueRatio);
+            // At least one distinct value is not a filter, so a ratio that rounds down to zero still asks for
+            // one - otherwise a tiny ratio on a small frame would keep a genuinely constant column.
+            var minUnique = Math.Max(1, (int)(rows * _minUniqueRatio));
             var uniqueValues = new HashSet<float>(rows / 4);
 
             for (var c = 0; c < cols; c++)
@@ -152,14 +164,14 @@ namespace DevOnBike.Overfit.Data.Prepare
                 for (var r = 0; r < rows; r++)
                 {
                     uniqueValues.Add(span[r * cols + c]);
-                    if (uniqueValues.Count > minUnique)
+                    if (uniqueValues.Count >= minUnique)
                     {
                         earlyPass = true;
                         break;
                     }
                 }
 
-                if (earlyPass || uniqueValues.Count > minUnique)
+                if (earlyPass || uniqueValues.Count >= minUnique)
                 {
                     keptIndices.Add(c);
                 }

@@ -9,7 +9,6 @@ using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.LanguageModels.Runtime;
 using DevOnBike.Overfit.LanguageModels.Tokenizers;
 using DevOnBike.Overfit.Tests.TestSupport;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
 {
@@ -29,7 +28,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
         private readonly ITestOutputHelper _out;
         public QwenGgufCachedDecodeSpeedTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("7s")]
         public void CachedDecode_MatchesUncached_TimingReported()
         {
             var ggufPath = TestModelPaths.Qwen3B.RequireQ4KmGgufPath();

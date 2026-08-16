@@ -1,0 +1,45 @@
+# Fallback analyzer severities for syntax trees that NO .editorconfig section can reach.
+#
+# WHY THIS FILE EXISTS (measured 2026-08-16, aot-guard CI failure)
+# ---------------------------------------------------------------
+# .editorconfig severities are resolved PER SYNTAX TREE, from a map the compiler builds out of the
+# files listed on the csc command line. Source generators add their trees to the compilation AFTER
+# that map exists, so a generated tree is not in it and matches NO section — not by path, by identity.
+# Its diagnostics therefore fall through to the analyzer's own default severity, and under the
+# aot-guard's TreatWarningsAsErrors=true that default becomes a hard error.
+#
+# This is not a guess. `dotnet build Anomalies.csproj -c Release -p:PublishAot=true` WITHOUT
+# TreatWarningsAsErrors reports, at BindingExtensions.g.cs(123,62) and (528,62):
+#
+#     warning RS0030: The symbol 'System.Linq' is banned in this project
+#
+# `warning` is the decisive word. If [*.g.cs] or [**/obj/**] (both of which the path matches, and
+# both of which set RS0030 = none) had applied, there would be no diagnostic at all; if [*.cs]
+# (RS0030 = error) had applied it would say `error`. It says neither, so it is the BannedApiAnalyzers
+# default — every section missed the tree.
+#
+# The offending code is not ours and cannot be changed: the Microsoft.Extensions.Configuration.Binder
+# source generator (10.0.14), which runs only under PublishAot/PublishTrimmed, emits
+# `section.GetChildren().Any()` for the single `section.Bind(file)` call in
+# Hosting/AnomalyGuardRegistration.cs. That call is deliberate and documented there.
+#
+# WHY A GLOBAL CONFIG IS THE FIX, AND WHY IT DOES NOT WEAKEN THE BAN
+# -----------------------------------------------------------------
+# A global AnalyzerConfig is the compiler's fallback for exactly the trees the per-path map misses,
+# so this entry reaches generated trees and nothing else: every real .cs file in this project is
+# matched by [*.cs] in the repo-root .editorconfig, whose `error` takes precedence over a global
+# config for that path. Proven both ways on 2026-08-16 — the publish above goes green, and a
+# temporary `using System.Linq;` in a real Anomalies source still fails with `error RS0030`.
+#
+# Do NOT "simplify" this to <NoWarn>RS0030</NoWarn> or to a WarningsNotAsErrors entry in
+# Directory.Build.props. Both are compilation-wide switches that also disarm the ban on real code —
+# measured 2026-08-08, when exempting RS0030 globally left three System.Reflection sites and a banned
+# Array.Copy sitting as warnings in Sources/Main while two files claimed in comments it could not
+# happen. Directory.Build.props carries an explicit prohibition on the WarningsNotAsErrors variant.
+#
+# WHAT IT COSTS: a future source generator added to THIS project could emit a genuinely banned API
+# and nobody would hear about it. That is the same trade the [*.g.cs] section already intended to
+# make; the difference is that this one actually takes effect. Hand-written code is unaffected.
+is_global = true
+
+dotnet_diagnostic.RS0030.severity = none

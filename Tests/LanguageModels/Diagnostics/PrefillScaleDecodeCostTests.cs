@@ -8,7 +8,6 @@ using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Runtime;
 using DevOnBike.Overfit.LanguageModels.Tokenizers;
 using DevOnBike.Overfit.Tests.TestSupport;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
 {
@@ -41,7 +40,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
 
         public PrefillScaleDecodeCostTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("47s")]
         public void Prefill_ScaleDecodeShare_ByPromptLength()
         {
             var path = TestModelPaths.Qwen3B.Q4KmGgufPath;
@@ -96,7 +95,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
         /// the case it was never tried on, where the same property that made it useless is exactly what is
         /// missing.</para>
         /// </summary>
-        [LongFact]
+        [LongFact("1min13s")]
         public void Prefill_OutputBlocking_OnShortPrompts()
         {
             var path = TestModelPaths.Qwen3B.Q4KmGgufPath;

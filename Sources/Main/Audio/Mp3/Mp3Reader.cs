@@ -80,6 +80,16 @@ namespace DevOnBike.Overfit.Audio.Mp3
             return 0;
         }
 
+        // OVERFIT040 for this private helper. THE CONSTRAINT: it drains a whole MP3 into memory once, inside
+        // `ReadMono`, which then decodes every frame synchronously on the same thread — the copy is a small
+        // fraction of the work the caller already committed that thread to.
+        //
+        // WHAT IS GIVEN UP, and this one is structural rather than a preference: the public entry
+        // `ReadMono(Stream stream, out int sampleRate)` returns the sample rate through an `out` parameter,
+        // and `out` parameters are ILLEGAL on async methods. Converting this helper therefore cannot stop at
+        // adding an `await` — it forces a redesign of a public signature in the shipped `DevOnBike.Overfit`
+        // package (a tuple or a result type), which is a maintainer's decision, not a lint sweep's.
+#pragma warning disable OVERFIT040
         private static byte[] ReadAll(Stream stream)
         {
             if (stream is MemoryStream ms)
@@ -90,5 +100,6 @@ namespace DevOnBike.Overfit.Audio.Mp3
             stream.CopyTo(buffer);
             return buffer.ToArray();
         }
+#pragma warning restore OVERFIT040
     }
 }

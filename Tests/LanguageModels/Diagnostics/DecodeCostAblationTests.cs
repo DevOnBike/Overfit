@@ -9,7 +9,6 @@ using DevOnBike.Overfit.LanguageModels.Chat;
 using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Runtime;
 using DevOnBike.Overfit.Tests.TestSupport;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
 {
@@ -36,7 +35,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
 
         public DecodeCostAblationTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("16s")]
         public void DecodeCost_ByEarlyEmitAndLogitsCache()
         {
             var path = TestModelPaths.Qwen3B.Q4KmGgufPath;

@@ -163,7 +163,7 @@ namespace DevOnBike.Overfit.LanguageModels.Retrieval.Evaluation
         /// has a fixed, corpus-independent scale. Fused hybrid scores are derived from ranks, so every query
         /// produces a top score of roughly the same magnitude whether or not the corpus actually contains an
         /// answer — exactly the signal this check depends on. Calling it on a
-        /// <see cref="ForHybrid(HybridRetriever, Func{string, float[]})"/> evaluator throws rather than
+        /// <see cref="ForHybrid(HybridRetriever, SentenceEmbedder)"/> evaluator throws rather than
         /// returning a number that looks fine and means nothing.</para>
         /// </summary>
         public FalsePremiseReport EvaluateFalsePremise(IEnumerable<FalsePremiseCase> cases, double groundedThreshold = 0.5)

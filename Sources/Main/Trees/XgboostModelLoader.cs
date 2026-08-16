@@ -27,6 +27,15 @@ namespace DevOnBike.Overfit.Trees
             return Load(stream);
         }
 
+        // OVERFIT040 for the stream overload — `JsonDocument.Parse(Stream)` reads the stream synchronously.
+        //
+        // THE CONSTRAINT: an XGBoost booster JSON parsed once, at model-construction time, on the caller's
+        // own thread, into an immutable `BoostedTreeModel`; predictions afterwards touch no I/O at all. There
+        // is no pool thread behind the load and nothing queued on it.
+        //
+        // WHAT IS GIVEN UP: both `Load` overloads are public API of the shipped `DevOnBike.Overfit` package
+        // and are the only way to construct a `BoostedTreeModel`.
+#pragma warning disable OVERFIT040
         public static BoostedTreeModel Load(Stream stream)
         {
             ArgumentNullException.ThrowIfNull(stream);
@@ -34,6 +43,7 @@ namespace DevOnBike.Overfit.Trees
             using var doc = JsonDocument.Parse(stream);
             return Build(doc.RootElement);
         }
+#pragma warning restore OVERFIT040
 
         private static BoostedTreeModel Build(JsonElement root)
         {

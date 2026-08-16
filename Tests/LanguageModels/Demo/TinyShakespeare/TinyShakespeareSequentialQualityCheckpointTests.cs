@@ -12,7 +12,6 @@ using DevOnBike.Overfit.LanguageModels.Runtime;
 using DevOnBike.Overfit.Optimizers;
 using DevOnBike.Overfit.Parameters;
 using DevOnBike.Overfit.Tokenization;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Demo.TinyShakespeare
 {
@@ -76,7 +75,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Demo.TinyShakespeare
             _output = output;
         }
 
-        [LongFact]
+        [LongFact("9min38s")]
         [Trait("Category", "Demo")]
         [Trait("Category", "LongRunning")]
         public void Demo_Train_TinyShakespeare_SequentialQuality_AndWriteCheckpointBin()

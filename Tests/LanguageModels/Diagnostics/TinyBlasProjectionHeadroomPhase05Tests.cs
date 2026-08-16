@@ -8,7 +8,6 @@ using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.X86;
 using DevOnBike.Overfit.LanguageModels.Loading;
 using DevOnBike.Overfit.LanguageModels.Runtime;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
 {
@@ -38,14 +37,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
 
         public TinyBlasProjectionHeadroomPhase05Tests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [FixtureFact(TestFixture.Avx2AndFma, "1s")]
         public void Phase05_ProjectionGflops_VsCeiling()
         {
-            if (!Avx2.IsSupported || !Fma.IsSupported)
-            {
-                _out.WriteLine("AVX2/FMA not supported — skipping");
-                return;
-            }
 
             // ── build a real Q4_K weight [OutputSize × InputSize] from random F32 ── (22.5M elems, fits int)
             var f32 = new float[OutputSize * InputSize];

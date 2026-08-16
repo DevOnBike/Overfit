@@ -22,7 +22,7 @@ namespace DevOnBike.Overfit.Tensors.Core
         {
             ArgumentNullException.ThrowIfNull(template);
 
-            if (template._isBorrowedMemory && template._buffer is null)
+            if (template._isBorrowedMemory && template._buffer == null)
             {
                 throw new OverfitRuntimeException("Template storage is marked as borrowed memory but has no arena.");
             }

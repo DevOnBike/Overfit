@@ -54,6 +54,7 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
         private bool _initialized;
         private bool _hasFitness;
 
+
         /// <summary>
         ///     Creates a generational GA.
         /// </summary>
@@ -123,7 +124,7 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
             // would have to be written directly to the population buffer, and the subsequent
             // Mutate call would read its own newly-written output as "parent" — which is the
             // wrong semantics (Mutate expects an unrelated parent, not the crossover child).
-            if (crossoverOperator is not null)
+            if (crossoverOperator != null)
             {
                 _crossoverScratch1 = new float[parameterCount];
                 _crossoverScratch2 = new float[parameterCount];
@@ -220,6 +221,24 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
             population.CopyTo(populationMatrix);
         }
 
+        /// <summary>
+        /// Folds one generation's fitness back in.
+        ///
+        /// <para><b>Guarded on initialization, not on a pending Ask.</b> Calling this on a fresh instance
+        /// ranked <c>_workspace.Population</c> - a <c>PooledBuffer&lt;float&gt;</c> taken with
+        /// <c>clearMemory: false</c>, so <b>leftover pool contents, not zeros</b> - and stored the winner as
+        /// the best genome. Nothing threw, the result had the right shape, and the search started from
+        /// somebody else's freed buffer.</para>
+        ///
+        /// <para><b>Why not the siblings' guard.</b> <c>OpenAiEsStrategy</c> and
+        /// <c>SeparableCmaEsStrategy</c> both throw unless <c>Ask</c> was called first, and copying that here
+        /// looked like the obvious symmetry - it is not. For those two, <c>Ask</c> <i>draws</i> the population
+        /// being scored, so fitness without a draw is meaningless. Here the population is durable state that
+        /// <see cref="Initialize"/> creates and <c>Ask</c> merely copies out, so <c>Initialize</c> then
+        /// <c>Tell</c> is a legitimate loop that this project's own tests use. The Ask guard was tried and
+        /// broke seven of them; the asymmetry between the three implementations is real, and it follows from
+        /// what <c>Ask</c> means in each.</para>
+        /// </summary>
         public void Tell(ReadOnlySpan<float> fitness)
         {
             ThrowIfDisposed();
@@ -230,6 +249,8 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
                     $"fitness length must be {PopulationSize}.",
                     nameof(fitness));
             }
+
+            ThrowIfNotInitialized();
 
             fitness.CopyTo(_workspace.Fitness.GetView().AsSpan());
             _hasFitness = true;
@@ -257,7 +278,7 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
         {
             var rankingFitness = _workspace.Fitness.GetView().AsReadOnlySpan();
 
-            if (_fitnessShaper is not null)
+            if (_fitnessShaper != null)
             {
                 var shapedFitness = _workspace.ShapedFitness.GetView().AsSpan();
                 _fitnessShaper.Shape(rankingFitness, shapedFitness);
@@ -351,7 +372,7 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
                 throw new OverfitRuntimeException("Elite set cannot be empty.");
             }
 
-            if (_crossoverOperator is null)
+            if (_crossoverOperator == null)
             {
                 CreateChildrenMutationOnly(currentPopulation, nextPopulation, eliteIndices);
                 return;

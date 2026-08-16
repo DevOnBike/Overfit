@@ -21,24 +21,152 @@
          rules silently off). Expect this package to show as permanently "outdated"; that is INTENTIONAL, not
          debt. Bump it only when the SDK's own Roslyn version moves up. -->
     <PackageVersion Include="Microsoft.CodeAnalysis.CSharp" Version="5.0.0" />
-    <PackageVersion Include="Microsoft.Agents.AI" Version="1.15.0" />
-    <PackageVersion Include="Microsoft.AspNetCore.TestHost" Version="10.0.10" />
-    <PackageVersion Include="Microsoft.Extensions.AI.Abstractions" Version="10.8.1" />
-    <PackageVersion Include="Microsoft.Extensions.AI.Evaluation" Version="10.8.0" />
-    <PackageVersion Include="Microsoft.Extensions.AI.Evaluation.Quality" Version="10.8.0" />
+    <!-- Tools/SemanticNavigator only. Held at the SAME 5.0.0 as Microsoft.CodeAnalysis.CSharp above, and for a
+         different reason than that package's own pin: MSBuildWorkspace loads the OVERFIT analyzers out of each
+         project it opens, so the navigator is an analyzer HOST. A host older than the analyzers cannot load
+         them; a host newer than the SDK's Roslyn diverges from what `dotnet build` actually ran. Matching the
+         analyzers' own compile-time version is the only value that is right on both counts.
+         Newer exist (5.3.0, 5.6.0) and are deliberately not taken — see the note above. -->
+    <PackageVersion Include="Microsoft.CodeAnalysis.Workspaces.MSBuild" Version="5.0.0" />
+    <!-- Registers the C# language service into the workspace's MEF composition. Without it MSBuildWorkspace
+         opens the solution, reports zero projects, and raises "the language 'C#' is not supported" as a
+         non-fatal diagnostic per project — so every query answers "no results" instead of failing. -->
+    <PackageVersion Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="5.0.0" />
+    <!-- Discovers the installed .NET SDK's MSBuild at runtime. Not bound to Roslyn's version. -->
+    <PackageVersion Include="Microsoft.Build.Locator" Version="1.11.2" />
+    <!-- Compile-time only (ExcludeAssets="runtime" at the reference site — see SemanticNavigator.csproj), so
+         the version sets which MSBuild API the navigator COMPILES against while the SDK supplies the one it
+         RUNS against. The stated rule was "must be AT OR BELOW the SDK's MSBuild, or it fails with a
+         MissingMethodException at the first call", and on that reasoning this sat at 18.0.2 because
+         `dotnet msbuild -version` on SDK 10.0.110 reports 18.0.11.
+
+         Tested on 2026-08-11 rather than reasoned about again, and the rule turned out to be VACUOUS HERE:
+         the navigator calls no Microsoft.Build.Framework API at all. Its only MSBuild-shaped calls are
+         MSBuildLocator (a different package, pinned separately) and Roslyn's MSBuildWorkspace, so there is no
+         call site that a newer reference could resolve to missing API. 18.8.2 builds and runs — `measure`
+         loads all 26 projects and 1667 documents, and `refs`/`impls` return correct results.
+
+         What DID block the bump, and it is worth knowing because the message names the fix: 18.3+ pulls
+         Microsoft.NET.StringTools transitively, and MSBuild Locator's own MSBL001 gate fails the build unless
+         that package carries the same ExcludeAssets="runtime" PrivateAssets="all" — otherwise it lands in
+         output and collides with the MSBuild the Locator loads. Hence the second pin below; the two move
+         together and pinning one without the other reproduces MSBL001.
+
+         Still true and still the reason to look here first if the tool breaks after an SDK change: the
+         constraint is "do not CALL API the runtime lacks", and the version is only a proxy for it. Not
+         exercised on the 18.8.2 bump: the `callers`, `unused` and `serve` verbs.
+
+         18.9.6 taken 2026-08-11, same day, on the same reasoning and with the gap above closed — this time
+         every verb was exercised, not three of them, because "it built" is not evidence about a tool whose
+         failure mode is answering "no results" instead of throwing. The two packages move TOGETHER; bumping
+         Microsoft.Build.Framework alone reproduces MSBL001, which is the failure this pair was created for.
+
+         NOT 17.11.31 (what Workspaces.MSBuild 5.0.0 resolves transitively): that version carries
+         GHSA-w3q9-fxm7-j8fq and NuGetAudit fails the build on it, correctly. -->
+    <PackageVersion Include="Microsoft.Build.Framework" Version="18.9.6" />
+    <PackageVersion Include="Microsoft.NET.StringTools" Version="18.9.6" />
+    <PackageVersion Include="Microsoft.Agents.AI" Version="1.17.0" />
+    <!-- 10.0.11 is the 2026-08-11 .NET security servicing release (10 CVEs across .NET 8/9/10, of which
+         CVE-2026-62897 is CVSS 7.0). Taken immediately because the blast radius is one test project and
+         nothing ships it. NOTE, and this is the part that matters: bumping this pin does NOT close that CVE
+         for anything real — it is the shared runtime that is affected, so the SDK and runtime INSTALLS have
+         to move, on this box and in CI. See XC-21. System.Numerics.Tensors is the other 10.0.11 pin and is
+         deliberately NOT taken here: it is a decode hot-path dependency and wants a canary bench first. -->
+    <PackageVersion Include="Microsoft.AspNetCore.TestHost" Version="10.0.11" />
+    <!-- 10.9.0 taken 2026-08-12. Additive in the part we consume: one bug fix that can bite us
+         (ExcludeFromSchema was dropped when several AIFunction instances were built concurrently,
+         dotnet/extensions#7677) plus new EXPERIMENTAL routing/failover base classes (RoutingChatClient,
+         FailoverChatClient) that nothing here references. No breaking change is listed for Abstractions.
+         The one breaking item in 10.9.0 is Microsoft.Extensions.AI.OpenAI constraining OpenAI to 2.12.x —
+         a package this solution does not reference. Checked after the bump rather than assumed:
+         Sources/Extensions.AI is IsAotCompatible + IsTrimmable, and the build emits no IL2xxx/IL3xxx. -->
+    <PackageVersion Include="Microsoft.Extensions.AI.Abstractions" Version="10.9.0" />
+    <!-- 10.9.0 taken 2026-08-12 with Abstractions above (Evaluation depends on it; leaving these at 10.8.0
+         would pin two halves of one release train apart). The 10.9.0 change here is the generated report
+         UI — new Overview / Cases / History / Comparison views. Only consumer is Demo/EvaluationDemo, which
+         is not packed and not in the AOT guard, so the blast radius is a demo's HTML output. -->
+    <PackageVersion Include="Microsoft.Extensions.AI.Evaluation" Version="10.9.0" />
+    <PackageVersion Include="Microsoft.Extensions.AI.Evaluation.Quality" Version="10.9.0" />
     <PackageVersion Include="Microsoft.ML" Version="5.0.0" />
-    <PackageVersion Include="Microsoft.ML.OnnxRuntime" Version="1.27.1" />
+    <!-- HELD at 1.28.0 while 1.29.0 exists, deliberately, and NOT for the usual "it might be slower" reason:
+         this package is not in any Overfit code path at all. Its only consumer is Sources/Benchmark, where it
+         is the OTHER SIDE of the comparison — InferenceBenchmark, BatchScalingBenchmark,
+         ConcurrentInferenceBenchmark, ColdStartBenchmark and ImportedOnnxMnistCnnBenchmark each pair an
+         Overfit method against an OnnxRuntime_* one. Moving the baseline moves every published
+         Overfit-vs-ORT ratio without touching a line of Overfit, and 1.29.0 is not a no-op on that side:
+         it changes CPU thread-pool defaults (ORT_INTRA_OP_NUM_THREADS / ORT_INTER_OP_NUM_THREADS now set
+         the default intra/inter-op sizes; explicit settings still win) and reworks MLAS itself — new
+         AVX2/VNNI weight kernels with vectorized dequantization, masked-Attention improvements — which is
+         the x86 CPU path these benchmarks actually exercise. On top of security hardening in path and
+         buffer handling. Take it together with a re-run of those five classes on both versions — the ORT
+         side is what has to be shown unmoved (or the ratio restated), not the Overfit side.
+
+         CORRECTION 2026-08-13: that re-run HAPPENED (PB-ORT1, 2026-08-12, six clean A/B process pairs
+         alternating AB/BA) and this comment was left describing it as pending. Two of its claims above are
+         also wrong and are kept only so the correction is legible: the env-var item does NOT change default
+         thread counts, it lets ORT_INTRA/INTER_OP_NUM_THREADS set them and neither is present here; and the
+         MLAS work is entirely MatMulNBits — 2-bit weight kernels, fp16 — plus Arm64/RISC-V, while every
+         model these benchmarks generate is dense fp32 (Gemm/Relu/Conv/MaxPool only).
+
+         THE RESULT, and it is why the pin stays: every steady-state ORT arm was faster on 1.29.0 (0.9848
+         to 0.9974) AND IT MEANS NOTHING, because the canaries moved the same way and Overfit_Batch64 moved
+         further than any ORT arm at 0.9825. Resolving power, computed before the verdict: median canary
+         spread 4.26% against an effect of 0.3-1.5%. The experiment is SILENT in that band, not negative.
+         The floor is intrinsic to cross-process measurement here, not background load — a reboot to one
+         process made it slightly WORSE (median 4.26% clean vs 3.17% loaded).
+
+         So the bump is neither justified nor refuted by performance, and the honest reason to hold is the
+         one at the top: it moves the other side of every published ratio. What that obliges instead is
+         cheap and NOT YET DONE — state the ORT version beside any published Overfit-vs-ORT number, because
+         docs/measured-baselines.md carries no ORT entry at all and a reader will assume the latest. -->
+    <PackageVersion Include="Microsoft.ML.OnnxRuntime" Version="1.28.0" />
     <PackageVersion Include="Microsoft.ML.OnnxTransformer" Version="5.0.0" />
-    <PackageVersion Include="Microsoft.SourceLink.GitHub" Version="10.0.301" />
-    <PackageVersion Include="OpenTelemetry.Extensions.Hosting" Version="1.17.0" />
-    <PackageVersion Include="OpenTelemetry.Exporter.Prometheus.AspNetCore" Version="1.15.3-beta.1" />
-    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.8.1" />
+    <!-- Build/pack-time only (PrivateAssets="all"), so it adds no runtime surface to the shipped package.
+         10.0.400 is an SDK-feature-band-aligned re-release; no changelog was found for it, which is stated
+         rather than glossed — the verdict rests on the asset scope, not on having read release notes. -->
+    <PackageVersion Include="Microsoft.SourceLink.GitHub" Version="10.0.400" />
+    <!-- 18.8.1 -> 18.9.0 on 2026-08-16, taken ALONE and deliberately ahead of the xunit question: bug fixes
+         only (TerminalLogger character corruption, TRX attachment paths, data-collector protocol negotiation
+         using the negotiated version rather than V1, AOT-compatible TranslationLayer), nothing touching
+         discovery. Kept separate from `xunit.v3` 4.0.0 precisely so any test-runner surprise here is
+         attributable — that one is a build-and-CI change, not a bump, and is deferred under `XC-70`. -->
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />
     <PackageVersion Include="Moq" Version="4.20.72" />
     <PackageVersion Include="Swashbuckle.AspNetCore" Version="10.2.3" />
-    <PackageVersion Include="System.CommandLine" Version="2.0.10" />
-    <PackageVersion Include="System.Numerics.Tensors" Version="10.0.10" />
-    <PackageVersion Include="TorchSharp-cpu" Version="0.106.0" />
-    <PackageVersion Include="xunit" Version="2.9.3" />
+    <!-- 2.0.11 is SOURCE-IDENTICAL to 2.0.10 — verified against the upstream v2.0.10...v2.0.11 comparison,
+         not inferred from the version shape. It is a re-stamp tied to the SDK release train, so the risk is
+         zero by construction rather than by judgement. `Cli` is the only consumer. -->
+    <PackageVersion Include="System.CommandLine" Version="2.0.11" />
+    <!-- HELD at 10.0.10 while 10.0.11 exists, deliberately. This is TensorPrimitives — a decode hot-path
+         dependency — and this repository does not take a version bump on a hot path without a measurement,
+         however unlikely a servicing release is to touch vectorization. What it needs is a canary run (an
+         untouched path measured on both sides to prove the box did not move), not a full re-benchmark. Not
+         run today: five agents were on the machine and the benchmark host takes a global mutex, so any
+         number taken now would have been measured against a contended box — which is worse than no number.
+         TAKEN 2026-08-12, and NOT by running that benchmark — by removing the question. The two packages
+         were compared as artefacts: every entry by SHA-256, then the PE and ECMA-335 layout of the assembly
+         itself. For lib/net10.0 (what Sources/Main consumes) the **IL region differs by ZERO bytes**; every
+         section RVA, raw size and metadata heap size (#~, #Strings, #US, #GUID, #Blob) is byte-identical.
+         The 59 differing metadata bytes are the MVID and 10.0.10+f7d90799 -> 10.0.11+e2f47b01, and the whole
+         file-size delta is the Authenticode certificate table — confirmed to the byte from PE data directory
+         4 (net10.0 cert 10,024 -> 10,064, exactly the +40; net8.0 10,064 -> 10,024, exactly the -40).
+         Corroborated independently: dotnet/runtime's release/10.0 branch has NO commit under
+         src/libraries/System.Numerics.Tensors since 2025-10-29, before .NET 10 GA.
+
+         Identical IL on the same runtime produces identical JIT codegen, so there is no execution change to
+         measure. That is a STRONGER result than the benchmark this comment used to demand: a benchmark can
+         only fail to detect a difference, whereas the artefact comparison shows there is none.
+
+         Worth keeping, because the caution above was right in principle and only the conclusion changed:
+         TensorPrimitives is NOT cold-path here — 341 call sites across 59 files in Sources/Main, including
+         the decode path (TensorMath.Normalization 58, Gelu 27, CachedMultiHeadAttention 7). The hot-path
+         exposure is real and large. It simply does not matter when the compiled code is the same.
+
+         STILL OUTSTANDING and NOT closed by this pin: the 10.0.11 servicing release also moves the shared
+         runtime and SDK, which DOES change the JIT. That install is a separate action and does warrant a
+         canary. See XC-21. -->
+    <PackageVersion Include="System.Numerics.Tensors" Version="10.0.11" />
+    <PackageVersion Include="xunit.v3" Version="3.2.2" />
     <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5" />
   </ItemGroup>
 </Project>

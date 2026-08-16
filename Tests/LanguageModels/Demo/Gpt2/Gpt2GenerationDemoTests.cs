@@ -9,7 +9,6 @@ using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Runtime;
 using DevOnBike.Overfit.Tests.TestSupport;
 using DevOnBike.Overfit.Tokenization;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Demo.Gpt2
 {

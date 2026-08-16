@@ -7,7 +7,6 @@ using System.Text;
 using DevOnBike.Overfit.LanguageModels.Chat;
 using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.Tests.TestSupport;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Chat
 {
@@ -26,14 +25,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Chat
 
         private static string SafetensorsPath => Path.Combine(TestModelPaths.Qwen3B.Dir, "model.safetensors");
 
-        [LongFact]
+        [FixtureFact(TestFixture.QwenSafetensors, "3s")]
         public void Chat_RealQwen05B_FromDirectory_ZeroPython_Responds()
         {
-            if (!File.Exists(SafetensorsPath))
-            {
-                _out.WriteLine("model.safetensors not present — skipping.");
-                return;
-            }
 
             using var model = QwenChatModel.LoadFromDirectory(TestModelPaths.Qwen3B.Dir, maxContextLength: 512, quantize: false);
             model.Chat.AddSystem("You are a concise assistant. Answer in one short sentence.");
@@ -54,7 +48,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Chat
             Assert.Equal(reply, streamed.ToString());          // stream == return
             Assert.DoesNotContain("<|im_end|>", reply);        // ChatML terminator suppressed
             Assert.Equal(3, model.Chat.History.Count);         // system + user + assistant
-            Assert.Equal("assistant", model.Chat.History[^1].Role);
+            var history = model.Chat.History;
+
+            Assert.Equal("assistant", history[history.Count - 1].Role);
             Assert.Contains("Paris", reply, StringComparison.OrdinalIgnoreCase);
         }
     }

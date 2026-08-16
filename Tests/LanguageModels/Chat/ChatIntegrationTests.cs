@@ -9,7 +9,6 @@ using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Loading;
 using DevOnBike.Overfit.LanguageModels.Tokenizers;
 using DevOnBike.Overfit.Tests.TestSupport;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Chat
 {
@@ -25,7 +24,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Chat
         private readonly ITestOutputHelper _out;
         public ChatIntegrationTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("3s")]
         public void Chat_DetectTemplate_RenderMultiTurn_StreamWithStopDetector()
         {
             TestModelPaths.Qwen3B.RequireQ4KmGgufPath();

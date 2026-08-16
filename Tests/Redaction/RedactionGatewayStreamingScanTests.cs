@@ -78,6 +78,7 @@ namespace DevOnBike.Overfit.Tests.Redaction
                         Redactor.CreateDefault(),
                         new NullAuditSink(),
                         RedactionPolicy.Default(),
+                        CancellationToken.None,
                         clientKeys: null,
                         scanResponses: true);
                 }
@@ -161,7 +162,7 @@ namespace DevOnBike.Overfit.Tests.Redaction
 
         private sealed class NullAuditSink : IRedactionAuditSink
         {
-            public void Record(RedactionAuditRecord record)
+            public void Record(in RedactionAuditEntry entry)
             {
             }
         }

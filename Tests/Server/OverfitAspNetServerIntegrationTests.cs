@@ -11,9 +11,7 @@ using DevOnBike.Overfit.Server.AspNet.Endpoints;
 using DevOnBike.Overfit.Server.AspNet.Services;
 using DevOnBike.Overfit.Server.OpenAi;
 using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.TestHost;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace DevOnBike.Overfit.Tests.Server
@@ -39,6 +37,26 @@ namespace DevOnBike.Overfit.Tests.Server
             app.MapOverfitOpenAiApi();
             await app.StartAsync();
             return (app, app.GetTestClient());
+        }
+
+        [Fact]
+        public async Task DoAsync()
+        {
+            await Task.CompletedTask;
+        }
+
+        private async Task DoCoreDefaultAsync()
+        {
+            var a = "a";
+
+            await Task.CompletedTask;
+        }
+
+        private Task DoCoreCorrectAsync()
+        {
+            var a = "a";
+
+            return Task.CompletedTask;
         }
 
         [Fact]
@@ -97,7 +115,7 @@ namespace DevOnBike.Overfit.Tests.Server
                 var frames = body.Split("\n\n", StringSplitOptions.RemoveEmptyEntries);
                 Assert.Contains("\"content\":\"po\"", body);
                 Assert.Contains("\"content\":\"ng\"", body);
-                Assert.EndsWith("data: [DONE]", frames[^1].Trim());
+                Assert.EndsWith("data: [DONE]", frames[frames.Length - 1].Trim());
             }
         }
 
@@ -160,6 +178,53 @@ namespace DevOnBike.Overfit.Tests.Server
         }
 
         [Fact]
+        public async Task Metrics_AreOrderedByName_WithEachFamilyIntact()
+        {
+            var (app, client) = await StartAsync(new FakeInferenceService());
+            await using (app)
+            {
+                var body = await (await client.GetAsync("/metrics")).Content.ReadAsStringAsync();
+                var lines = body.Split('\n');
+
+                var names = new List<string>();
+                var helped = new HashSet<string>(StringComparer.Ordinal);
+
+                foreach (var line in lines)
+                {
+                    if (line.StartsWith("# HELP ", StringComparison.Ordinal))
+                    {
+                        helped.Add(line.Split(' ')[2]);
+                    }
+
+                    if (line.StartsWith("# TYPE ", StringComparison.Ordinal))
+                    {
+                        names.Add(line.Split(' ')[2]);
+                    }
+                }
+
+                Assert.NotEmpty(names);
+
+                // Sorted by name. Prometheus does not require this; two readers do — a human diffing
+                // /metrics between two replicas, which is the premise of the peer comparison this server is
+                // instrumented for, and anyone scanning the endpoint for a name they expect to find.
+                for (var i = 1; i < names.Count; i++)
+                {
+                    Assert.True(
+                        string.CompareOrdinal(names[i - 1], names[i]) < 0,
+                        $"metric families are out of order: '{names[i - 1]}' precedes '{names[i]}'");
+                }
+
+                // Sorting has to happen per family, never per line: every TYPE must still be preceded by its
+                // own HELP. A flat sort of the rendered text would satisfy the check above and destroy this
+                // one, which is exactly the mistake worth guarding against.
+                foreach (var name in names)
+                {
+                    Assert.Contains(name, helped);
+                }
+            }
+        }
+
+        [Fact]
         public async Task Metrics_ExposePrometheusProcessMetrics()
         {
             var (app, client) = await StartAsync(new FakeInferenceService());
@@ -208,7 +273,10 @@ namespace DevOnBike.Overfit.Tests.Server
             public PoolStatus PoolStatus => new(Size: 4, Active: 0, Available: 4, RejectedTotal: 0, PeakActive: 1);
 
             public ModelsResponse ListModels()
-                => new() { Data = [new ModelInfo { Id = "fake-model", Created = 0 }] };
+                => new()
+                {
+                    Data = [new ModelInfo { Id = "fake-model", Created = 0 }]
+                };
 
             public void CompleteChat(ChatCompletionRequest? request, IOpenAiResponseSink sink, CancellationToken cancellationToken)
             {
@@ -240,7 +308,7 @@ namespace DevOnBike.Overfit.Tests.Server
                     JsonSerializer.Serialize(response, OpenAiJsonContext.Default.ChatCompletionResponse));
             }
 
-            public void Embed(EmbeddingsRequest? request, IOpenAiResponseSink sink, CancellationToken cancellationToken)
+            public Task EmbedAsync(EmbeddingsRequest? request, IOpenAiResponseSink sink, CancellationToken cancellationToken)
             {
                 if (!EmbeddingsAvailable)
                 {
@@ -248,7 +316,7 @@ namespace DevOnBike.Overfit.Tests.Server
                         JsonSerializer.Serialize(
                             new OpenAiErrorResponse { Error = new OpenAiError { Message = "no embedding model" } },
                             OpenAiJsonContext.Default.OpenAiErrorResponse));
-                    return;
+                    return Task.CompletedTask;
                 }
 
                 var response = new EmbeddingsResponse
@@ -259,10 +327,16 @@ namespace DevOnBike.Overfit.Tests.Server
                 };
                 sink.WriteBody(200, "application/json",
                     JsonSerializer.Serialize(response, OpenAiJsonContext.Default.EmbeddingsResponse));
+
+                return Task.CompletedTask;
             }
 
-            public void Synthesize(SpeechRequest? request, IOpenAiResponseSink sink, CancellationToken cancellationToken)
-                => sink.WriteBinary(200, "audio/wav", [0x52, 0x49, 0x46, 0x46]);
+            public Task SynthesizeAsync(SpeechRequest? request, IOpenAiResponseSink sink, CancellationToken cancellationToken)
+            {
+                sink.WriteBinary(200, "audio/wav", [0x52, 0x49, 0x46, 0x46]);
+
+                return Task.CompletedTask;
+            }
 
             private static string Chunk(string content)
             {

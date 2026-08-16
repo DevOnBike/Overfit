@@ -31,6 +31,18 @@ namespace DevOnBike.Overfit.Onnx
         private const int MinSupportedOpset = 11;
         private const int MaxSupportedOpset = 20;
 
+        // OVERFIT040 for `Load` — the path-taking overload, which is the only method here that touches disk.
+        //
+        // THE CONSTRAINT: a whole `.onnx` file slurped once, at model-construction time, on the caller's own
+        // thread. The importer is a one-shot conversion into a `Sequential`; there is no pool thread behind
+        // it, no session yet, and nothing queued on the thread. The byte-taking `LoadFromBytes` immediately
+        // below is the overload for a caller who already has the bytes — including one who fetched them
+        // asynchronously — so the async door is already open without changing this signature.
+        //
+        // WHAT IS GIVEN UP: `Load` is public API of the shipped `DevOnBike.Overfit` package and the documented
+        // ONNX entry point; a task-returning form is a breaking change.
+#pragma warning disable OVERFIT040
+
         /// <summary>
         /// Loads an ONNX model from disk.
         /// External data files are resolved relative to the .onnx file directory.
@@ -53,6 +65,7 @@ namespace DevOnBike.Overfit.Onnx
                 modelBytes,
                 modelDir);
         }
+#pragma warning restore OVERFIT040
 
         /// <summary>
         /// Loads an ONNX model from a raw byte array.
@@ -303,164 +316,15 @@ namespace DevOnBike.Overfit.Onnx
             }
         }
 
+        /// <summary>
+        /// Shared with <see cref="OnnxGraphImporter"/>, which used to carry a second, unguarded copy.
+        /// See <see cref="OnnxExternalData"/>.
+        /// </summary>
         private static void ResolveExternalData(
             OnnxModel model,
             string? externalDataDir)
         {
-            var fileCache = new Dictionary<string, byte[]>(
-                StringComparer.OrdinalIgnoreCase);
-
-            for (var i = 0; i < model.Graph.Initializers.Count; i++)
-            {
-                var initializer = model.Graph.Initializers[i];
-
-                if (initializer.ExternalData == null)
-                {
-                    continue;
-                }
-
-                if (string.IsNullOrEmpty(externalDataDir))
-                {
-                    throw new OverfitRuntimeException(
-                        $"Initializer '{initializer.Name}' references external data " +
-                        $"'{initializer.ExternalData.Location}', but no externalDataDir was provided. " +
-                        "Use OnnxImporter.Load(path), which resolves it automatically.");
-                }
-
-                var fullPath = ResolveExternalDataPath(
-                    externalDataDir,
-                    initializer.ExternalData.Location,
-                    initializer.Name);
-
-                if (!fileCache.TryGetValue(
-                        fullPath,
-                        out var fileBytes))
-                {
-                    if (!File.Exists(fullPath))
-                    {
-                        throw new FileNotFoundException(
-                            $"External data file not found: {fullPath} " +
-                            $"(referenced by initializer '{initializer.Name}').",
-                            fullPath);
-                    }
-
-                    fileBytes = File.ReadAllBytes(fullPath);
-                    fileCache[fullPath] = fileBytes;
-                }
-
-                var offset = CheckedToInt32(
-                    initializer.ExternalData.Offset,
-                    $"External data offset for initializer '{initializer.Name}'");
-
-                var length = GetExternalDataLength(
-                    initializer,
-                    fileBytes.Length,
-                    offset);
-
-                if (offset < 0 ||
-                    length < 0 ||
-                    offset > fileBytes.Length ||
-                    length > fileBytes.Length - offset)
-                {
-                    throw new OverfitFormatException(
-                        $"External data for '{initializer.Name}' requests bytes " +
-                        $"[{offset}, {offset + length}) but '{Path.GetFileName(fullPath)}' " +
-                        $"is only {fileBytes.Length} bytes.");
-                }
-
-                var raw = new byte[length];
-                fileBytes.AsSpan(offset, length).CopyTo(raw);
-
-                model.Graph.Initializers[i] = new OnnxTensor
-                {
-                    Name = initializer.Name,
-                    DataType = initializer.DataType,
-                    Dims = initializer.Dims,
-                    RawData = raw,
-                    FloatData = initializer.FloatData,
-                    Int64Data = initializer.Int64Data,
-                    ExternalData = null,
-                };
-            }
-        }
-
-        private static string ResolveExternalDataPath(
-            string externalDataDir,
-            string location,
-            string initializerName)
-        {
-            if (string.IsNullOrWhiteSpace(location))
-            {
-                throw new OverfitFormatException(
-                    $"Initializer '{initializerName}' has an empty external data location.");
-            }
-
-            if (Path.IsPathRooted(location))
-            {
-                throw new OverfitFormatException(
-                    $"Initializer '{initializerName}' references an absolute external data path: '{location}'.");
-            }
-
-            var baseDir = Path.GetFullPath(externalDataDir);
-            var fullPath = Path.GetFullPath(
-                Path.Combine(
-                    baseDir,
-                    location));
-
-            var comparison = OperatingSystem.IsWindows()
-                ? StringComparison.OrdinalIgnoreCase
-                : StringComparison.Ordinal;
-
-            if (!IsPathInsideDirectory(
-                    fullPath,
-                    baseDir,
-                    comparison))
-            {
-                throw new OverfitFormatException(
-                    $"External data path for initializer '{initializerName}' escapes the model directory: '{location}'.");
-            }
-
-            return fullPath;
-        }
-
-        private static bool IsPathInsideDirectory(
-            string path,
-            string directory,
-            StringComparison comparison)
-        {
-            var normalizedDirectory = directory;
-
-            if (!normalizedDirectory.EndsWith(
-                    Path.DirectorySeparatorChar.ToString(),
-                    comparison))
-            {
-                normalizedDirectory += Path.DirectorySeparatorChar;
-            }
-
-            return path.StartsWith(
-                normalizedDirectory,
-                comparison);
-        }
-
-        private static int GetExternalDataLength(
-            OnnxTensor initializer,
-            int fileLength,
-            int offset)
-        {
-            if (initializer.ExternalData == null)
-            {
-                throw new OverfitRuntimeException(
-                    "ExternalData must be present.");
-            }
-
-            if (initializer.ExternalData.Length == 0)
-            {
-                return fileLength - offset;
-            }
-
-            return CheckedToInt32(
-                initializer.ExternalData.Length,
-                $"External data length for initializer '{initializer.Name}'");
+            OnnxExternalData.Resolve(model, externalDataDir);
         }
 
         private static Dictionary<string, OnnxTensor> BuildInitializerLookup(

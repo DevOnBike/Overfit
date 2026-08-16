@@ -194,7 +194,7 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
             _pC = new float[parameterCount];
             _zMean = new float[parameterCount];
             _bestParameters = new float[parameterCount];
-            _z = new float[populationSize * parameterCount];
+            _z = new float[(long)populationSize * parameterCount];
             _ranking = new int[populationSize];
 
             ResetState();

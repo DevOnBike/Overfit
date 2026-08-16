@@ -1,0 +1,531 @@
+# The anomaly guard, deployed the way a client would run it: one replica, configuration from a ConfigMap,
+# Prometheus reached by cluster DNS, shadow mode.
+#
+#   dotnet publish Sources/Cli/Cli.csproj -c Release -o Sources/Cli/publish -p:PublishAot=false
+#   docker build -f k8s/lab/guard.Dockerfile -t overfit-guard:latest Sources/Cli
+#   kubectl apply -f k8s/lab/anomaly-guard.yaml
+#
+# The only dependency is an HTTP route to Prometheus. No API-server access, no RBAC, no CRDs, no operator —
+# which is the claim made to clients, and running it this way is what tests it rather than asserting it.
+#
+# The floors below came from FloorCalibrator run against THIS cluster over 24 windows (288 observations
+# per metric), not from anybody's judgement — see LabFloorCalibrationDiagnostics. Three things about them
+# are worth knowing before anyone edits one:
+#
+# 1. MemoryWorkingSetBytes.minTrendChange has now been wrong in BOTH directions, which is the useful part:
+#    256MiB -> 1.089MB -> 25.85MB.
+#
+#    256MiB was measured on the SYNTHETIC population, whose pods carry a 1.23 GB working set; these pods
+#    carry 43 MB. A floor of 268 MB against a 43 MB signal cannot fire at all — the gate meant to catch a
+#    memory leak was silently switched off, and would have stayed off through a real one.
+#
+#    1.089MB then over-corrected, for the reason in note 4: it came from 24 windows. Over the full 24-hour
+#    run this channel was the LARGEST single producer of findings (7 of the run's total, more than any
+#    other signal) while nothing was wrong with the cluster, and the calibrator proposed 25.85MB in every
+#    cycle — healthy replicas move their working set by up to 20.7 MB across a window, so a 1 MB floor has
+#    nothing to distinguish.
+#
+#    VERIFIED BY INJECTION at 0.2 MB/s on one replica, on a window clean of rollout ghosts:
+#
+#      Anomaly finding on lab-workload-...-8k5w4: MemoryWorkingSetBytes [Resource] severity 0.96 —
+#      Series rose by 210.0% of typical across 0:20:00 (tau 0.96, lag-1 autocorrelation 0.89)
+#
+#    Right pod, right family — this is the trend gate whose floor was raised 23.7x — grouped into one
+#    incident with the heap channel (+307% trend, +3,832% peer gap). Raising the floor did not blind it.
+#
+#    That verification was only possible after fixing the instrument: /fault/leak touched chunk[0] and
+#    chunk[^1], which faults in two 4 KB pages of a multi-megabyte LOH allocation, so it moved the working
+#    set by 8 kB/s while claiming 2 MB/s — 240x short. Measured before: RSS 39 -> 36 -> 37 -> 24 MiB while
+#    leaking. After: 29 -> 138 -> 253 -> 368 MiB, against peers flat at 29-33. So every earlier claim that
+#    this fault exercises MemoryWorkingSetBytes was untested, and this is the first time it has been.
+#
+#    CAVEAT that remains: the calibrator's spread is a running MAXIMUM, and this channel's proposal did not
+#    move at all after the first hours (1.00x across the day) while RequestsPerSecond and GcGen2HeapBytes
+#    kept growing. The 20.7 MB may have been set during pod warm-up at the start of the run — note 3's
+#    hazard exactly. What is now verified is that a 0.2 MB/s leak still reports; a leak an order of
+#    magnitude slower has not been tested and is where this floor would fail first.
+#
+#    Operational note, learned the hard way: /fault/clear does NOT release what has already leaked (the
+#    workload retains the list on purpose), so a replica used for a leak test is spent for the rest of its
+#    life and must be deleted, not cleared.
+#
+# 2. The latency floors are NOT the calibrated ones. The calibrator proposed about 0.01 ms, correctly:
+#    latency in this lab is near-constant, so that is genuinely what healthy does. It is also not a
+#    threshold anybody would act on. A calibrated floor is a NOISE floor — it says what to ignore, never
+#    what is worth waking for — so where the two disagree the rule is max(calibrated, operational), and
+#    50 ms is the operational one.
+#
+# 3. A calibrated floor is only valid if the period it came from was healthy. A fault inside that window
+#    raises the bar above itself and blinds the guard to that fault at that size, permanently.
+#
+# 4. CpuUsageRatio.minGap was 0.000159 and is now 0.00041, because 24 windows was not long enough to
+#    calibrate it. Over the full 24-hour false-positive run (2026-08-04/05, 292 cycles, nothing wrong with
+#    the cluster) the calibrator proposed 0.00041 in EVERY cycle — healthy peers differed by up to
+#    0.000328 — and logged, every five minutes for a day, "the configured floor is under that, which is
+#    why it reports". It was right: two of the five false incidents in that run were this signal, at
+#    absolute gaps of 0.000182 and 0.000171, both just over the old floor and both far under the proposed
+#    one. Neither is a fault: 0.00017 is 0.017% of a core.
+#
+#    The lesson generalises past this one number. A floor calibrated over a window SHORTER THAN THE
+#    WORKLOAD'S PERIOD underestimates the spread, because it never sees the part of the cycle where peers
+#    diverge most — here the evening ramp of the driver's 1440-minute curve. It is the same mistake as a
+#    240-minute detector window sitting on the daily slope, in the opposite direction.
+#
+#    The relative gate was NOT touched and is not the defect. Cliff's delta and MinRelativeGap are
+#    scale-free by construction; 9% of a tiny number is still 9%, and no percentage can express "too small
+#    to matter". That is exactly what the absolute floor is for, and it was set 2.6x too low. Raising the
+#    relative gate instead would have suppressed genuine small regressions on well-scaled signals.
+#
+#    The margin was VERIFIED BY INJECTION, not by arithmetic, because the floor is only safe if a real
+#    fault still reports. POST /fault/cpu?msPerRequest=3 on exactly one replica, guard restarted onto the
+#    new floor first and the ConfigMap read back out of the cluster to confirm it had actually landed:
+#
+#      Anomaly finding on lab-workload-...-45gv7: CpuUsageRatio [Resource] severity 0.636 —
+#      sits above the other 11 peers by 190 % (0.00301): Cliff's delta 0.64, p 2.22E-16
+#
+#    Right pod, and an absolute gap of 0.00301 against the new floor of 0.00041 — 7.3x of headroom. The
+#    other eleven replicas were not accused. Note the honest gap in this evidence: the fault was AIMED at
+#    ~0.0015 (the 2.5x reference the detection matrix uses) and came out at twice that, so what is measured
+#    is that a 2.9x fault reports, not that a 2.5x one does. The arithmetic for the smaller case (0.0015 is
+#    still 3.7x the floor) remains arithmetic.
+#
+# 4b. GcGen2HeapBytes.minGap was 0.641MB and is now 0.93MB — raised BEFORE it cost anything, which is
+#    unusual here and is justified by a trend rather than by a count. This is the channel that produced
+#    108 false incidents a day in the 2026-08-02 baseline and exactly ZERO in this run; the reason is not
+#    a fix, it is that these pods were young, and peer heap gaps sat just under the floor instead of just
+#    over it. The proposal grew through the day as the heaps diverged — 0.729MB -> 0.930MB, 1.27x — so the
+#    channel was heading back to where it was noisy. Raising it now is extrapolating a measured trend, not
+#    a hunch, but it IS extrapolation: if this channel goes quiet through a real heap problem, start here.
+#
+# 6. RequestsPerSecond raised on both gates — minTrendChange 0.194 -> 0.333, minGap 0.0119 -> 0.0238 —
+#    and this is the one entry whose evidence is partly circular, so the reasoning is written out rather
+#    than the number left to speak for itself.
+#
+#    Two of the five false incidents in the 24-hour run were this signal, and they are the two halves of ONE
+#    phenomenon: +10.6% of typical at 19:03Z (tau +0.57) and -15.2% at 23:43Z (tau -0.53) — the up and down
+#    slopes of the load driver's 1440-minute curve, both correctly described as deployment-wide movement
+#    with no replica implicated.
+#
+#    The old floors were calibrated over 24 windows and are almost exactly the FIRST thing the calibrator
+#    saw: proposal 0.238 early against a configured 0.194. Across the full day the observed maximum among
+#    healthy replicas grew 0.190 -> 0.266 and the proposal with it, 0.238 -> 0.333, because the evening ramp
+#    moves traffic further than anything in the first hours. Same lesson as note 4, different signal.
+#
+#    THE CIRCULARITY, STATED: the calibrator also observes the windows in which those incidents fired, so
+#    0.266 may BE their amplitude, and raising the floor above it suppresses them by construction. That is
+#    the self-reference which once made the level-shift gate unable to fire at all. Here it is sound, and on
+#    one condition only — THE OBSERVATION PERIOD WAS VERIFIED HEALTHY. The 24 hours were a false-positive
+#    measurement on a cluster where nothing was wrong, so 0.266 is literally "this is how far traffic moves
+#    when everything is fine", and the incidents were false precisely because of it. Re-derive these two
+#    numbers from a period containing a real incident and they become a blind spot instead.
+#
+#    THE COST, ALSO STATED: this channel is now blind to a genuine deployment-wide traffic change smaller
+#    than 0.333 — and a real outage that halves traffic on a quiet night is exactly that shape. The right
+#    fix is SeasonalBaseline (compare against the same phase of the previous day, so the diurnal ramp is
+#    expected and a real drop is not), which needs MinimumHistoryDays and therefore a day of history the
+#    guard did not have. The floor is the lever available today, not the correct one.
+#
+# 7. GcPauseRatio.minGap 0.0000082 -> 0.0000209, proposed in every cycle of the same run against one
+#    finding produced. Small, and grouped with the entry above because it is the same edit for the same
+#    reason on a channel that costs almost nothing either way. Its minTrendChange stays UNSET while the run
+#    proposed 0.0000345 — one finding is not evidence enough to arm a gate that has never misbehaved.
+#
+# 5. NOT changed, but recorded: CpuUsageRatio.minTrendChange is 0.000326 while the same run proposed
+#    0.0097 — thirty times higher. It produced no false findings in 292 cycles, so there is nothing
+#    measured to fix, and raising a floor 30x on a gate that is not misbehaving is how a signal goes quiet
+#    without anybody noticing. Left alone deliberately.
+#
+# Note that guard.json is parsed as strict JSON — no comments inside the ConfigMap data.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: anomaly-guard-config
+  namespace: lab
+data:
+  guard.json: |
+    {
+      "prometheus": "http://overfit-lab-prometheus.monitoring.svc.cluster.local:9090",
+      "namespace": "lab",
+      "workload": "lab-workload",
+      "podRegex": "lab-workload-.*",
+      "metrics": {
+        "RequestsPerSecond": {
+          "source": "labapp_requests_total",
+          "kind": "Counter"
+        },
+        "LatencyP50Ms": {
+          "source": "labapp_request_duration_seconds",
+          "kind": "HistogramSeconds",
+          "quantile": 0.5
+        },
+        "LatencyP95Ms": {
+          "source": "labapp_request_duration_seconds",
+          "kind": "HistogramSeconds",
+          "quantile": 0.95
+        },
+        "LatencyP99Ms": {
+          "source": "labapp_request_duration_seconds",
+          "kind": "HistogramSeconds",
+          "quantile": 0.99
+        },
+        "CpuUsageRatio": {
+          "source": "container_cpu_usage_seconds_total",
+          "kind": "Counter"
+        },
+        "MemoryWorkingSetBytes": {
+          "source": "container_memory_working_set_bytes",
+          "kind": "Gauge"
+        },
+        "GcGen2HeapBytes": {
+          "source": "dotnet_gc_heap_size_bytes",
+          "kind": "Gauge"
+        },
+        "GcPauseRatio": {
+          "source": "dotnet_gc_pause_seconds_total",
+          "kind": "Counter"
+        },
+        "ThreadPoolQueueLength": {
+          "source": "dotnet_threadpool_queue_length",
+          "kind": "Gauge"
+        },
+        "OomEventsRate": {
+          "source": "kube_pod_container_status_restarts_total",
+          "kind": "EventCount",
+          "query": "sum by (pod) (increase(kube_pod_container_status_restarts_total{%selector%}[2m]) * on (namespace, pod, container) group_left() kube_pod_container_status_last_terminated_reason{%selector%,reason=\"OOMKilled\"}) or sum by (pod) (increase(kube_pod_container_status_restarts_total{%selector%}[2m]) * 0)"
+        },
+        "ContainerRestarts": {
+          "source": "kube_pod_container_status_restarts_total",
+          "kind": "EventCount"
+        },
+        "CpuThrottleRatio": {
+          "source": "container_cpu_cfs_throttled_periods_total",
+          "kind": "Ratio",
+          "query": "sum by (pod) (rate(container_cpu_cfs_throttled_periods_total{%selector%}[2m])) / sum by (pod) (rate(container_cpu_cfs_periods_total{%selector%}[2m]))"
+        }
+      },
+      "thresholds": {
+        "CpuUsageRatio": {
+          "minGap": "0.00041",
+          "minTrendChange": "0.000326"
+        },
+        "MemoryWorkingSetBytes": {
+          "minGap": "9.52MB",
+          "minTrendChange": "25.85MB"
+        },
+        "GcGen2HeapBytes": {
+          "minGap": "0.93MB",
+          "minTrendChange": "3.93MB"
+        },
+        "RequestsPerSecond": {
+          "minGap": "0.0238",
+          "minTrendChange": "0.333"
+        },
+        "GcPauseRatio": {
+          "minGap": "0.0000209"
+        },
+        "LatencyP50Ms": {
+          "minTrendChange": "50"
+        },
+        "LatencyP95Ms": {
+          "minTrendChange": "50"
+        },
+        "LatencyP99Ms": {
+          "minTrendChange": "50"
+        },
+        "ErrorRate": {
+          "minGap": "0.01",
+          "minTrendChange": "0.01"
+        }
+      },
+      "customMetrics": {
+        "GcCommittedBytes": {
+          "source": "dotnet_gc_committed_bytes",
+          "kind": "Gauge",
+          "loadSensitive": false,
+          "class": "Resource",
+          "minGap": "1.0MB",
+          "minTrendChange": "3.0MB"
+        },
+        "ActiveRequests": {
+          "source": "labapp_active_requests",
+          "kind": "Gauge",
+          "loadSensitive": false,
+          "class": "Symptom",
+          "minGap": "3",
+          "minTrendChange": "3",
+          "ruleThreshold": "3",
+          "ruleMinBreachFraction": 0.25
+        },
+        "LockContentions": {
+          "source": "labapp_lock_contentions_total",
+          "kind": "Counter",
+          "loadSensitive": false,
+          "class": "Resource",
+          "minGap": "0.119",
+          "minTrendChange": "0.119",
+          "ruleThreshold": "0.119",
+          "ruleMinBreachFraction": 0.25
+        },
+        "Exceptions": {
+          "source": "labapp_exceptions_total",
+          "kind": "Counter",
+          "loadSensitive": false,
+          "class": "Symptom",
+          "minGap": "0.0167",
+          "minTrendChange": "0.0167",
+          "ruleThreshold": "0.0167",
+          "ruleMinBreachFraction": 0.25
+        },
+        "CpuPressure": {
+          "source": "container_pressure_cpu_waiting_seconds_total",
+          "kind": "Counter",
+          "loadSensitive": false,
+          "class": "Infrastructure",
+          "minGap": "0.00004",
+          "minTrendChange": "0.00004",
+          "ruleThreshold": "0.01",
+          "ruleMinBreachFraction": 0.25
+        },
+        "ScrapeCoverage": {
+          "source": "up",
+          "kind": "Ratio",
+          "query": "avg_over_time(up{%selector%}[15m])",
+          "loadSensitive": false,
+          "class": "Symptom",
+          "requirePersistence": true,
+          "calibrated": false
+        }
+      }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: anomaly-guard
+  namespace: lab
+  labels:
+    app.kubernetes.io/name: anomaly-guard
+spec:
+  # One. Two would keep two independent incident trackers and page twice for one problem — naive HA here is
+  # worse than none.
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: anomaly-guard
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: anomaly-guard
+    spec:
+      # The guard talks to Prometheus over HTTP and to nothing else — the pod roster it uses for the
+      # silent-pod check comes from kube-state-metrics THROUGH Prometheus, not from the Kubernetes API.
+      # So a mounted service-account token is a credential with no corresponding use, sitting in a pod
+      # whose whole job is to be reachable. Verified mounted before this was added: the running pod
+      # carried `kube-api-access-…` at /var/run/secrets/kubernetes.io/serviceaccount.
+      automountServiceAccountToken: false
+      # runAsNonRoot was deferred once on the grounds that the image runs as root — `Config.User` is empty
+      # and the entrypoint is `[dotnet /app/overfit.dll]`, a framework-dependent build rather than the
+      # chiselled Native-AOT image in Sources/Cli/Dockerfile. That reasoning was WRONG, and applying it is
+      # what showed it: a pod-level runAsUser OVERRIDES the image's user, so a root image is not an
+      # obstacle to running as somebody else. Applied 2026-08-11 — uid=1000(ubuntu), zero restarts.
+      #
+      # The real hazard was the PVC, and it needed checking rather than assuming, because "the cycle ran"
+      # is not "the state was written". `/state` is mode 777, so CREATING a file always succeeds; what
+      # would fail is a non-root process reopening the existing root-owned 0644 files, and that failure is
+      # silent from outside — the guard keeps cycling and quietly stops persisting the seasonal baseline
+      # and the floor calibration, which is the failure mode that looks like success.
+      #
+      # Verified across a full cycle instead: both files changed size and mtime under uid 1000
+      # (incidents.json 470 -> 436 B, learned-state.txt 421,849 -> 423,050 B) and are now owned
+      # ubuntu:ubuntu. Note fsGroup did NOT do this — it left the directory root:root — the files are
+      # rewritten rather than updated in place, so they take the writer's ownership. fsGroup is kept
+      # anyway: it is what makes a FRESH volume writable, and this one only works because of how the
+      # writes happen to be shaped.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      containers:
+        - name: guard
+          image: overfit-guard:latest
+          imagePullPolicy: Never
+          # The pod-level securityContext above carries runAsNonRoot / runAsUser and why they are safe.
+          #
+          # readOnlyRootFilesystem is now SET, and the reason it was deferred turned out to be checkable
+          # rather than a judgement call. Measured inside the running pod before applying it: the only
+          # writes anywhere on the root filesystem are three files in /tmp, and they are not "the runtime
+          # writing scratch" — they are the .NET diagnostics IPC endpoints, `clr-debug-pipe-1-N-in/out`
+          # and `dotnet-diagnostic-1-N-socket`, created at startup. `find / -xdev -newer /app` turned up
+          # nothing else outside /tmp, /state and /config; /etc/hosts, /etc/resolv.conf and /.dockerenv
+          # are kubelet bind-mounts, not root-fs writes, and are unaffected by this flag.
+          #
+          # So an emptyDir at /tmp is exactly the required surface, and losing it on restart costs
+          # nothing: those sockets are recreated on every start and hold no state.
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
+          args:
+            - anomaly-guard
+            - --config
+            - /config/guard.json
+            - --state
+            - /state/incidents.json
+            - --cadence-seconds
+            - "300"
+            - --window-minutes
+            - "20"
+            - --metrics-port
+            - "9469"
+          env:
+            # Shared secret for POST /ack, which suppresses a finding for a caller-chosen duration.
+            #
+            # `optional: true` on purpose, and it is not laxness: the endpoint FAILS CLOSED without this —
+            # /ack answers 503 and says why — so a missing Secret costs the acknowledge feature and nothing
+            # else. Making it required would stop the guard from starting over a feature most deployments
+            # never use, which trades a detector outage for a convenience.
+            #
+            # The NetworkPolicy below is NOT a substitute and was measured inert on this cluster: Docker
+            # Desktop carries no policy-capable CNI, and a probe pod in `lab` still reached :9469 with the
+            # policy applied. A control that depends on the customer's CNI is not a control.
+            #
+            #   kubectl -n lab create secret generic anomaly-guard-ack \
+            #     --from-literal=token="$(openssl rand -base64 32)"
+            - name: OVERFIT_GUARD_ACK_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: anomaly-guard-ack
+                  key: token
+                  optional: true
+          ports:
+            - name: metrics
+              containerPort: 9469
+          volumeMounts:
+            - name: config
+              mountPath: /config
+              readOnly: true
+            - name: state
+              mountPath: /state
+            # Required by readOnlyRootFilesystem above: the .NET diagnostics IPC endpoints are created
+            # here at startup and the process cannot start without a writable /tmp.
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+      volumes:
+        # Diagnostics sockets only — recreated on every start, so emptyDir is the correct lifetime here
+        # in a way it is NOT for /state below.
+        - name: tmp
+          emptyDir: {}
+        - name: config
+          configMap:
+            name: anomaly-guard-config
+        - name: state
+          # A volume that outlives the pod, and the reason changed. It used to be an emptyDir with a known,
+          # bounded cost: one duplicate notification per open incident per restart. This directory now also
+          # holds the LEARNED state — the per-hour seasonal baseline and the floor calibration, which take
+          # days to rebuild. Losing those does not produce a burst of duplicates; it produces a guard that is
+          # quieter than it should be for a week, which is the failure mode that looks like success.
+          persistentVolumeClaim:
+            claimName: anomaly-guard-state
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: anomaly-guard-state
+  namespace: lab
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      # Incidents are kilobytes. The learned state is bounded by construction — seven days per bucket, a
+      # capped reservoir per signal — so this is not a number that has to grow with the cluster.
+      storage: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: anomaly-guard
+  namespace: lab
+  labels:
+    app.kubernetes.io/name: anomaly-guard
+spec:
+  selector:
+    app.kubernetes.io/name: anomaly-guard
+  ports:
+    - name: metrics
+      port: 9469
+      targetPort: metrics
+---
+# Port 9469 serves /metrics AND /ack, and /ack is unauthenticated (SEC-1). It suppresses an incident for a
+# caller-chosen duration, so on a cluster without default-deny anyone with pod-level network reach can
+# silence a real finding with one HTTP call and leave nothing behind but a log line. That is the guard being
+# switched off by whoever can reach it.
+#
+# This restricts ingress to the Prometheus namespace, which is the only thing that has any business talking
+# to the port. `kubectl port-forward` still works for an operator acking an incident: it goes through the
+# API server and the kubelet rather than the pod network, so it is not subject to this policy — and it
+# already requires cluster credentials, which is the authentication /ack itself lacks.
+#
+# READ THIS BEFORE TRUSTING IT. **NetworkPolicy is not enforced on Docker Desktop**, which is what this lab
+# runs on: `kube-system` carries no policy-capable CNI (kube-proxy and vpnkit only), so this object is
+# accepted by the API server and does nothing here. Three Strimzi policies in the `dc-a`/`dc-b` namespaces
+# have been in the same state for 153 days. It is correct on a real cluster with Calico, Cilium or
+# equivalent — and **it cannot be verified on this one**, so it is shipped as a deployment control rather
+# than as a tested guarantee.
+#
+# The durable fix is not this file: /ack should require a credential, or bind somewhere /metrics does not.
+# Until then a customer whose CNI ignores NetworkPolicy has no protection at all.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: anomaly-guard-metrics
+  namespace: lab
+  labels:
+    app.kubernetes.io/name: anomaly-guard
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: anomaly-guard
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - protocol: TCP
+          port: 9469
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: anomaly-guard
+  namespace: lab
+  labels:
+    release: overfit-lab
+spec:
+  # The guard watching the guard. Until this existed, a loop that had stopped or whose queries had begun
+  # failing produced no incidents — indistinguishable from a healthy cluster, which is the one failure mode
+  # this whole subsystem exists to make loud. The alert to write against it:
+  #
+  #   time() - overfit_guard_last_cycle_timestamp_seconds > 900
+  #
+  # A guard that has stopped is worse than one that never started, because somebody is relying on it.
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: anomaly-guard
+  endpoints:
+    - port: metrics
+      interval: 30s

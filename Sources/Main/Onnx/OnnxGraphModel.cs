@@ -99,7 +99,7 @@ namespace DevOnBike.Overfit.Onnx
             }
 
             // Last node's output slot → caller's output span.
-            var lastNode = _nodes[^1];
+            var lastNode = _nodes[_nodes.Length - 1];
             _buffers[lastNode.OutputSlot].AsSpan().Slice(0, _outputSize).CopyTo(output);
         }
 
@@ -137,13 +137,13 @@ namespace DevOnBike.Overfit.Onnx
         /// </summary>
         public string PerNodeProfileReport()
         {
-            if (_nodeTicks is null)
+            if (_nodeTicks == null)
             {
                 return "(no node profile recorded — set OnnxGraphModel.ProfileNodes before running)";
             }
 
             var toMs = 1000.0 / Stopwatch.Frequency;
-            var runs = _nodeCalls is null || _nodeCalls.Length == 0 ? 1L : Math.Max(1L, _nodeCalls[0]);
+            var runs = _nodeCalls == null || _nodeCalls.Length == 0 ? 1L : Math.Max(1L, _nodeCalls[0]);
             var sb = new StringBuilder();
 
             sb.AppendLine($"=== per-node ({runs} run(s)) ===");
@@ -152,7 +152,9 @@ namespace DevOnBike.Overfit.Onnx
             {
                 var node = _nodes[i];
                 sb.AppendLine(
+#pragma warning disable RS0030 // AOT-safe: type name in a profiling report line.
                     $"  [{i,2}] {node.Module.GetType().Name,-26} out={node.OutputSize,9}  {_nodeTicks[i] * toMs / runs,8:F2} ms");
+#pragma warning restore RS0030
             }
 
             return sb.ToString();
@@ -171,7 +173,7 @@ namespace DevOnBike.Overfit.Onnx
         /// </summary>
         public string NodeProfileReport()
         {
-            if (_nodeTicks is null)
+            if (_nodeTicks == null)
             {
                 return "(no node profile recorded — set OnnxGraphModel.ProfileNodes before running)";
             }
@@ -187,7 +189,9 @@ namespace DevOnBike.Overfit.Onnx
 
             for (var i = 0; i < _nodes.Length; i++)
             {
+#pragma warning disable RS0030 // AOT-safe: type name used to group per-node timings in a report.
                 var name = _nodes[i].Module.GetType().Name;
+#pragma warning restore RS0030
                 total += _nodeTicks[i];
 
                 var slot = -1;
@@ -228,7 +232,7 @@ namespace DevOnBike.Overfit.Onnx
             }
 
             var toMs = 1000.0 / Stopwatch.Frequency;
-            var runs = _nodeCalls is null || _nodeCalls.Length == 0 ? 1L : Math.Max(1L, _nodeCalls[0]);
+            var runs = _nodeCalls == null || _nodeCalls.Length == 0 ? 1L : Math.Max(1L, _nodeCalls[0]);
             var sb = new StringBuilder();
 
             sb.AppendLine($"=== OnnxGraphModel node profile ({runs} run(s), {_nodes.Length} nodes) ===");

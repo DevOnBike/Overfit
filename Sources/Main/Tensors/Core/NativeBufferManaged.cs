@@ -57,7 +57,7 @@ namespace DevOnBike.Overfit.Tensors.Core
 
             _ptr = NativeMemory.AlignedAlloc(paddedByteSize, BaseAlignmentBytes);
 
-            if (_ptr is null)
+            if (_ptr == null)
             {
                 throw new OutOfMemoryException($"Failed to allocate {paddedByteSize} bytes of aligned unmanaged memory.");
             }

@@ -3,12 +3,11 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using DevOnBike.Overfit.Anomalies.Contracts;
 using DevOnBike.Overfit.Anomalies.Gpt;
-using DevOnBike.Overfit.Anomalies.Monitoring.Contracts;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.LanguageModels.LoRA;
 using DevOnBike.Overfit.LanguageModels.Runtime;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.Anomalies
 {
@@ -34,7 +33,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
         private readonly ITestOutputHelper _out;
         public GptAnomalyLoRATargetComparisonTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact]  // runtime unmeasured — the test failed after 1s (2026-08-07)
         public void LoRATargetStages_OnAnomalyTask_AllFlattenBenign_AndKeepDetection()
         {
             var tps = MetricTokenizer.TokensPerSnapshot;

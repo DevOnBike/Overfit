@@ -42,6 +42,8 @@ namespace DevOnBike.Overfit.LanguageModels.Rope
         /// When true, uses the split-half rotation layout (rotate-half over the two contiguous halves of
         /// each head) instead of the adjacent-pair layout. Default false.
         /// </param>
+        /// <param name="freqFactors">Optional per-dimension frequency divisors (Phi-3 longrope); null = none.</param>
+        /// <param name="attnFactor">Uniform scale applied to the computed sin/cos, 1 = unscaled.</param>
         public RopeTable(int maxSequenceLength, int headDimension, float theta = 10_000f, RopeScaling? scaling = null, bool splitHalf = false, float[]? freqFactors = null, float attnFactor = 1f)
         {
             SplitHalf = splitHalf;
@@ -51,7 +53,7 @@ namespace DevOnBike.Overfit.LanguageModels.Rope
                 throw new ArgumentOutOfRangeException(nameof(headDimension), "headDimension must be positive and even.");
             }
             ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(theta, 0f);
-            if (freqFactors is not null && freqFactors.Length != headDimension / 2)
+            if (freqFactors != null && freqFactors.Length != headDimension / 2)
             {
                 throw new ArgumentException(
                     $"freqFactors length ({freqFactors.Length}) must equal head_dim/2 ({headDimension / 2}).", nameof(freqFactors));
@@ -66,8 +68,8 @@ namespace DevOnBike.Overfit.LanguageModels.Rope
 
             _halfDim = headDimension / 2;
 
-            _cos = new float[maxSequenceLength * _halfDim];
-            _sin = new float[maxSequenceLength * _halfDim];
+            _cos = new float[(long)maxSequenceLength * _halfDim];
+            _sin = new float[(long)maxSequenceLength * _halfDim];
 
             Precompute();
         }
@@ -112,12 +114,12 @@ namespace DevOnBike.Overfit.LanguageModels.Rope
             {
                 // freq_i = 1 / (theta ^ (2i / headDim)), optionally llama3-rescaled.
                 var freq = 1f / MathF.Pow(Theta, 2f * i / HeadDimension);
-                if (_scaling is not null)
+                if (_scaling != null)
                 {
                     freq = _scaling.Apply(freq);
                 }
                 // Phi-3 longrope: divide each dim's base frequency by its per-dim factor.
-                if (_freqFactors is not null)
+                if (_freqFactors != null)
                 {
                     freq /= _freqFactors[i];
                 }

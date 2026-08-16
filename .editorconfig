@@ -49,14 +49,22 @@ csharp_prefer_braces = true:warning
 # body-on-newline, closing-brace-on-newline form. Enforced by IDE0055 (=warning above) and auto-applied
 # by `dotnet format` / update-code-headers.cmd.
 csharp_new_line_before_open_brace = all
-csharp_preserve_single_line_blocks = false
+# true since 2026-08-16, measured rather than assumed. With `false` the formatter EXPANDS every block
+# written on one line, including auto-properties: `public int SampleRate { get; }` became four lines, and
+# one run rewrote 28 files that way. Three arms on a scratch project using this exact .editorconfig:
+# false -> expanded; true -> stayed inline; true fed already-expanded input -> STAYED expanded.
+# That last arm is the one to know: this setting stops the expansion happening, it never undoes it.
+# The price, also measured: a body written as `if (x) { return; }` now formats to the brace on its own
+# line with `{ return; }` beside the statement, instead of being fully expanded. Fully-expanded bodies
+# remain the house style (see the braces rule) — the formatter simply no longer enforces it there.
+csharp_preserve_single_line_blocks = true
 csharp_preserve_single_line_statements = false
 
 csharp_space_around_binary_operators = before_and_after
 
 file_header_template = Copyright (c) 2026 DevOnBike.\nThis file is part of DevonBike Overfit.\nDevonBike Overfit is licensed under the GNU AGPLv3.\nFor commercial licensing options, contact: devonbike@gmail.com
 # ── Overfit custom performance analyzer (Sources/Analyzers) — RATCHET rollout ──────────────
-# OVERFIT001 (per-call heap array allocation → PooledBuffer<T>/PooledArray/TensorStorage<T>/
+# OVERFIT001 (per-call heap array allocation → PooledBuffer<T>/TensorStorage<T>/
 # stackalloc): IDE suggestion everywhere; build WARNING in the zero-alloc hot directories.
 # Policy: clean a directory → flip it to warning below. Never loosen a flipped directory.
 # Backlog at introduction (2026-06-11): 432 unique sites; Runtime 85 (mostly batched-prefill,
@@ -124,6 +132,77 @@ dotnet_diagnostic.OVERFIT019.severity = suggestion
 # capture; ordinary private/internal non-async non-iterator methods) so it never suggests breaking a
 # stored-weights API. An API-shape change a human reviews, never a build gate.
 dotnet_diagnostic.OVERFIT020.severity = suggestion
+# OVERFIT025 (stackalloc over the byte budget) / OVERFIT026 (stackalloc with a variable element count).
+#
+# WHY AT ALL: nothing in the shipped analyzer set bounds stackalloc SIZE — CA2014 only catches allocation
+# inside a loop. Yet size is the failure that matters in a hosted library: StackOverflowException cannot be
+# caught, cannot be logged, and takes the whole process down, on threads whose stack size we do not choose.
+#
+# BUDGET = 512 BYTES OF MEMORY, never element count: the rule multiplies length by element width, so
+# char[256], int[128], double[64] and Vector256<float>[16] all sit exactly at the limit and are treated
+# alike. An element-count rule would wave through Vector512<T>[64] (4 KB) while stopping byte[300].
+#
+# Reference points: Microsoft's stackalloc documentation uses `const int MaxStackLimit = 1024;` as its
+# worked example and instructs "be conservative when you define the actual limit value"; the BCL is
+# stricter than its own page, with StackallocCharBufferSizeLimit = 256 chars and
+# StackallocIntBufferSizeLimit = 128 ints — 512 B each — in System.String's manipulation paths. So 512 B is
+# the BCL's working figure, and a census of Sources/Main (2026-07-24) says it cuts in the right place: of
+# 63 constant-size sites, 49 are <= 512 B (48 of them <= 256 B, plus exactly one int[128] matching the BCL
+# limit to the element) and NOTHING sits between 512 B and 1 KB. Everything above that gap is a deliberate
+# tile/block buffer, so any threshold in 512..1024 B flags the same 14 sites.
+#
+# Per-directory override: `overfit_max_stackalloc_bytes = N`. A kernel that MEASURED its way to a bigger
+# buffer raises its own budget and states why — it does not raise the tree's.
+#
+# OVERFIT026: a VARIABLE element count is not allowed. `stackalloc T[n]` with non-constant n defeats the
+# byte budget entirely — the cost cannot be read off the line, so neither the rule nor a reviewer can bound
+# it. Live example in this tree: `stackalloc float[vocab]` is ~608 KB on a 152k-token vocabulary, over half
+# a default thread stack, in one call. The documented `n <= Limit ? stackalloc T[n] : new T[n]` guard is
+# reported too, deliberately: a guard is only as good as the constant it compares against and the direction
+# of the comparison, neither of which a mechanical check can confirm. Opt out per site with
+# `#pragma warning disable OVERFIT026` whose comment names what bounds the length — the same visible,
+# reviewable contract as OVERFIT022/023.
+#
+# RATCHET: both start at suggestion everywhere, as OVERFIT021 did. Backlog measured 2026-07-24 —
+#   OVERFIT025: 15 sites. Ops/TensorMath.{Gelu,SiLU,Activations} 4 KB tiles, SafetensorsReader 4 KB
+#     chunks, Q4K/Q6KRepack block buffers (1152/1680 B).
+#   OVERFIT026: 41 sites. Q4K/Q6KGemvKernel vector scratch, TrainableLlamaModel float[vocab] (~608 KB on a
+#     152k vocabulary — the worst one in the tree), MelSpectrogram, GgufReader, CachedLlamaSession,
+#     WhisperKernels, VectorizedRandom, CholeskyMultivariateGaussianLogic, LoRAWeight, FeatureExtractor.
+#     14 of these were previously invisible: they use the documented ternary guard, which this rule reports
+#     on purpose rather than blessing.
+# Escalate Sources/Main to warning once a list is at zero or each survivor carries a pragma with its bound.
+#
+# FIRST SWEEP ENTRY, and the pattern for the rest: Statistics/MannWhitneyU's radix digit histogram was
+# 8 KB of stackalloc, defended on the grounds that it is touched 8x per element and belongs in L1. A/B
+# against the identical buffer rented from the pool measured 1.006x / 0.992x / 1.025x at 500 / 2 000 /
+# 10 000 samples per arm — a tie wherever the code actually runs. The argument did not survive measurement,
+# so the site moved to PooledBuffer<int> rather than buying itself an exemption.
+dotnet_diagnostic.OVERFIT025.severity = suggestion
+# OVERFIT027 (async void) — suggestion outside the library so a WPF/demo event handler is a hint, not a
+# wall; ERROR in Sources/Main below.
+dotnet_diagnostic.OVERFIT027.severity = suggestion
+dotnet_diagnostic.OVERFIT028.severity = suggestion
+dotnet_diagnostic.OVERFIT029.severity = suggestion
+dotnet_diagnostic.OVERFIT030.severity = suggestion
+
+# OVERFIT038 (externally-read count sizing an allocation or bounding a loop) — warning while the backlog is
+# swept, error in the library below. Held at warning outside Sources/Main because tests and demos read files
+# they wrote themselves, where the count is not an attacker's.
+dotnet_diagnostic.OVERFIT038.severity = warning
+
+# OVERFIT031 (redundant async state machine) — suggestion outside the library. Eliding changes when a
+# pre-await exception surfaces (synchronously, rather than inside the returned task), which is invisible to
+# a caller that awaits immediately and visible to one that stores the task. Outside Sources/Main that call
+# shape is not ours to police.
+dotnet_diagnostic.OVERFIT031.severity = suggestion
+
+# OVERFIT032 (await without ConfigureAwait(false)) — suggestion outside the library. Applications and the
+# analyzer project pick their own host and have no synchronization context to capture, so the rule buys them
+# nothing; Cli has 22 sites and Server.AspNet 4, none of which can deadlock.
+dotnet_diagnostic.OVERFIT032.severity = suggestion
+
+dotnet_diagnostic.OVERFIT026.severity = suggestion
 # OVERFIT900 — the [OverfitHotPath] escalation. Any per-call rule (001-007, 009-011, 013-014) that
 # fires inside a member or type marked [DevOnBike.Overfit.Diagnostics.OverfitHotPath] is reported as
 # this hard error INSTEAD of its directory-configured severity — the per-member ratchet. Always error;
@@ -223,11 +302,20 @@ dotnet_diagnostic.OVERFIT001.severity = suggestion
 # to obj/ only, which demoted OVERFIT008 to its analyzer-default warning on real code and broke the
 # analyzer-guard CI job. Keep new global [*.cs] rules ABOVE this block.
 #
-# The SDK AssemblyInfo / System.Text.Json JsonSerializerContext / GlobalUsings under obj/ are not ours and
-# legitimately use System.Reflection, so scope the banned-API rule off for generated files (BannedApiAnalyzers
-# 3.3.4 skipped them automatically; 5.6.0 analyses them). The STJ source-gen context itself is analysed under
-# a synthetic path no section matches — that residual RS0030 warning is handled via <WarningsNotAsErrors> in
-# Directory.Build.props. Real .cs code still gets RS0030 = error from the [*.cs] section at the top.
+# The SDK AssemblyInfo / GlobalUsings files that sit under obj/ ON DISK are not ours and legitimately use
+# System.Reflection, so scope the banned-API rule off for them (BannedApiAnalyzers 3.3.4 skipped generated
+# files automatically; 5.6.0 analyses them). Real .cs code still gets RS0030 = error from the [*.cs] section
+# at the top.
+#
+# THIS SECTION DOES NOT — AND CANNOT — REACH A SOURCE-GENERATED TREE, whatever its path looks like.
+# Measured 2026-08-16: the configuration-binder generator's BindingExtensions.g.cs is reported at a path
+# under obj/ that ends in .g.cs, so it matches this section AND [*.g.cs] at the end of the file, and both
+# say `none` — yet a build with PublishAot=true and no TreatWarningsAsErrors still reports
+# `warning RS0030` on it. Neither `none` applied, and the [*.cs] `error` did not either: that is the
+# BannedApiAnalyzers default severity showing through. Severities are resolved per syntax tree from a map
+# the compiler builds out of the csc command line, and a generator adds its trees after that map exists,
+# so a generated tree matches no section by identity. The fallback that DOES reach it is a global
+# AnalyzerConfig — see Sources/Anomalies/SourceGenerated.globalconfig.
 [**/obj/**]
 dotnet_diagnostic.RS0030.severity = none
 
@@ -255,6 +343,14 @@ dotnet_diagnostic.OVERFIT022.severity = error
 # OVERFIT021 (else) — Tests are the one exemption: test code is local and disposable, so the ban's rationale
 # (shipped library, read by strangers, hot paths) does not apply. Kept at suggestion so it still shows in the
 # IDE. MUST stay at the END of this file — a [section] header scopes every setting below it.
+# OVERFIT030 — ERROR in the CLI too. HfDownloader was the whole backlog: five multi-gigabyte fetches
+# that ignored Ctrl+C. Fixed properly rather than with an ignored parameter — the token reaches the socket
+# and the file write, Console.CancelKeyPress signals it, and the swallowing catch blocks now rethrow
+# OperationCanceledException so an interrupt cannot masquerade as "metadata unavailable, skipping
+# verification". Interrupting is safe by construction: the .part temp is kept and the next run resumes it.
+[Sources/Cli/**.cs]
+dotnet_diagnostic.OVERFIT030.severity = error
+
 [Tests/**.cs]
 dotnet_diagnostic.OVERFIT021.severity = suggestion
 
@@ -269,6 +365,265 @@ dotnet_diagnostic.OVERFIT021.severity = suggestion
 dotnet_diagnostic.OVERFIT008.severity = error
 dotnet_diagnostic.OVERFIT015.severity = error
 dotnet_diagnostic.OVERFIT024.severity = warning
+# OVERFIT025 — ERROR in the shipped library. Criteria met: the backlog is at ZERO (five cold-path buffers
+# moved to PooledBuffer<T>, and Ops/ carries an explicit, scoped 4096 B budget for its activation tiles), the
+# rule is unconditional, and the miss-cost is the worst there is — a StackOverflowException in Main kills the
+# HOST process, uncatchable and unlogged. Same bar as OVERFIT008/015/022/023.
+# NOT yet error: OVERFIT026 (40 open sites, see the ratchet note above) — several are genuinely unbounded,
+# and pragma-ing them to reach `error` would rubber-stamp exactly what the rule exists to find.
+dotnet_diagnostic.OVERFIT025.severity = error
+# OVERFIT026 — ERROR in the library too. Every remaining site now carries a pragma naming its real
+# bound, in the code, next to the allocation: an analyzer that only whispers gets ignored, and a
+# deliberate exception belongs where the author signs it rather than in a directory-wide budget that
+# would also wave through code nobody has looked at yet.
+dotnet_diagnostic.OVERFIT026.severity = error
+# OVERFIT028 — ERROR in the library. Backlog swept to zero: 68 sites widened mechanically with a (long)
+# cast (free at runtime — imul r64 costs what imul r32 costs, and array creation already takes a 64-bit
+# length), 3 rewritten by hand, 1 pragma'd where a 64-bit guard already proves the 32-bit product safe.
+# Demo/ and Server keep the global suggestion.
+dotnet_diagnostic.OVERFIT028.severity = error
+# OVERFIT038 — ERROR in the library. Backlog swept to zero from 18 sites, and the inventory is the reason
+# to trust the rule rather than its unit tests: 13 of them were three unvalidated header fields in
+# CachedLlamaInferenceEngine.Load, which the 2026-08-02 HAND sweep that motivated this rule did not find —
+# its window was a few lines and there the reads and their uses are thirty apart. 2 were LoRAWeight.Load
+# feeding three file ints straight into a constructor that allocates on their product. Both now bound the
+# declared shape against the bytes remaining, the house pattern. 1 is pragma'd in QwenTokenizer with the
+# measurement that stops the obvious bound going in (real Qwen: 22 added tokens, highest id 151 664 against
+# a 151 665 bound — a margin of one). 2 were the rule's own false positive, JsonElement.GetArrayLength,
+# which reports a count the parser already materialised rather than one the file declares; fixed in the
+# analyzer, not suppressed here.
+dotnet_diagnostic.OVERFIT038.severity = error
+# OVERFIT029 / OVERFIT030 (Async suffix / CancellationToken) — ERROR in the library, ZERO sites there.
+# 029: the single real hit was CachedLlamaSession.StreamGenerate, renamed to StreamGenerateAsync (19
+#      references, pre-1.0, so a rename beat a suppression).
+# 030: Sources/Main already offers a token on every awaitable public method — the rule locks that in.
+#      Sources/Cli keeps the suggestion: HfDownloader has 5 uncancellable downloads (a multi-GB fetch
+#      that ignores Ctrl+C), and fixing that means wiring a real token, not adding an ignored parameter.
+dotnet_diagnostic.OVERFIT029.severity = error
+dotnet_diagnostic.OVERFIT030.severity = error
+
+# OVERFIT031 (redundant async state machine) — ERROR in the library. The whole backlog was ONE site:
+# LiveMonitoringPipeline.DisposeAsync, which disposed three resources synchronously and then awaited
+# ValueTask.CompletedTask purely to justify the keyword. Fixed, so the rule starts at zero.
+#
+# The rule is deliberately narrow, because its one dangerous false positive would be severe: eliding inside a
+# `using` returns the task before disposal and produces a use-after-dispose. It therefore stays silent on any
+# body containing a using (either form) or a try, on more than one await, on an await that is not the tail,
+# and on an awaited type that is not identical to the return type. Verified against 13 controls — 5 shapes it
+# must catch and 8 it must not — because a rule that fires once across a solution looks the same whether the
+# codebase is clean or the rule is broken.
+dotnet_diagnostic.OVERFIT031.severity = error
+
+# OVERFIT032 (await without ConfigureAwait(false)) — ERROR in the library. Coverage was already 17 of 19
+# await sites, kept by hand; the two gaps were found by grepping rather than by anyone noticing, and one of
+# them was real (OfflineTrainingJob's `await using` over the checkpoint stream). A convention that holds 89%
+# of the time is a habit, and this is what a build error is for.
+#
+# A library does not choose its host: the same code awaited from the WPF demo or the Android app marshals
+# every continuation through one dispatcher, and a caller that blocks deadlocks outright. Exempt by design:
+# `await Task.Yield()` (YieldAwaitable has no such overload and always resumes on the captured context),
+# anything already configured, and any awaitable with no ConfigureAwait member — reporting there would
+# demand a fix that does not compile.
+dotnet_diagnostic.OVERFIT032.severity = error
+
+# OVERFIT027 — ERROR on the same criteria as OVERFIT008/015/025: ZERO existing sites in the whole
+# solution at introduction (2026-07-24), unconditional rule, trivial fix (return Task), and the
+# miss-cost is an uncatchable kill of the hosting process. A tripwire, not a sweep.
+dotnet_diagnostic.OVERFIT027.severity = error
 dotnet_diagnostic.OVERFIT022.severity = error
 dotnet_diagnostic.OVERFIT023.severity = error
 dotnet_diagnostic.OVERFIT900.severity = error
+
+# ── OVERFIT040-045 — the async/readability set added 2026-08-11 ───────────────────────────────────────
+#
+# RATCHET, as OVERFIT021 and OVERFIT025/026 did before them. Backlog measured at introduction, whole
+# solution / of which Sources:
+#   OVERFIT040 (sync method with an async sibling)        184 / 142
+#   OVERFIT041 (defaulted CancellationToken)               58 /  56
+#   OVERFIT042 (index from end, x[^1])                     52 /  46
+#   OVERFIT043 (range operator, x[1..])                   394 / 378
+#   OVERFIT044 (null pattern, is null / is not null)      808 / 734
+#   OVERFIT045 (primary constructor on class or struct)     8 /   4
+#
+# Those counts are grep-wide, and a severity set here does NOT reach all of them. The analyzer is wired
+# centrally in Directory.Build.props:59-69 with an exclusion list, so it never runs in Analyzers, Tests,
+# AotSmokeTest, Benchmarks, DevOnBike.Overfit.Templates or OverfitChat — measured 2026-08-11 by building
+# Sources/Analyzers with 38 live OVERFIT044 sites in it and getting zero diagnostics. Two of those
+# exclusions are decisions rather than gaps (test code is exempt from style rules; benchmarks deliberately
+# write the slow shape next to the fast one), and Analyzers cannot ever be covered because it would
+# reference itself. Read the "whole solution" column as the size of the READING preference and the Sources
+# column as the size of what any escalation below can actually lock.
+#
+# 041, 042 and 045 are being swept to zero, after which they escalate here — they carry no severity line
+# yet and sit at their default Warning until that sweep lands. 043 and 044 stay at suggestion while their
+# backlog is worked down — 1202 sites between them, and a rule that cannot be obeyed today is a warning
+# that trains people to ignore the channel, which is the failure the prerelease accept-list note in
+# Directory.Build.targets describes.
+#
+# OVERFIT040 stays at suggestion globally and is raised only where threads are a scarce resource. In
+# Sources/Main most of its hits are one-shot model and config loading, where synchronous IS correct: a
+# GGUF reader is not improved by returning a task. Raising it there would make the rule lie.
+#
+# THE THREE SEVERITY LINES THAT USED TO SIT HERE HAVE MOVED to their own [*.cs] section near the end of
+# this file. They were written here on 2026-08-11 and this section is [Sources/Main/**.cs], so the word
+# "globally" three lines above was false for the whole day: outside Sources/Main all three ran at their
+# DEFAULT severity, which is Warning. See that section for what it measured.
+
+# ── OVERFIT046 — task discarded with `_ =`, added 2026-08-11 ──────────────────────────────────────────
+#
+# NOT part of the 040-045 set above and not a readability rule: it closes a MEASURED hole in CS4014, which
+# Directory.Build.props promotes to error. CS4014 fires on `Work();` and is silent on `_ = Work();` —
+# compiled both in one file, one diagnostic across the two. So a one-character edit opts out of a build
+# error and nothing watched it.
+#
+# `error` is the intended end state and the reason it is NOT set here yet is a count, not a doubt. The rule
+# was designed against 2 known sites; inventorying the whole tree before shipping found 6, because the first
+# census covered Sources/ only and Demo is NOT on the exclusion list. It is now 5: Cli/GuardMetricsEndpoint
+# was fixed while this rule was being written — it assigns the serve loop to a field instead of discarding
+# it — which removed the one site that was a defect rather than a decision.
+#
+# The remaining 5 are Server.AspNet (1), Demo/LabLoadDriver (1), Demo/LabWorkload (3), and ALL FIVE are
+# deliberate fire-and-forget that already observe their own exceptions: the load driver's SendAsync is
+# wrapped end to end in a catch that counts the failure, and each LabWorkload body logs from a catch. So all
+# five take a pragma naming the reason and NONE is better fixed. That leaves the rule with no live defect to
+# catch, which is the OVERFIT027 posture — error at zero sites, as a tripwire on a shape that has already
+# produced one real defect here.
+#
+# ALL FIVE PRAGMAS HAVE NOW LANDED (2026-08-11), so the rule is `error` — but the severity line is NOT here
+# any more. THE LINE THAT USED TO SIT HERE WAS IN THE WRONG SECTION: this block is inside
+# [Sources/Main/**.cs], and four of the rule's five sites are under Demo/. Outside the library the rule was
+# therefore running at its ANALYZER DEFAULT, which is also Warning — so the configuration looked correct and
+# was inert, and writing `error` here would have bound the library (zero sites) and left the four real ones
+# at warning. Identical in kind to what the OVERFIT040/043/044 note at the end of this file describes.
+# See the [*.cs] section near the end for the severity and what promoting it is worth.
+
+# ── OVERFIT033 / OVERFIT034 — the two MSBuild guards, now analyzers ───────────────────────────────────
+#
+# Both replace RoslynCodeTaskFactory tasks that lived as embedded C# inside Main.csproj and Anomalies.csproj
+# and matched with regular expressions over raw text. Moved on 2026-08-05 for three reasons, in order of
+# weight: the regexes were wrong in both directions, embedded C# in XML has no tests and no IDE, and the
+# same 40 lines had just been copy-pasted into a second csproj — which is the moment a copy becomes a
+# maintenance problem rather than a shortcut.
+#
+# Both errors are now pinned by tests, and both are worth naming because they fail in opposite ways:
+#   * the jagged check stripped only `//` comments, so `float[][]` inside a `/* ... */` comment was REPORTED
+#     — an error about code that does not exist, which teaches people the rule is noise;
+#   * the one-type check anchored on exactly four spaces of indentation, so under a file-scoped namespace it
+#     matched nothing and REPORTED NOTHING, silently, for every such file.
+# A guard that cries wolf and a guard that quietly stops are the same defect wearing different clothes.
+#
+# SCOPE IS DELIBERATELY UNCHANGED: error exactly where the MSBuild tasks used to fail the build, silent
+# everywhere else. Making them warnings tree-wide would have turned a mechanical move into a sweep, and a
+# refactor that also changes behaviour cannot be reverted cleanly if it goes wrong.
+[*.cs]
+dotnet_diagnostic.OVERFIT033.severity = none
+dotnet_diagnostic.OVERFIT034.severity = none
+
+[Sources/Main/**.cs]
+dotnet_diagnostic.OVERFIT033.severity = error
+dotnet_diagnostic.OVERFIT034.severity = error
+
+[Sources/Anomalies/**.cs]
+dotnet_diagnostic.OVERFIT033.severity = error
+dotnet_diagnostic.OVERFIT034.severity = error
+
+# ── Reliability rules, armed on the OTHER assemblies that parse external input ────────────────────────
+# OVERFIT022/023/025/026/027/028/029/030 were error under [Sources/Main/**.cs] only. That scoping was never
+# a decision — the Tests and Benchmarks exclusions are written down and argued, these four projects were
+# simply not named. They take the same class of input the rules exist for: Anomalies parses Prometheus
+# exposition text, Server.AspNet and Mcp parse HTTP bodies and JSON-RPC frames, Cli reads files chosen by
+# whoever runs it. A stack overflow or an unbounded loop there kills the host process exactly as it would
+# in the library.
+#
+# MEASURED BEFORE ARMING, 2026-08-10: the backlog across all four projects and all eight rules is ZERO, so
+# this promotion costs nothing today and only binds what is written next. Two things had to be proved
+# before that zero was worth anything, because the first two attempts to measure it were wrong:
+#   * the rules RUN here — Directory.Build.props wires the analyzer into every project except
+#     Analyzers/Tests/AotSmokeTest/Benchmarks and the templates. Confirmed with a probe file carrying a
+#     `while (true)`: OVERFIT023 reported in Sources/Anomalies.
+#   * six of the eight sit at `suggestion` under [*.cs] and A BUILD DOES NOT PRINT SUGGESTIONS. The first
+#     sweep returned "0 sites" and was measuring the config's silence, not the code. Re-run with the
+#     severities raised, and the raise itself proved by the same probe reporting OVERFIT026.
+# The escape hatch is unchanged and is the point: a `#pragma warning disable` whose comment starts with
+# `BOUND:` and names what bounds the loop, the recursion or the allocation. If that sentence cannot be
+# written, the code is not safe and the pragma would be a lie.
+[Sources/{Anomalies,Server.AspNet,Mcp,Cli}/**.cs]
+dotnet_diagnostic.OVERFIT022.severity = error
+dotnet_diagnostic.OVERFIT023.severity = error
+dotnet_diagnostic.OVERFIT025.severity = error
+dotnet_diagnostic.OVERFIT026.severity = error
+dotnet_diagnostic.OVERFIT027.severity = error
+dotnet_diagnostic.OVERFIT028.severity = error
+dotnet_diagnostic.OVERFIT029.severity = error
+dotnet_diagnostic.OVERFIT030.severity = error
+
+# ── OVERFIT040 / 043 / 044 — the ratchet's severity, GLOBAL on purpose ────────────────────────────────
+# The reasoning for these three lives with the 040-045 backlog table earlier in this file. Only the
+# severities are here, and the placement is the whole point: they were written inside
+# [Sources/Main/**.cs] on 2026-08-11 while their own prose said "stays at suggestion globally", so for
+# one day the ratchet applied to the library and nowhere else.
+#
+# WHAT THAT COST, measured the same day by a deduplicated census over a whole-solution build: 60
+# OVERFIT040 (Cli 15, Server.AspNet 12, Mcp 6, Demo 6, rest scattered), 16 OVERFIT044 and 2 OVERFIT043 —
+# 78 of the tree's 115 analyzer warnings — were not a backlog anyone had chosen to carry. They were the
+# rules running STRICTER outside the library than the decision that created them, because a severity
+# written in a directory section is silent about every directory it does not name. Nothing reports this:
+# the build is green either way and the prose reads as though it had been applied.
+#
+# This section is [*.cs] and sits after every directory section above, so it wins for Sources/Main too —
+# which is what "globally" was always meant to say.
+#
+# 043 and 044 ESCALATED TO ERROR 2026-08-12, on the ratchet's own terms: swept to zero and only then
+# locked. Backlog at introduction was 394 and 808 sites; the last of them — 2 and 16, every remaining
+# one in Tools/SemanticNavigator — went on 2026-08-12. **Measured before escalating, not assumed**: a
+# whole-solution rebuild with all three temporarily raised to `warning` reports 0 and 0. That step is
+# not ceremony — a build does NOT print suggestions, so counting these at their normal severity
+# measures the config's silence rather than the code, which is the mistake recorded verbatim in the
+# [Sources/{Anomalies,Server.AspNet,Mcp,Cli}] block below.
+#
+# 040 stays at suggestion: 12 sites remain (Sources/Anomalies 4, three demos, Tools/SemanticNavigator 1)
+# and, unlike the other two, it is NOT a sweepable rule — most of its hits in the library were one-shot
+# model and config loading where synchronous IS correct, and the 2026-08-12 pass through Sources/Main
+# ended in 32 pragmas and zero conversions for exactly that reason. Escalating it would make the rule
+# lie. The remaining 12 have never been assigned to anyone.
+[*.cs]
+dotnet_diagnostic.OVERFIT040.severity = suggestion
+dotnet_diagnostic.OVERFIT043.severity = error
+dotnet_diagnostic.OVERFIT044.severity = error
+
+# ── OVERFIT046 — task discarded with `_ =`. ERROR, and global for the same reason as the three above ──────
+# The rule's own reasoning is in its block earlier in this file; only the severity is here, and the
+# placement is the point: that block sits inside [Sources/Main/**.cs] and FOUR OF THE RULE'S FIVE SITES ARE
+# UNDER Demo/. A severity written there binds the library and is silent about every directory it does not
+# name. This section is [*.cs] and comes after every directory section above, so it wins everywhere.
+#
+# WHAT PROMOTING IT IS WORTH, stated plainly because the honest version is unflattering: THE RULE SHIPS WITH
+# ZERO LIVE DEFECTS TO CATCH. Its one true positive — Anomalies/Hosting/GuardMetricsEndpoint (it was under
+# Cli/ when the rule caught it; XC-22 moved it 2026-08-12), whose serve loop died silently on any
+# non-transport exception — was fixed by someone else the same day, and its remaining four
+# reports are all correct fire-and-forget that already observe their own exceptions. Each now carries a
+# pragma naming what makes the discard safe AND what is given up (2026-08-11: LabWorkload's three
+# fault-injection endpoints and LabLoadDriver's paced send).
+#
+# So this is a TRIPWIRE ON A SHAPE THAT HAS ALREADY PRODUCED ONE REAL DEFECT HERE, exactly like OVERFIT027
+# at zero sites — NOT a cleanup tool. It buys one thing: `_ = SomethingAsync()` can no longer be written by
+# accident to get past CS4014, which Directory.Build.props promotes to error and which is silent on the
+# discard. Every future one has to be signed.
+dotnet_diagnostic.OVERFIT046.severity = error
+
+# ── Files named *.g.cs that exist ON DISK ─────────────────────────────────────────────────────────────
+# Added to catch the System.Text.Json source-generated context, whose RS0030 fell through to its default
+# Warning. It was the right instinct — the alternative then in use, exempting RS0030 from
+# TreatWarningsAsErrors globally, ALSO downgraded the ban on real code (measured 2026-08-08: three
+# System.Reflection sites and one banned Array.Copy sat as warnings in Sources/Main while both files
+# asserted in comments that this could not happen), and that entry is now correctly gone.
+#
+# BUT IT DOES NOT DO WHAT ITS NAME SAYS, and nothing had checked. A filename glob cannot reach a
+# source-generated tree either: severities are resolved per syntax tree from a map built out of the csc
+# command line, and generated trees are added afterwards, so they match no section regardless of path.
+# Measured 2026-08-16 on BindingExtensions.g.cs — matches this section, still reports `warning RS0030`.
+# Generated trees are handled by a global AnalyzerConfig (Sources/Anomalies/SourceGenerated.globalconfig).
+# What is left for this section is files that really are on disk and end in .g.cs; those under obj/ are
+# already covered above, so keep it only as a cheap net for one outside obj/.
+[*.g.cs]
+dotnet_diagnostic.RS0030.severity = none

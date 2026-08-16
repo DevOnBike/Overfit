@@ -7,7 +7,6 @@ using System.Diagnostics;
 using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Runtime;
 using DevOnBike.Overfit.LanguageModels.Tokenizers;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
 {
@@ -26,14 +25,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
 
         public Qwen3PerfTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [ModelFact(Path, "8s")]
         public void Qwen3_DecodeThroughput_BestOfN()
         {
-            if (!File.Exists(Path))
-            {
-                _out.WriteLine("missing Qwen3-0.6B gguf");
-                return;
-            }
 
             using var engine = CachedLlamaInferenceEngine.LoadGguf(Path);
             var tok = GgufTokenizer.Load(Path);
@@ -61,8 +55,8 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             }
 
             Array.Sort(perRun);
-            _out.WriteLine($"=== Qwen3-0.6B Q8_0 decode: min {perRun[0]:F2} | median {perRun[Runs / 2]:F2} | max {perRun[^1]:F2} tok/s ===");
-            Assert.True(perRun[^1] > 0);
+            _out.WriteLine($"=== Qwen3-0.6B Q8_0 decode: min {perRun[0]:F2} | median {perRun[Runs / 2]:F2} | max {perRun[perRun.Length - 1]:F2} tok/s ===");
+            Assert.True(perRun[perRun.Length - 1] > 0);
         }
 
         private static long DecodeFixed(

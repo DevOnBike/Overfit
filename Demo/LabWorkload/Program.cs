@@ -1,0 +1,450 @@
+// Copyright (c) 2026 DevOnBike.
+// This file is part of DevonBike Overfit.
+// DevonBike Overfit is licensed under the GNU AGPLv3.
+// For commercial licensing options, contact: devonbike@gmail.com
+
+using System.Diagnostics;
+using System.Runtime.InteropServices;
+using DevOnBike.Overfit.LabWorkload;
+
+// A stand-in for a client's application: it serves requests, exports metrics, and can be told to misbehave
+// in a way somebody chose. See FaultProfile for why the lab stopped using the real inference server for this,
+// and FaultState for why the faults are switchable at runtime rather than only at deploy time.
+//
+//   GET  /health                 readiness
+//   GET  /metrics                Prometheus exposition
+//   POST /work                   one unit of simulated work
+//
+//   GET  /fault                  what this replica is currently pretending to be
+//   POST /fault/latency?ms=&jitter=
+//   POST /fault/stall?probability=&seconds=
+//   POST /fault/errors?rate=
+//   POST /fault/leak?bytesPerSecond=
+//   POST /fault/cpu?msPerRequest=
+//   POST /fault/clear            back to a good replica, no restart — cancels a running OOM allocation too
+//   POST /fault/contend?threads=&holdMicroseconds=
+//   POST /fault/oom              allocate NATIVE memory, every page touched, until the limit kills it
+//   POST /fault/crash            exit(1) — a restart without an OOM
+//
+// Every fault is off by default, so an unconfigured pod is a healthy replica.
+
+var faults = new FaultState(FaultProfile.FromEnvironment());
+
+// Constructed before the host, because MeterListener only sees instruments published after it starts and
+// the hosting layer creates its own during startup.
+using var runtimeSignals = new RuntimeSignalListener();
+
+var metrics = new WorkloadMetrics(faults.Role, runtimeSignals);
+
+// Retained deliberately and never released — a leak with a rate somebody chose, which is the one fault the
+// real lab could not produce and the one the trend family exists to catch.
+var leaked = new List<byte[]>();
+var leakLock = new object();
+
+// Taken briefly by every request, and fought over by POST /fault/contend. It is on the REQUEST PATH on
+// purpose: a fault contending a private lock proves the counter counts, and proves nothing about the case
+// the channel exists for. Contention only matters because it produces a latency cliff while CPU and GC stay
+// normal, and a request that never waits for the lock cannot show that.
+//
+// Uncontended cost is a few nanoseconds against a ~40 ms service time, so a healthy replica is unaffected.
+var requestLock = new object();
+
+var builder = WebApplication.CreateSlimBuilder(args);
+builder.Logging.AddSimpleConsole(o => o.TimestampFormat = "HH:mm:ss ");
+
+// A concurrency ceiling, and it is part of the queued/rejected channels rather than a deployment detail.
+// Kestrel only queues a connection when it is AT its limit, and only rejects one when the queue is full —
+// so with the default (unlimited) both kestrel.queued_connections and kestrel.rejected_connections are
+// permanently zero. Binding a channel to a series that cannot move is the failure this repository hit twice
+// on 2026-08-09 alone, and it looks exactly like health.
+//
+// Left unset by default so a plain `dotnet run` behaves as before; the lab manifest sets it well above the
+// concurrency a healthy replica reaches (~1-2 at 0.8 rps and 40 ms) and below what a stall produces (~40,
+// measured while building the in-flight channel).
+var connectionLimit = Environment.GetEnvironmentVariable("OVERFIT_MAX_CONNECTIONS");
+
+if (long.TryParse(connectionLimit, out var maxConnections) && maxConnections > 0)
+{
+    builder.WebHost.ConfigureKestrel(options => options.Limits.MaxConcurrentConnections = maxConnections);
+}
+
+var app = builder.Build();
+
+app.Logger.LogInformation("lab-workload up: role={Role} — {Faults}", faults.Role, faults.Describe());
+
+// A timer rather than per-request, so the leak rate is what it says regardless of traffic. Tying it to
+// requests would make the leak a function of load, and a trend finding on memory could then never be
+// separated from a trend in traffic.
+using var leakTimer = new Timer(
+    _ =>
+    {
+        var perSecond = faults.LeakBytesPerSecond;
+
+        if (perSecond <= 0.0)
+        {
+            return;
+        }
+
+        var chunk = new byte[(int)Math.Clamp(perSecond, 1, 64 * 1024 * 1024)];
+
+        // EVERY page, not just the ends. The previous version touched chunk[0] and chunk[^1] and the comment
+        // above it named the exact failure it was trying to prevent — but two writes fault in two 4 KB
+        // pages, so a 2 MB chunk moved the working set by 8 KB. Anything past ~85 KB is a Large Object Heap
+        // allocation served from pre-zeroed OS pages, which the runtime need not write to, so the pages stay
+        // mapped to the shared zero page and never become resident.
+        //
+        // Measured before the fix, at 2 MB/s for four minutes: RSS 39 -> 36 -> 37 -> 24 MiB, i.e. falling,
+        // while dotnet_gc_heap_size_bytes rose 542% of typical and the guard raised a GcGen2HeapBytes
+        // incident. So the leak fault has only ever exercised the HEAP channel, and every statement that it
+        // tests MemoryWorkingSetBytes — including the trend family's headline case — was untested.
+        for (var offset = 0; offset < chunk.Length; offset += 4096)
+        {
+            chunk[offset] = 1;
+        }
+
+        lock (leakLock)
+        {
+            leaked.Add(chunk);
+        }
+    },
+    null,
+    TimeSpan.FromSeconds(1),
+    TimeSpan.FromSeconds(1));
+
+app.MapGet("/health", () => Results.Text("ok"));
+
+app.MapGet("/metrics", () =>
+    Results.Text(metrics.Render(), "text/plain; version=0.0.4; charset=utf-8"));
+
+app.MapGet("/fault", () => Results.Text(faults.Describe()));
+
+app.MapPost("/work", async () =>
+{
+    var started = Stopwatch.GetTimestamp();
+    var random = Random.Shared;
+
+    // Multiplicative scatter around the median, then an ADDITIVE stall on top. The two are modelled
+    // separately because they move the quantiles differently: scaling lifts every quantile by the same
+    // proportion, while a fixed wait added to whatever is in flight moves a p50 far more, relatively, than it
+    // moves a p99. Reproducing that asymmetry is the reason the stall is not just a bigger jitter.
+    var seconds = faults.LatencyMs / 1000.0
+                  * (1.0 + ((random.NextDouble() - 0.5) * faults.LatencyJitter));
+
+    if (faults.StallProbability > 0.0 && random.NextDouble() < faults.StallProbability)
+    {
+        seconds += faults.StallSeconds;
+    }
+
+    var burnMs = faults.CpuBurnMs;
+
+    if (burnMs > 0.0)
+    {
+        var burnUntil = Stopwatch.GetTimestamp() + (long)(burnMs / 1000.0 * Stopwatch.Frequency);
+
+        // #pragma BOUND: bounded by a timestamp taken before the loop; Stopwatch is monotonic.
+        while (Stopwatch.GetTimestamp() < burnUntil)
+        {
+        }
+    }
+
+    // No await inside: the point is to block on a monitor, which is what the runtime counts, and awaiting
+    // under a lock would neither contend nor be legal to hold across.
+    lock (requestLock)
+    {
+        _ = random.Next(2);
+    }
+
+    // Thrown and caught, so the request still succeeds and the status code never changes. That is the whole
+    // point of this fault: dotnet.exceptions moves while ErrorRate, latency and everything else stay
+    // exactly where they were.
+    if (faults.ThrowRate > 0.0 && random.NextDouble() < faults.ThrowRate)
+    {
+        try
+        {
+            throw new InvalidOperationException("injected first-chance exception");
+        }
+        catch (InvalidOperationException)
+        {
+            // Swallowed on purpose — a caught-and-retried exception is the case being reproduced.
+        }
+    }
+
+    await Task.Delay(TimeSpan.FromSeconds(Math.Max(0.0, seconds)));
+
+    var failed = faults.ErrorRate > 0.0 && random.NextDouble() < faults.ErrorRate;
+
+    metrics.Observe(Stopwatch.GetElapsedTime(started).TotalSeconds, failed);
+
+    return failed ? Results.StatusCode(500) : Results.Text("done");
+});
+
+app.MapPost("/fault/latency", (double? ms, double? jitter) =>
+{
+    if (ms is { } value)
+    {
+        faults.LatencyMs = value;
+    }
+
+    if (jitter is { } scatter)
+    {
+        faults.LatencyJitter = scatter;
+    }
+
+    return Results.Text(faults.Describe());
+});
+
+app.MapPost("/fault/stall", (double? probability, double? seconds) =>
+{
+    if (probability is { } chance)
+    {
+        faults.StallProbability = chance;
+    }
+
+    if (seconds is { } duration)
+    {
+        faults.StallSeconds = duration;
+    }
+
+    return Results.Text(faults.Describe());
+});
+
+app.MapPost("/fault/errors", (double? rate) =>
+{
+    faults.ErrorRate = rate ?? 0.0;
+
+    return Results.Text(faults.Describe());
+});
+
+app.MapPost("/fault/leak", (double? bytesPerSecond) =>
+{
+    faults.LeakBytesPerSecond = bytesPerSecond ?? 0.0;
+
+    return Results.Text(faults.Describe());
+});
+
+app.MapPost("/fault/cpu", (double? msPerRequest) =>
+{
+    faults.CpuBurnMs = msPerRequest ?? 0.0;
+
+    return Results.Text(faults.Describe());
+});
+
+app.MapPost("/fault/clear", () =>
+{
+    faults.Clear();
+
+    return Results.Text(faults.Describe());
+});
+
+// Allocates until the container's memory limit kills the process. The kill is the point: it is the only way
+// to produce a real container_oom_events_total and a real restart, and the peer detector is structurally
+// blind to a single OOM — one event over a small share of the window scores below any usable effect size, so
+// only an absolute rule catches it. That claim needs a real event to be tested against.
+//
+// Runs on a background thread so the response is sent before the process dies; without that the caller sees
+// a connection reset and cannot tell an OOM from a network fault.
+//
+// MEASURED 2026-08-08 (AN-D6): the previous version could not produce an OOM at all, and returned 200 while
+// failing. It allocated managed byte[64 MB] and touched chunk[0] and chunk[^1] only. Two things went wrong
+// and either alone was fatal:
+//
+//   1. Two writes fault in two 4 KB pages. A cgroup limit counts RESIDENT memory, not reservation, so after
+//      the process reached VmSize 6.65 GB the cgroup was charged 37 MB of its 512 MiB limit and the kernel
+//      OOM killer was never anywhere near it. This is the same trap the leak timer above documents in
+//      detail — the fix landed there and not here.
+//   2. Managed allocation cannot reach the limit even when every page IS touched, because the
+//      container-aware GC sets a heap hard limit at 75% of the cgroup limit (384 MiB of 512 MiB) and throws
+//      a managed OutOfMemoryException first. Thrown inside a detached Task.Run with no continuation, it was
+//      swallowed: the loop stopped, nothing was logged, and GET /fault still said "healthy".
+//
+// So the allocation is now NATIVE — outside the GC heap, therefore not subject to its hard limit — and every
+// page is written, so the cgroup is charged what was allocated. Marshal rather than NativeMemory keeps the
+// project free of unsafe blocks.
+app.MapPost("/fault/oom", () =>
+{
+    // 32 MiB per step reaches a 512 MiB limit in sixteen steps; at 100 ms that is under two seconds, which is
+    // deliberate. The memory RAMP is the leak fault's job and it has a rate knob for it. What this endpoint
+    // owes the detector is the EVENT.
+    const int chunkBytes = 32 * 1024 * 1024;
+    const int pageBytes = 4096;
+
+    // A bound, not `while (true)`: 4 GiB is eight times the limit this lab sets, so reaching it means no kill
+    // happened. That is a defect to report loudly — an injector whose failure looks like success is exactly
+    // how AN-D6 survived, and it would have been read as evidence that the detector is blind.
+    const long maxBytes = 4L * 1024 * 1024 * 1024;
+
+    var token = faults.BeginOomAllocation();
+    var logger = app.Logger;
+
+    // OVERFIT046 — fire-and-forget by construction: the endpoint has to answer BEFORE the allocation starts,
+    // or the caller sees a connection reset when the kernel kills this process and cannot tell an OOM from a
+    // network fault (the paragraph above this endpoint is that decision).
+    //
+    // WHAT MAKES THE DISCARD SAFE: everything the delegate does after its two locals is inside the
+    // try/catch(Exception) below, which logs through `logger.LogError` — the note on that catch ("Observed,
+    // not swallowed") records the incident where a swallowed throw made this endpoint report success while
+    // failing. The token, not the task handle, is the stop signal, and POST /fault/clear cancels it.
+    //
+    // WHAT IS LOST: two regions sit outside that catch — the `List<IntPtr>` construction before the `try`
+    // and the `finally` that frees the blocks. Neither throws in practice (a fixed-capacity list and
+    // Marshal.FreeHGlobal), but a fault in either would fault the task with nobody holding it. And nothing
+    // can await this to learn whether the kill actually happened; that is what the bounded loop, the LogError
+    // at the bound and IsAllocatingToOom exist for.
+#pragma warning disable OVERFIT046
+    _ = Task.Run(() =>
+    {
+        var held = new List<IntPtr>((int)(maxBytes / chunkBytes));
+        var allocated = 0L;
+
+        try
+        {
+            Thread.Sleep(500);
+
+            while (allocated < maxBytes && !token.IsCancellationRequested)
+            {
+                var block = Marshal.AllocHGlobal(chunkBytes);
+
+                held.Add(block);
+
+                for (var offset = 0; offset < chunkBytes; offset += pageBytes)
+                {
+                    Marshal.WriteByte(block, offset, 1);
+                }
+
+                allocated += chunkBytes;
+                Thread.Sleep(100);
+            }
+
+            if (token.IsCancellationRequested)
+            {
+                logger.LogInformation(
+                    "oom fault cancelled after {Mib} MiB — released, no kill", allocated / (1024 * 1024));
+
+                return;
+            }
+
+            logger.LogError(
+                "oom fault reached its {Mib} MiB bound WITHOUT being killed — this pod has no enforced "
+                + "memory limit, so no container_oom_events_total was produced and the silence that "
+                + "follows is NOT evidence about the detector", maxBytes / (1024 * 1024));
+        }
+        catch (Exception ex)
+        {
+            // Observed, not swallowed. The previous version's throw vanished and the endpoint stayed silent.
+            logger.LogError(ex, "oom fault failed after {Mib} MiB", allocated / (1024 * 1024));
+        }
+        finally
+        {
+            // Only reached when the kill did NOT happen; a killed process frees nothing. Releasing here is
+            // what makes POST /fault/clear a real undo rather than a label change.
+            foreach (var block in held)
+            {
+                Marshal.FreeHGlobal(block);
+            }
+        }
+    }, token);
+#pragma warning restore OVERFIT046
+
+    return Results.Text("allocating native memory until the container limit kills this pod");
+});
+
+// Exceptions that are THROWN AND CAUGHT, so the request still succeeds. That is the whole case: the lab had
+// no way to produce a first-chance exception, because POST /fault/errors returns a 500 status without ever
+// throwing — so ErrorRate moved and nothing else could. A caught-and-retried exception is invisible to every
+// channel the guard has, and it is the shape that usually arrives before the failure the error rate sees.
+app.MapPost("/fault/throw", (double? rate) =>
+{
+    faults.ThrowRate = rate ?? 0.0;
+
+    return Results.Text(faults.Describe());
+});
+
+// Threads fighting over one lock. The point is the SHAPE, not the slowdown: contention produces a latency
+// cliff with normal CPU and normal GC, because a thread waiting on a monitor is not running and costs
+// nothing to measure. Every channel the guard has today stays quiet through it, which is why
+// dotnet.monitor.lock_contentions is worth a channel of its own.
+//
+// Deliberately NOT a CPU burn with a lock around it: that would move CpuUsageRatio as well and the
+// experiment could no longer say which channel noticed. The critical section sleeps.
+app.MapPost("/fault/contend", (int? threads, int? holdMicroseconds) =>
+{
+    var count = Math.Clamp(threads ?? 8, 1, 64);
+    var hold = Math.Clamp(holdMicroseconds ?? 200, 1, 100_000);
+    var token = faults.BeginContention();
+    var logger = app.Logger;
+
+    // OVERFIT046 — fire-and-forget by construction: these threads run until POST /fault/clear cancels the
+    // token, so the endpoint cannot wait for them and must answer while the fault is still injected.
+    //
+    // WHAT MAKES THE DISCARD SAFE: the delegate's entire body is inside try/catch(Exception), which logs
+    // through `logger.LogError` — stated on that catch, because a contention thread that dies silently leaves
+    // the fault half-injected and the measurement unattributable. Cancellation goes through the token, which
+    // is also passed to StartNew, so nothing outside needs the handle.
+    //
+    // WHAT IS LOST: how many of the `count` threads are still contending is not observable. A thread that
+    // failed logs, but nothing counts survivors, so a half-injected fault has to be read out of the log
+    // rather than out of state — unlike the OOM and leak faults, which FaultState reports through Describe().
+#pragma warning disable OVERFIT046
+    for (var i = 0; i < count; i++)
+    {
+        _ = Task.Factory.StartNew(
+            () =>
+            {
+                try
+                {
+                    // BOUND: exits on the token, which POST /fault/clear cancels. Nothing else can end it,
+                    // and that is stated rather than left to be discovered — the OOM fault shipped with an
+                    // uncancellable loop and only killing the pod could stop it.
+                    while (!token.IsCancellationRequested)
+                    {
+                        lock (requestLock)
+                        {
+                            Thread.Sleep(TimeSpan.FromMicroseconds(hold));
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    // Observed rather than swallowed: a contention thread that dies silently leaves the
+                    // fault half-injected and the measurement unattributable.
+                    logger.LogError(ex, "contention thread failed");
+                }
+            },
+            token,
+            TaskCreationOptions.LongRunning,
+            TaskScheduler.Default);
+    }
+#pragma warning restore OVERFIT046
+
+    return Results.Text($"contending on one lock with {count} thread(s), {hold} us per hold");
+});
+
+// A restart WITHOUT an OOM, so the two can be told apart downstream: ContainerRestarts moves, OomEventsRate
+// does not. Reproducing them separately is what makes the distinction testable at all.
+app.MapPost("/fault/crash", () =>
+{
+    // OVERFIT046 — fire-and-forget by construction, for the same reason as /fault/oom: the response has to
+    // be sent before the process ends, or the caller cannot tell a deliberate crash from a network fault.
+    //
+    // WHAT MAKES THE DISCARD SAFE: this body is NOT the "catches and logs" case the other three are — it is
+    // the case where there is no later. Its last statement ends the process, so there is no continuation for
+    // a handle to serve and no observer that could still act on a result. Between the two statements nothing
+    // can fail on its own: Thread.Sleep throws only if something calls Thread.Interrupt on this thread, and
+    // nothing in this workload does.
+    //
+    // WHAT IS LOST: there is no catch, so IF the exit ever failed to happen this endpoint would have already
+    // answered "exiting in 500ms" and the pod would stay up, silently — which is precisely the shape AN-D6
+    // was (an injector whose failure reads as success). Left as-is deliberately: this file is the live lab's
+    // fault injector and this change is comments and pragmas only. Reported rather than fixed.
+#pragma warning disable OVERFIT046
+    _ = Task.Run(() =>
+    {
+        Thread.Sleep(500);
+        Environment.Exit(1);
+    });
+#pragma warning restore OVERFIT046
+
+    return Results.Text("exiting in 500ms");
+});
+
+app.Run();

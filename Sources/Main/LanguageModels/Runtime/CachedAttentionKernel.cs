@@ -393,7 +393,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             Span<float> scoreScratch,
             float scale)
         {
-            if (cache is null)
+            if (cache == null)
             {
                 throw new ArgumentNullException(nameof(cache));
             }

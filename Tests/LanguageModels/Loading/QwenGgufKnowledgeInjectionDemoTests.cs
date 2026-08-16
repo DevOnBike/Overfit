@@ -9,7 +9,6 @@ using DevOnBike.Overfit.LanguageModels.Runtime;
 using DevOnBike.Overfit.LanguageModels.Tokenizers;
 using DevOnBike.Overfit.Optimizers;
 using DevOnBike.Overfit.Tests.TestSupport;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
 {
@@ -26,7 +25,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
         private readonly ITestOutputHelper _out;
         public QwenGgufKnowledgeInjectionDemoTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("27min26s")]
         public void FineTune_TeachesNovelFact_ModelRecitesItAfterwards()
         {
             var ggufPath = TestModelPaths.Qwen3B.RequireQ4KmGgufPath();
@@ -55,7 +54,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
 
             // ── FINE-TUNE on the three sentences (next-token, overfit) ──
             var ids = tok.Encode(passage);
-            var input = ids[..^1];
+            var input = ids[..(ids.Length - 1)];
             var target = ids[1..];
             _out.WriteLine($"\nfine-tuning on {ids.Length} tokens ...");
 

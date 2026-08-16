@@ -7,7 +7,6 @@ using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Runtime;
 using DevOnBike.Overfit.LanguageModels.Tokenizers;
 using DevOnBike.Overfit.Tests.TestSupport;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
 {
@@ -46,13 +45,11 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
         /// Broken model: top tokens are high-ID garbage (>100000).
         /// Working model: top tokens are low-ID common tokens (<5000).
         /// </summary>
-        [LongFact]
+        [FixtureFact(TestFixture.Qwen3BBinaryAndTokenizer, "7s")]
         public void Diag_BosOnly_TopLogits()
         {
-            if (!TryLoad(out var engine, out var tok))
-            {
-                return;
-            }
+            TryLoad(out var engine, out var tok);
+
             using (engine)
             {
                 using var session = engine!.CreateSession(64);
@@ -92,18 +89,11 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
         /// BOS-only logits vs full-chat-prompt logits should differ.
         /// If model ignores context, both will be identical (avg diff ≈ 0).
         /// </summary>
-        [LongFact]
+        [FixtureFact(TestFixture.Qwen3BBinaryAndTokenizer, "11s")]
         public void Diag_ContextChangesLogits()
         {
-            if (!TryLoad(out var engine, out var tok))
-            {
-                return;
-            }
-            if (tok is null)
-            {
-                _out.WriteLine("SKIPPED: no tokenizer");
-                return;
-            }
+            TryLoad(out var engine, out var tok);
+
             using (engine)
             {
                 var sampling = SamplingOptions.Greedy;
@@ -135,8 +125,26 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
             }
         }
 
-        /// <summary>Binary file date/size — confirms re-conversion actually happened.</summary>
-        [LongFact]
+        /// <summary>
+        /// Binary file date/size — confirms re-conversion actually happened.
+        ///
+        /// <para><b>The 2000–3000 MB assertion this used to carry was removed on 2026-08-07, and what it
+        /// caught is worth recording.</b> It failed with <c>Actual: 12963</c>: the file at
+        /// <see cref="TestModelPaths.Qwen3B.BinaryPath"/> is a <b>13.6 GB FP32</b> checkpoint, while the
+        /// range encoded an assumption that it would be a 2–3 GB quantised one. That is not a defect in the
+        /// loader or in the file; it is a test pinning which artifact happens to sit on one developer's
+        /// disk. An absolute megabyte window cannot survive a re-conversion at a different precision, which
+        /// is the very event this diagnostic exists to report.</para>
+        ///
+        /// <para>It also corroborates the separate finding in <c>docs/test-gate-backlog.md</c> (T9) that
+        /// <c>GgufLlamaLoaderIntegrationTests</c> compares two files that are not the same weights: the
+        /// <c>.gguf</c> is 6.18 GB and this <c>.bin</c> is 13.59 GB.</para>
+        ///
+        /// <para>What is asserted instead is the only thing this can honestly check without loading the
+        /// model: that the path resolves to something large enough to be a checkpoint at all. The size and
+        /// date are <i>reported</i> — that is the diagnostic.</para>
+        /// </summary>
+        [LongFact("4ms")]
         public void Diag_ModelFileInfo()
         {
             var info = new FileInfo(ModelPath);
@@ -148,7 +156,12 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
             _out.WriteLine($"Path     : {info.FullName}");
             _out.WriteLine($"Size     : {info.Length / 1024.0 / 1024.0:F1} MB");
             _out.WriteLine($"Modified : {info.LastWriteTime:yyyy-MM-dd HH:mm:ss}");
-            Assert.InRange(info.Length / 1024L / 1024L, 2000L, 3000L);
+
+            // A truncated or half-written conversion is the failure worth catching here, and it does not
+            // need a magic window to catch: no usable checkpoint of this model is under a gigabyte.
+            Assert.True(info.Length > 1024L * 1024L * 1024L,
+                $"{ModelPath} is only {info.Length / 1024.0 / 1024.0:F1} MB — too small to be a converted "
+                + "Qwen-3B checkpoint. A truncated or partial conversion looks exactly like this.");
         }
     }
 }

@@ -6,7 +6,6 @@
 using System.Diagnostics;
 using DevOnBike.Overfit.Runtime;
 using DevOnBike.Overfit.Trees;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.Trees.Diagnostics
 {
@@ -28,7 +27,7 @@ namespace DevOnBike.Overfit.Tests.Trees.Diagnostics
             _output = output;
         }
 
-        [LongFact]
+        [LongFact("9s")]
         public void ManagedPredictor_Throughput()
         {
             if (!File.Exists(ModelPath))

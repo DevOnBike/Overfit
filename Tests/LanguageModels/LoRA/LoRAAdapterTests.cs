@@ -8,7 +8,6 @@ using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.LoRA;
 using DevOnBike.Overfit.LanguageModels.Runtime;
 using DevOnBike.Overfit.Tests.TestSupport;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.LoRA
 {
@@ -132,7 +131,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.LoRA
 
         // ── Integration tests (require model) ─────────────────────────────────
 
-        [LongFact]
+        [LongFact("7s")]
         public void LoRA_CreateAdapter_HasCorrectParamCount()
         {
             TestModelPaths.Qwen3B.RequireBinaryPath();
@@ -161,7 +160,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.LoRA
             }
         }
 
-        [LongFact]
+        [LongFact("6s")]
         public void LoRA_EnableDisable_LogitsUnchanged()
         {
             TestModelPaths.Qwen3B.RequireBinaryPath();
@@ -256,7 +255,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.LoRA
         /// If this test passes, the engine is fine and LoRA has a bug.
         /// If this test fails, the engine itself has a copy somewhere.
         /// </summary>
-        [LongFact]
+        [LongFact("9s")]
         public void Diagnostic_DirectWeightWrite_ChangesLogits()
         {
             TestModelPaths.Qwen3B.RequireBinaryPath();
@@ -332,7 +331,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.LoRA
             }
         }
 
-        [LongFact]
+        [LongFact]  // heavy group, never measured — see Scripts/longfact_heavy.txt
         public void LoRA_AfterTraining_LogitsChange()
         {
             TestModelPaths.Qwen3B.RequireBinaryPath();
@@ -468,7 +467,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.LoRA
             }
         }
 
-        [LongFact]
+        [LongFact("9s")]
         public void LoRA_SaveLoad_Roundtrip()
         {
             TestModelPaths.Qwen3B.RequireBinaryPath();

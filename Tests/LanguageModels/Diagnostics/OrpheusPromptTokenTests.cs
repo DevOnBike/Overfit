@@ -4,7 +4,6 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using DevOnBike.Overfit.LanguageModels.Tokenizers;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
 {
@@ -20,14 +19,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
         private readonly ITestOutputHelper _out;
         public OrpheusPromptTokenTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [ModelFact(Path, "147ms")]
         public void Dump_Control_Token_Ids()
         {
-            if (!File.Exists(Path))
-            {
-                _out.WriteLine("missing orpheus gguf");
-                return;
-            }
 
             var tok = GgufTokenizer.Load(Path);
 

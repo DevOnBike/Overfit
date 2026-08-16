@@ -66,6 +66,40 @@ import struct
 import sys
 import numpy as np
 
+# Output is UTF-8 regardless of where it goes. Without this the script dies on its own progress line
+# ("... -> f32 ...") the moment stdout is a pipe or a file rather than a console: Python then picks the
+# system code page, which on a Polish Windows is cp1252 and has no arrow. Measured 2026-08-07 — the
+# conversion crashed after parsing the header, having written nothing.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
+
+
+def permute_rope_rows(block):
+    """HF rotate-half -> adjacent-pair (NEOX) row permute, on the head_dim axis.
+
+    out[2i] = in[i], out[2i+1] = in[i + head_dim/2].
+
+    RoPE pairs dimensions two ways. HuggingFace stores Q/K expecting `rotate_half`, which pairs
+    (x[i], x[i + d/2]); Overfit's RopeKernel and the .bin format use adjacent pairs (x[2i], x[2i+1]) —
+    the same permute llama.cpp applies when it converts HF weights to GGUF for Llama/Mistral.
+
+    Getting this wrong is close to invisible: position 0 is the identity rotation, so the model still
+    answers short prompts, and the damage grows with context. Measured 2026-08-07 on Qwen2.5-3B, the .bin
+    written WITHOUT this permute and the GGUF read with the correct convention agreed to cosine 0.999896
+    on a one-token prompt and drifted to 0.9789 at three tokens and 0.8639 by the last layer.
+
+    V and O are not rotated and must NOT be permuted.
+    """
+    head_dim = block.shape[0]
+    half = head_dim // 2
+    out = np.empty_like(block)
+    out[0::2] = block[:half]
+    out[1::2] = block[half:]
+    return out
+
+
 MAGIC   = 0x4F565246  # "OVRF"
 VERSION = 2
 FFN_SWIGLU = 3
@@ -210,8 +244,8 @@ def convert(tensors: dict, cfg: dict, out_path: str):
             wq_full = get_tensor(tensors, f"{p}.self_attn.q_proj.weight")
             bq_full = tensors.get(f"{p}.self_attn.q_proj.bias", zeros(n_heads * head_dim))
             for h in range(n_heads):
-                write_f32(f, wq_full[h*head_dim:(h+1)*head_dim, :].T)  # [d_model, head_dim]
-                write_f32(f, bq_full[h*head_dim:(h+1)*head_dim].astype(np.float32))
+                write_f32(f, permute_rope_rows(wq_full[h*head_dim:(h+1)*head_dim, :]).T)  # [d_model, head_dim]
+                write_f32(f, permute_rope_rows(bq_full[h*head_dim:(h+1)*head_dim].astype(np.float32)))
 
             # KV heads [n_kv_heads, d_model, head_dim]
             wk_full = get_tensor(tensors, f"{p}.self_attn.k_proj.weight")
@@ -219,8 +253,8 @@ def convert(tensors: dict, cfg: dict, out_path: str):
             bk_full = tensors.get(f"{p}.self_attn.k_proj.bias", zeros(n_kv_heads * head_dim))
             bv_full = tensors.get(f"{p}.self_attn.v_proj.bias", zeros(n_kv_heads * head_dim))
             for kv in range(n_kv_heads):
-                write_f32(f, wk_full[kv*head_dim:(kv+1)*head_dim, :].T)
-                write_f32(f, bk_full[kv*head_dim:(kv+1)*head_dim].astype(np.float32))
+                write_f32(f, permute_rope_rows(wk_full[kv*head_dim:(kv+1)*head_dim, :]).T)
+                write_f32(f, permute_rope_rows(bk_full[kv*head_dim:(kv+1)*head_dim].astype(np.float32)))
                 write_f32(f, wv_full[kv*head_dim:(kv+1)*head_dim, :].T)
                 write_f32(f, bv_full[kv*head_dim:(kv+1)*head_dim].astype(np.float32))
 

@@ -10,7 +10,6 @@ using DevOnBike.Overfit.Optimizers;
 using DevOnBike.Overfit.Tensors;
 using DevOnBike.Overfit.Tensors.Core;
 using DevOnBike.Overfit.Tests.TestSupport;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.Data.Mnist
 {
@@ -29,7 +28,7 @@ namespace DevOnBike.Overfit.Tests.Data.Mnist
         private readonly ITestOutputHelper _out;
         public MnistAllocBreakdownTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("1s")]
         public void Epoch_Allocation_Breakdown()
         {
             const int batchSize = 128;

@@ -93,6 +93,16 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
 
         public bool SupportsZeroAllocationDecode => false;
 
+        // OVERFIT040 for `FromVocabFile` only — not the file, so the `Encode` path below stays covered by the
+        // rule.
+        //
+        // THE CONSTRAINT: one `vocab.txt` walked line by line, once, at model-construction time, on the
+        // caller's own thread, before any encode happens. No pool thread is behind it.
+        //
+        // WHAT IS GIVEN UP: `FromVocabFile` is public API of the shipped `DevOnBike.Overfit` package and is
+        // how every BERT-family embedder builds its tokenizer.
+#pragma warning disable OVERFIT040
+
         /// <summary>Loads a tokenizer from a HuggingFace <c>vocab.txt</c> (line index = token id).</summary>
         public static WordPieceTokenizer FromVocabFile(string path, bool doLowerCase = true)
         {
@@ -107,7 +117,7 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
             using (var reader = new StreamReader(path, Encoding.UTF8))
             {
                 string? line;
-                while ((line = reader.ReadLine()) is not null)
+                while ((line = reader.ReadLine()) != null)
                 {
                     // vocab.txt tokens never contain trailing whitespace; a token is the line verbatim
                     // minus the platform newline (already stripped by ReadLine). Blank lines map too.
@@ -123,6 +133,7 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
 
             return new WordPieceTokenizer(vocab, doLowerCase);
         }
+#pragma warning restore OVERFIT040
 
         /// <summary>
         /// Tokenizes <paramref name="text"/> to subword ids, wrapping in <c>[CLS] … [SEP]</c> when
@@ -189,7 +200,7 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
                     continue;
                 }
                 var tok = _inverse[id];
-                if (tok is null || id == _clsId || id == _sepId || id == _padId)
+                if (tok == null || id == _clsId || id == _sepId || id == _padId)
                 {
                     continue;
                 }

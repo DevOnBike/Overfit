@@ -2,6 +2,21 @@
 
 This directory contains scenario guides, benchmark notes and architecture documentation for Overfit.
 
+## Before you write or measure anything here
+
+Two documents carry the working knowledge that is otherwise only in somebody's head. Neither is optional
+for a first contribution.
+
+- [`code-patterns.md`](code-patterns.md) — how code is written in this repository: the hard rules a build
+  gate enforces and the `BOUND:` pragma that is the only way past them, how anything parsed from outside
+  the process must be bounded, the two execution paths and their ownership model, the measured preferences
+  that contradict the obvious answer, and what not to build at all. **This is not how a web or
+  line-of-business application is written**, and the difference is not taste — the library runs inside
+  somebody else's process, often ahead-of-time compiled, with no JIT to rescue it.
+- [`performance-discipline.md`](performance-discipline.md) — how a performance claim is earned: the four
+  ways a benchmark lies here, the table of measured changes that were **reverted**, and eleven rules
+  distilled from a session in which nine mechanism hypotheses were killed by measurement.
+
 ## Current focus
 
 The current branch adds the **in-process agentic stack** on top of the GGUF LLM runtime —
@@ -38,7 +53,9 @@ ONNX: PyTorch-exported model import into Sequential for inference
 11. `mcp.md` — the MCP server: plug local ask/rag_query/transcribe tools into Claude Code (spec conformance, Docker variant, helper scripts).
 11b. `serving-benchmark.md` — `overfit bench`: concurrent load test of an OpenAI-compatible endpoint (TTFT/ITL/throughput/goodput + a holistic score in the GPU-leaderboard shape, measured on CPU).
 11c. `openapi.yaml` — OpenAPI 3.0.3 contract for the `overfit serve` HTTP API (every endpoint + request/response schemas + examples; import into Swagger UI / Postman / codegen). `overfit-api.http` — the same calls ready to run in VS Code REST Client / JetBrains HTTP Client.
-12. `gp-anomaly-baseline.md` — proposed GP/EWMA baseline for the metric anomaly detector.
+12. [`aiops/`](aiops/README.md) — the cluster anomaly guard: product blueprints, the detection pipeline as
+    built, client-facing material, the scored backlog and the GP/EWMA baseline sketch. Eleven documents,
+    moved out of this directory on 2026-08-05 because they were a third of it.
 13. `scenarios/` — role-specific usage guides (start with [`in-process-agents.md`](scenarios/in-process-agents.md) for the RAG + tool-calling + structured-output story).
 14. `marketing/` — non-engineering collateral (e.g. `feature-blocks.md`, the infographic source). Launch copy and LinkedIn drafts live at the repo root.
 15. `../ROADMAP.md` — planned work and priorities.

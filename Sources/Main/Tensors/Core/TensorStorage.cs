@@ -30,6 +30,14 @@ namespace DevOnBike.Overfit.Tensors.Core
         public readonly int Length;
 
         /// <summary>
+        /// Which of the three backings this storage has. Derived from the two flags rather than stored
+        /// again, so it cannot disagree with them.
+        /// </summary>
+        internal TensorStorageKind Kind => _isBorrowedMemory
+            ? TensorStorageKind.Borrowed
+            : _pooled ? TensorStorageKind.Pooled : TensorStorageKind.Unpooled;
+
+        /// <summary>
         /// Standard pooled managed storage.
         /// Reports only context-free infrastructure telemetry:
         /// storage created, pooled created, elements, estimated bytes.
@@ -58,7 +66,10 @@ namespace DevOnBike.Overfit.Tensors.Core
             _data = data;
             _pooled = false;
 
-            OverfitTelemetry.RecordTensorStorageCreated(Length, Unsafe.SizeOf<T>(), borrowed: false);
+            // Unpooled, not pooled. It reported itself as pooled because the counter took one bool, so
+            // every model weight loaded through this path landed in the pool-churn series.
+            OverfitTelemetry.RecordTensorStorageCreated(
+                Length, Unsafe.SizeOf<T>(), TensorStorageKind.Unpooled);
         }
 
         /// <summary>
@@ -120,10 +131,34 @@ namespace DevOnBike.Overfit.Tensors.Core
         }
 
         /// <summary>
-        /// Returns a Memory&lt;T&gt; view over the data without copying.
+        /// A <see cref="Memory{T}"/> view over the data, without copying.
+        ///
+        /// <para><b>Two defects lived here, and the loud one was the less dangerous.</b> The method did not
+        /// branch on <see cref="_isBorrowedMemory"/> as <see cref="AsSpan"/> does, so on native-backed
+        /// storage it fell into <c>_data!</c> — which is null there — and threw a
+        /// <see cref="NullReferenceException"/> from an operator that reads like a field access. It also
+        /// skipped the disposed check its sibling performs first, and <b>that</b> is the one to worry about:
+        /// a disposed pooled storage would hand out a <see cref="Memory{T}"/> over an array already returned
+        /// to <c>ArrayPool</c>, so the caller reads and writes memory that something else now owns, with no
+        /// exception at any point.</para>
+        ///
+        /// <para>Native storage cannot produce a <see cref="Memory{T}"/> at all — <see cref="Memory{T}"/>
+        /// requires an object or a pinned owner, and a raw pointer is neither. Refusing it is the honest
+        /// answer; use <see cref="AsSpan"/> there, which is what every caller inside the library does.</para>
         /// </summary>
+        /// <exception cref="ObjectDisposedException">This storage has been disposed.</exception>
+        /// <exception cref="NotSupportedException">The storage is backed by borrowed native memory.</exception>
         public Memory<T> AsMemory()
         {
+            ObjectDisposedException.ThrowIf(_disposed == 1, this);
+
+            if (_isBorrowedMemory)
+            {
+                throw new NotSupportedException(
+                    "This storage is backed by borrowed native memory, which cannot be exposed as Memory<T>. "
+                    + "Use AsSpan().");
+            }
+
             return _pooled ? _pooledBuf.Memory : _data!.AsMemory(0, Length);
         }
 
@@ -144,7 +179,7 @@ namespace DevOnBike.Overfit.Tensors.Core
         {
             if (Interlocked.Exchange(ref _disposed, 1) == 0)
             {
-                OverfitTelemetry.RecordTensorStorageDisposed(_isBorrowedMemory);
+                OverfitTelemetry.RecordTensorStorageDisposed(Kind);
 
                 // Only return to pool if rented from pool. Unpooled storage is GC-managed.
                 if (!_isBorrowedMemory && _pooled)

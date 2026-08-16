@@ -8,7 +8,6 @@ using System.Text;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.LanguageModels.Loading;
 using DevOnBike.Overfit.LanguageModels.Runtime;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
 {
@@ -108,7 +107,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             }
         }
 
-        [LongFact]
+        // BOTH files, because this test compares one loader against the other. With only one present
+        // there is nothing to compare, and the early return this replaces reported that as a pass —
+        // i.e. as "the two loaders agree".
+        [FixtureFact(TestFixture.Gpt2SafetensorsAndBinary, "9s")]
         public void Load_RealGpt2Safetensors_BitParity_WithBinFixture()
         {
             var safe = ResolveFirst(
@@ -117,11 +119,11 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
                 @"C:\gpt2\model.safetensors");
             var bin = ResolveFirst(@"C:\gpt2\gpt2_small.bin");
 
-            if (safe is null || bin is null)
-            {
-                _output.WriteLine("GPT-2 model.safetensors and/or gpt2_small.bin not found — skipping.");
-                return;
-            }
+            // Asserted, not returned. The attribute above has already established both files exist, so
+            // reaching here with a null means the two resolvers disagree with it — a real inconsistency
+            // worth failing on, not a reason to report success.
+            Assert.NotNull(safe);
+            Assert.NotNull(bin);
 
             using var model = SafetensorsGpt2Loader.Load(safe, Gpt2Config.Small);
 

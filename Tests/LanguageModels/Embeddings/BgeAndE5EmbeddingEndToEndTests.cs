@@ -29,7 +29,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Embeddings
 
         // ──────────────── BGE-small-en-v1.5 ────────────────
 
-        [LongFact]
+        [LongFact("2s")]
         public void RealBge_QueryFindsRelevantPassage()
         {
             TestModelPaths.Bge.RequireConfigJsonPath();
@@ -54,14 +54,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Embeddings
             Assert.Equal("guitar", top[0].Id);
         }
 
-        [LongFact]
+        [FixtureFact(TestFixture.BgeReferenceEmbeddings, "1s")]
         public void RealBge_MatchesReferenceVectorWhenAvailable()
         {
             var refPath = Path.Combine(TestModelPaths.Bge.Dir, "bge_reference_embeddings.json");
-            if (!File.Exists(refPath))
-            {
-                return;
-            }
 
             TestModelPaths.Bge.RequireConfigJsonPath();
             using var embedder = SentenceEmbedder.ForBgeEnV15(TestModelPaths.Bge.Dir);
@@ -75,7 +71,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Embeddings
 
         // ──────────────── E5-small-v2 ────────────────
 
-        [LongFact]
+        [LongFact("1s")]
         public void RealE5_QueryPassagePrefixingDrivesRetrieval()
         {
             TestModelPaths.E5.RequireConfigJsonPath();
@@ -100,14 +96,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Embeddings
             Assert.Equal("guitar", top[0].Id);
         }
 
-        [LongFact]
+        [FixtureFact(TestFixture.E5ReferenceEmbeddings, "1s")]
         public void RealE5_MatchesReferenceVectorWhenAvailable()
         {
             var refPath = Path.Combine(TestModelPaths.E5.Dir, "e5_reference_embeddings.json");
-            if (!File.Exists(refPath))
-            {
-                return;
-            }
 
             TestModelPaths.E5.RequireConfigJsonPath();
             using var embedder = SentenceEmbedder.ForE5(TestModelPaths.E5.Dir);

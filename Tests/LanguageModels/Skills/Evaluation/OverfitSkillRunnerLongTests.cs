@@ -6,7 +6,6 @@
 using DevOnBike.Overfit.LanguageModels;
 using DevOnBike.Overfit.LanguageModels.Skills.Evaluation;
 using DevOnBike.Overfit.Tests.TestSupport;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Skills.Evaluation
 {
@@ -34,7 +33,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Skills.Evaluation
             }
         }
 
-        [LongFact]
+        [LongFact("18s")]
         public void ConciseSkill_RunsEndToEnd_ReportsLiftTriggerAndRubric()
         {
             var gguf = TestModelPaths.Qwen3B.RequireQ4KmGgufPath();

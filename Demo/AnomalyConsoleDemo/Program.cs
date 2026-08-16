@@ -3,15 +3,15 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using DevOnBike.Overfit.Runtime;
 using DevOnBike.Overfit.Anomalies.Adaptive;
 using DevOnBike.Overfit.Anomalies.Baseline;
+using DevOnBike.Overfit.Anomalies.Contracts;
 using DevOnBike.Overfit.Anomalies.Gpt;
-using DevOnBike.Overfit.Anomalies.Monitoring.Contracts;
 using DevOnBike.Overfit.Anomalies.Training;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.LanguageModels.LoRA;
 using DevOnBike.Overfit.LanguageModels.Runtime;
+using DevOnBike.Overfit.Runtime;
 
 namespace DevOnBike.Overfit.Demo.AnomalyConsole
 {
@@ -81,7 +81,7 @@ namespace DevOnBike.Overfit.Demo.AnomalyConsole
 
             if (!hadCheckpoint)
             {
-                if (csv is null || !File.Exists(csv))
+                if (csv == null || !File.Exists(csv))
                 {
                     throw new FileNotFoundException(
                         "No checkpoint and no metrics CSV found. Pass --csv <path> " +
@@ -97,7 +97,9 @@ namespace DevOnBike.Overfit.Demo.AnomalyConsole
                         Console.WriteLine($"  step {p.Step}/{p.TotalSteps}  train={p.TrainLoss:F3}  val={p.ValLoss:F3}");
                     }
                 });
-                var result = await job.RunAsync(csv, checkpoint, progress);
+                // CancellationToken.None: this demo's Main wires no Console.CancelKeyPress handler, so no
+                // token exists to hand over. Training therefore runs to completion or dies with the process.
+                var result = await job.RunAsync(csv, checkpoint, progress, CancellationToken.None);
                 Console.WriteLine($"Trained: {result.SnapshotsLoaded:N0} snapshots, " +
                     $"val loss {result.InitialLoss:F2} → {result.FinalValLoss:F2}, {result.TrainingTime:mm\\:ss}.");
             }
@@ -343,7 +345,7 @@ namespace DevOnBike.Overfit.Demo.AnomalyConsole
                     var history = tuner.FineTune(
                         corpus, steps: 300, contextLength: ContextSnapshots * tps, learningRate: 1e-2f);
                     Console.WriteLine(
-                        $"  LoRA loss {history[0]:F3} → {history[^1]:F3}  ({history.Count} steps, rank 16, "
+                        $"  LoRA loss {history[0]:F3} → {history[history.Count - 1]:F3}  ({history.Count} steps, rank 16, "
                         + $"LM head: {tuner.AdapterCount} adapter / {tuner.TrainableParameterCount} params, base frozen)");
                     tuner.Save(loraPath);
                 }
@@ -473,14 +475,14 @@ namespace DevOnBike.Overfit.Demo.AnomalyConsole
             var dir = Environment.GetEnvironmentVariable(OverfitEnvironment.ModelDir);
             var candidates = new[]
             {
-                dir is null ? null : Path.Combine(dir, "k8s_metrics.csv"),
+                dir == null ? null : Path.Combine(dir, "k8s_metrics.csv"),
                 Path.Combine("Tests", "test_fixtures", "k8s_metrics.csv"),
                 "k8s_metrics.csv",
             };
 
             foreach (var c in candidates)
             {
-                if (c is not null && File.Exists(c))
+                if (c != null && File.Exists(c))
                 {
                     return c;
                 }

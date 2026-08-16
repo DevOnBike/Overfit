@@ -16,7 +16,7 @@ namespace DevOnBike.Overfit.Tests.Audio
     /// Scripts/convert_snac.py); [LongFact] by default.</summary>
     public sealed class SnacDecoderParityTests
     {
-        [LongFact]
+        [LongFact("457ms")]
         public void Decode_RealCodes_MatchesReferenceNoiseOffDecode()
         {
             TestModelPaths.Snac.RequireSafetensorsPath();

@@ -43,7 +43,7 @@ namespace DevOnBike.Overfit.Audio.Tts.Snac
 
             // enc.in_conv: 1 → EncoderDim, k7 pad3 (length preserved)
             var dim = _cfg.EncoderDim;
-            var x = new float[dim * tIn];
+            var x = new float[(long)dim * tIn];
             SnacConv.Conv1d(padded, _w["enc.in_conv.weight"], _w["enc.in_conv.bias"], x,
                 inC: 1, tIn: tIn, outC: dim, kSize: 7, stride: 1, pad: 3, dilation: 1, groups: 1, tOut: tIn);
 
@@ -56,7 +56,7 @@ namespace DevOnBike.Overfit.Audio.Tts.Snac
             }
 
             // enc.out_conv: depthwise k7 pad3 (length preserved)
-            var outConv = new float[dim * curT];
+            var outConv = new float[(long)dim * curT];
             SnacConv.Conv1d(x, _w["enc.out_conv.weight"], _w["enc.out_conv.bias"], outConv,
                 inC: dim, tIn: curT, outC: dim, kSize: 7, stride: 1, pad: 3, dilation: 1, groups: dim, tOut: curT);
 
@@ -80,7 +80,7 @@ namespace DevOnBike.Overfit.Audio.Tts.Snac
             var pad = (stride + 1) / 2; // ceil(stride/2)
             outT = SnacConv.ConvOutputLength(tIn, k, stride, pad, dilation: 1);
 
-            var down = new float[outDim * outT];
+            var down = new float[(long)outDim * outT];
             SnacConv.Conv1d(x, _w[$"enc.block.{b}.down.weight"], _w[$"enc.block.{b}.down.bias"], down,
                 inC: inDim, tIn: tIn, outC: outDim, kSize: k, stride: stride, pad: pad, dilation: 1, groups: 1, tOut: outT);
             return down;
@@ -106,12 +106,12 @@ namespace DevOnBike.Overfit.Audio.Tts.Snac
 
                 if (stride > 1)
                 {
-                    pooled = new float[latent * ti];
+                    pooled = new float[(long)latent * ti];
                     SnacResidualVq.AveragePoolTime(residual, pooled, latent, frames, stride);
                 }
 
                 // in_proj: latent → codebook_dim (1×1)
-                var zE = new float[cbDim * ti];
+                var zE = new float[(long)cbDim * ti];
                 SnacConv.Conv1d(pooled, _w[$"q.{i}.in_proj.weight"], _w[$"q.{i}.in_proj.bias"], zE,
                     inC: latent, tIn: ti, outC: cbDim, kSize: 1, stride: 1, pad: 0, dilation: 1, groups: 1, tOut: ti);
 
@@ -122,16 +122,16 @@ namespace DevOnBike.Overfit.Audio.Tts.Snac
                 codes[i] = indices;
 
                 // reconstruct this level's contribution and remove it from the residual for the next level
-                var zqLow = new float[cbDim * ti];
+                var zqLow = new float[(long)cbDim * ti];
                 SnacResidualVq.DecodeCodebook(indices, codebook, zqLow, _cfg.CodebookSize, cbDim, ti);
 
-                var zq = new float[latent * ti];
+                var zq = new float[(long)latent * ti];
                 SnacConv.Conv1d(zqLow, _w[$"q.{i}.out_proj.weight"], _w[$"q.{i}.out_proj.bias"], zq,
                     inC: cbDim, tIn: ti, outC: latent, kSize: 1, stride: 1, pad: 0, dilation: 1, groups: 1, tOut: ti);
 
                 if (stride > 1)
                 {
-                    var up = new float[latent * frames];
+                    var up = new float[(long)latent * frames];
                     SnacResidualVq.RepeatInterleaveTime(zq, up, latent, ti, stride);
                     for (var j = 0; j < residual.Length; j++)
                     {

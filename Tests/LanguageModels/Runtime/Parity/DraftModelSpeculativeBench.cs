@@ -8,7 +8,7 @@ using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Loading;
 using DevOnBike.Overfit.LanguageModels.Runtime;
 using DevOnBike.Overfit.LanguageModels.Tokenizers;
-using Xunit.Abstractions;
+using DevOnBike.Overfit.Tests.TestSupport;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
 {
@@ -39,15 +39,12 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
         private readonly ITestOutputHelper _out;
         public DraftModelSpeculativeBench(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        // Both files, named individually so the skip says WHICH one is missing. `DraftDir + @"\..."`
+        // rather than Path.Combine because concatenating constants is itself a constant and can travel
+        // in an attribute; a method call cannot.
+        [ModelFact([TargetGguf, DraftDir + @"\model.safetensors"])]  // heavy group, never measured — see Scripts/longfact_heavy.txt
         public void DraftModel_Speculative_BitIdentical_AndSpeedup_OnNovelText()
         {
-            if (!File.Exists(TargetGguf) || !File.Exists(Path.Combine(DraftDir, "model.safetensors")))
-            {
-                _out.WriteLine("missing target gguf or draft safetensors");
-                return;
-            }
-
             using var target = CachedLlamaInferenceEngine.LoadGguf(TargetGguf);
             using var draft = SafetensorsLlamaLoader.Load(DraftDir);   // 0.5B, Q4_K by default
             var tok = QwenTokenizer.Load(DraftDir);
@@ -106,11 +103,12 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
                 _out.WriteLine($"maxDraft={maxDraft}: avg {(double)specSeq.Count / steps:F2} tok/step, " +
                                $"draft-spec {specTokPerSec:F2} tok/s, speedup {specTokPerSec / singleTokPerSec:F2}×");
 
-                // Greedy speculative is EXACT — identical token sequence to single-token decode (every maxDraft).
-                for (var i = 0; i < generate; i++)
-                {
-                    Assert.Equal(refSeq[i], specSeq[i]);
-                }
+                // This said "greedy speculative is EXACT — identical token sequence" and asserted it. It is
+                // not, and the first execution of this test (2026-08-07) showed why: expected 23327, got 279.
+                // The verify runs a batched kernel whose logits differ from the single-token path's by more
+                // than the gap between the top two tokens, so near-ties flip. See SpeculativeDivergence.
+                SpeculativeDivergence.AssertOnlyNearTieFlips(
+                    () => target.CreateSession(1024), promptArr, refSeq, specSeq, generate, _out);
             }
         }
     }

@@ -5,7 +5,6 @@
 
 using DevOnBike.Overfit.LanguageModels;
 using DevOnBike.Overfit.LanguageModels.Runtime;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
 {
@@ -25,7 +24,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
         private readonly ITestOutputHelper _out;
         public QwenDecodeSpeedTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("21s")]
         public void Qwen3B_Q4KM_DecodeSpeed()
         {
             if (!File.Exists(Model))

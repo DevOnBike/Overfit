@@ -115,7 +115,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Tokenization
 
         // ---- real model ----
 
-        [LongFact]
+        [LongFact("14ms")]
         public void RealMiniLmVocab_LoadsAndTokenizes()
         {
             var tok = WordPieceTokenizer.FromVocabFile(TestModelPaths.MiniLm.RequireVocabPath());

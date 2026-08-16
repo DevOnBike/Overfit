@@ -76,9 +76,18 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Neuro
             {
                 var flagged = AnomalyMlp.IsAnomaly(genome, features.AsSpan(i * Inputs, Inputs), Inputs, Hidden);
                 var actual = labels[i] != 0;
-                if (flagged && actual) { tp++; }
-                else if (flagged) { fp++; }
-                else if (actual) { fn++; }
+                if (flagged && actual)
+                {
+                    tp++;
+                }
+                else if (flagged)
+                {
+                    fp++;
+                }
+                else if (actual)
+                {
+                    fn++;
+                }
             }
             return (tp, fp, fn);
         }
@@ -106,7 +115,9 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Neuro
             // A miss costs 20x a false alarm -> the search should accept more false alarms to miss less.
             var costly = Evolve(features, labels, new AnomalyFitnessOptions
             {
-                Objective = AnomalyObjective.Cost, MissCost = 20f, FalseAlarmCost = 1f,
+                Objective = AnomalyObjective.Cost,
+                MissCost = 20f,
+                FalseAlarmCost = 1f,
             });
             var balanced = Evolve(features, labels, new AnomalyFitnessOptions { Objective = AnomalyObjective.F1 });
 
@@ -126,7 +137,8 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Neuro
 
             var genome = Evolve(features, labels, new AnomalyFitnessOptions
             {
-                Objective = AnomalyObjective.RecallAtFalseAlarmBudget, FalseAlarmBudget = budget,
+                Objective = AnomalyObjective.RecallAtFalseAlarmBudget,
+                FalseAlarmBudget = budget,
             });
 
             var (tp, fp, _) = Confusion(genome, features, labels);
@@ -145,7 +157,9 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Neuro
             var f1 = Evolve(features, labels, new AnomalyFitnessOptions { Objective = AnomalyObjective.F1 });
             var costly = Evolve(features, labels, new AnomalyFitnessOptions
             {
-                Objective = AnomalyObjective.Cost, MissCost = 20f, FalseAlarmCost = 1f,
+                Objective = AnomalyObjective.Cost,
+                MissCost = 20f,
+                FalseAlarmCost = 1f,
             });
 
             // The threshold is the last gene, optimised jointly with the weights. Two objectives that disagree

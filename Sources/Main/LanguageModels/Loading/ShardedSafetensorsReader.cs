@@ -4,6 +4,7 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using System.Text.Json;
+using DevOnBike.Overfit.Runtime;
 
 namespace DevOnBike.Overfit.LanguageModels.Loading
 {
@@ -45,7 +46,12 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                 {
                     if (!shardByFile.TryGetValue(shardFile, out var shard))
                     {
-                        shard = new SafetensorsReader(Path.Combine(baseDir, shardFile));
+                        // The shard name comes out of the index file, which arrives with the model — so it
+                        // is chosen by whoever published the model, not by us. Path.Combine constrains
+                        // nothing here: a rooted name replaces baseDir outright and a relative one can walk
+                        // out with '..'. See ContainedPath for what each of the three checks stops.
+                        shard = new SafetensorsReader(ContainedPath.Resolve(
+                            baseDir, shardFile, $"weight_map entry for tensor '{tensorName}'"));
                         shardByFile[shardFile] = shard;
                     }
 

@@ -8,7 +8,6 @@ using DevOnBike.Overfit.LanguageModels.Loading;
 using DevOnBike.Overfit.LanguageModels.Runtime;
 using DevOnBike.Overfit.LanguageModels.Tokenizers;
 using DevOnBike.Overfit.Tests.TestSupport;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
 {
@@ -30,7 +29,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
 
         private static readonly SamplingOptions Greedy = SamplingOptions.GreedyWithPenalty(1.0f);
 
-        [LongFact]
+        [LongFact("3s")]
         public void BeforeCacheFills_EnablingSliding_IsBitIdenticalNoOp()
         {
             using var engine = LoadEngine();
@@ -61,7 +60,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
             }
         }
 
-        [LongFact]
+        [LongFact("4s")]
         public void GeneratesPastContext_BoundedCache_WhileNonSlidingThrows()
         {
             using var engine = LoadEngine();

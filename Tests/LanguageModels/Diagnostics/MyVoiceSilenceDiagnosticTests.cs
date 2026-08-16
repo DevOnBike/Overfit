@@ -5,7 +5,6 @@
 
 using DevOnBike.Overfit.Audio;
 using DevOnBike.Overfit.Audio.Tts;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
 {
@@ -25,14 +24,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
 
         public MyVoiceSilenceDiagnosticTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [ModelFact(Dir, "246ms")]
         public void Report_LeadingSilence_PerClip()
         {
-            if (!Directory.Exists(Dir))
-            {
-                _out.WriteLine("missing C:\\myvoice");
-                return;
-            }
 
             var wavs = Directory.GetFiles(Dir, "*.wav");
             Array.Sort(wavs, StringComparer.Ordinal);

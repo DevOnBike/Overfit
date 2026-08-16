@@ -7,7 +7,6 @@ using System.Diagnostics;
 using System.Reflection;
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
 {
@@ -53,7 +52,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
             _output = output;
         }
 
-        [LongFact]
+        [LongFact("343ms")]
         [Trait("Category", "Diagnostics")]
         public void Profile_GPT1TrainingStep_BackwardOps()
         {

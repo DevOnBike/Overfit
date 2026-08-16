@@ -141,22 +141,22 @@ namespace DevOnBike.Overfit.DeepLearning
             // is never invoked. Hoisting the weight resolution out would call W1WeightProvider even when the
             // output hook owns the projection — that delegate records nodes on the graph, so it would be a
             // behaviour change, not a refactor.
-            var h1 = W1OutputProvider is not null
+            var h1 = W1OutputProvider != null
                 ? W1OutputProvider(graph, flat)
                 : graph.Linear(
                     flat,
-                    W1WeightProvider is not null ? W1WeightProvider(graph) : (_w1Node ??= W1.AsNode()),
+                    W1WeightProvider != null ? W1WeightProvider(graph) : (_w1Node ??= W1.AsNode()),
                     _b1Node);
 
             // GELU([B*T, dFF])
             var act = TensorMath.Gelu(graph, h1);
 
             // [B*T, dFF] @ W2 + b2 → [B*T, dModel]
-            var h2 = W2OutputProvider is not null
+            var h2 = W2OutputProvider != null
                 ? W2OutputProvider(graph, act)
                 : graph.Linear(
                     act,
-                    W2WeightProvider is not null ? W2WeightProvider(graph) : (_w2Node ??= W2.AsNode()),
+                    W2WeightProvider != null ? W2WeightProvider(graph) : (_w2Node ??= W2.AsNode()),
                     _b2Node);
 
             // Reshape back to [B, T, dModel]

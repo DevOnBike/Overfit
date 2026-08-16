@@ -26,9 +26,9 @@ namespace DevOnBike.OverfitChat
 
         public static void Write(string message, Exception? error = null)
         {
-            Android.Util.Log.Info("OverThink", error is null ? message : message + ": " + error);
+            Android.Util.Log.Info("OverThink", error == null ? message : message + ": " + error);
 
-            if (_path is null)
+            if (_path == null)
             {
                 return;
             }
@@ -38,7 +38,7 @@ namespace DevOnBike.OverfitChat
                 lock (Gate)
                 {
                     var line = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss}  {message}";
-                    if (error is not null)
+                    if (error != null)
                     {
                         line += Environment.NewLine + error;
                     }
@@ -48,7 +48,7 @@ namespace DevOnBike.OverfitChat
                     {
                         // Keep the most recent half so the file never grows unbounded.
                         var text = System.IO.File.ReadAllText(_path);
-                        System.IO.File.WriteAllText(_path, text[(text.Length / 2)..]);
+                        System.IO.File.WriteAllText(_path, text.Substring(text.Length / 2));
                     }
                 }
             }
@@ -62,10 +62,10 @@ namespace DevOnBike.OverfitChat
         {
             try
             {
-                if (_path is not null && System.IO.File.Exists(_path))
+                if (_path != null && System.IO.File.Exists(_path))
                 {
                     var text = System.IO.File.ReadAllText(_path);
-                    return text.Length > maxChars ? text[^maxChars..] : text;
+                    return text.Length > maxChars ? text.Substring(text.Length - maxChars) : text;
                 }
             }
             catch

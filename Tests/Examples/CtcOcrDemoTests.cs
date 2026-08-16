@@ -6,7 +6,6 @@
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Optimizers;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.Examples
 {
@@ -37,7 +36,7 @@ namespace DevOnBike.Overfit.Tests.Examples
         private readonly ITestOutputHelper _out;
         public CtcOcrDemoTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("982ms")]
         [Trait("Category", "Demo")]
         public void TrainsAndRecognizesSyntheticDigitStrings()
         {

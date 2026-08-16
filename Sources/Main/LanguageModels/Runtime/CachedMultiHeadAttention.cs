@@ -64,6 +64,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// <param name="kvHeadCount">
         /// Number of KV heads for GQA. 0 or equal to headCount = standard MHA.
         /// </param>
+        /// <param name="headDim">Per-head dimension. 0 (the default) means <c>dModel / headCount</c>; Qwen3 sets it explicitly, so Q/K/V need not be square.</param>
+        /// <param name="attnLogitSoftcap">Soft-cap applied to attention logits; 0 disables it (Gemma-2 sets it).</param>
         public CachedMultiHeadAttention(
             int dModel,
             int headCount,
@@ -99,7 +101,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             AttnLogitSoftcap = attnLogitSoftcap;
 
             _heads = new CachedSingleHeadAttention[headCount];
-            _headOutputs = new float[headCount * dModel];
+            _headOutputs = new float[(long)headCount * dModel];
 
             _hiddenQuants = new sbyte[dModel];
             _hiddenScales = new float[(dModel + Q4KDotKernel.SuperBlockElements - 1) / Q4KDotKernel.SuperBlockElements];
@@ -469,7 +471,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         {
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(rows);
 
-            if (rope is not null)
+            if (rope != null)
             {
                 throw new OverfitRuntimeException("Batched prefill does not support RoPE yet (F32/GPT-2 path only).");
             }
@@ -584,9 +586,19 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// per-row RoPE + cache writes (K/V-once for GQA); per Q head in the group, batched Q
         /// projection + per-row RoPE + the proven causal <see cref="BatchedAttentionKernel"/> (query n
         /// attends <c>[0..basePosition+n]</c>) + batched O projection accumulated into
-        /// <paramref name="output"/> in ascending head order — <b>bit-identical</b> to N× single-token
-        /// <see cref="Decode"/>. The cache must already be advanced to length
+        /// <paramref name="output"/> in ascending head order. The cache must already be advanced to length
         /// <c>basePosition + rows</c>. Scratch is per-call (prefill, not the 0-alloc decode path).
+        ///
+        /// <para><b>NOT bit-identical to N× single-token <see cref="Decode"/> on a Q4_K model</b>, which
+        /// this doc claimed until 2026-08-07. The whole-O path eighty lines below is default-on whenever
+        /// <c>WoWhole.IsQ4K</c> — true for a typical Q4_K_M GGUF — and its own comment says it reassociates
+        /// the sum the per-head path performs in ascending head order. Reassociation is not a rounding
+        /// detail here: measured end to end on Qwen2.5-3B Q4_K_M, feeding a prompt through this batched
+        /// path versus one token at a time moves the logits by <b>0.47–1.02</b>, which exceeds the usual
+        /// gap between the top two tokens and therefore flips argmaxes. <b>The claim held only for the F32
+        /// path</b> (<see cref="DecodeBatched"/> / <c>PrefillBatched</c>), where no repacked kernel is
+        /// involved. This matters to anyone comparing logits, embeddings or determinism across the
+        /// 16-token batching threshold — not only to speculative decoding, where it was first noticed.</para>
         /// </summary>
         internal void DecodeBatchedQuant(
             ReadOnlySpan<float> hidden,
@@ -797,7 +809,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 }
                 for (var n = 0; n < rows; n++)
                 {
-                    if (rope is not null)
+                    if (rope != null)
                     {
                         RopeKernel.Apply(kg.Span.Slice(n * headDim, headDim), rope, basePosition + n + ropeBase);
                     }
@@ -853,7 +865,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     {
                         QkNormKernel.Apply(qh.Span, weights.QkNormQ, rows, headDim);
                     }
-                    if (rope is not null)
+                    if (rope != null)
                     {
                         for (var n = 0; n < rows; n++)
                         {

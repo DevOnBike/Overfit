@@ -3,6 +3,8 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using DevOnBike.Overfit.Tensors;
+
 namespace DevOnBike.Overfit.LanguageModels.Runtime
 {
     /// <summary>
@@ -75,7 +77,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             }
 
             var dst = new byte[(long)(outputSize / RowsInterleaved) * superBlocksPerRow * BlockKx8Bytes];
-            Span<byte> gather = stackalloc byte[RowsInterleaved * SuperBlockBytes];
+            // 1152 B of gather scratch, pooled rather than stack-allocated (OVERFIT025 budgets the stack
+            // at 512 B). Repack runs once per model, writing a sidecar — a rent is not measurable here.
+            using var gatherBuffer = new PooledBuffer<byte>(RowsInterleaved * SuperBlockBytes, clearMemory: false);
+            var gather = gatherBuffer.Span;
 
             var dstOffset = 0;
             for (var rowGroup = 0; rowGroup < outputSize; rowGroup += RowsInterleaved)

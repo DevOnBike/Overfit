@@ -201,8 +201,8 @@ namespace DevOnBike.Overfit.Optimizers
             foreach (var s in _states)
             {
                 writer.Write(s.Size);
-                writer.Write(MemoryMarshal.AsBytes(s.M.GetView().AsSpan()[..s.Size]));
-                writer.Write(MemoryMarshal.AsBytes(s.V.GetView().AsSpan()[..s.Size]));
+                writer.Write(MemoryMarshal.AsBytes(s.M.GetView().AsSpan().Slice(0, s.Size)));
+                writer.Write(MemoryMarshal.AsBytes(s.V.GetView().AsSpan().Slice(0, s.Size)));
             }
         }
 
@@ -226,8 +226,8 @@ namespace DevOnBike.Overfit.Optimizers
                 {
                     throw new OverfitRuntimeException($"Optimizer checkpoint parameter size mismatch ({size} vs {s.Size}).");
                 }
-                ReadExactly(reader, MemoryMarshal.AsBytes(s.M.GetView().AsSpan()[..size]));
-                ReadExactly(reader, MemoryMarshal.AsBytes(s.V.GetView().AsSpan()[..size]));
+                ReadExactly(reader, MemoryMarshal.AsBytes(s.M.GetView().AsSpan().Slice(0, size)));
+                ReadExactly(reader, MemoryMarshal.AsBytes(s.V.GetView().AsSpan().Slice(0, size)));
             }
         }
 
@@ -236,7 +236,7 @@ namespace DevOnBike.Overfit.Optimizers
             var read = 0;
             while (read < dst.Length)
             {
-                var n = reader.Read(dst[read..]);
+                var n = reader.Read(dst.Slice(read));
                 if (n <= 0)
                 {
                     throw new OverfitRuntimeException("Optimizer checkpoint is truncated.");

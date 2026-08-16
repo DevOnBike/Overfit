@@ -8,7 +8,6 @@ using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Optimizers;
 using DevOnBike.Overfit.Tokenization;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Demo.TinyShakespeare
 {
@@ -71,7 +70,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Demo.TinyShakespeare
         /// Karpathy reaches ~1.47 on this dataset after full training (5000 steps).
         /// We expect ~2.5-3.5 after 300 steps — clear learning, not overfitting.
         /// </summary>
-        [LongFact]
+        [LongFact("3s")]
         public void TinyShakespeare_LossDecreases_After300Steps()
         {
             SkipIfMissing(FixturePath);
@@ -180,7 +179,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Demo.TinyShakespeare
             $"Oczekiwano finalLoss < {initialLoss * 0.85f:F4}. " +
             "Może być problem w backward pass lub gradient flow przez TransformerBlock.");
 
-            // 2. Loss nie jest NaN/Inf — forward/backward stabilne numerycznie
+            // 2. Loss is neither NaN nor Inf — forward and backward are numerically stable
             Assert.False(float.IsNaN(finalLoss) || float.IsInfinity(finalLoss),
             "Loss jest NaN lub Inf — problem numeryczny w attention lub LayerNorm.");
 

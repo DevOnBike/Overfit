@@ -40,10 +40,20 @@ namespace DevOnBike.Overfit.Extensions.AI
         }
 
         /// <inheritdoc />
+        // The defaults are declared on IChatClient in Microsoft.Extensions.AI.Abstractions 10.9.0, whose
+        // signature this adapter exists to match and which this repository does not control. Both the
+        // parameter ORDER and the defaults are the package's: `options` precedes the token, so the token
+        // cannot be made required without also making `options` required, and reordering would stop this
+        // method implementing the interface at all. More decisively, every consumer of this adapter reaches
+        // it AS an IChatClient — that is its whole purpose — and a call through the interface binds the
+        // INTERFACE's defaults regardless of what is written here. Removing the default on the class would
+        // therefore change no call site's behaviour and force no caller to name its token.
+#pragma warning disable OVERFIT041
         public async Task<ChatResponse> GetResponseAsync(
             IEnumerable<ChatMessage> messages,
             ChatOptions? options = null,
             CancellationToken cancellationToken = default)
+#pragma warning restore OVERFIT041
         {
             ArgumentNullException.ThrowIfNull(messages);
             ObjectDisposedException.ThrowIf(_disposed, this);
@@ -83,10 +93,15 @@ namespace DevOnBike.Overfit.Extensions.AI
         }
 
         /// <inheritdoc />
+        // Same constraint as GetResponseAsync above: the defaults and the parameter order belong to
+        // IChatClient in Microsoft.Extensions.AI.Abstractions 10.9.0, and callers reach this through the
+        // interface, where the interface's defaults bind.
+#pragma warning disable OVERFIT041
         public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
             IEnumerable<ChatMessage> messages,
             ChatOptions? options = null,
             [EnumeratorCancellation] CancellationToken cancellationToken = default)
+#pragma warning restore OVERFIT041
         {
             ArgumentNullException.ThrowIfNull(messages);
             ObjectDisposedException.ThrowIf(_disposed, this);
@@ -142,7 +157,7 @@ namespace DevOnBike.Overfit.Extensions.AI
         public object? GetService(Type serviceType, object? serviceKey = null)
         {
             ArgumentNullException.ThrowIfNull(serviceType);
-            if (serviceKey is null && serviceType == typeof(ChatClientMetadata))
+            if (serviceKey == null && serviceType == typeof(ChatClientMetadata))
             {
                 return _metadata;
             }
@@ -211,7 +226,7 @@ namespace DevOnBike.Overfit.Extensions.AI
                 _session.AddUser(text);   // user / tool / unknown → user turn
             }
 
-            return messages[^1].Text ?? string.Empty;
+            return messages[messages.Count - 1].Text ?? string.Empty;
         }
     }
 }

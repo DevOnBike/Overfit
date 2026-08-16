@@ -54,7 +54,12 @@ namespace DevOnBike.Overfit.Evolutionary.Fitness
                 _ranking = new int[count];
             }
 
-            var ranking = _ranking;
+            // Sliced to the current count, not passed whole. The buffer grows monotonically for zero-alloc
+            // reuse - which this type's own documentation promises - so after one large population every
+            // smaller one handed SortIndices an index array longer than the fitness span, and it requires
+            // equal lengths. A shrinking population therefore threw, which is precisely the case the doc told
+            // a caller was safe.
+            var ranking = _ranking.AsSpan(0, count);
 
             for (var i = 0; i < count; i++)
             {

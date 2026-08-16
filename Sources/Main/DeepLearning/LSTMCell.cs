@@ -6,6 +6,7 @@
 using System.Numerics.Tensors;
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning.Abstractions;
+using DevOnBike.Overfit.Maths;
 using DevOnBike.Overfit.Ops;
 using DevOnBike.Overfit.Tensors;
 using DevOnBike.Overfit.Tensors.Core;
@@ -131,11 +132,20 @@ namespace DevOnBike.Overfit.DeepLearning
             return (h0, c0);
         }
 
+        /// <summary>
+        /// Uniform init in <c>[-limit, limit)</c>, drawn from <see cref="MathUtils"/> so that
+        /// <see cref="MathUtils.SetSeed"/> actually reaches it.
+        ///
+        /// <para>This used <c>Random.Shared</c>, which <c>SetSeed</c> cannot touch — so any model
+        /// containing an LSTM was unseedable even when its caller did everything right. Measured
+        /// 2026-08-07: <c>CtcOcrLettersDemoTests</c> seeds its data order and still scored 5/24 on one run
+        /// and 23/24 on the next, because this line was outside the seed's reach.</para>
+        /// </summary>
         private static void InitUniform(Span<float> span, float limit)
         {
             for (var i = 0; i < span.Length; i++)
             {
-                span[i] = (Random.Shared.NextSingle() * 2f - 1f) * limit;
+                span[i] = (MathUtils.NextSingle() * 2f - 1f) * limit;
             }
         }
 
@@ -149,11 +159,69 @@ namespace DevOnBike.Overfit.DeepLearning
         public void InvalidateParameterCaches()
         {
         }
+        /// <summary>
+        /// Writes the three parameter tensors, in <see cref="Parameters"/> order.
+        ///
+        /// <para><b>These two methods were empty bodies</b> - not incomplete, <c>{ }</c> - until 2026-08-02,
+        /// and <c>LstmLayer</c>, <c>LstmAutoencoder</c> and <c>Crnn</c> all delegate through them. The result
+        /// was a shipped capability broken in the way that is hardest to notice: save a trained CRNN, load it
+        /// back, and the convolutions, norms and classifier all return correctly while the recurrent core
+        /// sits at its random initialisation. Nothing throws, the model reports as loaded, and it produces
+        /// nonsense. The OCR demo that reads digits at loss 0.006 could not survive a round-trip through
+        /// disk.</para>
+        ///
+        /// <para>Order matters and must match <see cref="Load"/>: a composite <c>Save</c> writes one stream,
+        /// so a mismatch here misaligns every layer that follows rather than failing here.</para>
+        /// </summary>
         public void Save(BinaryWriter bw)
         {
+            ArgumentNullException.ThrowIfNull(bw);
+
+            WriteTensor(bw, W);
+            WriteTensor(bw, U);
+            WriteTensor(bw, B);
         }
+
+        /// <inheritdoc cref="Save"/>
         public void Load(BinaryReader br)
         {
+            ArgumentNullException.ThrowIfNull(br);
+
+            ReadTensor(br, W);
+            ReadTensor(br, U);
+            ReadTensor(br, B);
+        }
+
+        /// <summary>Length then floats — the same wire format <c>Parameter.Save</c> writes, so a checkpoint
+        /// written by either side is readable by the other.</summary>
+        private static void WriteTensor(BinaryWriter bw, AutogradNode node)
+        {
+            var data = node.DataView.AsReadOnlySpan();
+
+            bw.Write(data.Length);
+
+            for (var i = 0; i < data.Length; i++)
+            {
+                bw.Write(data[i]);
+            }
+        }
+
+        /// <inheritdoc cref="WriteTensor"/>
+        private static void ReadTensor(BinaryReader br, AutogradNode node)
+        {
+            var data = node.DataView.AsSpan();
+            var length = br.ReadInt32();
+
+            if (length != data.Length)
+            {
+                throw new OverfitFormatException(
+                    $"Checkpoint size {length} does not match LSTM parameter size {data.Length}.");
+            }
+
+            for (var i = 0; i < length; i++)
+            {
+                data[i] = br.ReadSingle();
+            }
         }
         public void Dispose()
         {

@@ -5,7 +5,6 @@
 using System.Runtime.InteropServices;
 using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Runtime;
-using Xunit.Abstractions;
 namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
 {
     public sealed class QwenMaxDraftSweep
@@ -14,14 +13,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
         private readonly ITestOutputHelper _out;
         public QwenMaxDraftSweep(ITestOutputHelper o) => _out = o;
 
-        [LongFact]
+        [ModelFact(ModelPath)]  // heavy group, never measured — see Scripts/longfact_heavy.txt
         public void Sweep_MaxDraft_OnEchoText()
         {
-            if (!File.Exists(ModelPath))
-            {
-                _out.WriteLine("missing");
-                return;
-            }
             using var engine = CachedLlamaInferenceEngine.LoadGguf(ModelPath);
             var prompt = new List<int>();
             for (var r = 0; r < 10; r++)

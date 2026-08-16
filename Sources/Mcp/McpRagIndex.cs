@@ -42,7 +42,15 @@ namespace DevOnBike.Overfit.Mcp
         /// Indexes every <c>*.txt</c> / <c>*.md</c> under <paramref name="directory"/> (recursive).
         /// Embedding happens here, once — queries only embed the question.
         /// </summary>
+        // OVERFIT040 on Build: `File.ReadAllText` has a `ReadAllTextAsync` sibling and this is the one place
+        // that reading synchronously is right. BOUND BY WHEN IT RUNS: Build is a ONE-SHOT STARTUP STEP —
+        // Cli/Commands.cs calls it once, on the process main thread, before `McpServer.Run` begins serving,
+        // and there is no request in flight and no pool thread behind it to give back. The loop is dominated
+        // by `client.Embed` per chunk, which is synchronous CPU work on that same thread regardless, so
+        // awaiting the file read would change where the method suspends and not how long it holds anything.
+#pragma warning disable OVERFIT040
         public static McpRagIndex Build(OverfitClient client, string directory, TextWriter? log = null)
+#pragma warning restore OVERFIT040
         {
             ArgumentNullException.ThrowIfNull(client);
 

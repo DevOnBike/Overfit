@@ -7,7 +7,6 @@ using System.Text;
 using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Runtime;
 using DevOnBike.Overfit.LanguageModels.Tokenizers;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
 {
@@ -25,14 +24,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
         private readonly ITestOutputHelper _out;
         public BielikPrefillTtftBench(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [ModelFact(TargetGguf)]  // heavy group, never measured — see Scripts/longfact_heavy.txt
         public void Bielik_Prefill_Ttft_WeightStationary_vs_Original()
         {
-            if (!File.Exists(TargetGguf))
-            {
-                _out.WriteLine("missing target gguf");
-                return;
-            }
 
             using var engine = CachedLlamaInferenceEngine.LoadGguf(TargetGguf);
             var tok = GgufTokenizer.Load(TargetGguf);

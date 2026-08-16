@@ -8,7 +8,6 @@ using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Runtime;
 using DevOnBike.Overfit.LanguageModels.Tokenizers;
 using DevOnBike.Overfit.Tests.TestSupport;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
 {
@@ -39,7 +38,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
 
         public PrefillAxisSweepTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("24s")]
         public void Prefill_AxisAndTileWidth_AtChatPromptLengths()
         {
             var path = TestModelPaths.Qwen3B.Q4KmGgufPath;

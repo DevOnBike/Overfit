@@ -124,7 +124,7 @@ namespace DevOnBike.Overfit.Ops
             // We just detect "no valid alignment" from a −inf final α.
 
             // Forward α (log) over [T*S].
-            var alpha = new float[timeSteps * s];
+            var alpha = new float[(long)timeSteps * s];
             alpha.AsSpan().Fill(NegInf);
             alpha[0] = logp[ext[0]];                 // blank at s=0
             if (s > 1)
@@ -177,7 +177,7 @@ namespace DevOnBike.Overfit.Ops
             }
 
             // Backward β (log).
-            var beta = new float[timeSteps * s];
+            var beta = new float[(long)timeSteps * s];
             beta.AsSpan().Fill(NegInf);
             var lastBase = (timeSteps - 1) * classCount;
             beta[last + s - 1] = logp[lastBase + ext[s - 1]];
@@ -211,7 +211,9 @@ namespace DevOnBike.Overfit.Ops
             //   posterior[t,k] = Σ_{s: ext[s]=k} exp(α[t,s] + β[t,s] − logp[t,k] − logProb).
             // (α and β each include logp[t,ext[s]] once, so their product double-counts it — hence the
             //  − logp[t,k] correction.) Accumulate the per-class lattice mass in log-space first.
+#pragma warning disable OVERFIT026 // BOUND: guarded at 256 floats = 1 KB. Over the 512 B budget, deliberately: this is a per-timestep accumulator on the CTC backward path and the alternative is a heap allocation per call.
             Span<float> classAcc = classCount <= 256 ? stackalloc float[classCount] : new float[classCount];
+#pragma warning restore OVERFIT026
             for (var t = 0; t < timeSteps; t++)
             {
                 var cur = t * s;

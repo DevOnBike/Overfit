@@ -8,7 +8,6 @@ using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.Arm;
 using System.Runtime.Intrinsics.X86;
 using DevOnBike.Overfit.Diagnostics;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.Diagnostics
 {
@@ -59,7 +58,7 @@ namespace DevOnBike.Overfit.Tests.Diagnostics
 
         public MachineProbeTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("7s")]
         public void Probe_HardwareCeilings()
         {
             var cores = Environment.ProcessorCount;

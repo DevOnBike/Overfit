@@ -6,7 +6,6 @@
 using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Runtime;
 using DevOnBike.Overfit.Tests.TestSupport;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
 {
@@ -31,7 +30,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
         ///   Layer 0 after attn_residual: [-0.0097559, -0.002254, 0.00501522, ...]
         ///   Layer 0 after ffn_residual:  [0.18736684, 0.03360228, -0.11243583, ...]
         /// </summary>
-        [LongFact]
+        [LongFact("6s")]
         public void L0Diag_IntermediateValues()
         {
             TestModelPaths.Qwen3B.RequireBinaryPath();

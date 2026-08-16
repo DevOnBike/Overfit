@@ -6,6 +6,8 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using DevOnBike.Overfit.Tensors;
+using DevOnBike.Overfit.Text;
 
 namespace DevOnBike.Overfit.LanguageModels.Tokenizers
 {
@@ -63,6 +65,16 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
                 @"(?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\r\n\p{L}\p{N}]?\p{L}+|\p{N}{1,3}| ?[^\s\p{L}\p{N}]+[\r\n]*|\s*[\r\n]+|\s+(?!\S)|\s+",
                 RegexOptions.Compiled);
         }
+
+        // OVERFIT040 for `Load` only — deliberately not the file, because the Encode / Decode section below is
+        // the hot path and must keep the rule pointed at it.
+        //
+        // THE CONSTRAINT: one `tokenizer.json` read once, at model-construction time, on the caller's own
+        // thread, before any session or decode exists. No pool thread is behind it.
+        //
+        // WHAT IS GIVEN UP: `Load` is public API of the shipped `DevOnBike.Overfit` package — the only way to
+        // construct this tokenizer — so a task-returning form is a breaking change.
+#pragma warning disable OVERFIT040
 
         /// <summary>Load tokenizer from a directory containing tokenizer.json, or directly from tokenizer.json path.</summary>
         public static QwenTokenizer Load(string pathOrDirectory)
@@ -124,6 +136,24 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
             }
 
             // ── Special tokens ─────────────────────────────────────────────
+            //
+            // The decoder is grown to `id + 1` at 8 bytes an entry, and `id` is a number chosen by whoever
+            // wrote tokenizer.json — so a declared 2^31-1 is a 16 GB allocation request the caller cannot
+            // catch. Bounded here against the FILE'S OWN LENGTH, the same way the binary loaders bound a
+            // declared count: a token cannot be encoded in fewer than a few bytes of JSON, so the document
+            // cannot describe more ids than it has room for.
+            //
+            // Four bytes is a deliberate under-estimate of the floor, not a guess at the typical: the real
+            // Qwen tokenizer measures **46.4 bytes per token** (7,031,645 B for 151,665 tokens), so the bound
+            // clears its highest id by **11.6x** and caps the allocation at 14 MB whatever the file claims.
+            //
+            // The obvious bound — `vocab.Count + added.Count` — was measured and REJECTED: on that same file
+            // it clears the highest added id by exactly ONE (151,664 against 151,665), so any tokenizer with
+            // a single gap in its added-token ids would be refused. Rejecting a valid model is worse than the
+            // allocation this guards against.
+            const long MinBytesPerToken = 4;
+            var maxDecoderEntries = stream.Length / MinBytesPerToken;
+
             var specialTokens = new Dictionary<string, int>();
             if (root.TryGetProperty("added_tokens", out var added))
             {
@@ -131,6 +161,16 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
                 {
                     var content = tok.GetProperty("content").GetString()!;
                     var id = tok.GetProperty("id").GetInt32();
+
+                    if (id < 0 || id + 1L > maxDecoderEntries)
+                    {
+                        throw new OverfitFormatException(
+                            $"'{jsonPath}' declares added token id {id}, which would size the decoder at "
+                            + $"{id + 1L} entries. The file is {stream.Length} bytes and a token needs at "
+                            + $"least {MinBytesPerToken}, so it cannot describe more than {maxDecoderEntries} "
+                            + "ids.");
+                    }
+
                     specialTokens[content] = id;
                     // Extend decoder if needed
                     if (id >= decoder.Length)
@@ -145,6 +185,7 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
 
             return new QwenTokenizer(vocab, decoder, mergeRanks, specialTokens);
         }
+#pragma warning restore OVERFIT040
 
         // ── Public API ─────────────────────────────────────────────────────
 
@@ -183,51 +224,146 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
         /// <summary>Decode a sequence of token IDs to text.</summary>
         public string Decode(ReadOnlySpan<int> tokens)
         {
-            var bytes = new List<byte>();
-            var sb = new StringBuilder();
+            var text = new ValueStringBuilder(CharBudget(tokens));
 
-            foreach (var id in tokens)
+            try
             {
-                if (id < 0 || id >= _decoder.Length || _decoder[id] is null)
+                DecodeInto(tokens, ref text);
+
+                return text.AsSpan().ToString();
+            }
+            finally
+            {
+                text.Dispose();
+            }
+        }
+
+        /// <summary>
+        /// Decodes into a caller-owned buffer and returns the characters written; allocates nothing once
+        /// the pool is warm.
+        ///
+        /// <para>The reason this exists is <c>ChatSession</c>'s incremental detokenizer, which decodes the
+        /// WHOLE generated run once per token. Through the string overload that was a
+        /// <c>List&lt;byte&gt;</c>, a <c>StringBuilder</c>, an array from <c>ToArray</c> and two strings per
+        /// call, over a growing sequence.</para>
+        /// </summary>
+        /// <exception cref="ArgumentException">
+        /// <paramref name="destination"/> is shorter than the decoded text. It names the required length
+        /// rather than truncating: a silently shortened reply looks like a model that stopped early.
+        /// </exception>
+        public int Decode(ReadOnlySpan<int> tokens, Span<char> destination)
+        {
+            var text = new ValueStringBuilder(CharBudget(tokens));
+
+            try
+            {
+                DecodeInto(tokens, ref text);
+
+                if (!text.TryCopyTo(destination, out var written))
+                {
+                    throw new ArgumentException(
+                        $"Destination holds {destination.Length} char(s); the decoded text needs "
+                        + $"{text.Length}.",
+                        nameof(destination));
+                }
+
+                return written;
+            }
+            finally
+            {
+                text.Dispose();
+            }
+        }
+
+        /// <summary>
+        /// Byte-level pieces are accumulated and flushed as UTF-8 only when a special token interrupts
+        /// them or the sequence ends — a piece can hold half a codepoint, and converting each separately
+        /// yields a replacement character where the text had a letter.
+        /// </summary>
+        private void DecodeInto(ReadOnlySpan<int> tokens, ref ValueStringBuilder text)
+        {
+            using var byteBuffer = new PooledBuffer<byte>(ByteBudget(tokens), clearMemory: false);
+            var bytes = byteBuffer.Span;
+            var byteCount = 0;
+
+            for (var i = 0; i < tokens.Length; i++)
+            {
+                var id = tokens[i];
+
+                if (id < 0 || id >= _decoder.Length || _decoder[id] == null)
                 {
                     continue;
                 }
 
                 var piece = _decoder[id];
 
+                // Looked up once. The previous shape asked the set twice per token, in an if and then in
+                // its negation.
                 if (_specialTokenIds.Contains(id))
                 {
-                    // Flush byte buffer first
-                    if (bytes.Count > 0)
-                    {
-                        sb.Append(Encoding.UTF8.GetString(bytes.ToArray()));
-                        bytes.Clear();
-                    }
-                    sb.Append(piece);
+                    Flush(ref text, bytes, ref byteCount);
+                    text.Append(piece);
+
+                    continue;
                 }
 
-                if (!(_specialTokenIds.Contains(id)))
+                for (var c = 0; c < piece.Length; c++)
                 {
-                    // Decode byte-level piece → raw bytes
-                    foreach (var ch in piece)
-                    {
-                        bytes.Add(_charToByte[ch]);
-                    }
+                    bytes[byteCount++] = _charToByte[piece[c]];
                 }
             }
 
-            if (bytes.Count > 0)
+            Flush(ref text, bytes, ref byteCount);
+        }
+
+        private static void Flush(ref ValueStringBuilder text, Span<byte> bytes, ref int byteCount)
+        {
+            if (byteCount == 0)
             {
-                sb.Append(Encoding.UTF8.GetString(bytes.ToArray()));
+                return;
             }
 
-            return sb.ToString();
+            var pending = bytes.Slice(0, byteCount);
+            var charCount = Encoding.UTF8.GetCharCount(pending);
+
+            using var chars = new PooledBuffer<char>(charCount, clearMemory: false);
+
+            Encoding.UTF8.GetChars(pending, chars.Span);
+            text.Append(chars.Span.Slice(0, charCount));
+
+            byteCount = 0;
+        }
+
+        /// <summary>
+        /// Upper bound on the accumulated bytes. <b>Must be an upper bound</b>: the loop indexes into the
+        /// rented span directly, so an underestimate is an <see cref="IndexOutOfRangeException"/> on some
+        /// vocabulary rather than a slower path. Byte-level pieces contribute exactly one byte per
+        /// character, so their total length is the bound.
+        /// </summary>
+        private int ByteBudget(ReadOnlySpan<int> tokens) => CharBudget(tokens);
+
+        /// <summary>Total piece length across the sequence — bounds both the bytes and the characters.</summary>
+        private int CharBudget(ReadOnlySpan<int> tokens)
+        {
+            var total = 0;
+
+            for (var i = 0; i < tokens.Length; i++)
+            {
+                var id = tokens[i];
+
+                if (id >= 0 && id < _decoder.Length && _decoder[id] is { } piece)
+                {
+                    total += piece.Length;
+                }
+            }
+
+            return total + 1;
         }
 
         /// <summary>Decode a single token ID (for streaming output).</summary>
         public string DecodeToken(int id)
         {
-            if (id < 0 || id >= _decoder.Length || _decoder[id] is null)
+            if (id < 0 || id >= _decoder.Length || _decoder[id] == null)
             {
                 return string.Empty;
             }
@@ -238,13 +374,17 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
                 return piece;
             }
 
-            var bytes = new byte[piece.Length];
+            // Rented rather than `new byte[piece.Length]`: this is the per-token streaming entry point, so
+            // that array was one allocation per token for no reason. The returned string stays — it is the
+            // method's product.
+            using var bytes = new PooledBuffer<byte>(piece.Length, clearMemory: false);
+
             for (var i = 0; i < piece.Length; i++)
             {
-                bytes[i] = _charToByte[piece[i]];
+                bytes.Span[i] = _charToByte[piece[i]];
             }
 
-            return Encoding.UTF8.GetString(bytes);
+            return Encoding.UTF8.GetString(bytes.Span.Slice(0, piece.Length));
         }
 
         public bool IsSpecialToken(int id) => _specialTokenIds.Contains(id);
@@ -357,7 +497,7 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
             {
                 if (m.Index > pos)
                 {
-                    result.Add((text[pos..m.Index], false));
+                    result.Add((text.Substring(pos, m.Index - pos), false));
                 }
                 result.Add((m.Value, true));
                 pos = m.Index + m.Length;
@@ -365,7 +505,7 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
 
             if (pos < text.Length)
             {
-                result.Add((text[pos..], false));
+                result.Add((text.Substring(pos), false));
             }
 
             return result;

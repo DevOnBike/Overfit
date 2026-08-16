@@ -10,7 +10,6 @@ using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Loading;
 using DevOnBike.Overfit.LanguageModels.Tokenizers;
 using DevOnBike.Overfit.Tests.TestSupport;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Constraints
 {
@@ -25,7 +24,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Constraints
         private readonly ITestOutputHelper _out;
         public JsonConstrainedChatTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("3s")]
         public void Send_WithJsonConstraint_ProducesParseableJson()
         {
             TestModelPaths.Qwen3B.RequireQ4KmGgufPath();

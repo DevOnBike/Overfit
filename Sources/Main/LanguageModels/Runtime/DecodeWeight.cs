@@ -73,26 +73,26 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         public static implicit operator DecodeWeight(Q6KWeight q6k) => new(q6k);
 
         /// <summary>True when the weight is resident as Q8_0 specifically.</summary>
-        public bool IsQuantized => _q8 is not null;
+        public bool IsQuantized => _q8 != null;
 
         /// <summary>True when the weight is resident as Q4_K specifically.</summary>
-        public bool IsQ4K => _q4k is not null;
+        public bool IsQ4K => _q4k != null;
 
         /// <summary>True when the weight is resident as Q6_K specifically.</summary>
-        public bool IsQ6K => _q6k is not null;
+        public bool IsQ6K => _q6k != null;
 
         /// <summary>True when no backing is set (default value).</summary>
-        public bool IsEmpty => _q8 is null
-            && _q4k is null
-            && _q6k is null
-            && (_f32 is null || _f32.Length == 0);
+        public bool IsEmpty => _q8 == null
+            && _q4k == null
+            && _q6k == null
+            && (_f32 == null || _f32.Length == 0);
 
         /// <summary>Total weight element count, regardless of backing.</summary>
-        public long ElementCount => _q6k is not null
+        public long ElementCount => _q6k != null
             ? (long)_q6k.OutputSize * _q6k.InputSize
-            : _q4k is not null
+            : _q4k != null
                 ? (long)_q4k.OutputSize * _q4k.InputSize
-                : _q8 is not null
+                : _q8 != null
                     ? (long)_q8.OutputSize * _q8.InputSize
                     : _f32?.Length ?? 0;
 
@@ -123,22 +123,22 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// </summary>
         public void DequantizeRow(int row, Span<float> dst)
         {
-            if (_q4k is not null)
+            if (_q4k != null)
             {
                 _q4k.DecodeRow(row, dst);
                 return;
             }
-            if (_q6k is not null)
+            if (_q6k != null)
             {
                 _q6k.DecodeRow(row, dst);
                 return;
             }
-            if (_q8 is not null)
+            if (_q8 != null)
             {
                 _q8.DecodeRow(row, dst);
                 return;
             }
-            if (_f32 is not null)
+            if (_f32 != null)
             {
                 var rowLength = dst.Length;
                 _f32.AsReadOnlySpan().Slice(row * rowLength, rowLength).CopyTo(dst);
@@ -156,15 +156,15 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// </summary>
         public IDequantRowSource AsRowSource()
         {
-            if (_q4k is not null)
+            if (_q4k != null)
             {
                 return _q4k;
             }
-            if (_q6k is not null)
+            if (_q6k != null)
             {
                 return _q6k;
             }
-            if (_q8 is not null)
+            if (_q8 != null)
             {
                 return _q8;
             }

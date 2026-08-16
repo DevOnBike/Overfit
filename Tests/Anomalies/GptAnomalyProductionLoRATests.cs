@@ -3,13 +3,12 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using DevOnBike.Overfit.Anomalies.Contracts;
 using DevOnBike.Overfit.Anomalies.Gpt;
-using DevOnBike.Overfit.Anomalies.Monitoring.Contracts;
 using DevOnBike.Overfit.Anomalies.Training;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.LanguageModels.LoRA;
 using DevOnBike.Overfit.LanguageModels.Runtime;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.Anomalies
 {
@@ -42,17 +41,10 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             _output = output;
         }
 
-        [LongFact]
+        [ProductionAnomalyBaseFact("3ms")]
         public void ProductionBase_PerPodLoRA_FlattensBenignRegime_StillFlagsIncident()
         {
             var path = ResolveProductionBase();
-            if (path is null)
-            {
-                _output.WriteLine(
-                    "Production base not found ($OVERFIT_MODEL_DIR / test_fixtures / D:\\ " +
-                    "k8s_anomaly_production.bin) — skipping.");
-                return;
-            }
 
             var config = DetectConfigFromCheckpoint(path);
             _output.WriteLine($"Loaded base: {config.DModel}d / {config.NLayers}L from {path}");
@@ -98,7 +90,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
                 {
                     var history = tuner.FineTune(
                         corpus, steps: 300, contextLength: ContextSnapshots * tps, learningRate: 1e-2f);
-                    _output.WriteLine($"LoRA loss {history[0]:F3} -> {history[^1]:F3}");
+                    _output.WriteLine($"LoRA loss {history[0]:F3} -> {history[history.Count - 1]:F3}");
                     tuner.Save(loraPath);
                 }
 

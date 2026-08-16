@@ -38,15 +38,7 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints
             _dfa = RegexDfa.Compile(pattern);
             _state = _dfa.Start;
             _eosTokenId = tokenizer.EndOfTextTokenId;
-
-            var vocab = tokenizer.VocabularySize;
-            _tokenText = new string[vocab];
-            Span<int> one = stackalloc int[1];
-            for (var t = 0; t < vocab; t++)
-            {
-                one[0] = t;
-                _tokenText[t] = tokenizer.DecodeToString(one);
-            }
+            _tokenText = TokenTextTable.For(tokenizer);
         }
 
         public bool IsComplete => _dfa.IsAccepting(_state);
@@ -76,15 +68,22 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints
                 }
 
                 // Cheap prune: reject on the first character (no replay) before the full walk.
-                if (_dfa.Next(_state, text[0]) < 0 || !Accepts(text))
+                //
+                // Evaluated ONCE. The second `if` was the literal negation of the first, recomputed rather
+                // than remembered, so `Accepts` — which walks the whole token text through the DFA — ran
+                // twice for every surviving token at every decode step, over the entire vocabulary. The
+                // same defect was fixed in JsonSchemaConstraint on 2026-08-03 and left here because the
+                // review that found it named only the two JSON files.
+                var allowed = _dfa.Next(_state, text[0]) >= 0 && Accepts(text);
+
+                if (!allowed)
                 {
                     logits[t] = float.NegativeInfinity;
+
+                    continue;
                 }
 
-                if (!(_dfa.Next(_state, text[0]) < 0 || !Accepts(text)))
-                {
-                    anyAllowed = true;
-                }
+                anyAllowed = true;
             }
 
             // End-of-text is allowed once the pattern fully matches, OR as a graceful escape from a BPE
@@ -108,10 +107,26 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints
             }
 
             var text = _tokenText[token];
+
             for (var i = 0; i < text.Length; i++)
             {
-                // The token was unmasked, so every character keeps the automaton alive.
-                _state = _dfa.Next(_state, text[i]);
+                // Asserted rather than assumed, and here the assumption was more dangerous than in the two
+                // JSON constraints. `Next` returns -1 for a dead transition, and that -1 was stored
+                // straight into the state field: `IsAccepting(-1)` indexes an array at -1, and
+                // `Next(-1, c)` computes `-1 * Alphabet + c`, also negative. So a broken invariant did not
+                // desynchronise quietly — it produced an IndexOutOfRangeException from inside the
+                // constraint on some later call, with nothing pointing at the token that caused it.
+                var next = _dfa.Next(_state, text[i]);
+
+                if (next < 0)
+                {
+                    throw new OverfitRuntimeException(
+                        $"Token {token} ('{text}') was accepted but character '{text[i]}' has no transition "
+                        + "from the current state. The constraint's mask and its committed state have "
+                        + "diverged; continuing would compute every later mask from a wrong state.");
+                }
+
+                _state = next;
             }
         }
 

@@ -19,15 +19,23 @@ namespace DevOnBike.Overfit.Server.OpenAi
         private static string? _yaml;
 
         /// <summary>The embedded <c>openapi.yaml</c> contract, read once and cached.</summary>
+        // OVERFIT040 on Yaml: `StreamReader.ReadToEnd` has a `ReadToEndAsync` sibling and there is nothing for
+        // it to overlap with. BOUND BY WHAT THE STREAM IS: `Assembly.GetManifestResourceStream` returns an
+        // UnmanagedMemoryStream over bytes already mapped in with the assembly image — the read is a memory
+        // copy, with no file handle, no socket and no device to wait on, so there is no IO here to yield
+        // during. The result is cached in `_yaml` on the first call, so even that copy happens once per
+        // process; making this a task would add a state machine to a memcpy.
+#pragma warning disable OVERFIT040
         public static string Yaml()
+#pragma warning restore OVERFIT040
         {
-            if (_yaml is not null)
+            if (_yaml != null)
             {
                 return _yaml;
             }
 
             using var stream = typeof(OpenApiDocument).Assembly.GetManifestResourceStream("openapi.yaml");
-            if (stream is null)
+            if (stream == null)
             {
                 _yaml = "openapi: 3.0.3\ninfo:\n  title: Overfit\n  version: '1.0.0'\npaths: {}\n";
                 return _yaml;

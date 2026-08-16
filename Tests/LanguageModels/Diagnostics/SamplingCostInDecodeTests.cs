@@ -6,7 +6,6 @@
 using System.Diagnostics;
 using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Runtime;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
 {
@@ -26,7 +25,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
 
         public SamplingCostInDecodeTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("294ms")]
         public void SamplingCost_VsPerTokenDecode()
         {
             // A realistic (peaked) LLM logit distribution: a low baseline with a modest high-probability head,

@@ -9,7 +9,6 @@ using DevOnBike.Overfit.LanguageModels.Runtime;
 using DevOnBike.Overfit.LanguageModels.Tokenizers;
 using DevOnBike.Overfit.Optimizers;
 using DevOnBike.Overfit.Tests.TestSupport;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
 {
@@ -24,7 +23,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
         private readonly ITestOutputHelper _out;
         public QwenGgufQLoraAdapterRoundTripTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact]  // heavy group, never measured — see Scripts/longfact_heavy.txt
         public void FineTune_SaveAdapter_FreshModelLoadsIt_AndRecitesFact()
         {
             var ggufPath = TestModelPaths.Qwen3B.RequireQ4KmGgufPath();
@@ -46,7 +45,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             // ── train model A on the new fact ──
             using var modelA = TrainableLlamaModel.FromEngine(engine, loraRank: 8, rng: new Random(7), maxSeqLen: 128, loraOnLmHead: true);
             var ids = tok.Encode(passage);
-            var input = ids[..^1];
+            var input = ids[..(ids.Length - 1)];
             var target = ids[1..];
             var trainable = ToList(modelA.TrainableParameters());
             using (var opt = new Adam(trainable, learningRate: 0.002f) { WeightDecay = 0f, Epsilon = 1e-4f })

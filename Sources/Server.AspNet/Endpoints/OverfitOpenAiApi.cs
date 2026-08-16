@@ -39,6 +39,28 @@ namespace DevOnBike.Overfit.Server.AspNet.Endpoints
         /// </summary>
         public static WebApplication MapOverfitOpenAiApi(this WebApplication app)
         {
+            // Registered before the endpoints so it wraps them: the endpoint executor is terminal middleware,
+            // so everything added here surrounds it. Resolved once from the application container rather than
+            // per request — the metrics object is a singleton and a per-request lookup would buy nothing.
+            var metrics = app.Services.GetRequiredService<ServerMetrics>();
+
+            app.Use(async (context, next) =>
+            {
+                try
+                {
+                    await next(context);
+                    metrics.RecordResponse(context.Response.StatusCode);
+                }
+                catch
+                {
+                    // An unhandled exception reaches the client as a 500 whether or not the status has been
+                    // written yet. Letting it go uncounted would make the error rate look best exactly when
+                    // the server is at its worst.
+                    metrics.RecordResponse(StatusCodes.Status500InternalServerError);
+                    throw;
+                }
+            });
+
             app.MapGet("/health", () => Results.Text("ok", "text/plain"));
             app.MapGet("/", () => Results.Text("ok", "text/plain"));
             app.MapMetrics();

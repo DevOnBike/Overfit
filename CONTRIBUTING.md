@@ -29,7 +29,7 @@ Two independent guards:
 - `System.Reflection` and `System.Linq.Expressions.Expression`.
 - `System.Activator`.
 - `Array.Copy` — use `Span<T>.CopyTo` instead.
-- Raw `ArrayPool<T>.Shared` — use `PooledBuffer<T>` (scoped via `using`) or `PooledBuffer<T>.RentArray` + `ReturnArray` (class-lifetime).
+- Raw `ArrayPool<T>.Shared` — use `PooledBuffer<T>`, scoped via `using` for method-local scratch or held as a field and disposed by its owner for class-lifetime buffers.
 
 **2. Actual Native AOT publish, checked in CI.** `Tests/AotSmokeTest` is a thin console exe referencing `DevOnBike.Overfit`. The `aot-guard` job in `.github/workflows/ci.yml` publishes it under `-p:PublishAot=true -p:TreatWarningsAsErrors=true` on Ubuntu and then runs the produced native binary. Libraries cannot be Native-AOT compiled directly (no entry point), so the smoketest is the real AOT consumer — ILCompiler actually runs, IL2026 / IL3050 / IL31xx warnings on reachable code become errors, and a non-zero exit from the binary fails the job.
 

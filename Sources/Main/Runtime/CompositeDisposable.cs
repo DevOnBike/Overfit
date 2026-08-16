@@ -27,7 +27,7 @@ namespace DevOnBike.Overfit.Runtime
             IDisposable? last = null;
             foreach (var r in resources)
             {
-                if (r is not null)
+                if (r != null)
                 {
                     live++;
                     last = r;

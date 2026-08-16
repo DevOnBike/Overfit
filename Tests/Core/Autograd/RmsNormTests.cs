@@ -6,7 +6,6 @@
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.Tensors;
 using DevOnBike.Overfit.Tensors.Core;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.Core.Autograd
 {

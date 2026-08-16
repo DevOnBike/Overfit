@@ -53,7 +53,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         {
             get;
         }
-        public bool HasSharedExpert => _shared is not null;
+        public bool HasSharedExpert => _shared != null;
         public int ExpertCount => _routed.ExpertCount;
         public int ExpertUsedCount => _routed.ExpertUsedCount;
 
@@ -87,7 +87,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             }
 
             // Mixtral (no shared expert): the FFN is the routed sum alone — write it straight out.
-            if (_shared is null)
+            if (_shared == null)
             {
                 _routed.Decode(hidden, routerWeight, gateExperts, upExperts, downExperts, output);
                 return;
@@ -148,7 +148,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             }
 
             // Mixtral (no shared expert): the FFN is the routed sum alone.
-            if (_shared is null)
+            if (_shared == null)
             {
                 _routed.DecodeBatched(hidden, rows, routerWeight, gateExperts, upExperts, downExperts, output);
                 return;

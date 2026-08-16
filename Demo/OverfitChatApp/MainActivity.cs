@@ -16,8 +16,9 @@ using Android.Widget;
 using DevOnBike.Overfit.LanguageModels;
 using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Loading;
-
+using DevOnBike.Overfit.LanguageModels.Runtime;
 using DevOnBike.Overfit.LanguageModels.Whisper;
+using DevOnBike.Overfit.Runtime;
 
 namespace DevOnBike.OverfitChat
 {
@@ -74,8 +75,15 @@ namespace DevOnBike.OverfitChat
         private volatile bool _busy;
         private bool _inChat; // true while the chat screen is shown (drives Back → welcome instead of exit)
 
-        // After this much idle time the model is unloaded (frees ~RAM) and the user returns to model select.
+        // After this much idle time the model's weights are released. On the chat screen the conversation
+        // STAYS on screen and the next message reloads the model — freeing ~1 GB of RAM must not cost the
+        // user their conversation, which is what returning to model select used to do while they were
+        // simply reading a long answer.
         private const int IdleUnloadMs = 30_000;
+
+        // Set when the idle timer released the weights while the chat stayed up: "the conversation is still
+        // here, the model is not". Non-null is the signal for OnSend to reload before generating.
+        private string? _suspendedModelPath;
         private readonly Android.OS.Handler _idleHandler = new(Android.OS.Looper.MainLooper!);
 
         // Live on-device CPU/RAM/tok-per-sec readout shown in the header subtitle while the model generates.
@@ -83,6 +91,18 @@ namespace DevOnBike.OverfitChat
         private readonly CpuRamSampler _sampler = new();
         private int _genTokens;          // streamed tokens this turn (one onText callback ≈ one token)
         private long _genFirstTokenMs;   // timestamp of the first token, so tok/s excludes the prefill wait
+
+        // The headline tok/s is a CUMULATIVE mean since the first token, which starts high and falls as it
+        // converges — it cannot tell a real slowdown apart from that convergence. These marks give the rate
+        // per SegmentTokens-token window, which can. Sized for the 512-token generation cap.
+        // Flip to true to log a per-component decode breakdown for every generation (see OnSend).
+        // `static readonly` rather than `const` on purpose: a const folds at compile time and the guarded
+        // block becomes CS0162 unreachable code, which is a warning nobody should have to suppress.
+        private static readonly bool ProfileDecode = false;
+
+        private const int SegmentTokens = 32;
+        private readonly long[] _genMarks = new long[512 / SegmentTokens + 1];
+        private int _genMarkCount;
 
         // Models live as individual *.gguf files here (the bundled SmolLM2 + any the user added).
         private string ModelsDir => System.IO.Path.Combine(GetExternalFilesDir(null)!.AbsolutePath, "models");
@@ -98,6 +118,56 @@ namespace DevOnBike.OverfitChat
             base.OnCreate(savedInstanceState);
 
             AppLog.Init(GetExternalFilesDir(null)!.AbsolutePath);
+
+            // Which arm is this? An AOT build ships libaot-*.so next to the runtime; a JIT build ships
+            // none. Recorded from the installed files rather than from a build-time constant, so a log
+            // line cannot claim an arm the APK does not actually contain.
+            try
+            {
+                var nativeLibraryDir = ApplicationInfo!.NativeLibraryDir!;
+                var aotLibraries = System.IO.Directory.GetFiles(nativeLibraryDir, "libaot-*.so");
+                var aotBytes = 0L;
+                foreach (var library in aotLibraries)
+                {
+                    aotBytes += new System.IO.FileInfo(library).Length;
+                }
+                AppLog.Write($"build: aotLibs={aotLibraries.Length} ({aotBytes / 1024} kB)");
+
+                // Which arithmetic path will the quantised kernels actually take? Q4_K decode measured 6.4x
+                // SLOWER than F32 here, and this repository has already been bitten once by a build whose
+                // instruction set silently fell back to a baseline ISA, making SIMD decode ~6x slower. Before
+                // treating that as a property of the kernel, check the kernel is the one being executed.
+                AppLog.Write(
+                    $"simd: Dp={System.Runtime.Intrinsics.Arm.Dp.IsSupported} " +
+                    $"AdvSimd={System.Runtime.Intrinsics.Arm.AdvSimd.IsSupported} " +
+                    $"AdvSimd64={System.Runtime.Intrinsics.Arm.AdvSimd.Arm64.IsSupported} " +
+                    $"V128hw={System.Runtime.Intrinsics.Vector128.IsHardwareAccelerated} " +
+                    $"forceScalar={Q4KDotKernel.ForceScalar}");
+            }
+            catch (Exception probeError)
+            {
+                AppLog.Write("build: AOT probe failed", probeError);
+            }
+
+            // One worker per fast core. BigCoreAffinity confines decode to the big cluster (4 cores here),
+            // and the engine otherwise spawns Environment.ProcessorCount (8) workers — a 2x oversubscription
+            // that hurts barrier-synchronised kernels, because a preempted worker makes every other one wait
+            // at the barrier. Read before the engine is first touched: OverfitParallel resolves this once, in
+            // its static constructor, and ignores later changes.
+            var fastCores = BigCoreAffinity.FastestCoreCount();
+            if (fastCores > 0)
+            {
+                System.Environment.SetEnvironmentVariable(OverfitEnvironment.ParallelWorkers, fastCores.ToString());
+                AppLog.Write($"OVERFIT_PARALLEL_WORKERS={fastCores}");
+            }
+
+            // The library default (1,000,000 elements) keeps this model's 576x1536 FFN matmuls on the
+            // sequential path, which measured as 46% of decode wall time here; 100,000 took the phone from
+            // 8.7 to 10.1 tok/s. Set per-app rather than changed in the library because the same lowering
+            // measured 1.2x to 2.9x SLOWER on a 32-core desktop, where 32 workers split a row into
+            // cache-line-sized pieces. See docs/measured-baselines.md; this goes away once the kernel
+            // decides from worker count and shape instead of an absolute element count.
+            SingleTokenProjectionKernel.ParallelWorkThresholdOverride = 100_000;
             Android.Runtime.AndroidEnvironment.UnhandledExceptionRaiser += (_, e) =>
                 AppLog.Write("Unhandled exception", e.Exception);
             AppDomain.CurrentDomain.UnhandledException += (_, e) =>
@@ -136,11 +206,11 @@ namespace DevOnBike.OverfitChat
             // so it works out of the box; we only enter chat once it's ready.
             ShowWelcome();
             var last = Prefs.GetString("last_model_path", null);
-            if (last is null || !System.IO.File.Exists(last))
+            if (last == null || !System.IO.File.Exists(last))
             {
                 last = _modelPaths.Count > 0 ? _modelPaths[0] : null;
             }
-            if (last is not null)
+            if (last != null)
             {
                 var path = last;
                 SetWelcomeLoading("loading…");
@@ -410,6 +480,16 @@ namespace DevOnBike.OverfitChat
             _screenRoot.AddView(column, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.MatchParent));
 
+            // Repopulate the composer with the last prompt. This app doubles as its own benchmark harness,
+            // and every A/B arm reinstalls and restarts it — retyping the prompt each time is tedious and,
+            // worse, lets the arms drift apart on the one input that has to stay identical.
+            var lastPrompt = Prefs.GetString("last_prompt", null);
+            if (!string.IsNullOrEmpty(lastPrompt))
+            {
+                _input.Text = lastPrompt;
+                _input.SetSelection(lastPrompt.Length);
+            }
+
             var hint = AddAssistantBubble("Say hi — tokens stream as the model generates.");
             hint.PostDelayed(() =>
             {
@@ -476,11 +556,14 @@ namespace DevOnBike.OverfitChat
         // Builds the SamplingOptions for the chosen preset and installs it on the client (preserving the other
         // GenerationOptions fields). DRY (Don't-Repeat-Yourself) is on for all three — it penalises would-be
         // verbatim repetitions before sampling, so it breaks loops even under the deterministic "Precise" preset.
-        private void ApplySampling(int mode)
+        private void ApplySampling(int mode) => ApplySampling(mode, _client);
+
+        // Overload taking the client explicitly: the lazy reload has to configure the new client BEFORE
+        // publishing it to the field, so it cannot go through the field-reading form.
+        private void ApplySampling(int mode, OverfitClient? client)
         {
             _samplingMode = mode;
-            var client = _client;
-            if (client is null)
+            if (client == null)
             {
                 return;
             }
@@ -594,7 +677,9 @@ namespace DevOnBike.OverfitChat
             {
                 return;
             }
-            if (_client is null)
+            // A suspended model is not a missing one — the idle timer released the weights and the path to
+            // reload them is known, so the send proceeds and the reload happens below.
+            if (_client == null && _suspendedModelPath == null)
             {
                 Toast.MakeText(this, "Model is still loading…", ToastLength.Short)!.Show();
                 return;
@@ -605,46 +690,107 @@ namespace DevOnBike.OverfitChat
             }
 
             _busy = true;
+            Prefs.Edit()!.PutString("last_prompt", text)!.Apply(); // so the next chat entry pre-fills it
             _gradient.Pause();
             _input.Text = string.Empty;
             SetComposerEnabled(false);
             _idleHandler.RemoveCallbacksAndMessages(null);
             _genTokens = 0;
             _genFirstTokenMs = 0;
+            _genMarkCount = 0;
             StartStatsUpdater();
 
             AddUserBubble(text);
             var update = AddStreamingAssistantBubble();
-            var sb = new StringBuilder();
             var client = _client;
+            var suspendedPath = _suspendedModelPath;
 
             System.Threading.Tasks.Task.Run(() =>
             {
                 try
                 {
+                    if (client == null)
+                    {
+                        // Reload the weights the idle timer released. Configured BEFORE being published to
+                        // the field, so no other code can observe a client without its sampling preset.
+                        RunOnUiThread(() => _subtitle.Text = "⏳ reloading model…");
+                        var reloaded = CreateClient(suspendedPath!, DisplayName(suspendedPath!));
+                        ApplySampling(_samplingMode, reloaded.Client);
+                        client = reloaded.Client;
+                        RunOnUiThread(() =>
+                        {
+                            _client = reloaded.Client;
+                            _modelInfo = reloaded.Info;
+                            _suspendedModelPath = null;
+                        });
+                    }
+
+                    // Per-component decode breakdown, off by default. Flip ProfileDecode to true and the log
+                    // gains an attention / ffn / lm_head / sampler / other split per turn; `other` is the
+                    // serial remainder (norms, residuals, embed). It found the real bottleneck on
+                    // 2026-08-14 — the FFN matmuls were 12% below ParallelWorkThreshold and ran on one
+                    // thread — so it earns its place, but it costs a Stopwatch read per hook and a
+                    // multi-line log entry per message, which is not what a user's phone should be doing.
+                    if (ProfileDecode)
+                    {
+                        DecodeProfiler.Reset();
+                        DecodeProfiler.Enabled = true;
+                    }
+
+                    AppLog.Write("affinity(before): " + BigCoreAffinity.Apply());
                     client.Send(text, onText: token =>
                     {
-                        if (System.Threading.Interlocked.Increment(ref _genTokens) == 1)
+                        var n = System.Threading.Interlocked.Increment(ref _genTokens);
+                        if (n == 1)
                         {
                             _genFirstTokenMs = Android.OS.SystemClock.ElapsedRealtime();
+                            // The engine's worker threads are created on the first dispatch, so they did
+                            // not exist for the call above and would otherwise stay unpinned.
+                            AppLog.Write("affinity(decoding): " + BigCoreAffinity.Apply());
                         }
-                        sb.Append(token);
-                        RunOnUiThread(() => update(sb.ToString()));
+                        if (n % SegmentTokens == 0 && _genMarkCount < _genMarks.Length)
+                        {
+                            _genMarks[_genMarkCount++] = Android.OS.SystemClock.ElapsedRealtime();
+                        }
+                        // Post the new token only. Accumulating the answer here and re-sending the whole
+                        // string was the other half of the O(n²) — it allocated the full text per token.
+                        RunOnUiThread(() => update.Append(token));
                     });
-                    RunOnUiThread(() => update(sb.Length > 0 ? sb.ToString() : "(no output)"));
+                    if (_genTokens == 0)
+                    {
+                        RunOnUiThread(() => update.Replace("(no output)"));
+                    }
                 }
                 catch (Exception ex)
                 {
                     AppLog.Write("Generation failed", ex);
-                    RunOnUiThread(() => update("⚠ " + ex.Message));
+                    RunOnUiThread(() => update.Replace("⚠ " + ex.Message));
                 }
                 finally
                 {
+                    if (ProfileDecode)
+                    {
+                        DecodeProfiler.Enabled = false;
+                        AppLog.Write(DecodeProfiler.Report());
+                    }
+
                     var toks = _genTokens;
                     var genMs = _genFirstTokenMs > 0 ? Android.OS.SystemClock.ElapsedRealtime() - _genFirstTokenMs : 0;
                     var tps = genMs > 0 && toks > 1 ? (toks - 1) * 1000.0 / genMs : 0;
                     var (_, rssMb) = _sampler.Sample();
-                    AppLog.Write($"LLM gen: {toks} tok, {tps:F1} tok/s, RSS {rssMb} MB");
+                    // Per-window rates, oldest first. A flat series means the cumulative headline was only
+                    // converging; a falling series means decode really is slowing down as the answer grows.
+                    var segments = new System.Text.StringBuilder();
+                    var previousMs = _genFirstTokenMs;
+                    for (var i = 0; i < _genMarkCount; i++)
+                    {
+                        var windowMs = _genMarks[i] - previousMs;
+                        var windowTps = windowMs > 0 ? SegmentTokens * 1000.0 / windowMs : 0;
+                        segments.Append(i == 0 ? string.Empty : " ").Append(windowTps.ToString("F1"));
+                        previousMs = _genMarks[i];
+                    }
+                    AppLog.Write(
+                        $"LLM gen: {toks} tok, {tps:F1} tok/s, RSS {rssMb} MB, seg/{SegmentTokens}: {segments}");
                     RunOnUiThread(() =>
                     {
                         _busy = false;
@@ -704,7 +850,7 @@ namespace DevOnBike.OverfitChat
             _input.Alpha = enabled ? 1f : 0.55f;
             _send.Enabled = enabled;
             _send.Alpha = enabled ? 1f : 0.45f;
-            if (_mic is not null)
+            if (_mic != null)
             {
                 _mic.Enabled = enabled;
                 _mic.Alpha = enabled ? 1f : 0.45f;
@@ -729,7 +875,15 @@ namespace DevOnBike.OverfitChat
         }
 
         // Assistant bubble that starts as thinking-dots and swaps to streamed text on the first update.
-        private Action<string> AddStreamingAssistantBubble()
+        // Returns two callbacks: `Append` adds one streamed token, `Replace` overwrites the whole bubble
+        // (an error, or "(no output)"). They are separate on purpose. Assigning `TextView.Text` rebuilds
+        // the entire StaticLayout — measure + layout + draw of the whole answer — so doing it once per
+        // token makes streaming O(n²) in the answer length. Measured on a Snapdragon 7s Gen 2 on
+        // 2026-08-14: a 342-token answer ran at 3.4 tok/s while a 194-token one ran at 4.9, and
+        // RenderThread burned 28750 jiffies against 14470 for all eight inference workers combined —
+        // the phone was rendering, not computing. Appending into an Editable re-flows only the tail, so
+        // the per-token cost stops growing with the text already on screen.
+        private (Action<string> Append, Action<string> Replace) AddStreamingAssistantBubble()
         {
             var bubble = new FrameLayout(this);
             bubble.SetPadding(Dp(15), Dp(11), Dp(15), Dp(11));
@@ -741,22 +895,54 @@ namespace DevOnBike.OverfitChat
             var tv = new TextView(this) { Visibility = ViewStates.Gone };
             tv.SetTextColor(Color.White);
             tv.TextSize = 16f;
+            tv.SetText(string.Empty, TextView.BufferType.Editable);
             bubble.AddView(tv);
 
             AttachBubble(bubble, isUser: false);
 
             var swapped = false;
-            return text =>
+            var scrollPending = false;
+
+            void Reveal()
             {
-                if (!swapped)
+                if (swapped)
                 {
-                    swapped = true;
-                    bubble.RemoveView(dots);
-                    tv.Visibility = ViewStates.Visible;
+                    return;
                 }
-                tv.Text = text;
-                ScrollToBottom();
-            };
+                swapped = true;
+                bubble.RemoveView(dots);
+                tv.Visibility = ViewStates.Visible;
+            }
+
+            // At most one scroll in flight. Every token used to post its own FullScroll, and each of those
+            // forces a layout pass over the scroll container — the same per-token tax as the text rebuild.
+            void ScrollSoon()
+            {
+                if (scrollPending)
+                {
+                    return;
+                }
+                scrollPending = true;
+                _scroll.Post(() =>
+                {
+                    scrollPending = false;
+                    _scroll.FullScroll(FocusSearchDirection.Down);
+                });
+            }
+
+            return (
+                Append: delta =>
+                {
+                    Reveal();
+                    tv.Append(delta);
+                    ScrollSoon();
+                },
+                Replace: text =>
+                {
+                    Reveal();
+                    tv.SetText(text, TextView.BufferType.Editable);
+                    ScrollSoon();
+                });
         }
 
         private TextView NewBubbleText(string text)
@@ -866,27 +1052,13 @@ namespace DevOnBike.OverfitChat
         {
             try
             {
-                // quantize:false keeps Q4_K resident (measured ~4× faster on-device than the Q8 requant path);
-                // 4096 context + sliding window so long multi-turn chats don't error on "context full".
-                // RAM vs speed, chosen by model size. quantize:false = every weight F32 → ~8× the Q4_K file
-                // size in RAM, but the F32 matmul is faster on mobile (it beats the quantized kernels under
-                // Mono/CoreCLR's weaker codegen). quantize:true = Q4_K/Q6_K mmap'd zero-copy (low, reclaimable
-                // working set) + Q8 for the rest. So keep F32 for models small enough to fit comfortably, and
-                // switch big models to the quantized/mmap path so they don't OOM the phone.
-                var fileBytes = new System.IO.FileInfo(path).Length;
-                var quantize = fileBytes >= 550_000_000; // ~>0.7B Q4_K → mmap/quantized; smaller → fast F32
-
-                // maxNewTokens is a SAFETY cap, not the expected length — a well-behaved chat model stops at its
-                // end-of-turn token well before this. 160 was too low and chopped longer answers mid-sentence.
-                var client = OverfitClient.LoadGguf(
-                    path, maxContextLength: 4096, mmap: true, quantize: quantize, maxNewTokens: 512, slidingWindow: true);
-                AppLog.Write($"Model load: {System.IO.Path.GetFileName(path)} ({fileBytes / (1024 * 1024)} MB, quantize={quantize})");
-                var info = BuildInfo(path, client, displayName);
+                var loaded = CreateClient(path, displayName);
                 RunOnUiThread(() =>
                 {
                     _client?.Dispose();
-                    _client = client;
-                    _modelInfo = info;
+                    _client = loaded.Client;
+                    _modelInfo = loaded.Info;
+                    _suspendedModelPath = null;
                     ApplySampling(_samplingMode); // wire the chosen preset (incl. DRY) into the fresh client
                     Prefs.Edit()!.PutString("last_model_path", path)!.Apply();
                     ShowChat();
@@ -896,6 +1068,51 @@ namespace DevOnBike.OverfitChat
             {
                 AppLog.Write("Model load failed", ex);
                 RunOnUiThread(() => SetWelcomeError(ex.Message));
+            }
+        }
+
+        // The load itself, with no UI and no field side effects, so the first load and the lazy reload after
+        // an idle unload cannot drift apart in the parameters they pass (context length, quantisation policy,
+        // token cap). Runs on a background thread; throws on failure for the caller to report.
+        private (OverfitClient Client, ModelInfo Info) CreateClient(string path, string displayName)
+        {
+            {
+                // quantize:false keeps Q4_K resident (measured ~4× faster on-device than the Q8 requant path);
+                // 4096 context + sliding window so long multi-turn chats don't error on "context full".
+                // RAM vs speed, chosen by model size. quantize:false = every weight F32 → ~8× the Q4_K file
+                // size in RAM, but the F32 matmul is faster on mobile (it beats the quantized kernels under
+                // Mono/CoreCLR's weaker codegen). quantize:true = Q4_K/Q6_K mmap'd zero-copy (low, reclaimable
+                // working set) + Q8 for the rest. So keep F32 for models small enough to fit comfortably, and
+                // switch big models to the quantized/mmap path so they don't OOM the phone.
+                var fileBytes = new System.IO.FileInfo(path).Length;
+                // MEASURED AGAIN 2026-08-14 and the F32 choice above still holds. Decode is bandwidth-bound
+                // (~540 MB of F32 weights per token, 4.75 -> 5.5 GB/s once the FFN matmuls reached the
+                // worker pool), so Q4_K-resident weights — ~5.4x fewer bytes — looked like the next lever.
+                // Forcing quantize:true was tried and abandoned: time-to-first-token went from ~1 s to ~6 s
+                // (measured from the log) and generation was slow enough to be called off by hand, so there
+                // is NO tok/s figure for that arm — the run was never completed. Weak evidence, but it points
+                // the same way as the earlier note. Bytes per token are not obviously the only ceiling here;
+                // anyone re-proposing this should finish the run and get the number.
+                // RAM vs speed, chosen by model size. quantize:false = every weight F32 -> ~8x the Q4_K file
+                // size in RAM, but far faster here. quantize:true = Q4_K/Q6_K mmap'd zero-copy (low,
+                // reclaimable working set) + Q8 for the rest. Keep F32 for models small enough to fit, and
+                // switch big models to the quantized/mmap path so they do not OOM the phone.
+                //
+                // MEASURED 2026-08-14, and the reason is not the one the old comment gave. Q4_K decode ran
+                // 639 ms/token against 100 ms for F32 — 6.4x SLOWER while reading 5.4x FEWER bytes, i.e.
+                // 0.16 GB/s, nowhere near bandwidth-bound. The cause is that .NET-for-Android exposes NO ARM
+                // hardware intrinsics (AdvSimd.IsSupported is false on this arm64 device, which advertises
+                // asimddp in /proc/cpuinfo), so every NEON path in the quantised kernels runs its SCALAR
+                // fallback. Fixing that means porting those kernels to the portable Vector128<T> API, which
+                // this runtime does accelerate. Until then F32 is the right choice on mobile.
+                var quantize = fileBytes >= 550_000_000; // ~>0.7B Q4_K → mmap/quantized; smaller → fast F32
+
+                // maxNewTokens is a SAFETY cap, not the expected length — a well-behaved chat model stops at its
+                // end-of-turn token well before this. 160 was too low and chopped longer answers mid-sentence.
+                var client = OverfitClient.LoadGguf(
+                    path, maxContextLength: 4096, mmap: true, quantize: quantize, maxNewTokens: 512, slidingWindow: true);
+                AppLog.Write($"Model load: {System.IO.Path.GetFileName(path)} ({fileBytes / (1024 * 1024)} MB, quantize={quantize})");
+                return (client, BuildInfo(path, client, displayName));
             }
         }
 
@@ -912,7 +1129,7 @@ namespace DevOnBike.OverfitChat
 
         private void SetWelcomeLoading(string status)
         {
-            if (_modelSelectField is null)
+            if (_modelSelectField == null)
             {
                 return;
             }
@@ -925,7 +1142,7 @@ namespace DevOnBike.OverfitChat
 
         private void SetWelcomeError(string message)
         {
-            if (_modelSelectField is null)
+            if (_modelSelectField == null)
             {
                 return;
             }
@@ -973,25 +1190,62 @@ namespace DevOnBike.OverfitChat
                 .Show();
         }
 
+        // Any touch on the chat screen counts as activity. Without this the countdown measured time since
+        // the last KEYSTROKE, so scrolling or tapping while reading an answer did not postpone it — and the
+        // unload does not merely free RAM, it returns to model select and discards the conversation.
+        public override bool DispatchTouchEvent(MotionEvent? e)
+        {
+            if (_inChat && e != null && e.Action == MotionEventActions.Down)
+            {
+                ScheduleIdleUnload();
+            }
+            return base.DispatchTouchEvent(e);
+        }
+
         private void ScheduleIdleUnload()
         {
             _idleHandler.RemoveCallbacksAndMessages(null);
             _idleHandler.PostDelayed(UnloadIfIdle, IdleUnloadMs);
         }
 
-        // Fired 30s after the last activity: free the model and send the user back to model select.
+        // Fired 30s after the last activity: free the model's weights. On the chat screen that is ALL it
+        // does — the conversation stays and the next message reloads. Only off the chat screen does it also
+        // return to model select.
         private void UnloadIfIdle()
         {
-            if (_busy || _client is null)
+            if (_client == null)
             {
                 return;
             }
 
-            AppLog.Write("Model unloaded after 30s idle.");
+            // Working is "ask again later", not "never mind": returning without re-arming used to drop the
+            // timer for good, so a session that happened to be generating when it fired never unloaded.
+            // `_transcribing` belongs here too — unloading clears `_whisper`, which the speech-to-text pass
+            // is using at that moment, and it was not checked at all.
+            if (_busy || _transcribing)
+            {
+                _idleHandler.PostDelayed(UnloadIfIdle, IdleUnloadMs);
+                return;
+            }
+
+            var lastPath = Prefs.GetString("last_model_path", null);
             _client.Dispose();
             _client = null;
-            _modelInfo = null;
             _whisper = null; // free the speech model's RAM too
+
+            // In the chat: keep the screen, keep `_modelInfo` so the header still names the model, and
+            // remember what to reload. Without a known path there is nothing to reload from, so fall back
+            // to the old behaviour rather than stranding the user in a chat that can never answer.
+            if (_inChat && !string.IsNullOrEmpty(lastPath) && System.IO.File.Exists(lastPath))
+            {
+                _suspendedModelPath = lastPath;
+                AppLog.Write("Model unloaded after 30s idle (chat kept, reloads on next message).");
+                _subtitle.Text = "💤 model unloaded — send a message to reload";
+                return;
+            }
+
+            AppLog.Write("Model unloaded after 30s idle.");
+            _modelInfo = null;
             ShowWelcome();
         }
 
@@ -1061,11 +1315,11 @@ namespace DevOnBike.OverfitChat
         // no point showing a voice button that can't transcribe.
         private void UpdateMicVisibility()
         {
-            if (_mic is null)
+            if (_mic == null)
             {
                 return;
             }
-            var show = VoiceInputEnabled && WhisperModelPath() is not null;
+            var show = VoiceInputEnabled && WhisperModelPath() != null;
             _mic.Visibility = show ? ViewStates.Visible : ViewStates.Gone;
         }
 
@@ -1084,7 +1338,7 @@ namespace DevOnBike.OverfitChat
             }
 
             // No speech model yet → offer to add one (no network, nothing bundled).
-            if (WhisperModelPath() is null)
+            if (WhisperModelPath() == null)
             {
                 PromptAddWhisperModel();
                 return;
@@ -1253,7 +1507,7 @@ namespace DevOnBike.OverfitChat
         {
             _micPulse?.Cancel();
             _micPulse = null;
-            if (_mic is not null)
+            if (_mic != null)
             {
                 _mic.ScaleX = 1f;
                 _mic.ScaleY = 1f;
@@ -1449,7 +1703,7 @@ namespace DevOnBike.OverfitChat
 
         private void EnableChatBackHandling()
         {
-            if (!OperatingSystem.IsAndroidVersionAtLeast(33) || _backCallback is not null)
+            if (!OperatingSystem.IsAndroidVersionAtLeast(33) || _backCallback != null)
             {
                 return;
             }

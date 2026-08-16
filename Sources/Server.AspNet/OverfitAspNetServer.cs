@@ -35,16 +35,24 @@ namespace DevOnBike.Overfit.Server.AspNet
         /// embeddings and TTS are served when <paramref name="embedder"/> / <paramref name="tts"/> are supplied
         /// (501 otherwise). The pool, embedder and TTS engine are owned by the caller.
         /// </summary>
+        // OVERFIT040 on Serve: `app.Run` has a `RunAsync` sibling and this method is where the process stops
+        // being asynchronous on purpose. BOUND BY BEING THE ENTRY POINT: `Serve` is invoked from the CLI's
+        // `serve` verb, which System.CommandLine drives synchronously from the process main thread, and it
+        // blocks there for the lifetime of the host — that is its documented contract ("Blocks the calling
+        // thread"). No pool thread waits behind it, so there is none to give back; returning a task here would
+        // only move the block up to a caller that has nothing else to do with the thread either. The
+        // request-serving path below it is a separate question and is not covered by this pragma.
+#pragma warning disable OVERFIT040
         public static void Serve(
             OverfitResourcePool<OverfitClient> pool,
             string modelName,
             string host,
             int port,
             string systemMessage,
+            CancellationToken cancellationToken,
             SentenceEmbedder? embedder = null,
             OrpheusVoiceEngine? tts = null,
-            Action<string>? onListening = null,
-            CancellationToken cancellationToken = default)
+            Action<string>? onListening = null)
         {
             ArgumentNullException.ThrowIfNull(pool);
 
@@ -70,11 +78,24 @@ namespace DevOnBike.Overfit.Server.AspNet
 
             app.Lifetime.ApplicationStarted.Register(() => onListening?.Invoke($"http://{host}:{port}"));
 
-            // Discarding the shutdown Task is intentional (StopAsync is fire-and-forget on cancel);
-            // `_ =` keeps CS4014 — promoted to error repo-wide — from tripping.
+            // The shutdown task cannot be observed here, and the constraint is the callback signature rather
+            // than any diagnostic: CancellationToken.Register hands us an Action, so there is nothing to
+            // await from and no return value anything could look at, and the usual escape — making the
+            // lambda `async void` — is banned by OVERFIT027 because an exception out of one is uncatchable
+            // and kills the host process.
+            //
+            // WHAT IS LOST, accepted deliberately: if StopAsync faults, nobody learns. No log, no exit code,
+            // no trace. The visible symptom would be `app.Run` below failing to return after cancellation —
+            // a hang at shutdown with no stated cause. The two alternatives are worse for this path: holding
+            // the task in a local and inspecting it after Run returns adds cross-thread machinery to a
+            // shutdown path, and an OnlyOnFaulted continuation reintroduces an unobserved task inside a
+            // non-async lambda, where NOTHING would flag it — trading a visible discard for an invisible one.
+#pragma warning disable OVERFIT046
             using var reg = cancellationToken.Register(() => _ = app.StopAsync());
+#pragma warning restore OVERFIT046
 
             app.Run($"http://{host}:{port}");
         }
+#pragma warning restore OVERFIT040
     }
 }

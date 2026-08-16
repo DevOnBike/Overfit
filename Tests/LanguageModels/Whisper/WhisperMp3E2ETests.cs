@@ -5,7 +5,6 @@
 
 using DevOnBike.Overfit.LanguageModels.Whisper;
 using DevOnBike.Overfit.Tests.TestSupport;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Whisper
 {
@@ -20,7 +19,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Whisper
         private readonly ITestOutputHelper _out;
         public WhisperMp3E2ETests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("1s")]
         public void Transcribe_Mp3_MatchesWav()
         {
             var w = WhisperTranscriber.Load(TestModelPaths.Whisper.RequireTinyGgmlPath());
@@ -49,7 +48,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Whisper
             Assert.True(ratio >= 0.6, $"MP3 transcription diverges from WAV (overlap {ratio:P0})");
         }
 
-        [LongFact]
+        [LongFact("686ms")]
         public void Transcribe_RepeatedCall_AllocStable()
         {
             var w = WhisperTranscriber.Load(TestModelPaths.Whisper.RequireTinyGgmlPath());

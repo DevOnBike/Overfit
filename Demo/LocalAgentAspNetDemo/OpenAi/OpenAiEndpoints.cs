@@ -51,7 +51,7 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.OpenAi
                     });
                 }
 
-                var last = req.Messages[^1];
+                var last = req.Messages[req.Messages.Count - 1];
                 if (!string.Equals(last.Role, "user", StringComparison.OrdinalIgnoreCase))
                 {
                     return Results.BadRequest(new
@@ -120,7 +120,7 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.OpenAi
                     ctx.Response.Headers.ContentType = "text/event-stream";
                     ctx.Response.Headers.CacheControl = "no-cache";
                     var bodyControl = ctx.Features.Get<IHttpBodyControlFeature>();
-                    if (bodyControl is not null)
+                    if (bodyControl != null)
                     {
                         bodyControl.AllowSynchronousIO = true;
                     }
@@ -199,7 +199,20 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.OpenAi
             WriteSseRaw(ctx, JsonSerializer.Serialize(chunk, Json));
         }
 
+        // OVERFIT040 — synchronous by design, and it is the case the rule's own documentation calls out: a
+        // request path that is synchronous ON PURPOSE. The SSE chunks are produced by the generation
+        // callback `onText: delta => WriteChunk(...)`, an Action<string> with nowhere to await; async void
+        // is banned by OVERFIT027, so a blocking write is the only spelling available at that boundary. The
+        // endpoint opts in explicitly, one call earlier, via IHttpBodyControlFeature.AllowSynchronousIO —
+        // without which this would throw rather than merely hold a thread.
+        //
+        // WHAT IS LOST, and it is not small: the Kestrel thread serving this request is held for the WHOLE
+        // generation, not just for one write. Removing that means an asynchronous streaming callback in the
+        // client API, which is not this file's to change. The gate above keeps one generation in flight at a
+        // time, so today the cost is one thread, not a pool.
+#pragma warning disable OVERFIT040
         private static void WriteSseRaw(HttpContext ctx, string data)
+#pragma warning restore OVERFIT040
         {
             var bytes = Encoding.UTF8.GetBytes($"data: {data}\n\n");
             ctx.Response.Body.Write(bytes, 0, bytes.Length);

@@ -135,7 +135,7 @@ namespace DevOnBike.Overfit.LanguageModels.Embeddings
         public void EmbedQuery(string text, Span<float> destination)
         {
             ArgumentNullException.ThrowIfNull(text);
-            EmbedRaw(_queryPrefix is null ? text : _queryPrefix + text, destination);
+            EmbedRaw(_queryPrefix == null ? text : _queryPrefix + text, destination);
         }
 
         /// <summary>Encodes <paramref name="text"/> with the configured retrieval-side passage prefix prepended.</summary>
@@ -150,7 +150,7 @@ namespace DevOnBike.Overfit.LanguageModels.Embeddings
         public void EmbedPassage(string text, Span<float> destination)
         {
             ArgumentNullException.ThrowIfNull(text);
-            EmbedRaw(_passagePrefix is null ? text : _passagePrefix + text, destination);
+            EmbedRaw(_passagePrefix == null ? text : _passagePrefix + text, destination);
         }
 
         private void EmbedRaw(string text, Span<float> destination)
@@ -170,7 +170,9 @@ namespace DevOnBike.Overfit.LanguageModels.Embeddings
         public void AddTo(VectorStore store, string id, string text)
         {
             ArgumentNullException.ThrowIfNull(store);
+#pragma warning disable OVERFIT026 // BOUND: guarded at Dimension <= 1024 floats = 4 KB. Eight times the budget — the guard constant predates this rule and was chosen for embedding widths (384/768/1024), not against a stack budget. Candidate for lowering once measured.
             Span<float> vec = Dimension <= 1024 ? stackalloc float[Dimension] : new float[Dimension];
+#pragma warning restore OVERFIT026
             Embed(text, vec);
             store.Add(id, vec, text);
         }
@@ -179,7 +181,9 @@ namespace DevOnBike.Overfit.LanguageModels.Embeddings
         public void AddPassageTo(VectorStore store, string id, string text)
         {
             ArgumentNullException.ThrowIfNull(store);
+#pragma warning disable OVERFIT026 // BOUND: guarded at Dimension <= 1024 floats = 4 KB. Eight times the budget — the guard constant predates this rule and was chosen for embedding widths (384/768/1024), not against a stack budget. Candidate for lowering once measured.
             Span<float> vec = Dimension <= 1024 ? stackalloc float[Dimension] : new float[Dimension];
+#pragma warning restore OVERFIT026
             EmbedPassage(text, vec);
             store.Add(id, vec, text);
         }

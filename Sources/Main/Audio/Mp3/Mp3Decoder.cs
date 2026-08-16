@@ -486,7 +486,14 @@ namespace DevOnBike.Overfit.Audio.Mp3
             var region2Start = shortBlock ? 576 : bandsLong[_region0[g] + _region1[g] + 2];
 
             var pos = 0;
-            var bigEnd = _bigValues[g] * 2;
+
+            // Clamped, because big_values is a raw 9-bit side-info field: 0..511, doubled to as much as 1022,
+            // written into a 576-entry granule. A crafted or merely corrupt file therefore indexed past the
+            // buffer, and nothing on the path from Mp3Reader or AudioFile catches it — user-supplied input
+            // taking the process down. Truncating to the granule is what every other bound in this method
+            // already does with an overlong stream.
+            var bigEnd = Math.Min(_bigValues[g] * 2, 576);
+
             while (pos < bigEnd)
             {
                 int table = pos < region1Start ? _tableSelect[g * 3]
@@ -521,7 +528,27 @@ namespace DevOnBike.Overfit.Audio.Mp3
 
             if (br.BitPosition > bitPosEnd + 1)
             {
-                pos -= 4; // overshoot — drop the last quad
+                // Overshoot — drop the last quad, but never below the start of the granule.
+                //
+                // BOUND: pos >= 0. Reached with pos == 0 when the granule claims fewer bits than its own
+                // scalefactors consume — part2_3_length 1 with scalefac_compress 4 spends 33 bits on
+                // scalefactors and leaves bitPosEnd at 0, so neither loop above runs and there is no quad
+                // to drop. No cross-field validation exists between part2_3_length, big_values and
+                // scalefac_compress, so such a frame clears the header and side-info reads intact.
+                //
+                // Unclamped this was two defects with one cause: isBase is g * 576, so granule 0 indexed
+                // _is[-4] and threw IndexOutOfRangeException out of a public read of a user-supplied file,
+                // while any later granule landed INSIDE the array and silently zeroed four already-decoded
+                // samples of the preceding granule. The clamp closes both, because isBase + pos can no
+                // longer go below isBase.
+                //
+                // Zero is the count, not a fallback: a granule whose Huffman region cannot begin has
+                // decoded nothing, and _count1 is how many coefficients were decoded. The method already
+                // says exactly this one step earlier — part2_3_length == 0 returns with _count1[g] = 0.
+                // Clamping here makes "claimed too few bits" agree with "claimed no bits" instead of
+                // inventing a third policy, and the loop below then zeroes the whole granule as it does
+                // for any short read.
+                pos = Math.Max(pos - 4, 0);
             }
             _count1[g] = pos;
             for (; pos < 576; pos++)

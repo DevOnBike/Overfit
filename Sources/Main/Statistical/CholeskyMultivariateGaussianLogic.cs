@@ -41,8 +41,10 @@ namespace DevOnBike.Overfit.Statistical
             // has to consume its scratch here rather than falling through to a shared tail.
             if (dimensions <= StackAllocThreshold)
             {
+#pragma warning disable OVERFIT026 // BOUND: guarded at dimensions <= StackAllocThreshold = 256, so 2 x 1 KB = 2 KB; wider observations take the pooled branch below. Over the 512 B budget and recorded as such.
                 Span<float> diff = stackalloc float[dimensions];
                 Span<float> y = stackalloc float[dimensions];
+#pragma warning restore OVERFIT026
                 return logNormConst - (0.5 * SolveAndGetDistance(observation, mean, L, dimensions, diff, y));
             }
 

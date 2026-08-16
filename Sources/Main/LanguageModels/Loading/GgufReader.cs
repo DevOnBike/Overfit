@@ -20,6 +20,20 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
     ///   var buffer = new float[info.ElementCount];
     ///   reader.LoadTensorAsF32(info, buffer);
     /// </summary>
+    // OVERFIT040 for this whole type, type-scoped because the constraint is a property of the type rather
+    // than of any one of its four flagged methods (LoadTensorQ8_0Raw, ReadF16ToF32, ReadBF16ToF32,
+    // ReadQ8_0ToF32 — every one of them `_stream.Read(...)`).
+    //
+    // THE CONSTRAINT: a GgufReader is constructed, drained once, and disposed, on whatever thread asked for
+    // the model. It is model-CONSTRUCTION, not serving: the reads happen before any session exists, they run
+    // to completion on the caller's own thread, and there is no thread-pool thread behind them to hand back.
+    // Nothing is waiting on that thread except the caller who wants the model loaded.
+    //
+    // WHAT IS GIVEN UP, and it is the larger half of the reason: `GgufReader` is public API of the shipped
+    // `DevOnBike.Overfit` package, and so is every loader that drives it. Making these return tasks is a
+    // breaking change for every consumer, propagated all the way up through the model-loading surface — a
+    // decision for the maintainer, not a lint sweep.
+#pragma warning disable OVERFIT040
     public sealed class GgufReader : IDisposable
     {
         private readonly Stream _stream;
@@ -55,7 +69,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
 
         public GgufReader(Stream stream)
         {
-            if (stream is null)
+            if (stream == null)
             {
                 throw new ArgumentNullException(nameof(stream));
             }
@@ -89,6 +103,14 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             var tensorCount = _reader.ReadUInt64();
             var metaCount = _reader.ReadUInt64();
 
+            // Both counts are attacker-controlled — a .gguf is a file the user downloads — and both are used
+            // to size a dictionary before a single entry has been read. Unvalidated, a 24-byte file declaring
+            // a billion entries costs seconds and gigabytes on a large machine and an OutOfMemoryException on
+            // a small one. The bound is exact and cheap: an entry cannot be smaller than its own fixed fields,
+            // so the declared count can never exceed the bytes left in the file divided by that minimum.
+            RequireDeclaredCountFitsInFile(metaCount, MinMetadataEntryBytes, "metadata KV");
+            RequireDeclaredCountFitsInFile(tensorCount, MinTensorInfoBytes, "tensor info");
+
             // ─── Metadata KVs ──────────────────────────────────────────────
             var meta = new Dictionary<string, object>((int)metaCount);
             for (var i = 0UL; i < metaCount; i++)
@@ -105,6 +127,11 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             {
                 var name = ReadString();
                 var nDims = _reader.ReadUInt32();
+
+                // Same reasoning as the counts above: each dimension is 8 bytes on disk, so a declared
+                // dimension count larger than the remaining file is impossible and must not size an array.
+                RequireDeclaredCountFitsInFile(nDims, sizeof(ulong), "tensor dimension");
+
                 var dims = new ulong[nDims];
                 for (var d = 0; d < nDims; d++)
                 {
@@ -127,7 +154,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         /// </summary>
         public void LoadTensorAsF32(GgufTensorInfo info, Span<float> destination)
         {
-            if (info is null)
+            if (info == null)
             {
                 throw new ArgumentNullException(nameof(info));
             }
@@ -145,35 +172,35 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             switch (info.Type)
             {
                 case GgmlType.F32:
-                    ReadF32(destination[..(int)elementCount]);
+                    ReadF32(destination.Slice(0, (int)elementCount));
                     return;
 
                 case GgmlType.F16:
-                    ReadF16ToF32(destination[..(int)elementCount]);
+                    ReadF16ToF32(destination.Slice(0, (int)elementCount));
                     return;
 
                 case GgmlType.BF16:
-                    ReadBF16ToF32(destination[..(int)elementCount]);
+                    ReadBF16ToF32(destination.Slice(0, (int)elementCount));
                     return;
 
                 case GgmlType.Q8_0:
-                    ReadQ8_0ToF32(destination[..(int)elementCount]);
+                    ReadQ8_0ToF32(destination.Slice(0, (int)elementCount));
                     return;
 
                 case GgmlType.Q4_K:
-                    ReadQ4_KToF32(destination[..(int)elementCount]);
+                    ReadQ4_KToF32(destination.Slice(0, (int)elementCount));
                     return;
 
                 case GgmlType.Q6_K:
-                    ReadQ6_KToF32(destination[..(int)elementCount]);
+                    ReadQ6_KToF32(destination.Slice(0, (int)elementCount));
                     return;
 
                 case GgmlType.Q5_0:
-                    ReadQ5_0ToF32(destination[..(int)elementCount]);
+                    ReadQ5_0ToF32(destination.Slice(0, (int)elementCount));
                     return;
 
                 case GgmlType.Q5_K:
-                    ReadQ5_KToF32(destination[..(int)elementCount]);
+                    ReadQ5_KToF32(destination.Slice(0, (int)elementCount));
                     return;
 
                 default:
@@ -197,7 +224,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         /// </summary>
         public void LoadTensorQ8_0Raw(GgufTensorInfo info, Span<sbyte> quants, Span<float> scales)
         {
-            if (info is null)
+            if (info == null)
             {
                 throw new ArgumentNullException(nameof(info));
             }
@@ -275,7 +302,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         /// </summary>
         public void LoadTensorQ4_KRaw(GgufTensorInfo info, Span<byte> destination)
         {
-            if (info is null)
+            if (info == null)
             {
                 throw new ArgumentNullException(nameof(info));
             }
@@ -301,7 +328,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             }
 
             _stream.Seek(_dataStart + (long)info.Offset, SeekOrigin.Begin);
-            _stream.ReadExactly(destination[..byteCount]);
+            _stream.ReadExactly(destination.Slice(0, byteCount));
         }
 
         /// <summary>
@@ -314,7 +341,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         /// </summary>
         public void LoadTensorQ6_KRaw(GgufTensorInfo info, Span<byte> destination)
         {
-            if (info is null)
+            if (info == null)
             {
                 throw new ArgumentNullException(nameof(info));
             }
@@ -340,7 +367,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             }
 
             _stream.Seek(_dataStart + (long)info.Offset, SeekOrigin.Begin);
-            _stream.ReadExactly(destination[..byteCount]);
+            _stream.ReadExactly(destination.Slice(0, byteCount));
         }
 
         /// <summary>Reads a metadata value or returns the default if the key is absent.</summary>
@@ -430,6 +457,48 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
 
         // ─── Private I/O helpers ─────────────────────────────────────────────
 
+        /// <summary>
+        /// Smallest possible on-disk size of one metadata key/value pair: an 8-byte key length, a zero-length
+        /// key, a 4-byte value type, and at least one byte of value.
+        /// </summary>
+        private const int MinMetadataEntryBytes = 13;
+
+        /// <summary>
+        /// Smallest possible on-disk size of one tensor-info entry: an 8-byte name length, a zero-length name,
+        /// a 4-byte dimension count, a 4-byte type and an 8-byte offset.
+        /// </summary>
+        private const int MinTensorInfoBytes = 24;
+
+        /// <summary>
+        /// Refuses a count declared in the header that the rest of the file cannot possibly contain, before
+        /// that count is used to size anything.
+        ///
+        /// <para>This is the whole defence against a hostile or truncated model file turning a length field
+        /// into an allocation: every element costs at least <paramref name="minBytesPerElement"/> bytes on
+        /// disk, so a count above <c>remaining / minBytesPerElement</c> is a lie the file cannot back up.
+        /// Refusing here keeps the failure a catchable <see cref="OverfitFormatException"/> in the loader
+        /// rather than a multi-gigabyte allocation inside whichever application embeds the engine.</para>
+        /// </summary>
+        private void RequireDeclaredCountFitsInFile(ulong declared, int minBytesPerElement, string what)
+        {
+            var remaining = _stream.Length - _stream.Position;
+
+            if (remaining < 0)
+            {
+                remaining = 0;
+            }
+
+            var maximum = (ulong)remaining / (ulong)minBytesPerElement;
+
+            if (declared > maximum)
+            {
+                throw new OverfitFormatException(
+                    $"GGUF header declares {declared} {what} entries, but only {remaining} bytes remain in the "
+                    + $"file — at {minBytesPerElement} B per entry at minimum, at most {maximum} can exist. "
+                    + "The file is truncated or corrupt.");
+            }
+        }
+
         private string ReadString()
         {
             var n = _reader.ReadUInt64();
@@ -437,6 +506,11 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             {
                 throw new OverfitFormatException($"String length {n} exceeds int.MaxValue.");
             }
+
+            // A declared string length is an allocation request from the file. `int.MaxValue` is not a bound —
+            // a 32-byte file may not ask for 100 MB — so it is checked against what the file actually holds.
+            RequireDeclaredCountFitsInFile(n, 1, "string byte");
+
             var bytes = _reader.ReadBytes((int)n);
             return Encoding.UTF8.GetString(bytes);
         }
@@ -495,10 +569,14 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                     {
                         var elemType = (GgufValueType)_reader.ReadUInt32();
                         var count = _reader.ReadUInt64();
-                        if (count > int.MaxValue)
-                        {
-                            throw new OverfitFormatException("Array too large.");
-                        }
+
+                        // int.MaxValue is not a bound — it still permits a two-billion-element object[], 16 GB
+                        // of references, out of a forty-byte file. This is also the count that feeds the
+                        // tokenizer: `tokenizer.ggml.tokens` is one array entry per vocabulary item. The
+                        // smallest element type occupies one byte on disk, so the file's own remaining length
+                        // is the real limit.
+                        RequireDeclaredCountFitsInFile(count, 1, "array element");
+
                         var arr = new object[(int)count];
                         for (var i = 0; i < arr.Length; i++)
                         {
@@ -519,7 +597,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             var read = 0;
             while (read < bytes.Length)
             {
-                var n = _stream.Read(bytes[read..]);
+                var n = _stream.Read(bytes.Slice(read));
                 if (n == 0)
                 {
                     throw new EndOfStreamException("Unexpected EOF reading tensor data.");
@@ -702,7 +780,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         /// </summary>
         internal void LoadQ5RegionAsF32(GgufTensorInfo info, long elementOffset, Span<float> dst)
         {
-            if (info is null)
+            if (info == null)
             {
                 throw new ArgumentNullException(nameof(info));
             }
@@ -742,7 +820,9 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             _stream.Seek(_dataStart + (long)info.Offset + startBlock * blockBytes, SeekOrigin.Begin);
 
             var nBlocks = dst.Length / blockElems;
+#pragma warning disable OVERFIT026 // BOUND: the switch above assigns blockBytes only from Q5_0 (22 B) or Q5_K (176 B) and throws on anything else, so 176 B is the worst case. The value is a compile-time constant per branch, never read from the file, so a malformed model cannot widen it.
             Span<byte> buf = stackalloc byte[blockBytes];
+#pragma warning restore OVERFIT026
             for (var b = 0; b < nBlocks; b++)
             {
                 _stream.ReadExactly(buf);
@@ -809,4 +889,5 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             }
         }
     }
+#pragma warning restore OVERFIT040
 }

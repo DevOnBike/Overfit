@@ -1,0 +1,92 @@
+# The lab workload as a StatefulSet — AN-A5's second half.
+#
+# WHY THIS EXISTS. The peer family compares replicas against each other and assumes they are
+# interchangeable. A StatefulSet's members are not: stable identity, their own volume, and in a real
+# system their own shard of the data, which means their metrics legitimately differ. The backlog carried
+# that as "documented, never measured"; this is the manifest that lets it be measured.
+#
+# THE NAME IS DELIBERATE. `lab-workload` gives pods `lab-workload-0`, `lab-workload-1`, ... which the
+# guard's existing `lab-workload-.*` selector already matches. No guard configuration changes, so the
+# comparison against the Deployment baseline is like-for-like rather than a second experiment.
+#
+# IT REPLACES THE DEPLOYMENT, it does not run beside it: both would own the same pod-name prefix and the
+# peer group would mix two topologies, which is a third thing neither half of A5 asks about.
+#
+#   kubectl -n lab scale deployment/lab-workload --replicas=0
+#   kubectl apply -f k8s/lab/workload-statefulset.yaml
+#   ... measure ...
+#   kubectl delete -f k8s/lab/workload-statefulset.yaml
+#   kubectl delete pvc -n lab -l app.kubernetes.io/name=lab-workload    # volumeClaimTemplates outlive the set
+#   kubectl -n lab scale deployment/lab-workload --replicas=12
+#
+# WHAT THE VOLUME IS AND IS NOT. The workload does not write to it. It is here because the *topology* is
+# what the guard reads — per-member PVCs are what makes `kube_pod_owner` report a StatefulSet and what a
+# client's sharded service actually looks like. Do not read the volume's presence as "state was measured";
+# the measurable difference between members comes from uneven load, not from disk.
+apiVersion: v1
+kind: Service
+metadata:
+  name: lab-workload-headless
+  namespace: lab
+  labels:
+    app.kubernetes.io/name: lab-workload
+spec:
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: lab-workload
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: lab-workload
+  namespace: lab
+  labels:
+    app.kubernetes.io/name: lab-workload
+spec:
+  serviceName: lab-workload-headless
+  replicas: 12
+  # Parallel, not OrderedReady: twelve members started one at a time would spend the first several guard
+  # cycles with a changing population, and membership change is itself the thing A5's first half measured.
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: lab-workload
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: lab-workload
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/metrics"
+    spec:
+      terminationGracePeriodSeconds: 5
+      containers:
+        - name: workload
+          image: lab-workload:latest
+          imagePullPolicy: Never
+          ports:
+            - name: http
+              containerPort: 8080
+          resources:
+            requests:
+              memory: 64Mi
+            limits:
+              memory: 512Mi
+          volumeMounts:
+            - name: shard
+              mountPath: /shard
+  volumeClaimTemplates:
+    - metadata:
+        name: shard
+        labels:
+          app.kubernetes.io/name: lab-workload
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 64Mi

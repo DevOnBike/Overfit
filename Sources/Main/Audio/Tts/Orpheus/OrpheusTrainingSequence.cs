@@ -33,7 +33,7 @@ namespace DevOnBike.Overfit.Audio.Tts.Orpheus
             {
                 inputIds[promptTokenIds.Length + i] = audioTokenBase + OrpheusSnacBridge.CustomTokenNumber(flat[i], i);
             }
-            inputIds[^1] = endOfSpeechTokenId;
+            inputIds[inputIds.Length - 1] = endOfSpeechTokenId;
 
             return new OrpheusTrainingExample(inputIds, promptTokenIds.Length);
         }

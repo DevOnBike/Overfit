@@ -41,7 +41,7 @@ namespace DevOnBike.Overfit.Ops
             var outputNode = AllocateNode(
                 graph,
                 new TensorShape(batchSize, outC, outH, outW),
-                input.RequiresGrad || weights.RequiresGrad || (bias is not null && bias.RequiresGrad),
+                input.RequiresGrad || weights.RequiresGrad || (bias != null && bias.RequiresGrad),
                 clearMemory: true);
 
             // The convolution workspace holds per-worker im2col scratch buffers that the
@@ -53,7 +53,7 @@ namespace DevOnBike.Overfit.Ops
             // hot path; it's the cost of decoupling inference from graph state.
             Conv2DWorkspace? localWorkspace = null;
 
-            if (graph is null)
+            if (graph == null)
             {
                 localWorkspace = new Conv2DWorkspace();
                 var localWorkers = Math.Max(1, Math.Min(OverfitParallel.MaxDegreeOfParallelism, Math.Max(1, batchSize)));
@@ -65,7 +65,7 @@ namespace DevOnBike.Overfit.Ops
 
             // Single definitely-assigned expression: the graph owns the workspace when there is one,
             // otherwise the local we just built. Split ifs could not prove assignment to the compiler.
-            var workspace = graph is not null
+            var workspace = graph != null
                 ? graph.GetConv2DWorkspace(batchSize, inC, outC, h, w, k, padding, stride)
                 : localWorkspace!;
 
@@ -76,7 +76,7 @@ namespace DevOnBike.Overfit.Ops
                 // Each worker owns a private col-buffer slice and strides the batch, so the
                 // chunks are independent. Pin the data + the contiguous col buffer once and
                 // dispatch through OverfitParallel (zero-allocation, no TPL closure).
-                var biasSpan = bias is not null ? bias.DataView.AsReadOnlySpan() : ReadOnlySpan<float>.Empty;
+                var biasSpan = bias != null ? bias.DataView.AsReadOnlySpan() : ReadOnlySpan<float>.Empty;
 
                 unsafe
                 {
@@ -93,7 +93,7 @@ namespace DevOnBike.Overfit.Ops
                             Output = outputPtr,
                             Col = colPtr,
                             Bias = biasPtr,
-                            HasBias = bias is not null ? 1 : 0,
+                            HasBias = bias != null ? 1 : 0,
                             BatchSize = batchSize,
                             WorkerCount = workerCount,
                             ColLength = workspace.ColLength,
@@ -151,7 +151,7 @@ namespace DevOnBike.Overfit.Ops
             int padding,
             int stride)
         {
-            var biasNeedsGrad = bias is not null && bias.RequiresGrad;
+            var biasNeedsGrad = bias != null && bias.RequiresGrad;
             if (!input.RequiresGrad && !weights.RequiresGrad && !biasNeedsGrad)
             {
                 return;

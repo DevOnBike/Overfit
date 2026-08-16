@@ -105,7 +105,9 @@ namespace DevOnBike.Overfit.Ops
 
         private static void SiLUForwardSimd(ReadOnlySpan<float> input, Span<float> output)
         {
+#pragma warning disable OVERFIT025 // 4 KB activation tile. Eight times the OVERFIT025 budget, kept deliberately: GeluTile / SiLUTile are cache-blocking constants on a measured hot path, so shrinking them or pooling them is a PERFORMANCE change needing an A/B, not a cleanup. Signed here rather than hidden in a directory budget, so new code in Ops/ is still checked.
             Span<float> sBuf = stackalloc float[SiLUTile];
+#pragma warning restore OVERFIT025
 
             var len = input.Length;
             for (var offset = 0; offset < len; offset += SiLUTile)
@@ -113,7 +115,7 @@ namespace DevOnBike.Overfit.Ops
                 var n = Math.Min(SiLUTile, len - offset);
                 var x = input.Slice(offset, n);
                 var y = output.Slice(offset, n);
-                var s = sBuf[..n];
+                var s = sBuf.Slice(0, n);
 
                 TensorPrimitives.Sigmoid(x, s);     // s = σ(x)
                 TensorPrimitives.Multiply(x, s, y); // y = x · σ(x)
@@ -127,8 +129,10 @@ namespace DevOnBike.Overfit.Ops
             ReadOnlySpan<float> gradOutput,
             Span<float> gradInput)
         {
+#pragma warning disable OVERFIT025 // 4 KB activation tile. Eight times the OVERFIT025 budget, kept deliberately: GeluTile / SiLUTile are cache-blocking constants on a measured hot path, so shrinking them or pooling them is a PERFORMANCE change needing an A/B, not a cleanup. Signed here rather than hidden in a directory budget, so new code in Ops/ is still checked.
             Span<float> sBuf = stackalloc float[SiLUTile];
             Span<float> tmpBuf = stackalloc float[SiLUTile];
+#pragma warning restore OVERFIT025
 
             var len = input.Length;
             for (var offset = 0; offset < len; offset += SiLUTile)
@@ -137,8 +141,8 @@ namespace DevOnBike.Overfit.Ops
                 var x = input.Slice(offset, n);
                 var dO = gradOutput.Slice(offset, n);
                 var dI = gradInput.Slice(offset, n);
-                var s = sBuf[..n];
-                var t = tmpBuf[..n];
+                var s = sBuf.Slice(0, n);
+                var t = tmpBuf.Slice(0, n);
 
                 TensorPrimitives.Sigmoid(x, s);     // s = σ(x)
 

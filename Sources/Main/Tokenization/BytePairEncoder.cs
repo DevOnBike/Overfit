@@ -7,6 +7,7 @@ using System.Collections.Frozen;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using DevOnBike.Overfit.Tensors;
 
 namespace DevOnBike.Overfit.Tokenization
 {
@@ -61,6 +62,14 @@ namespace DevOnBike.Overfit.Tokenization
                     ? unknown
                     : 0;
 
+        // OVERFIT040 for `Load` only, so the encode path below stays covered by the rule.
+        //
+        // THE CONSTRAINT: a vocab JSON and a merges list read once, at construction time, on the caller's own
+        // thread, before any text is encoded — and the method exists purely to hand both file contents to
+        // `LoadFromStrings`, which is the string-in overload a caller who already has the bytes uses instead.
+        //
+        // WHAT IS GIVEN UP: `Load` is public API of the shipped `DevOnBike.Overfit` package.
+#pragma warning disable OVERFIT040
         public static BytePairEncoder Load(
             string vocabJsonPath,
             string mergesPath)
@@ -72,6 +81,7 @@ namespace DevOnBike.Overfit.Tokenization
                 vocabJson,
                 string.Join('\n', mergesLines));
         }
+#pragma warning restore OVERFIT040
 
         public static BytePairEncoder LoadFromStrings(
             string vocabJson,
@@ -125,23 +135,65 @@ namespace DevOnBike.Overfit.Tokenization
         public string Decode(
             int[] tokenIds)
         {
-            if (tokenIds is null)
-            {
-                throw new ArgumentNullException(nameof(tokenIds));
-            }
+            ArgumentNullException.ThrowIfNull(tokenIds);
 
-            var builder = new StringBuilder();
+            // Two changes, and the second is a bug fix rather than an optimisation.
+            //
+            // Allocation: this was a StringBuilder plus one DecodeToken STRING per id, and DecodeToken
+            // itself built a List<byte>, called ToArray on it and produced another string — four
+            // allocations a token to assemble text.
+            //
+            // CORRECTNESS: it also converted each token's bytes to text SEPARATELY, so a codepoint spread
+            // across two tokens became two replacement characters. Byte-level BPE splits multi-byte
+            // characters routinely, so "zazolc" with Polish diacritics came back as "za????????" — found
+            // 2026-08-11 by the first test this class's decode has ever had that runs by default. The
+            // bytes are now accumulated across the whole sequence and converted once, which is what
+            // GgufTokenizer and QwenTokenizer already did.
+            using var byteBuffer = new PooledBuffer<byte>(ByteBudget(tokenIds), clearMemory: false);
+            var byteCount = 0;
 
-            foreach (var id in tokenIds)
+            for (var i = 0; i < tokenIds.Length; i++)
             {
+                var id = tokenIds[i];
+
                 if ((uint)id < (uint)_idToToken.Length)
                 {
-                    builder.Append(DecodeToken(id));
+                    byteCount += ToBytes(_idToToken[id], byteBuffer.Span.Slice(byteCount));
                 }
             }
 
-            return builder.ToString();
+            var pending = byteBuffer.Span.Slice(0, byteCount);
+            var charCount = Encoding.UTF8.GetCharCount(pending);
+
+            using var chars = new PooledBuffer<char>(charCount, clearMemory: false);
+
+            Encoding.UTF8.GetChars(pending, chars.Span);
+
+            return chars.Span.Slice(0, charCount).ToString();
         }
+
+        /// <summary>
+        /// Upper bound on the bytes a sequence decodes to. Must be an upper bound: the loop writes into the
+        /// rented span at a running offset, so an underestimate is an exception rather than a slow path.
+        /// </summary>
+        private int ByteBudget(int[] tokenIds)
+        {
+            var total = 0;
+
+            for (var i = 0; i < tokenIds.Length; i++)
+            {
+                var id = tokenIds[i];
+
+                if ((uint)id < (uint)_idToToken.Length && _idToToken[id] is { } token)
+                {
+                    total += Encoding.UTF8.GetMaxByteCount(token.Length);
+                }
+            }
+
+            return total + 1;
+        }
+
+
 
         public string DecodeToken(
             int tokenId)
@@ -291,8 +343,8 @@ namespace DevOnBike.Overfit.Tokenization
                     continue;
                 }
 
-                var left = line[..split];
-                var right = line[(split + 1)..];
+                var left = line.Substring(0, split);
+                var right = line.Substring(split + 1);
 
                 ranks[(left, right)] = rank;
                 rank++;
@@ -304,28 +356,56 @@ namespace DevOnBike.Overfit.Tokenization
         private static string ByteDecode(
             string token)
         {
-            var bytes = new List<byte>(token.Length);
+            using var bytes = new PooledBuffer<byte>(
+                Encoding.UTF8.GetMaxByteCount(token.Length) + 1, clearMemory: false);
 
-            foreach (var ch in token)
+            var count = ToBytes(token, bytes.Span);
+            var pending = bytes.Span.Slice(0, count);
+            var charCount = Encoding.UTF8.GetCharCount(pending);
+
+            using var chars = new PooledBuffer<char>(charCount, clearMemory: false);
+
+            Encoding.UTF8.GetChars(pending, chars.Span);
+
+            return chars.Span.Slice(0, charCount).ToString();
+        }
+
+        /// <summary>
+        /// Maps a byte-level piece back to text and appends it.
+        ///
+        /// <para><b>The `try/catch` that used to wrap this is gone, and its removal is the point.</b> It
+        /// caught everything from <c>Encoding.UTF8.GetString</c> and returned the raw token instead — but
+        /// that method does not throw on malformed input, it substitutes U+FFFD, so the catch was dead code
+        /// standing in for a fallback that never ran. Keeping it would have hidden a real exception from
+        /// somewhere else in the block behind a silently wrong answer.</para>
+        ///
+        /// <para>A character outside the byte-decoder table is encoded as itself, which is what the old
+        /// <c>ch.ToString()</c> fallback did — without the string per character.</para>
+        /// </summary>
+        private static int ToBytes(string? token, Span<byte> destination)
+        {
+            if (string.IsNullOrEmpty(token))
             {
+                return 0;
+            }
+
+            var count = 0;
+
+            for (var i = 0; i < token.Length; i++)
+            {
+                var ch = token[i];
+
                 if (ByteDecoder.TryGetValue(ch, out var value))
                 {
-                    bytes.Add(value);
+                    destination[count++] = value;
+
                     continue;
                 }
 
-                var fallback = Encoding.UTF8.GetBytes(ch.ToString());
-                bytes.AddRange(fallback);
+                count += Encoding.UTF8.GetBytes(token.AsSpan(i, 1), destination.Slice(count));
             }
 
-            try
-            {
-                return Encoding.UTF8.GetString(bytes.ToArray());
-            }
-            catch
-            {
-                return token;
-            }
+            return count;
         }
 
         private static string[] BuildByteEncoder()
@@ -351,7 +431,7 @@ namespace DevOnBike.Overfit.Tokenization
 
             for (var b = 0; b < 256; b++)
             {
-                if (result[b] is null)
+                if (result[b] == null)
                 {
                     result[b] = ((char)(256 + n)).ToString();
                     n++;

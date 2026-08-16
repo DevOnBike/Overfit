@@ -6,7 +6,6 @@
 using DevOnBike.Overfit.LanguageModels;
 using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.Maths;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
 {
@@ -29,7 +28,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
         private readonly ITestOutputHelper _out;
         public LogitLensInterpretabilityTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("2s")]
         public void LogitLens_LastLayer_MatchesLogits_AndShowsPredictionAcrossDepth()
         {
             if (!File.Exists(Model))

@@ -44,9 +44,16 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         public static readonly bool AttnEnabled = ResolveFlag(OverfitEnvironment.RepackAttn);
 
         /// <summary>
-        /// Opt-in (<c>OVERFIT_TILED_PREFILL=1</c>) for the register-tiled Q4_K prefill GEMM (<see cref="GemmTiled"/>)
-        /// in place of the weight-stationary kernel — measured ~3× per projection under real parallelism. Off by
-        /// default: it repacks the weight (adds ~model RAM) and is AVX2-only.
+        /// Opt-in (<c>OVERFIT_TILED_PREFILL=1</c>) for the register-tiled Q4_K prefill GEMM
+        /// (<see cref="GemmTiled"/>) in place of the weight-stationary kernel. Off by default: it repacks
+        /// the weight (adds ~model RAM) and is AVX2-only.
+        ///
+        /// <para><b>The "~3×" this used to quote is against re-decode-per-row, not against the kernel it
+        /// replaces.</b> Against weight-stationary — which is what this flag actually swaps out — the
+        /// measured result is an <b>exact tie (0.999×)</b>: <c>ProjectBatchedWeightStationary</c> already
+        /// decodes each super-block once per row tile, so the tiling has nothing left to amortise. Turning
+        /// this on for the speedup named here would have bought nothing. Corrected 2026-08-07 from
+        /// <c>Runtime/README.md</c>, which had it right.</para>
         /// </summary>
         public static readonly bool TiledPrefillEnabled = ResolveFlag(OverfitEnvironment.TiledPrefill);
 
@@ -390,11 +397,13 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
             // Per-column accumulator state, hoisted out of the group loop (stackalloc-in-loop = CA2014). Reset
             // per output-group / per-block below. cols <= MaxTileCols keeps this a small bounded frame.
+#pragma warning disable OVERFIT026 // BOUND: cols is validated to [1, MaxTileCols=16] by the throw at the top of this method. Worst case 5 spans x 16 x 32 B = 2560 B.
             Span<Vector256<float>> accRow = stackalloc Vector256<float>[cols];
             Span<Vector256<float>> accMin = stackalloc Vector256<float>[cols];
             Span<Vector256<int>> iaccB = stackalloc Vector256<int>[cols];
             Span<Vector256<int>> iaccMinB = stackalloc Vector256<int>[cols];
             Span<Vector256<short>> q8s = stackalloc Vector256<short>[cols];
+#pragma warning restore OVERFIT026
 
             var m4b = Vector256.Create((byte)0x0F);
             var deltamask = Vector128.Create((byte)0, 1, 8, 9, 2, 3, 10, 11, 4, 5, 12, 13, 6, 7, 14, 15);
@@ -436,10 +445,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                         // Pre-decoded when the caller hoisted the F16 widening out of the tile loop; the values
                         // are identical either way, so the two paths are bit-identical.
                         var decodedAt = ds + (((long)x * nb) + b) * DecodedScalesPerBlock;
-                        var colScale = ds is not null
+                        var colScale = ds != null
                             ? Vector256.Load(decodedAt)
                             : AblateF16Scales ? Vector256.Create(1f) : LoadF16x8Rearrange(blk, deltamask);
-                        var colDmin = ds is not null
+                        var colDmin = ds != null
                             ? Vector256.Load(decodedAt + 8)
                             : AblateF16Scales ? Vector256.Create(0f) : LoadF16x8(blk + 16);
 
@@ -566,7 +575,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     // Two stores rather than one with a zero vector: `x + 0f` rewrites -0.0 to +0.0,
                     // which would break the bit-identity the no-bias path is pinned to. The branch is
                     // per output-group, not per column, and is perfectly predicted.
-                    if (bs is null)
+                    if (bs == null)
                     {
                         for (var c = 0; c < cols; c++)
                         {
@@ -575,7 +584,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                         }
                     }
 
-                    if (bs is not null)
+                    if (bs != null)
                     {
                         // Same 8 bias floats for every column - hoisted out of the column loop.
                         var biasVec = Vector256.Load(bs + x * 8);
@@ -609,6 +618,26 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// unchanged, two columns merely execute at once. Measured ceilings on this machine: the kernel's own
         /// instruction mix runs at 4.63 TFLOP/s at 256 bits and 7.71–9.08 at 512.</para>
         /// </summary>
+        /// <param name="groupStart">First output group of eight rows to compute.</param>
+        /// <param name="groupCount">
+        /// How many groups, or zero for all of them from <paramref name="groupStart"/>.
+        ///
+        /// <para>Added so the banded prefill path can reach this kernel at all. It could not: only
+        /// <see cref="GemmTiled"/> took a band, so <c>BatchedQuantProjection.TiledBandChunk</c> always called
+        /// the 256-bit kernel while its three siblings each branched on AVX-512. A feature that is
+        /// configured, parity-tested and documented as active did not run on one path - and that path is the
+        /// short-prompt case banding exists for.</para>
+        /// </param>
+        /// <param name="repacked">Weight matrix in the repacked <c>block_q4_Kx8</c> layout.</param>
+        /// <param name="outputSize">Number of output rows in the weight matrix.</param>
+        /// <param name="inputSize">Number of input elements per row.</param>
+        /// <param name="cols">Activation columns (prompt tokens) computed in this call; at most <see cref="MaxTileCols"/>.</param>
+        /// <param name="actQuants">Q8_K activation quants, column-contiguous.</param>
+        /// <param name="actScales">Per-super-block activation scales.</param>
+        /// <param name="actBsums">Per-group activation block sums, used for the min correction.</param>
+        /// <param name="output">Destination, column-major: <c>output[c * outputSize + row]</c>.</param>
+        /// <param name="bias">Optional per-row bias added after the dot; empty for none.</param>
+        /// <param name="decodedScales">Optional pre-widened F16 row scales; empty means decode them inline.</param>
         public static void GemmTiled512(
             ReadOnlySpan<byte> repacked,
             int outputSize,
@@ -619,7 +648,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             ReadOnlySpan<short> actBsums,
             Span<float> output,
             ReadOnlySpan<float> bias = default,
-            ReadOnlySpan<float> decodedScales = default)
+            ReadOnlySpan<float> decodedScales = default,
+            int groupStart = 0,
+            int groupCount = 0)
         {
             if (cols is < 1 or > MaxTileCols)
             {
@@ -635,11 +666,13 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             var nb = inputSize / 256;
             var pairs = (cols + 1) / 2;
 
+#pragma warning disable OVERFIT026 // BOUND: pairs = (cols + 1) / 2 and cols is validated to [1, MaxTileCols=16] above, so pairs <= 8. Worst case 5 spans x 8 x 64 B = 2560 B.
             Span<Vector512<float>> accRow = stackalloc Vector512<float>[pairs];
             Span<Vector512<float>> accMin = stackalloc Vector512<float>[pairs];
             Span<Vector512<int>> iaccB = stackalloc Vector512<int>[pairs];
             Span<Vector512<int>> iaccMinB = stackalloc Vector512<int>[pairs];
             Span<Vector512<short>> q8s = stackalloc Vector512<short>[pairs];
+#pragma warning restore OVERFIT026
 
             var m4b = Vector512.Create((byte)0x0F);
             var deltamask = Vector128.Create((byte)0, 1, 8, 9, 2, 3, 10, 11, 4, 5, 12, 13, 6, 7, 14, 15);
@@ -663,7 +696,14 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             fixed (float* bs = bias)
             fixed (float* ds = decodedScales)
             {
-                for (var x = 0; x < outputSize / 8; x++)
+                // Banded when the caller asked for one; the whole matrix otherwise. Same bound GemmTiled
+                // computes, so the two kernels cover identical groups for identical arguments.
+                var totalGroups = outputSize / 8;
+                var groupEnd = groupCount <= 0
+                    ? totalGroups
+                    : Math.Min(groupStart + groupCount, totalGroups);
+
+                for (var x = groupStart; x < groupEnd; x++)
                 {
                     var bptr = w + (long)x * nb * BlockKx8Bytes;
 
@@ -678,10 +718,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                         var blk = bptr + (long)b * BlockKx8Bytes;
                         var decodedAt = ds + (((long)x * nb) + b) * DecodedScalesPerBlock;
 
-                        var colScale256 = ds is not null
+                        var colScale256 = ds != null
                             ? Vector256.Load(decodedAt)
                             : LoadF16x8Rearrange(blk, deltamask);
-                        var colDmin256 = ds is not null
+                        var colDmin256 = ds != null
                             ? Vector256.Load(decodedAt + 8)
                             : LoadF16x8(blk + 16);
 
@@ -863,7 +903,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
             // Two stores rather than adding a zero vector: `x + 0f` rewrites -0.0 to +0.0 and would break the
             // bit-identity the no-bias path is pinned to.
-            if (bs is null)
+            if (bs == null)
             {
                 value.Store(o + (long)column * outputSize + x * 8);
                 return;

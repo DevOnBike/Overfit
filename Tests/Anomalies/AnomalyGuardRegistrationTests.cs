@@ -1,0 +1,423 @@
+// Copyright (c) 2026 DevOnBike.
+// This file is part of DevonBike Overfit.
+// DevonBike Overfit is licensed under the GNU AGPLv3.
+// For commercial licensing options, contact: devonbike@gmail.com
+
+using DevOnBike.Overfit.Anomalies.Contracts;
+using DevOnBike.Overfit.Anomalies.Hosting;
+using DevOnBike.Overfit.Anomalies.Monitoring;
+using DevOnBike.Overfit.Anomalies.Monitoring.Abstractions;
+using DevOnBike.Overfit.Statistics;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+
+namespace DevOnBike.Overfit.Tests.Anomalies
+{
+    /// <summary>
+    /// That the container both entry points build can actually produce the guard.
+    ///
+    /// <para><b>Nothing checked this before.</b> <c>WorkloadIdentityTests</c> resolves
+    /// <see cref="AnomalyGuardServiceOptions"/> and stops there, so every dependency of
+    /// <see cref="AnomalyGuardService"/> itself was unverified: a constructor parameter whose service type
+    /// nobody registered fails at <c>GetRequiredService</c>, which in a real deployment is host startup —
+    /// after the image is built and pushed. These are the cheapest possible tests for the failure with the
+    /// longest feedback loop in this subsystem.</para>
+    ///
+    /// <para>The two overloads are covered separately on purpose. They register the window source at two
+    /// different call sites with two different argument lists, and a change applied to one of them is a
+    /// container that works from code and throws from a ConfigMap — which is the deployment nobody runs
+    /// locally.</para>
+    /// </summary>
+    public sealed class AnomalyGuardRegistrationTests
+    {
+        /// <summary>
+        /// The code-first overload. Resolving the guard is the assertion; the hosted-service identity check
+        /// is the half a non-null assertion would miss, and it is load-bearing — a host scrapes
+        /// <see cref="AnomalyGuardService.Telemetry"/> off the singleton, and if the hosted service were a
+        /// second instance those counters would belong to an object that never runs a cycle.
+        /// </summary>
+        [Fact]
+        public void TheGuardResolvesFromTheContainerTheCodeOverloadBuilds()
+        {
+            var services = new ServiceCollection();
+
+            services.AddLogging();
+            services.AddOverfitAnomalyGuard(Prometheus());
+
+            using var provider = services.BuildServiceProvider();
+            var guard = provider.GetRequiredService<AnomalyGuardService>();
+
+            Assert.NotNull(guard);
+            Assert.Contains(guard, provider.GetServices<IHostedService>());
+        }
+
+        /// <summary>
+        /// The configuration-file overload, which is the one a deployed guard actually takes — the CLI
+        /// deserialises the file itself and calls it, because the <c>IConfiguration</c> overload binds with
+        /// reflection and cannot go into a Native-AOT image.
+        /// </summary>
+        [Fact]
+        public void TheGuardResolvesFromTheContainerTheConfigFileOverloadBuilds()
+        {
+            var services = new ServiceCollection();
+
+            services.AddLogging();
+            services.AddOverfitAnomalyGuard(
+                new AnomalyGuardConfigFile
+                {
+                    Prometheus = "http://127.0.0.1:9090",
+                    Namespace = "lab",
+                    Workload = "lab-workload",
+                    PodRegex = "lab-workload-.*",
+                });
+
+            using var provider = services.BuildServiceProvider();
+
+            Assert.NotNull(provider.GetRequiredService<AnomalyGuardService>());
+        }
+
+        /// <summary>
+        /// The window source resolves under the interface the loop asks for, is the Prometheus one, and has
+        /// singleton lifetime.
+        ///
+        /// <para><b>What this does NOT catch, stated because the obvious reading of it is wrong.</b> A stray
+        /// <c>AddSingleton&lt;PrometheusMetricWindowSource&gt;(...)</c> left alongside the interface
+        /// registration — the natural thing for somebody who later wants <c>SeriesReturned</c> or
+        /// <c>CustomChannels</c>, which are deliberately not on the interface — is <i>invisible here</i>.
+        /// Measured rather than reasoned: with both registrations present, resolving the interface returns the
+        /// interface registration's instance every time and never consults the concrete descriptor, so the
+        /// second source (and its second <c>HttpClient</c>) exists, resolves independently, and no test in this
+        /// file goes red. The <c>Assert.Same</c> below therefore proves the interface registration is a
+        /// singleton — which <c>AddSingleton</c> guarantees for free — and nothing about how many sources the
+        /// container can build.</para>
+        ///
+        /// <para>Catching that would mean asserting over the <see cref="ServiceCollection"/>'s descriptors
+        /// before the provider is built (exactly one with <c>ServiceType</c> <see cref="IMetricWindowSource"/>,
+        /// none with <c>ServiceType</c> <see cref="PrometheusMetricWindowSource"/>) rather than over resolved
+        /// instances. Not done here: it is a different kind of test — registration shape rather than
+        /// resolution — and adding it is a scope decision, not part of extracting the seam.</para>
+        /// </summary>
+        [Fact]
+        public void TheWindowSourceIsASingleInstanceBehindTheInterface()
+        {
+            var services = new ServiceCollection();
+
+            services.AddLogging();
+            services.AddOverfitAnomalyGuard(Prometheus());
+
+            using var provider = services.BuildServiceProvider();
+            var source = provider.GetRequiredService<IMetricWindowSource>();
+
+            Assert.IsType<PrometheusMetricWindowSource>(source);
+            Assert.Same(source, provider.GetRequiredService<IMetricWindowSource>());
+        }
+
+        /// <summary>
+        /// A channel that declares itself uncalibrated in the file reaches the guard's options as a name.
+        ///
+        /// <para><b>The link this covers is the one that keeps breaking in this subsystem</b>: the property
+        /// exists, the file sets it, the binding carries it, and nothing hands it across. <c>FloorCalibrator</c>
+        /// is keyed by name and never sees a <c>CustomMetricBinding</c>, so the flag has to be translated
+        /// here or the exemption is configured and inert.</para>
+        ///
+        /// <para>Asserted alongside a calibrated channel, so a registration that exempted everything — or
+        /// nothing — fails rather than passing on a one-element list that happens to look right.</para>
+        /// </summary>
+        [Fact]
+        public void AnUncalibratedChannelReachesTheGuardOptionsByName()
+        {
+            var services = new ServiceCollection();
+
+            services.AddLogging();
+            services.AddOverfitAnomalyGuard(
+                new AnomalyGuardConfigFile
+                {
+                    Prometheus = "http://127.0.0.1:9090",
+                    Namespace = "lab",
+                    Workload = "lab-workload",
+                    PodRegex = "lab-workload-.*",
+                    CustomMetrics =
+                    {
+                        ["ScrapeCoverage"] = new AnomalyGuardConfigFile.CustomEntry
+                        {
+                            Source = "up",
+                            Kind = nameof(MetricSourceKind.Ratio),
+                            Query = "avg_over_time(up{%selector%}[15m])",
+                            Calibrated = false,
+                        },
+                        ["GcCommittedBytes"] = new AnomalyGuardConfigFile.CustomEntry
+                        {
+                            Source = "dotnet_gc_committed_bytes",
+                            Kind = nameof(MetricSourceKind.Gauge),
+                        },
+                    },
+                });
+
+            using var provider = services.BuildServiceProvider();
+            var options = provider.GetRequiredService<AnomalyGuardServiceOptions>();
+
+            Assert.Equal(["ScrapeCoverage"], options.Guard.NonCalibratedCustomChannels);
+        }
+
+        /// <summary>
+        /// The built-in change-in-gap floor reaches the guard's options as a positional table, and a file
+        /// that declares none leaves it null.
+        ///
+        /// <para><b>Both halves are the test.</b> The reader is where the table is built and this is the
+        /// hand-across — the link that has broken repeatedly in this subsystem, where a property exists, a
+        /// file sets it, and nothing carries it over. Null is asserted as hard as the value: a registration
+        /// that turned "declared nothing" into a zero-filled table would satisfy
+        /// <c>AnomalyGuard.RestoreNovelty</c>'s length check and start the peer-novelty gate with its floor
+        /// off, which from outside looks exactly like a quiet cluster.</para>
+        /// </summary>
+        [Theory]
+        [InlineData("2.5MB", 2_500_000.0)]
+        [InlineData("", 0.0)]
+        public void TheBuiltInGapChangeFloorReachesTheGuardOptions(string declared, double expected)
+        {
+            var services = new ServiceCollection();
+
+            services.AddLogging();
+            services.AddOverfitAnomalyGuard(
+                new AnomalyGuardConfigFile
+                {
+                    Prometheus = "http://127.0.0.1:9090",
+                    Namespace = "lab",
+                    Workload = "lab-workload",
+                    PodRegex = "lab-workload-.*",
+                    Thresholds =
+                    {
+                        ["MemoryWorkingSetBytes"] = new AnomalyGuardConfigFile.ThresholdEntry
+                        {
+                            MinGap = "9.52MB",
+                            MinGapChange = declared,
+                        },
+                    },
+                });
+
+            using var provider = services.BuildServiceProvider();
+            var guard = provider.GetRequiredService<AnomalyGuardServiceOptions>().Guard;
+
+            // The neighbouring floor is asserted in both arms so a registration that dropped the whole
+            // thresholds block would fail rather than pass the null half by accident.
+            Assert.Equal(
+                9.52e6,
+                AnomalyGuardOptions.FloorFor(guard.MinAbsoluteGap, MetricIndex.MemoryWorkingSetBytes));
+
+            if (expected == 0.0)
+            {
+                Assert.Null(guard.MinAbsoluteGapChange);
+
+                return;
+            }
+
+            Assert.NotNull(guard.MinAbsoluteGapChange);
+            Assert.Equal(
+                expected,
+                AnomalyGuardOptions.FloorFor(
+                    guard.MinAbsoluteGapChange, MetricIndex.MemoryWorkingSetBytes));
+        }
+
+        /// <summary>
+        /// A table a host assigned in code survives a file that declares no <c>minGapChange</c>.
+        ///
+        /// <para>Unlike the three floors beside it, this one is overwritten conditionally — those are always
+        /// a table, so an unconditional assignment loses nothing, while an unconditional assignment here
+        /// would erase a caller's table and turn a working peer-novelty gate into a refusal to start.</para>
+        /// </summary>
+        [Fact]
+        public void ACodeSuppliedGapChangeTableIsNotErasedByAFileThatDeclaresNone()
+        {
+            var supplied = new double[(int)MetricIndex.Count];
+            supplied[(int)MetricIndex.MemoryWorkingSetBytes] = 7.0e6;
+
+            var services = new ServiceCollection();
+
+            services.AddLogging();
+            services.AddOverfitAnomalyGuard(
+                new AnomalyGuardConfigFile
+                {
+                    Prometheus = "http://127.0.0.1:9090",
+                    Namespace = "lab",
+                    Workload = "lab-workload",
+                    PodRegex = "lab-workload-.*",
+                },
+                new AnomalyGuardServiceOptions
+                {
+                    Guard = new AnomalyGuardOptions { MinAbsoluteGapChange = supplied },
+                });
+
+            using var provider = services.BuildServiceProvider();
+            var guard = provider.GetRequiredService<AnomalyGuardServiceOptions>().Guard;
+
+            Assert.Equal(
+                7.0e6,
+                AnomalyGuardOptions.FloorFor(
+                    guard.MinAbsoluteGapChange, MetricIndex.MemoryWorkingSetBytes));
+        }
+
+        /// <summary>
+        /// A file naming a profile AND a change floor builds a guard with the gate on.
+        ///
+        /// <para><b>The two halves are one feature and this is where that is proved.</b> The floor shipped
+        /// on 2026-08-12 and the profile key beside it; either alone is useless — a floor with no profile
+        /// gates nothing, and the arm below shows what a profile with no floor does.</para>
+        /// </summary>
+        [Fact]
+        public void AProfileAndAFloorTogetherBuildAGuardWithTheGateOn()
+        {
+            var services = new ServiceCollection();
+
+            services.AddLogging();
+            services.AddOverfitAnomalyGuard(WithNovelty("Daily", floor: "2.5MB"));
+
+            using var provider = services.BuildServiceProvider();
+            var options = provider.GetRequiredService<AnomalyGuardServiceOptions>();
+
+            Assert.Equal(PeerNoveltyOptions.Daily, options.Guard.PeerNovelty);
+
+            // Resolving is the assertion that matters: AnomalyGuardService builds the AnomalyGuard in its
+            // constructor, so a guard that would refuse to start refuses here.
+            Assert.NotNull(provider.GetRequiredService<AnomalyGuardService>());
+        }
+
+        /// <summary>
+        /// A profile with no change floor still refuses to start, with the message that names the missing
+        /// table.
+        ///
+        /// <para><b>This is the arm that must never become a start.</b> The floor is unmeasured, so a guard
+        /// that ran the gate without one would be suppressing findings against a threshold nobody chose —
+        /// and a suppression gate running with its floor off looks exactly like a quiet cluster. Refusing is
+        /// deliberate: starting loudly beats suppressing quietly.</para>
+        /// </summary>
+        [Fact]
+        public void AProfileWithoutAChangeFloorStillRefusesToStart()
+        {
+            var services = new ServiceCollection();
+
+            services.AddLogging();
+            services.AddOverfitAnomalyGuard(WithNovelty("Daily", floor: ""));
+
+            using var provider = services.BuildServiceProvider();
+
+            var error = Assert.Throws<ArgumentException>(
+                () => provider.GetRequiredService<AnomalyGuardService>());
+
+            Assert.Contains(nameof(AnomalyGuardOptions.MinAbsoluteGapChange), error.Message,
+                StringComparison.Ordinal);
+        }
+
+        /// <summary>
+        /// A file naming no profile leaves the gate off and the guard buildable — the compatibility arm for
+        /// every configuration written before the key existed.
+        /// </summary>
+        [Fact]
+        public void AFileWithNoProfileLeavesTheGateOffAndTheGuardBuildable()
+        {
+            var services = new ServiceCollection();
+
+            services.AddLogging();
+            services.AddOverfitAnomalyGuard(WithNovelty(profile: "", floor: "2.5MB"));
+
+            using var provider = services.BuildServiceProvider();
+            var options = provider.GetRequiredService<AnomalyGuardServiceOptions>();
+
+            Assert.Null(options.Guard.PeerNovelty);
+            Assert.NotNull(provider.GetRequiredService<AnomalyGuardService>());
+        }
+
+        /// <summary>
+        /// A misspelled profile is reported through <c>onProblem</c> and leaves the gate off, rather than
+        /// being rounded to a profile the operator did not choose.
+        /// </summary>
+        [Fact]
+        public void AnUnknownProfileNameIsReportedToTheHostAndLeavesTheGateOff()
+        {
+            var services = new ServiceCollection();
+            var problems = new List<string>();
+
+            services.AddLogging();
+            services.AddOverfitAnomalyGuard(
+                WithNovelty("Dayly", floor: "2.5MB"), options: null, onProblem: problems.Add);
+
+            using var provider = services.BuildServiceProvider();
+            var options = provider.GetRequiredService<AnomalyGuardServiceOptions>();
+
+            Assert.Null(options.Guard.PeerNovelty);
+            Assert.Contains(problems, p => p.Contains("Dayly", StringComparison.Ordinal));
+
+            // And the guard still builds — the gate being off is the state every deployment is in today.
+            Assert.NotNull(provider.GetRequiredService<AnomalyGuardService>());
+        }
+
+        /// <summary>
+        /// A profile a host assigned in code survives a file that names none, matching how the change floor
+        /// beside it behaves and for the same reason.
+        /// </summary>
+        [Fact]
+        public void ACodeSuppliedProfileIsNotErasedByAFileThatNamesNone()
+        {
+            var floors = new double[(int)MetricIndex.Count];
+            floors[(int)MetricIndex.MemoryWorkingSetBytes] = 2.5e6;
+
+            var services = new ServiceCollection();
+
+            services.AddLogging();
+            services.AddOverfitAnomalyGuard(
+                WithNovelty(profile: "", floor: ""),
+                new AnomalyGuardServiceOptions
+                {
+                    Guard = new AnomalyGuardOptions
+                    {
+                        PeerNovelty = PeerNoveltyOptions.Weekly,
+                        MinAbsoluteGapChange = floors,
+                    },
+                });
+
+            using var provider = services.BuildServiceProvider();
+            var options = provider.GetRequiredService<AnomalyGuardServiceOptions>();
+
+            Assert.Equal(PeerNoveltyOptions.Weekly, options.Guard.PeerNovelty);
+        }
+
+        /// <summary>
+        /// One scope, one channel, and the two peer-novelty knobs varied independently by the callers above.
+        /// </summary>
+        private static AnomalyGuardConfigFile WithNovelty(string profile, string floor)
+        {
+            return new AnomalyGuardConfigFile
+            {
+                Prometheus = "http://127.0.0.1:9090",
+                Namespace = "lab",
+                Workload = "lab-workload",
+                PodRegex = "lab-workload-.*",
+                PeerNovelty = profile,
+                Thresholds =
+                {
+                    ["MemoryWorkingSetBytes"] = new AnomalyGuardConfigFile.ThresholdEntry
+                    {
+                        MinGap = "9.52MB",
+                        MinGapChange = floor,
+                    },
+                },
+            };
+        }
+
+        /// <summary>
+        /// A syntactically valid target that nothing is listening on. Registration issues no query, and
+        /// neither does resolution — the first request happens on the first cycle, which these tests never
+        /// run.
+        /// </summary>
+        private static PrometheusHistoricalSourceConfig Prometheus()
+        {
+            return PrometheusHistoricalSourceConfig.ForOverfitServer(
+                "http://127.0.0.1:9090",
+                "lab-workload-.*",
+                "lab",
+                DateTime.UtcNow.AddMinutes(-20),
+                DateTime.UtcNow,
+                step: TimeSpan.FromSeconds(15));
+        }
+    }
+}

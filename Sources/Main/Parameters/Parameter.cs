@@ -126,7 +126,7 @@ namespace DevOnBike.Overfit.Parameters
             {
                 ObjectDisposedException.ThrowIf(_disposed == 1, this);
 
-                if (!RequiresGrad || Grad is null)
+                if (!RequiresGrad || Grad == null)
                 {
                     throw new OverfitRuntimeException(
                         "This parameter does not track gradients (RequiresGrad = false).");
@@ -178,7 +178,7 @@ namespace DevOnBike.Overfit.Parameters
 
             if (RequiresGrad)
             {
-                if (Grad is null)
+                if (Grad == null)
                 {
                     throw new OverfitRuntimeException(
                         "RequiresGrad is true but Grad storage is null. This is a bug in Parameter construction.");

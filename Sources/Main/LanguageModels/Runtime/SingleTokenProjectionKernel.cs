@@ -163,6 +163,27 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         public const long ParallelWorkThreshold = 1_000_000;
 
         /// <summary>
+        /// Overrides <see cref="ParallelWorkThreshold"/> when set; <c>null</c> uses the constant.
+        /// <para>
+        /// <b>Why this exists.</b> The constant is an absolute element count tuned on a 32-core desktop,
+        /// and that is the wrong unit: what decides is work <i>per worker</i> against dispatch cost.
+        /// Measured 2026-08-14 on a Snapdragon 7s Gen 2 (4 fast cores), SmolLM2-135M's FFN matmuls are
+        /// 576x1536 = 884,736 — 12% below the constant — so every one of them took the sequential path and
+        /// ran on the calling thread, which was 46% of decode wall time. Lowering the bound to 100,000 took
+        /// that model from 8.7 to 10.1 tok/s. See <c>docs/measured-baselines.md</c>.
+        /// </para>
+        /// <para>
+        /// It is a settable value rather than a second constant so a single benchmark process can compare
+        /// both bounds without rebuilding — comparing two builds is how a machine's drift gets attributed
+        /// to a code change. Not thread-safe by design: set it once at startup, or around a measurement.
+        /// </para>
+        /// </summary>
+        public static long? ParallelWorkThresholdOverride
+        {
+            get; set;
+        }
+
+        /// <summary>
         /// Parallel projection for large matmuls (FFN, LM head). Splits the
         /// output dimension into one contiguous band per worker via the
         /// zero-allocation <see cref="OverfitParallel"/> dispatcher — each
@@ -193,7 +214,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 throw new ArgumentException("Bias span is smaller than outputSize.", nameof(bias));
             }
 
-            if ((long)inputSize * outputSize < ParallelWorkThreshold
+            if ((long)inputSize * outputSize < (ParallelWorkThresholdOverride ?? ParallelWorkThreshold)
                 || OverfitParallel.WorkerCount <= 1)
             {
                 Project(input, weightsInputOutput, bias, output, inputSize, outputSize);
@@ -348,7 +369,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             bool copyToKey,
             bool copyToValue)
         {
-            if (cache is null)
+            if (cache == null)
             {
                 throw new ArgumentNullException(nameof(cache));
             }

@@ -80,7 +80,7 @@ namespace DevOnBike.Overfit.Ops
             ArgumentNullException.ThrowIfNull(sequences);
             foreach (var sequence in sequences)
             {
-                if (sequence is not null)
+                if (sequence != null)
                 {
                     Train(sequence);
                 }
@@ -134,7 +134,9 @@ namespace DevOnBike.Overfit.Ops
                 return string.Empty;
             }
 
+#pragma warning disable OVERFIT026 // BOUND: guarded at 64 chars = 128 B.
             Span<char> chars = context.Length <= 64 ? stackalloc char[context.Length] : new char[context.Length];
+#pragma warning restore OVERFIT026
             for (var i = 0; i < context.Length; i++)
             {
                 chars[i] = (char)context[i];

@@ -122,15 +122,16 @@ namespace DevOnBike.Overfit.Ops
                 foreach (var (key, e) in beam)
                 {
                     var pTotal = LogSumExp(e.LogPb, e.LogPnb);
+                    var labels = e.Labels;
 
                     // (a) extend by blank → same prefix, blank-ending.
                     var same = GetOrAdd(next, key, e.Labels);
                     same.LogPb = LogSumExp(same.LogPb, pTotal + logp[baseT + blankIndex]);
 
                     // (b) repeat the last label with no blank between → same prefix, non-blank-ending.
-                    if (e.Labels.Length > 0)
+                    if (labels.Length > 0)
                     {
-                        var lastLabel = e.Labels[^1];
+                        var lastLabel = labels[labels.Length - 1];
                         same.LogPnb = LogSumExp(same.LogPnb, e.LogPnb + logp[baseT + lastLabel]);
                     }
 
@@ -144,12 +145,12 @@ namespace DevOnBike.Overfit.Ops
 
                         var lp = logp[baseT + c];
                         // A repeat of the last label can only follow a blank (else it would merge).
-                        var contribution = (e.Labels.Length > 0 && c == e.Labels[^1])
+                        var contribution = (labels.Length > 0 && c == labels[labels.Length - 1])
                             ? e.LogPb + lp
                             : pTotal + lp;
 
                         // The labeling grows by c here → apply the language-model score.
-                        if (languageModel is not null)
+                        if (languageModel != null)
                         {
                             contribution += languageModelWeight * languageModel.LogProbability(e.Labels, c);
                         }
@@ -176,11 +177,27 @@ namespace DevOnBike.Overfit.Ops
             return best;
         }
 
-        private sealed class Beam(int[] labels, double logPb, double logPnb)
+        private sealed class Beam
         {
-            public int[] Labels { get; } = labels;
-            public double LogPb { get; set; } = logPb;
-            public double LogPnb { get; set; } = logPnb;
+            public Beam(int[] labels, double logPb, double logPnb)
+            {
+                Labels = labels;
+                LogPb = logPb;
+                LogPnb = logPnb;
+            }
+
+            public int[] Labels
+            {
+                get;
+            }
+            public double LogPb
+            {
+                get; set;
+            }
+            public double LogPnb
+            {
+                get; set;
+            }
         }
 
         private static Beam GetOrAdd(Dictionary<string, Beam> beams, string key, int[] labels)
@@ -228,7 +245,7 @@ namespace DevOnBike.Overfit.Ops
 
         private static double[] LogSoftmaxPerTimestep(ReadOnlySpan<float> logits, int timeSteps, int classCount)
         {
-            var logp = new double[timeSteps * classCount];
+            var logp = new double[(long)timeSteps * classCount];
             for (var t = 0; t < timeSteps; t++)
             {
                 var baseT = t * classCount;

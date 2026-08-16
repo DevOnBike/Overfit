@@ -33,9 +33,11 @@ namespace DevOnBike.Overfit.LanguageModels.Retrieval
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(initialCapacity);
 
             Dimension = dimension;
+#pragma warning disable OVERFIT028 // BOUND: the 64-bit product on the line above is compared against int.MaxValue first, so the 32-bit one below is only evaluated when it provably cannot wrap.
             _vectors = new float[(long)initialCapacity * dimension <= int.MaxValue
                 ? initialCapacity * dimension
                 : throw new ArgumentOutOfRangeException(nameof(initialCapacity))];
+#pragma warning restore OVERFIT028
             _ids = new string[initialCapacity];
             _payloads = new string?[initialCapacity];
         }
@@ -124,7 +126,7 @@ namespace DevOnBike.Overfit.LanguageModels.Retrieval
 
             var buffer = new VectorMatch[capacity];
             var written = Search(query, buffer);
-            return written == buffer.Length ? buffer : buffer[..written];
+            return written == buffer.Length ? buffer : buffer.AsSpan(0, written).ToArray();
         }
 
         /// <summary>The id stored at <paramref name="index"/> (0-based, less than <see cref="Count"/>).</summary>
@@ -202,8 +204,8 @@ namespace DevOnBike.Overfit.LanguageModels.Retrieval
             {
                 writer.Write(_ids[i]);
                 var payload = _payloads[i];
-                writer.Write(payload is not null);
-                if (payload is not null)
+                writer.Write(payload != null);
+                if (payload != null)
                 {
                     writer.Write(payload);
                 }

@@ -23,6 +23,25 @@ namespace DevOnBike.Overfit.Audio.Tts
         private bool _completed;
         private bool _disposed;
 
+        /// <param name="metadata">
+        /// The synthetic-speech marker written into the file's INFO chunk. <b>Omitting it now marks the file
+        /// anyway</b>, with a marker naming no voice profile.
+        ///
+        /// <para>It used to mean "write nothing", and that was the wrong direction for a default to fail in.
+        /// This sink lives in the TTS namespace: everything it writes is generated speech, and a
+        /// voice-cloning path able to produce unmarked audio of a real person is the one property in this
+        /// repository that must not be merely intended. It was intended - <c>Sources/Main/Audio/README.md</c>
+        /// asserted the marker was enforced at the engine, and the engine never referenced it; the three call
+        /// sites that passed it were the whole of the enforcement, so any new caller got unmarked output by
+        /// default.</para>
+        ///
+        /// <para>To write a genuinely unmarked file - a decision, not an omission - pass
+        /// <see cref="SyntheticSpeechMetadata.Unmarked"/> and say why at the call site.</para>
+        /// </param>
+        /// <param name="output">Destination stream the WAV bytes are written to.</param>
+        /// <param name="sampleRate">Sample rate in Hz of the PCM this sink will be given. Must be positive.</param>
+        /// <param name="format">Sample encoding written into the header and used when converting incoming samples.</param>
+        /// <param name="leaveOpen">When <c>true</c> the stream survives this sink's disposal; the default closes it.</param>
         public WavAudioSink(
             Stream output,
             int sampleRate,
@@ -35,7 +54,7 @@ namespace DevOnBike.Overfit.Audio.Tts
             _output = output;
             SampleRate = sampleRate;
             _format = format;
-            _infoComment = metadata?.ToInfoComment();
+            _infoComment = (metadata ?? SyntheticSpeechMetadata.ForNow(null)).ToInfoComment();
             _leaveOpen = leaveOpen;
         }
 
@@ -66,6 +85,17 @@ namespace DevOnBike.Overfit.Audio.Tts
             }
         }
 
+        // OVERFIT040 for `Complete`. THE CONSTRAINT is the interface, not a preference: this method implements
+        // `IAudioSink.Complete()`, and the same interface's `Write(ReadOnlySpan<float> samples)` takes a span,
+        // which CANNOT cross an `await`. `IAudioSink` is therefore synchronous by construction — a TTS engine
+        // pushes decoded PCM into it from a synchronous decode callback — and making one of its two methods
+        // task-returning would leave the interface half-async while breaking every implementation and caller
+        // in the shipped `DevOnBike.Overfit` package.
+        //
+        // The flagged call is `_output.Flush()`, which follows a `WavWriter.WriteMono` that is itself the
+        // synchronous write of the whole buffered file; flushing asynchronously after a synchronous write
+        // frees nothing.
+#pragma warning disable OVERFIT040
         public void Complete()
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
@@ -77,6 +107,7 @@ namespace DevOnBike.Overfit.Audio.Tts
             _output.Flush();
             _completed = true;
         }
+#pragma warning restore OVERFIT040
 
         public void Dispose()
         {

@@ -64,7 +64,9 @@ namespace DevOnBike.Overfit.Statistical
 
             if (windowSize <= StackAllocThreshold)
             {
+#pragma warning disable OVERFIT026 // BOUND: guarded at windowSize <= StackAllocThreshold = 256 floats = 1 KB; longer windows take the pooled branch below.
                 Span<float> columnScratch = stackalloc float[windowSize];
+#pragma warning restore OVERFIT026
                 ExtractCore(window, windowSize, featureCount, output, columnScratch);
                 return;
             }

@@ -100,12 +100,12 @@ namespace DevOnBike.Overfit.Autograd
         }
 
         // Context for the OverfitParallel workers. The managed weight rides through the void*
-        // context as a GCHandleScope token (it has a DecodeRow method, so it can't be a plain float* like Conv2D).
+        // context as a GcHandleScope token (it has a DecodeRow method, so it can't be a plain float* like Conv2D).
         private unsafe struct FqlContext
         {
             public float* A;      // forward: input; backward: dy
             public float* Out;    // forward: output; backward: per-partition partial-dx base
-            public nint Weight;   // GCHandleScope.Token (recover with GCHandleScope.Recover)
+            public nint Weight;   // GcHandleScope.Token (recover with GcHandleScope.Recover)
             public int N;
             public int K;
             public int M;

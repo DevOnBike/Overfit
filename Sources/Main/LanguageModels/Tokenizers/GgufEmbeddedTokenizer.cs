@@ -33,7 +33,12 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
         public int EndOfTextTokenId => _inner.EosId;
         public int UnknownTokenId => _inner.UnknownId;
         public bool SupportsZeroAllocationEncode => false;
-        public bool SupportsZeroAllocationDecode => false;
+        // True since 2026-08-11: GgufTokenizer.Decode(ids, Span<char>) writes straight into the caller's
+        // buffer and allocates 0 B once the pool is warm (pinned by
+        // GgufTokenizerSpanDecodeTests.TheSpanOverloadAllocatesNothingOnceThePoolIsWarm). Encode has no
+        // such path yet, so its flag stays false — the two are independent and were reported honestly
+        // before, which is why only this one moves.
+        public bool SupportsZeroAllocationDecode => true;
 
         public int CountTokens(ReadOnlySpan<char> text) => _inner.Encode(new string(text), addBos: false).Length;
 
@@ -51,17 +56,7 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
         }
 
         public int Decode(ReadOnlySpan<int> tokens, Span<char> destination)
-        {
-            var text = _inner.Decode(tokens);
-            if (text.Length > destination.Length)
-            {
-                throw new ArgumentException(
-                    $"Destination ({destination.Length}) is smaller than the decoded length ({text.Length}).",
-                    nameof(destination));
-            }
-            text.AsSpan().CopyTo(destination);
-            return text.Length;
-        }
+            => _inner.Decode(tokens, destination);
 
         public string DecodeToString(ReadOnlySpan<int> tokens) => _inner.Decode(tokens);
     }

@@ -5,7 +5,6 @@
 
 using DevOnBike.Overfit.LanguageModels.Tokenizers;
 using DevOnBike.Overfit.Tests.TestSupport;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Tokenizers
 {
@@ -28,7 +27,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Tokenizers
         private static HuggingFaceBpeTokenizer Load() =>
             HuggingFaceBpeTokenizer.Load(TestModelPaths.Qwen3B.RequireDir());
 
-        [LongFact]
+        [LongFact("101ms")]
         public void Load_ResolvesVocabAndEos()
         {
             var tok = Load();
@@ -36,7 +35,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Tokenizers
             Assert.Equal(151643, tok.EndOfTextTokenId);   // <|endoftext|> from tokenizer_config.json
         }
 
-        [LongFact]
+        [LongFact("65ms")]
         public void Encode_Decode_RoundTrips()
         {
             var tok = Load();
@@ -55,7 +54,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Tokenizers
             }
         }
 
-        [LongFact]
+        [LongFact("73ms")]
         public void SpecialTokens_Recognised()
         {
             var tok = Load();
@@ -64,7 +63,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Tokenizers
             Assert.Contains(QwenTokenizer.ImEnd, ids);
         }
 
-        [LongFact]
+        [LongFact("232ms")]
         public void MatchesQwenTokenizer_OnNonMultiDigitText()
         {
             var generic = Load();
@@ -82,7 +81,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Tokenizers
             }
         }
 
-        [LongFact]
+        [LongFact("186ms")]
         public void Digits_TokenizeOneTokenPerDigit_AndAgreeWithQwen()
         {
             var generic = Load();
@@ -102,7 +101,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Tokenizers
             Assert.Equal(number, generic.DecodeToString(g));       // round-trips
         }
 
-        [LongFact]
+        [LongFact("86ms")]
         public void ITokenizerSurface_CountEncodeDecode_Consistent()
         {
             var tok = (DevOnBike.Overfit.LanguageModels.Contracts.ITokenizer)Load();

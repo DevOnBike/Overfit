@@ -70,7 +70,7 @@ namespace DevOnBike.Overfit.LanguageModels.Chat
             _template = template ?? throw new ArgumentNullException(nameof(template));
 
             var stops = new List<string>();
-            if (stopSequences is not null)
+            if (stopSequences != null)
             {
                 foreach (var s in stopSequences)
                 {
@@ -151,7 +151,7 @@ namespace DevOnBike.Overfit.LanguageModels.Chat
             Action<string>? onText = null,
             ITokenConstraint? constraint = null)
         {
-            if (userMessage is null)
+            if (userMessage == null)
             {
                 throw new ArgumentNullException(nameof(userMessage));
             }
@@ -176,7 +176,7 @@ namespace DevOnBike.Overfit.LanguageModels.Chat
             Action<string>? onText = null,
             ITokenConstraint? constraint = null)
         {
-            if (userMessage is null)
+            if (userMessage == null)
             {
                 throw new ArgumentNullException(nameof(userMessage));
             }
@@ -235,7 +235,12 @@ namespace DevOnBike.Overfit.LanguageModels.Chat
             var stops = new StopSequenceDetector(_stopSequences);
             var generated = new List<int>();
             var reply = new StringBuilder();
-            var prevText = string.Empty;
+
+            // Was `var prevText = string.Empty;` plus a DecodeToString of the WHOLE run inside EmitToken,
+            // i.e. a string holding the entire reply so far allocated once per generated token. The rule it
+            // implements — decode everything, emit only what has stopped changing, because byte-level BPE
+            // splits codepoints across tokens — is unchanged and now lives somewhere it can be tested.
+            using var detokenizer = new IncrementalDetokenizer();
             var sampling = options.Sampling;
             var maxNew = options.MaxNewTokens > 0 ? options.MaxNewTokens : int.MaxValue;
             var stopOnEot = options.StopOnEndOfTextToken;          // hoisted: `in` params can't be captured by a local fn
@@ -256,15 +261,15 @@ namespace DevOnBike.Overfit.LanguageModels.Chat
                 // Incremental detokenize: decode the whole run and emit only the newly stabilised
                 // suffix (byte-level BPE can leave a trailing partial codepoint until the next token
                 // arrives — hold it back rather than emit garbage).
-                var full = _tokenizer.DecodeToString(CollectionsMarshal.AsSpan(generated));
-                if (full.Length <= prevText.Length || !full.StartsWith(prevText, StringComparison.Ordinal))
+                if (!detokenizer.TryAdvance(_tokenizer, CollectionsMarshal.AsSpan(generated), out var delta))
                 {
                     return false;
                 }
-                var delta = full[prevText.Length..];
-                prevText = full;
 
-                var emit = stops.Append(delta);
+                // The one string this step still allocates, and it stays: StopSequenceDetector.Append and
+                // the onText callback both take a string, and both are public contracts. It is linear in
+                // the reply rather than quadratic, so it was never the cost worth removing.
+                var emit = stops.Append(delta.ToString());
                 if (emit.Length > 0)
                 {
                     reply.Append(emit);
@@ -295,13 +300,25 @@ namespace DevOnBike.Overfit.LanguageModels.Chat
             }
 
             // Speculative fast path (prompt-lookup, adaptively gated): commits ≥1 token per batched
-            // verify, sampling-correct, and ~free when drafts don't fire — but it can't mask the draft
-            // against a per-token constraint, so it only runs unconstrained on a speculation-capable
-            // session. Everything else falls back to the exact single-token loop.
+            // verify, and ~free when drafts don't fire (dn == 0 takes a plain single-token step, so the
+            // only cost is the drafter call) — but it can't mask the draft against a per-token
+            // constraint, so it only runs unconstrained on a speculation-capable session. Everything
+            // else falls back to the exact single-token loop.
+            //
+            // "Sampling-correct" used to be claimed here and it needs qualifying, because THIS is the
+            // caller-facing surface. The rejection sampling is exact with respect to the distribution the
+            // verify forward computes — but that forward is batched and quantized, and its logits differ
+            // from the single-token path's by 0.47-1.02 on Qwen2.5-3B Q4_K_M (measured 2026-08-07), which
+            // is more than the usual gap between the top two tokens. So a caller passing
+            // SamplingOptions.Greedy can get DIFFERENT TEXT depending on whether speculation engaged,
+            // and whether it engaged depends on the adaptive gate and on the drafter finding an n-gram —
+            // neither of which the caller can see. OVERFIT_DISABLE_SPECULATIVE forces the exact
+            // single-token loop for the whole process. T11 in docs/test-gate-backlog.md carries the
+            // measurements and the open decision on whether greedy should opt in rather than out.
             // Hoisted out of the condition: the speculative session is needed inside the branch, and a
             // second (negated) test could not re-introduce a pattern variable in the same scope.
             var spec = _session as CachedLlamaSession;
-            var useSpeculative = constraint is null && spec is not null && spec.CanSpeculate && !DisableSpeculative;
+            var useSpeculative = constraint == null && spec != null && spec.CanSpeculate && !DisableSpeculative;
 
             if (useSpeculative)
             {

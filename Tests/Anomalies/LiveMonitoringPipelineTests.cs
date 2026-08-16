@@ -5,14 +5,12 @@
 
 using DevOnBike.Overfit.Anomalies.Adaptive;
 using DevOnBike.Overfit.Anomalies.Alerting.Abstractions;
-using DevOnBike.Overfit.Anomalies.Alerting.Contracts;
+using DevOnBike.Overfit.Anomalies.Contracts;
 using DevOnBike.Overfit.Anomalies.Gpt;
 using DevOnBike.Overfit.Anomalies.Live;
 using DevOnBike.Overfit.Anomalies.Monitoring.Abstractions;
-using DevOnBike.Overfit.Anomalies.Monitoring.Contracts;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Maths;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.Anomalies
 {
@@ -92,7 +90,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
                     },
                 };
 
-                await using (var pipeline = LiveMonitoringPipeline.CreateForTest(model, source, options, sink))
+                await using (var pipeline = LiveMonitoringPipeline.CreateForTest(model, source, options, clock: null, sink))
                 {
                     await pipeline.RunAsync(cts.Token);
 
@@ -185,7 +183,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
                 _cts = cts;
             }
 
-            public Task<List<RawMetricSeries>> ReadAsync(CancellationToken ct = default)
+            public Task<List<RawMetricSeries>> ReadAsync(CancellationToken ct)
             {
                 if (_batches.Count == 0)
                 {
@@ -204,7 +202,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
         {
             public List<AlertEvent> Events { get; } = [];
 
-            public Task SendAsync(AlertEvent alert, CancellationToken ct = default)
+            public Task SendAsync(AlertEvent alert, CancellationToken ct)
             {
                 Events.Add(alert);
                 return Task.CompletedTask;

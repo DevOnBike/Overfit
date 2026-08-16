@@ -116,7 +116,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         {
             ThrowIfDisposed();
 
-            if (onToken is null)
+            if (onToken == null)
             {
                 throw new ArgumentNullException(nameof(onToken));
             }

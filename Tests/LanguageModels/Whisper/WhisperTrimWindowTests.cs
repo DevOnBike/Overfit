@@ -7,7 +7,6 @@ using System.Diagnostics;
 using DevOnBike.Overfit.Audio;
 using DevOnBike.Overfit.LanguageModels.Whisper;
 using DevOnBike.Overfit.Tests.TestSupport;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Whisper
 {
@@ -27,7 +26,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Whisper
         private readonly ITestOutputHelper _out;
         public WhisperTrimWindowTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("3s")]
         public void Trim_MatchesFullWindowText_AndIsFasterOnShortClips()
         {
             var ggml = TestModelPaths.Whisper.RequireTinyGgmlPath();

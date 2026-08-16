@@ -7,7 +7,6 @@ using System.Diagnostics;
 using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Runtime;
 using DevOnBike.Overfit.LanguageModels.Tokenizers;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
 {
@@ -27,14 +26,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
 
         public Phi4PerfTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [ModelFact(Path, "1min22s")]
         public void Phi4_DecodeThroughput_BestOfN()
         {
-            if (!File.Exists(Path))
-            {
-                _out.WriteLine("missing Phi-4 gguf");
-                return;
-            }
 
             using var engine = CachedLlamaInferenceEngine.LoadGguf(Path);
             var tok = GgufTokenizer.Load(Path);
@@ -58,8 +52,8 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             }
 
             Array.Sort(perRun);
-            _out.WriteLine($"=== Phi-4 14B Q4_K_M decode: min {perRun[0]:F2} | median {perRun[Runs / 2]:F2} | max {perRun[^1]:F2} tok/s, {bytesPerTok} B/tok ===");
-            Assert.True(perRun[^1] > 0);
+            _out.WriteLine($"=== Phi-4 14B Q4_K_M decode: min {perRun[0]:F2} | median {perRun[Runs / 2]:F2} | max {perRun[perRun.Length - 1]:F2} tok/s, {bytesPerTok} B/tok ===");
+            Assert.True(perRun[perRun.Length - 1] > 0);
         }
 
         private static long DecodeFixed(

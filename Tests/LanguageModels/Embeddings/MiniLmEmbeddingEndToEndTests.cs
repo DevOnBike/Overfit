@@ -31,7 +31,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Embeddings
             return dot; // both are L2-normalized
         }
 
-        [LongFact]
+        [LongFact("1s")]
         public void RealMiniLm_ParaphrasesScoreHigherThanUnrelated()
         {
             var dir = TestModelPaths.MiniLm.Dir;
@@ -55,7 +55,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Embeddings
                 $"paraphrase cosine {simParaphrase:F3} should clearly exceed unrelated {simUnrelated:F3}");
         }
 
-        [LongFact]
+        [LongFact("973ms")]
         public void RealMiniLm_DrivesVectorStoreRetrieval()
         {
             var dir = TestModelPaths.MiniLm.Dir;
@@ -78,16 +78,11 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Embeddings
             Assert.Equal("guitar", top[0].Id);
         }
 
-        [LongFact]
+        [FixtureFact(TestFixture.MiniLmReferenceEmbeddings, "837ms")]
         public void RealMiniLm_MatchesReferenceVectorWhenAvailable()
         {
             var dir = TestModelPaths.MiniLm.Dir;
             var refPath = Path.Combine(dir, "minilm_reference_embeddings.json");
-            if (!File.Exists(refPath))
-            {
-                // No reference dropped — semantic tests above cover correctness. Skip parity silently.
-                return;
-            }
 
             TestModelPaths.MiniLm.RequireConfigJsonPath();
             using var embedder = SentenceEmbedder.FromPretrained(dir);

@@ -5,7 +5,7 @@
 
 using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Runtime;
-using Xunit.Abstractions;
+using DevOnBike.Overfit.Tests.TestSupport;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
 {
@@ -24,7 +24,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
         private readonly ITestOutputHelper _out;
         public PrefixKvCacheParityTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact]  // runtime unmeasured — the test failed after 4s (2026-08-07)
         public void RestoredPrefix_MatchesFullPrefill_AndReusesAcrossRequests()
         {
             if (!File.Exists(ModelPath))
@@ -33,6 +33,20 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
                 return;
             }
 
+            // HOLD THE KERNEL LAYOUT CONSTANT, or this test silently stops testing what it claims.
+            //
+            // It compares prefilling 32 tokens in one go against 24 + 8 in two, and asserts the generated
+            // tokens match. Those two shapes can dispatch to different kernels, and the repacked
+            // `block_q*_Kx8` GEMMs associate their reduction differently from the per-row ones — measured
+            // elsewhere in this repository at `maxAbsLogitDiff ~ 0.44`, which is enough to flip an argmax.
+            // A `*.gguf.repack` sidecar sets `IsPrepacked` and switches the repacked path on regardless of
+            // any env flag, so on a box with a sidecar both halves ran repacked and disagreed.
+            //
+            // Measured 2026-08-07: without this scope the very first generated token differed (expected 34,
+            // got 322); with it, the test passes. The failure was never about prefix reuse — the thing this
+            // test exists to verify — and it took the first-ever [LongFact] run to surface it at all.
+            // `BatchedPrefillParityTests` learned the same lesson two days earlier and carries the same scope.
+            using var layout = new NonRepackedKernelScope();
             using var engine = CachedLlamaInferenceEngine.LoadGguf(ModelPath);
 
             var prefix = new int[24];   // "system prompt"

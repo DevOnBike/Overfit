@@ -5,7 +5,7 @@
 
 Rule ID | Category | Severity | Notes
 --------|----------|----------|-------
-OVERFIT001 | Performance | Warning | Heap array allocation in per-call code — use PooledBuffer/PooledArray/TensorStorage/stackalloc
+OVERFIT001 | Performance | Warning | Heap array allocation in per-call code — use PooledBuffer/TensorStorage/stackalloc
 OVERFIT002 | Performance | Warning | Jagged array allocation in per-call code — use a flat array Span-sliced per row
 OVERFIT003 | Performance | Warning | Boxing conversion in per-call code
 OVERFIT004 | Performance | Warning | Closure/delegate allocation in per-call code (capturing lambda or instance method group)
@@ -29,4 +29,26 @@ OVERFIT021 | Style | Warning | else / else if — use a guard clause + early ret
 OVERFIT022 | Reliability | Warning | Direct recursion — unbounded stack depth; StackOverflowException is uncatchable in .NET
 OVERFIT023 | Reliability | Warning | Loop with no exit condition in its header (while(true) / for(;;)) — state the bound
 OVERFIT024 | Maintainability | Warning | Environment-variable name literal — declare it in OverfitEnvironment so every switch has one audit point
+OVERFIT025 | Reliability | Warning | stackalloc over the stack budget in BYTES (default 512 B, per-directory via overfit_max_stackalloc_bytes) — StackOverflowException is uncatchable and kills the host
+OVERFIT026 | Reliability | Warning | stackalloc with a variable element count — its stack cost cannot be read off the line; use a constant, pool it, or pragma with the bound
+OVERFIT027 | Reliability | Warning | async void method or lambda — the exception has no task to surface in and is rethrown on the captured context, killing the host process
+OVERFIT028 | Reliability | Warning | Array length computed by 32-bit multiplication — a positive wrap yields an undersized buffer, not an exception
+OVERFIT029 | Naming | Warning | Awaitable method not named Async — at the call site it reads like completed work
+OVERFIT030 | Reliability | Warning | Awaitable public API with no CancellationToken — callers cannot abandon it
+OVERFIT031 | Performance | Warning | async method whose only await is its last statement — return the task and drop the state machine (not reported when a using/try would be torn down early)
+OVERFIT032 | Reliability | Warning | await without ConfigureAwait(false) — a library does not choose its host; a captured context deadlocks a blocking caller under WPF/WinForms/MAUI (Task.Yield exempt)
 OVERFIT900 | Performance | Error | A per-call OVERFIT rule fired inside an [OverfitHotPath] member/type — escalated to a build error
+OVERFIT033 | Performance | Warning | Jagged float[][] type — use a flat float[] Span-sliced per row or an Overfit buffer
+OVERFIT034 | Design | Warning | More than one namespace-level type in a file
+OVERFIT035 | Design | Error | Two Schemas/*.json files map to the same generated constant
+OVERFIT036 | Design | Error | Schema file name cannot become a C# identifier
+OVERFIT037 | Design | Warning | Comment is not in English — comments here carry measurements and rejected designs, not only description
+OVERFIT038 | Reliability | Warning | Count read from a file sizes an allocation, a counted read or a loop with no bound checked in between — the validator must run BEFORE the first use
+OVERFIT039 | Reliability | Warning | Blocking on a task (.GetAwaiter().GetResult(), .Result, Task.Wait()) — under a saturated pool the waiter and the continuation deadlock silently
+OVERFIT040 | Reliability | Warning | Synchronous method calling APIs that have async siblings — the method should return a task, or say with a pragma why it is synchronous by design
+OVERFIT041 | Reliability | Warning | CancellationToken parameter with a default value — the caller silently gets None and the operation is uncancellable while still looking cancellable
+OVERFIT042 | Design | Warning | Index-from-end operator (x[^1]) — a readability decision; write the arithmetic out. Ranges are unaffected
+OVERFIT043 | Design | Warning | Range operator (x[1..]) — a readability decision; use Slice/Substring/AsSpan
+OVERFIT044 | Design | Warning | Null pattern (is null / is not null) — a readability decision; use == null / != null
+OVERFIT045 | Design | Warning | Primary constructor on a class or struct — write an ordinary constructor; positional records are exempt
+OVERFIT046 | Reliability | Warning | Task discarded with '_ =' — an explicit discard silently opts out of CS4014 (an error repo-wide), so the task's exceptions are never observed

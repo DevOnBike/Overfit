@@ -8,7 +8,6 @@ using DevOnBike.Overfit.Audio.Tts.Orpheus;
 using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.LoRA;
 using DevOnBike.Overfit.LanguageModels.Runtime;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
 {
@@ -39,14 +38,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
         private readonly ITestOutputHelper _out;
         public LoRAMergeDecodeSpeedTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [ModelFact([Orpheus, Adapter], "1min54s")]
         public void Merged_Vs_Preset_DecodeTokensPerSecond()
         {
-            if (!File.Exists(Orpheus) || !File.Exists(Adapter))
-            {
-                _out.WriteLine("missing orpheus/adapter");
-                return;
-            }
 
             using var trainer = new VoiceCloneTrainer(Orpheus, maxSeqLen: 256, new QLoRAOptions());
             trainer.LoadAdapter(Adapter);

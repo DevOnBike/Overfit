@@ -140,7 +140,12 @@ namespace DevOnBike.Overfit.Demo.Unity.Server
         ///     Writes the network's parameters as a flat little-endian <c>float32</c> blob.
         ///     Matches the Unity client's expected format.
         /// </summary>
+        // OVERFIT040 — synchronous by design: a checkpoint write in a console training app, called once per
+        // generation from SwarmTrainer after the generation's work is finished. Nothing else is running that
+        // could use the thread, and there is no pool to starve in a process that owns its own threads.
+#pragma warning disable OVERFIT040
         public void SaveToFile(string path)
+#pragma warning restore OVERFIT040
         {
             var genome = new float[ParameterCount];
             StoreGenome(genome);
@@ -155,7 +160,11 @@ namespace DevOnBike.Overfit.Demo.Unity.Server
         ///     Returns false and leaves the network untouched when the file is missing, has
         ///     the wrong size, or contains non-finite values.
         /// </summary>
+        // OVERFIT040 — synchronous by design: the mirror of SaveToFile above. Called once at startup by
+        // DemoMode, before the TCP listener accepts anything, in a console process that owns its threads.
+#pragma warning disable OVERFIT040
         public bool LoadFromFile(string path)
+#pragma warning restore OVERFIT040
         {
             if (!File.Exists(path))
             {

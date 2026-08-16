@@ -3,6 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Runtime.CompilerServices;
 using DevOnBike.Overfit.Tests.TestSupport;
 
 namespace DevOnBike.Overfit.Tests
@@ -24,7 +25,10 @@ namespace DevOnBike.Overfit.Tests
     /// </summary>
     internal sealed class SmallModelFact : FactAttribute
     {
-        public SmallModelFact()
+        public SmallModelFact(
+            [CallerFilePath] string sourceFilePath = null,
+            [CallerLineNumber] int sourceLineNumber = -1)
+            : base(sourceFilePath, sourceLineNumber)
         {
             if (!File.Exists(TestModelPaths.Qwen05B.Q4KmGgufPath))
             {

@@ -74,7 +74,7 @@ namespace DevOnBike.Overfit.Demo.QLoRAFineTune
                         Console.Write($"\r  epoch {epoch + 1}/{epochs}  step {step,4}  loss {loss,8:F4}   ");
                     }
                 });
-                Console.WriteLine($"\n  done: loss {history[0]:F3} -> {history[^1]:F4} over {history.Count} steps ({sw.Elapsed.TotalMinutes:F1} min)");
+                Console.WriteLine($"\n  done: loss {history[0]:F3} -> {history[history.Count - 1]:F4} over {history.Count} steps ({sw.Elapsed.TotalMinutes:F1} min)");
 
                 var savePath = Path.ChangeExtension(textPath, ".lora");
                 tuner.SaveAdapter(savePath);
@@ -84,7 +84,13 @@ namespace DevOnBike.Overfit.Demo.QLoRAFineTune
             // ── interactive chat ──
             Console.WriteLine("Ask the model anything (it now knows your text). Empty line or 'exit' to quit.\n");
 
+            // BOUND: the console session. Every pass blocks on Console.ReadLine(), so the loop advances
+            // only when the user does, and the guard below breaks on 'exit', on an empty line and on
+            // end-of-input — IsNullOrWhiteSpace covers the null ReadLine returns when stdin closes or a
+            // redirected input runs out, so a piped or detached stdin ends the loop rather than spinning.
+#pragma warning disable OVERFIT023
             while (true)
+#pragma warning restore OVERFIT023
             {
                 Console.Write("you> ");
                 var prompt = Console.ReadLine();

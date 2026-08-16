@@ -57,22 +57,30 @@ namespace DevOnBike.Overfit.Data.Serialization
         private static void LoadTensor(BinaryReader br, TensorSpan<float> view) // TensorSpan zamiast TensorView
         {
             var rank = br.ReadInt32();
+
+            // Checked BEFORE the array is sized, and the order is the defect. The rank comparison existed
+            // but sat after `new int[rank]` and its read loop, so a file declaring a huge or negative rank
+            // got its allocation and its loop first and met the guard afterwards — the guard was there and
+            // the file went around it.
+            if (rank != view.Rank)
+            {
+                throw new OverfitFormatException(
+                    $"Tensor rank mismatch. File: {rank}, model: {view.Rank}.");
+            }
+
             var fileShape = new int[rank];
+
             for (var i = 0; i < rank; i++)
             {
                 fileShape[i] = br.ReadInt32();
-            }
-
-            if (rank != view.Rank)
-            {
-                throw new Exception($"Tensor rank mismatch! File: {rank}, Model: {view.Rank}");
             }
 
             for (var i = 0; i < rank; i++)
             {
                 if (fileShape[i] != view.GetDim(i))
                 {
-                    throw new Exception($"Dimension mismatch at index {i}! File: {fileShape[i]}, Model: {view.GetDim(i)}");
+                    throw new OverfitFormatException(
+                        $"Dimension mismatch at index {i}. File: {fileShape[i]}, model: {view.GetDim(i)}.");
                 }
             }
 

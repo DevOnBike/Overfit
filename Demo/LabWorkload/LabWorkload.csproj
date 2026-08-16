@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>DevOnBike.Overfit.LabWorkload</RootNamespace>
+    <AssemblyName>lab-workload</AssemblyName>
+    <InvariantGlobalization>true</InvariantGlobalization>
+
+    <!-- Verified AOT-clean, published JIT. The trim/AOT analyzers run on every ordinary build, so this
+         cannot quietly pick up a reflection dependency, but nothing pays the AOT compile cost on a project
+         that changes whenever a new fault is needed. Publishing native is then <PublishAot>true</PublishAot>
+         and nothing else.
+
+         Not chosen on taste: the lab fitted four inference replicas because each held a 1.07 GB model. This
+         app's working set is ~59 MB, so twenty cost ~1.2 GB on a 31 GiB node — AOT would make that ~30 MB
+         each and relieve a constraint that is not binding. -->
+    <IsAotCompatible>true</IsAotCompatible>
+    <EnableRequestDelegateGenerator>true</EnableRequestDelegateGenerator>
+
+    <!-- No project references on purpose. This stands in for a CLIENT's application, not for ours: the
+         guard must be exercised against something it knows nothing about, mapped through the configuration
+         file like any other deployment. A dependency on Overfit here would let a mistake in the metric map
+         hide behind shared types. -->
+    <!-- OVERFIT024 wants env-var names in OverfitEnvironment. This project has no reference to
+         Main on purpose (see above), so that constant table is out of reach; the names are local
+         to this stand-in and are documented on FaultProfile. -->
+    <NoWarn>$(NoWarn);OVERFIT024</NoWarn>
+  </PropertyGroup>
+
+</Project>

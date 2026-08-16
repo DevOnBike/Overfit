@@ -24,6 +24,20 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints.Schema
         // already-emitted properties (preventing a duplicate-key dead-end). Unused for enum tries.
         private readonly ulong[] _reachable;
 
+        /// <summary>
+        /// Values whose reachability can be tracked — the width of the bitmask, and therefore a hard limit
+        /// on how many object properties a schema may declare while forbidding additional ones.
+        ///
+        /// <para><b>Named rather than left as a literal, because three separate places bound themselves by
+        /// it and none of them said so.</b> The reachability loop below stopped at 64; the compiler drops
+        /// a <c>required</c> entry past 64 from its bitmask; the tracker refuses to record an emitted
+        /// property past 64. Each guard prevents a crash and each one changes behaviour silently — a
+        /// property that cannot be generated, a required property that is not enforced, a duplicate key
+        /// that is not caught. <c>JsonSchemaCompiler</c> now refuses such a schema outright, and this
+        /// constant is what it refuses against.</para>
+        /// </summary>
+        public const int MaxTrackedValues = 64;
+
         /// <summary>Builds a trie from <paramref name="values"/> (property names or enum values).</summary>
         public JsonStringTrie(IReadOnlyList<string> values)
         {
@@ -70,13 +84,25 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints.Schema
             // Reachability bitmasks: for each value v (≤ 64), OR bit v into every node on its path (root
             // included), so ReachableMask(node) = the set of values still completable from that node.
             _reachable = new ulong[_nodes.Length];
-            for (var v = 0; v < values.Count && v < 64; v++)
+            for (var v = 0; v < values.Count && v < MaxTrackedValues; v++)
             {
                 var node = 0;
                 _reachable[node] |= 1UL << v;
                 foreach (var c in values[v])
                 {
-                    TryGetChild(node, c, out node);
+                    // Asserted, not assumed. Every character of every value has an edge because this trie
+                    // was built from these very values a few lines above — but the result used to be
+                    // discarded, and TryGetChild's failure value is 0, which is the ROOT. A broken
+                    // invariant would therefore not fault: it would silently walk back to the root and OR
+                    // this value's bit into nodes belonging to other values, corrupting the mask that
+                    // decides which key characters the model may emit.
+                    if (!TryGetChild(node, c, out node))
+                    {
+                        throw new OverfitRuntimeException(
+                            $"Trie built from '{values[v]}' has no edge for '{c}' on the path it was just "
+                            + "constructed from. The trie and its reachability masks have diverged.");
+                    }
+
                     _reachable[node] |= 1UL << v;
                 }
             }

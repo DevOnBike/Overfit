@@ -4,7 +4,6 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using DevOnBike.Overfit.LanguageModels;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
 {
@@ -22,7 +21,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
         private readonly ITestOutputHelper _out;
         public Q8KvCacheCoherenceTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("2s")]
         public void Q8KvCache_RealModel_GeneratesCoherently()
         {
             var path = Path.Combine(

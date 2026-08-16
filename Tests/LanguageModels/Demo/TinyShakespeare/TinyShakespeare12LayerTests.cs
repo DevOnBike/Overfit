@@ -9,7 +9,6 @@ using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Optimizers;
 using DevOnBike.Overfit.Parameters;
 using DevOnBike.Overfit.Tokenization;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Demo.TinyShakespeare
 {

@@ -1,0 +1,59 @@
+# Traffic for the lab workload, on a daily curve, generated from inside the cluster.
+#
+# Running it as a pod removes the whole `kubectl port-forward` path, which produced three separate classes of
+# silent failure in earlier runs: stale forwards answering for the wrong pod, forwards dropping mid-run and
+# leaving a replica idle inside a peer group, and the driver being an xUnit test whose output was buffered
+# until after the run it would have explained.
+#
+#   dotnet publish Demo/LabLoadDriver/LabLoadDriver.csproj -c Release -o Demo/LabLoadDriver/publish
+#   docker build -f Demo/LabLoadDriver/Dockerfile -t lab-load-driver:latest Demo/LabLoadDriver
+#   kubectl apply -f k8s/lab/load-driver.yaml
+#
+# The daily curve is the point. Every load run this project has done was FLAT, and the trend detector's worst
+# case is the rising limb of a daily curve — it looks exactly like a leak over any window shorter than the
+# period. The one measurement of that effect (20 min gave 234 false incidents a day, 60 gave 93, 240 gave
+# 2583) came from the synthetic generator and has never been reproduced on a cluster.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lab-load-driver
+  namespace: lab
+  labels:
+    app.kubernetes.io/name: lab-load-driver
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: lab-load-driver
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: lab-load-driver
+    spec:
+      containers:
+        - name: driver
+          image: lab-load-driver:latest
+          imagePullPolicy: Never
+          env:
+            - name: LAB_TARGET
+              value: lab-workload.lab.svc.cluster.local
+            - name: LAB_PEAK_RPS
+              value: "24"
+            # A quarter of peak at the trough. Real overnight traffic does not go to zero, and a trough at
+            # zero would make the RED signals undefined for hours — the guard would report blindness rather
+            # than health, which is correct behaviour and a useless experiment.
+            - name: LAB_TROUGH
+              value: "0.25"
+            # A real day. Compressing it would change the ratio of trend window to cycle period, and that
+            # ratio IS the thing under test — the whole question is whether a 20-minute window mistakes a
+            # daily slope for a trend.
+            - name: LAB_PERIOD_MIN
+              value: "1440"
+            - name: LAB_JITTER
+              value: "0.10"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 64Mi
+            limits:
+              memory: 192Mi

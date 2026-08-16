@@ -5,7 +5,6 @@
 
 using DevOnBike.Overfit.LanguageModels.Whisper;
 using DevOnBike.Overfit.Tests.TestSupport;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Whisper
 {
@@ -20,7 +19,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Whisper
         private readonly ITestOutputHelper _out;
         public WhisperPolishE2ETests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("888ms")]
         public void Transcribe_Polish_Recording()
         {
             var ggml = TestModelPaths.Whisper.RequireTinyGgmlPath();

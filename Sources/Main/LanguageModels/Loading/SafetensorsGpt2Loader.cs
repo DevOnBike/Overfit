@@ -46,11 +46,11 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
 
         public static GPT1Model Load(ISafetensorsSource reader, GPT1Config config)
         {
-            if (reader is null)
+            if (reader == null)
             {
                 throw new ArgumentNullException(nameof(reader));
             }
-            if (config is null)
+            if (config == null)
             {
                 throw new ArgumentNullException(nameof(config));
             }
@@ -200,7 +200,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         // Extracts a [rows, colLen] column block from a row-major [rows, srcCols] matrix.
         private static float[] ColBlock(ReadOnlySpan<float> src, int rows, int srcCols, int colOffset, int colLen)
         {
-            var outBuf = new float[rows * colLen];
+            var outBuf = new float[(long)rows * colLen];
             for (var i = 0; i < rows; i++)
             {
                 var srcRow = i * srcCols + colOffset;
@@ -216,7 +216,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         // Extracts a [rowLen, cols] row block from a row-major [rows, cols] matrix.
         private static float[] RowBlock(float[] src, int cols, int rowOffset, int rowLen)
         {
-            var outBuf = new float[rowLen * cols];
+            var outBuf = new float[(long)rowLen * cols];
             src.AsSpan(rowOffset * cols, rowLen * cols).CopyTo(outBuf);
             return outBuf;
         }

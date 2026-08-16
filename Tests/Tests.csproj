@@ -1,6 +1,9 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
 		<TargetFramework>net10.0</TargetFramework>
+		<!-- xunit v3 ships its own test host, so the project is an executable rather than a
+	     library discovered by VSTest. Without this the assembly builds and no test runs. -->
+		<OutputType>Exe</OutputType>
 		<Nullable>annotations</Nullable>
 		<ImplicitUsings>enable</ImplicitUsings>
 		<IsPackable>false</IsPackable>
@@ -8,16 +11,39 @@
 		<RootNamespace>DevOnBike.Overfit.Tests</RootNamespace>
 		<AssemblyName>DevOnBike.Overfit.Tests</AssemblyName>
 		<SonarQubeExclude>true</SonarQubeExclude>
-		<NoWarn>$(NoWarn);1591</NoWarn>
+		<!--
+		  xUnit1051 SUPPRESSED 2026-08-11, deliberately and with a trigger to revisit (XC-18).
+
+		  The rule wants every call that accepts a CancellationToken to be given
+		  TestContext.Current.CancellationToken, so a cancelled run can interrupt it. It flagged 69 sites
+		  across 13 files the moment the suite moved to xunit v3 — none of them new, all ordinary awaits.
+
+		  Suppressed rather than swept because the rule's benefit is proportional to how long a test runs,
+		  and this suite is 22 seconds by policy: `dotnet test -c Release` carries correctness checks only
+		  and everything long-running sits behind [LongFact], skipped by default. Sixty-nine mechanical
+		  edits to make a 22-second run more interruptible is a poor trade, and leaving 69 permanent
+		  warnings is worse than either — a warning nobody can act on is how a build's output becomes
+		  wallpaper, which is the reasoning behind the prerelease accept-list in Directory.Build.targets.
+
+		  REVISIT IF: a test hangs rather than fails. XC-10, XC-13 and XC-19 are three single
+		  non-reproducing failures already on record; if that class turns out to be tests that stop
+		  responding rather than tests that assert wrongly, cancellation responsiveness is exactly the
+		  property wanted and this suppression is what would be hiding the lever.
+
+		  The other two v3 rules were NOT suppressed: xUnit1031 (7 sites, blocking on tasks — a real
+		  deadlock risk) was fixed at 5 sites and suppressed per-site with a reason at the 2 where the
+		  blocking IS the assertion, and xUnit1012 was fixed.
+		-->
+		<NoWarn>$(NoWarn);1591;xUnit1051</NoWarn>
 		<CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
 		<!--Thread_UseAllCpuGroups>true</Thread_UseAllCpuGroups-->
 	</PropertyGroup>
 	<ItemGroup>
-		<PackageReference Include="Microsoft.NET.Test.Sdk"/>
-		<PackageReference Include="Microsoft.AspNetCore.TestHost"/>
-		<PackageReference Include="Moq"/>
-		<PackageReference Include="System.Numerics.Tensors"/>
-		<PackageReference Include="xunit"/>
+		<PackageReference Include="Microsoft.NET.Test.Sdk" />
+		<PackageReference Include="Microsoft.AspNetCore.TestHost" />
+		<PackageReference Include="Moq" />
+		<PackageReference Include="System.Numerics.Tensors" />
+		<PackageReference Include="xunit.v3" />
 		<PackageReference Include="xunit.runner.visualstudio">
 			<IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
 			<PrivateAssets>all</PrivateAssets>
@@ -29,11 +55,22 @@
 	</ItemGroup>
 	
 	<ItemGroup>
-		<ProjectReference Include="..\Sources\Main\Main.csproj"/>
-		<ProjectReference Include="..\Sources\Extensions.AI\Extensions.AI.csproj"/>
-		<ProjectReference Include="..\Sources\Mcp\Mcp.csproj"/>
-		<ProjectReference Include="..\Sources\Server\Server.csproj"/>
-		<ProjectReference Include="..\Sources\Server.AspNet\Server.AspNet.csproj"/>
+		<ProjectReference Include="..\Sources\Main\Main.csproj" />
+		<ProjectReference Include="..\Sources\Extensions.AI\Extensions.AI.csproj" />
+		<ProjectReference Include="..\Sources\Mcp\Mcp.csproj" />
+		<ProjectReference Include="..\Sources\Server\Server.csproj" />
+		<ProjectReference Include="..\Sources\Server.AspNet\Server.AspNet.csproj" />
+		<ProjectReference Include="..\Sources\Anomalies\Anomalies.csproj" />
+		<!--
+		  The only Demo project this test assembly references, and it earns it. On 2026-08-11 the demo stopped
+		  getting its Prometheus exposition from OpenTelemetry.Exporter.Prometheus.AspNetCore — four years in
+		  prerelease, never a stable release, and the repository's only prerelease pin — and now writes the text
+		  itself, the way Sources/Server.AspNet and Sources/Anomalies already do. That swapped a package for
+		  real logic: cumulative buckets, label escaping, one HELP/TYPE pair per metric. A document that breaks
+		  any of those is REJECTED BY PROMETHEUS and looks perfectly fine from the outside, which is the class
+		  of failure this repository does not leave untested.
+		-->
+		<ProjectReference Include="..\Demo\LocalAgentAspNetDemo\LocalAgent.AspNet.csproj" />
 	</ItemGroup>
 
 	<ItemGroup>
@@ -47,4 +84,15 @@
 		<None Remove="AotSmokeTest\**\*" />
 	</ItemGroup>
 
+
+	<!--
+	  The analyzer project as a LIBRARY reference, not as an analyzer. Directory.Build.props deliberately
+	  excludes Tests from the analyzer wiring (test code is exempt from the style rules), which is exactly
+	  what makes this possible: the assembly can be referenced and its analyzers instantiated by hand, with
+	  no duplicate-item conflict and without OVERFIT rules being enforced on the tests themselves.
+	-->
+	<ItemGroup>
+		<ProjectReference Include="..\Sources\Analyzers\Analyzers.csproj" />
+		<PackageReference Include="Microsoft.CodeAnalysis.CSharp" />
+	</ItemGroup>
 </Project>

@@ -95,6 +95,47 @@ namespace DevOnBike.Overfit.Serving
         /// (a cancelled wait throws <see cref="OperationCanceledException"/> and is NOT counted as a rejection,
         /// so a client that disconnects before a slot opens doesn't look like overload).
         /// </summary>
+        // OVERFIT040: THE RULE IS RIGHT HERE, AND THIS SUPPRESSION RECORDS A DECISION, NOT A DEFERRAL.
+        //
+        // `_slots.Wait(timeout, cancellationToken)` really does block the calling thread for up to `timeout`,
+        // and the caller that matters is a request thread: `OverfitInferenceService.CompleteChat` passes
+        // `RentTimeout = TimeSpan.FromSeconds(30)`, and the CLI's `--sessions` defaults to 1
+        // (`Cli/Program.cs` `DefaultValueFactory = _ => 1`, `Cli/Commands.cs` `Serve(..., int sessions = 1)`),
+        // so at any concurrency above one every request but one waits here, each on its own request thread.
+        // Nothing about this site is fine.
+        //
+        // CORRECTION (XC-26, 2026-08-12): this block used to call that "the largest held thread in the
+        // server". It is not — it is the largest wait BEFORE any work starts. The same thread is then held
+        // for the generation as well, and for as long as that takes:
+        // `Server.AspNet/AspNetResponseSink.cs` records "the request thread that entered the endpoint is
+        // held for the whole generation. That is the server's design."
+        //
+        // WHY IT IS NOT FIXED HERE — DECIDED under XC-26 on 2026-08-12, not deferred. The fix would be a
+        // `TryRentAsync` on this type, and it would change which resource is held while waiting (a
+        // continuation instead of a thread), not the wait itself: the number of concurrent completions is
+        // bounded by `Size` either way, and the request thread is held for the whole generation regardless.
+        // What it would buy is isolating unrelated endpoints from a chat burst — and that has never been
+        // observed on this server, so it is a hypothesis. Against it stands a permanent cost: `out lease`
+        // cannot cross an `await`, so the shape would have to change, and this is public API of the shipped
+        // `DevOnBike.Overfit` package — it would be the library's first asynchronous primitive, and public
+        // API cannot be withdrawn. Deciding not to add it can be.
+        //
+        // WHAT WOULD REOPEN IT, as a condition rather than a promise: a chat burst at `--sessions 1` that
+        // measurably delays an unrelated endpoint (`GET /v1/models`, `GET /metrics`) while
+        // `dotnet_threadpool_queue_length` — which the server already exports — rises. That measurement has
+        // not been run, here or anywhere; any statement about what an asynchronous rent would gain is a
+        // performance claim and belongs to a measurement, not to this comment.
+        //
+        // WORTH NOTING, because it is why XC-26 exists at all: the rule reaches this method only because
+        // `SemaphoreSlim.Wait` has a `WaitAsync`. It CANNOT reach `CompleteChat`, whose block is the same
+        // block one frame up, because `TryRent` has no async sibling for it to match on. CORRECTION
+        // (2026-08-13): this used to say the analyzer is silent at "the more expensive of the two sites",
+        // which nothing supports — it is the SAME block seen one frame up, so the two are not cheaper and
+        // dearer. What is true is worse: the rule is silent exactly where a fix would have to be made,
+        // since `CompleteChat` is the method that would have to become task-returning, and loud here, where
+        // the wait cannot be fixed alone. So this diagnostic is the only automated signal pointing at the
+        // whole shape. Removing it by pragma without saying so would delete that signal.
+#pragma warning disable OVERFIT040
         public bool TryRent(TimeSpan timeout, CancellationToken cancellationToken, out Lease lease)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
@@ -118,6 +159,7 @@ namespace DevOnBike.Overfit.Serving
             lease = new Lease(this, item!);
             return true;
         }
+#pragma warning restore OVERFIT040
 
         private void UpdatePeak(int active)
         {

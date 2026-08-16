@@ -4,18 +4,17 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using DevOnBike.Overfit.Anomalies.Baseline;
+using DevOnBike.Overfit.Anomalies.Contracts;
 using DevOnBike.Overfit.Anomalies.Gpt;
 using DevOnBike.Overfit.Anomalies.Monitoring;
-using DevOnBike.Overfit.Anomalies.Monitoring.Contracts;
 using DevOnBike.Overfit.Anomalies.Training;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.LanguageModels.Runtime;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.Anomalies
 {
     /// <summary>
-    /// Rigorous "transformer vs classical baseline" benchmark (docs/gp-anomaly-baseline.md):
+    /// Rigorous "transformer vs classical baseline" benchmark (docs/aiops/gp-anomaly-baseline.md):
     /// trains a Quick GPT base on the fixture CSV, then scores ONE pod's real normal stream
     /// + three injected anomalies (OOM / latency / CPU) with BOTH the
     /// <see cref="GptAnomalyDetector"/> and the EWMA <see cref="EwmaAnomalyDetector"/> floor,
@@ -34,7 +33,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
         private static string CsvPath => Path.Combine(
             AppContext.BaseDirectory, "test_fixtures", "k8s_metrics.csv");
 
-        [LongFact]
+        [LongFact("21s")]
         public async Task GptDetector_VsEwmaFloor_BothSeparate_OnSamePodStream()
         {
             if (!File.Exists(CsvPath))
@@ -72,7 +71,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             try
             {
                 var cfg = GptTrainingConfig.Quick;
-                var result = await new OfflineTrainingJob(cfg).RunAsync(CsvPath, checkpoint);
+                var result = await new OfflineTrainingJob(cfg).RunAsync(CsvPath, checkpoint, progress: null, TestContext.Current.CancellationToken);
                 _out.WriteLine($"Quick base: {result.SnapshotsLoaded:N0} snapshots, val {result.InitialLoss:F2}→{result.FinalValLoss:F2}");
 
                 using var model = new GPT1Model(new GPT1Config

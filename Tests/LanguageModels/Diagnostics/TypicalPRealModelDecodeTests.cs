@@ -7,7 +7,6 @@ using System.Diagnostics;
 using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Runtime;
 using DevOnBike.Overfit.LanguageModels.Tokenizers;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
 {
@@ -27,14 +26,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
 
         public TypicalPRealModelDecodeTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [ModelFact(Path, "38s")]
         public void SamplerOverhead_InRealDecode()
         {
-            if (!File.Exists(Path))
-            {
-                _out.WriteLine("missing gguf — skipping");
-                return;
-            }
 
             using var engine = CachedLlamaInferenceEngine.LoadGguf(Path);
             var tok = GgufTokenizer.Load(Path);

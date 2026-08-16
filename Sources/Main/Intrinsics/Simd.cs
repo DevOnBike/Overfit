@@ -16,6 +16,14 @@ namespace DevOnBike.Overfit.Intrinsics
         // Below this, AVX2 overhead is lower
         private const int Avx512Threshold = 512;
 
+        // On Avx512Threshold above: it is UNMEASURED and its comment is wrong. Vector512WidthBenchmark
+        // measured 512-bit against 256-bit at 128 floats — a quarter of this threshold, where the comment
+        // claims AVX2 wins — and 512-bit was faster in every operation: Add 0.74, MulAdd 0.80, Dot 0.84.
+        // The threshold cuts off the wins it was written to protect. Left in place here rather than changed
+        // in passing: Add and MulAdd are on paths this session did not census, and moving a threshold on
+        // three microbenchmark points without knowing which lengths the callers pass is exactly the mistake
+        // that the Dot accumulator change turned out to be.
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static void Add(ReadOnlySpan<float> a, ReadOnlySpan<float> b, Span<float> dst)
         {
@@ -133,12 +141,33 @@ namespace DevOnBike.Overfit.Intrinsics
             ref var aRef = ref MemoryMarshal.GetReference(a);
             ref var bRef = ref MemoryMarshal.GetReference(b);
 
-            // AVX-512 path (ORIGINAL - no threshold, kept as-is)
+            // AVX-512 path
             if (CpuFeatures.HasAvx512)
             {
                 var acc512 = Vector512<float>.Zero;
                 var simd512Count = Vector512<float>.Count;
 
+                // ONE accumulator, deliberately — a second one was written, measured and REVERTED.
+                //
+                // The mechanism is real and was not in doubt: with one accumulator every FMA depends on the
+                // previous one, so this loop is bound by FMA latency rather than throughput. A second
+                // independent chain measured 2906 -> 1626 ns at 65536 floats and 60.5 -> 38.8 ns at 2048
+                // (SimdDotAccumulatorBenchmark, Ryzen 9 9950X3D, canary stable across four runs). It also
+                // showed that the win is the second CHAIN and not the wider register: two 256-bit
+                // accumulators land within 1% of one 512-bit accumulator.
+                //
+                // It was reverted because a path census answered the question the kernel benchmark could
+                // not. Dot is not on any forward/inference path at all — its only callers are backward
+                // (MatMulAdd_A_BT, the im2col weight-gradient GEMM, RNN backward, depthwise-conv kernel
+                // gradient). And in backward, 100% of the work is below the length where two accumulators
+                // start paying: a GPT-1 training step enters Dot 9.5 million times at exactly four lengths
+                // (32, 68, 128, 512) and an MNIST conv step at one (784).
+                //
+                // Worse than useless, then: the guarding `if (len >= 1024)` cost 9-11% at lengths 68 and 128
+                // even when NOT taken — the unreached dual loop still perturbs register allocation and code
+                // layout in a kernel whose whole body is ~4 ns — which works out to about +6% of the Dot
+                // time in a GPT-1 step in exchange for nothing. Worth revisiting only for models with
+                // dModel/dFF >= 2048, and note the Q4_K LLM training path does not come through here at all.
                 for (; i <= len - simd512Count; i += simd512Count)
                 {
                     var va = Vector512.LoadUnsafe(ref aRef, (nuint)i);

@@ -36,7 +36,7 @@ namespace DevOnBike.Overfit.Audio.Tts
                     }
                     if (j >= text.Length || char.IsWhiteSpace(text[j]))
                     {
-                        var sentence = text[start..j].Trim();
+                        var sentence = text.Substring(start, j - start).Trim();
                         if (sentence.Length > 0)
                         {
                             result.Add(sentence);
@@ -51,7 +51,7 @@ namespace DevOnBike.Overfit.Audio.Tts
                 i++;
             }
 
-            var tail = text[start..].Trim();
+            var tail = text.Substring(start).Trim();
             if (tail.Length > 0)
             {
                 result.Add(tail);

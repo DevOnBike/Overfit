@@ -164,7 +164,8 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             if (vocab == 0 && reader.Tensors.TryGetValue("token_embd.weight", out var embInfo))
             {
                 // GGUF dim order: [dModel, vocab]. Last dim is vocab.
-                vocab = (int)embInfo.Dims[^1];
+                var embDims = embInfo.Dims;
+                vocab = (int)embDims[embDims.Length - 1];
             }
             if (vocab == 0)
             {
@@ -974,7 +975,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
 
             // Zero-copy when mmapped (the file's block bytes ARE Q4KWeight's layout, verbatim); otherwise
             // read into a heap buffer. A ternary keeps `weight` definitely assigned without an else.
-            var weight = mmap is not null
+            var weight = mmap != null
                 ? new Q4KWeight(mmap.Slice(reader.DataStart + (long)info.Offset, totalBytes), inDim, outDim)
                 : LoadQ4KRawCopy(reader, info, totalBytes, inDim, outDim);
 
@@ -997,7 +998,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         // no matching entry, the shape can't repack, or the dims disagree — always safe to call.
         private static void AttachPrepacked(Q4KWeight weight, string tensorName, RepackedWeightsFile? repacked)
         {
-            if (repacked is null || !weight.CanRepack)
+            if (repacked == null || !weight.CanRepack)
             {
                 return;
             }
@@ -1086,7 +1087,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             var bytesPerRow = blocksPerRow * Q4KWeight.SuperBlockBytes;
             var headBytes = headDim * bytesPerRow;
 
-            if (mmap is not null)
+            if (mmap != null)
             {
                 // Zero-copy: head h's output rows are a contiguous byte run in the file,
                 // and the run IS Q4KWeight's layout verbatim — slice it straight in.
@@ -1128,7 +1129,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             GgufReader reader, string name, int outputSize, int inputSize, MemoryMappedModelFile? mmap,
             RepackedWeightsFile? repacked = null)
         {
-            if (mmap is null
+            if (mmap == null
                 || !reader.Tensors.TryGetValue(name, out var info)
                 || info.Type != GgmlType.Q4_K
                 || inputSize % Q4KWeight.SuperBlockElements != 0
@@ -1158,7 +1159,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             var blocksPerRow = inDim / Q6KWeight.SuperBlockElements;
             var totalBytes = checked((int)((long)outDim * blocksPerRow * Q6KWeight.SuperBlockBytes));
 
-            if (mmap is not null)
+            if (mmap != null)
             {
                 // Zero-copy: the file's block bytes ARE Q6KWeight's layout, verbatim.
                 var slice = mmap.Slice(reader.DataStart + (long)info.Offset, totalBytes);
@@ -1186,7 +1187,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             var bytesPerRow = blocksPerRow * Q6KWeight.SuperBlockBytes;
             var headBytes = headDim * bytesPerRow;
 
-            if (mmap is not null)
+            if (mmap != null)
             {
                 // Zero-copy: head h's output rows are a contiguous byte run in the file,
                 // and the run IS Q6KWeight's layout verbatim — slice it straight in.
@@ -1235,8 +1236,8 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             var heads = new DecodeWeight[nHeads];
             for (var h = 0; h < nHeads; h++)
             {
-                var headQuants = new sbyte[headDim * dModel];
-                var headScales = new float[headDim * blocksPerRow];
+                var headQuants = new sbyte[(long)headDim * dModel];
+                var headScales = new float[(long)headDim * blocksPerRow];
                 quants.Span.Slice(h * headDim * dModel, headDim * dModel).CopyTo(headQuants);
                 scales.Span.Slice(h * headDim * blocksPerRow, headDim * blocksPerRow).CopyTo(headScales);
                 heads[h] = new Q8Weight(headQuants, headScales, dModel, headDim);
@@ -1267,8 +1268,8 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             var heads = new DecodeWeight[nHeads];
             for (var h = 0; h < nHeads; h++)
             {
-                var headQuants = new sbyte[dModel * headDim];
-                var headScales = new float[dModel * headBlocks];
+                var headQuants = new sbyte[(long)dModel * headDim];
+                var headScales = new float[(long)dModel * headBlocks];
                 for (var o = 0; o < dModel; o++)
                 {
                     quants.Span.Slice(o * nHeadsHeadDim + h * headDim, headDim)
@@ -1300,7 +1301,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                 reader.LoadTensorAsF32(info, dst);
             }
 
-            if (info is null)
+            if (info == null)
             {
                 dst.Clear();
             }

@@ -35,7 +35,19 @@ namespace DevOnBike.Overfit.Analyzers
             isEnabledByDefault: true,
             description: "System.Threading.Tasks.Parallel is not suppress-aware and allocates on every dispatch. Route library parallelism through OverfitParallel; keep a measured exception behind #pragma with the benchmark cited.");
 
-        public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = [Rule];
+        /// <summary>
+        /// <c>OverfitPerfAnalysis.HotPathRule</c> is declared here because <see cref="Report"/> can raise
+        /// it. The attribute's own documentation says OVERFIT001–OVERFIT014 escalate to a hard OVERFIT900
+        /// error inside a member marked <c>[OverfitHotPath]</c>, and this analyzer — along with
+        /// <c>FinalizerAnalyzer</c> — reported through <c>context.ReportDiagnostic</c> directly, so the
+        /// escalation never happened for it. A raw <c>Parallel.For</c> added inside a decode-path method
+        /// built at warning severity while the attribute above it said that was impossible.
+        /// </summary>
+        public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics
+        {
+            get;
+        } =
+            [Rule, OverfitPerfAnalysis.HotPathRule];
 
         public override void Initialize(AnalysisContext context)
         {
@@ -70,7 +82,7 @@ namespace DevOnBike.Overfit.Analyzers
                     }
                 })
             {
-                context.ReportDiagnostic(Diagnostic.Create(Rule, operation.Syntax.GetLocation(), method.Name));
+                OverfitPerfAnalysis.Report(context, Rule, operation.Syntax.GetLocation(), method.Name);
             }
         }
     }

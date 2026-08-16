@@ -51,14 +51,7 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints
             _tracker = new JsonSchemaTracker(JsonSchemaCompiler.Compile(schemaJson));
             _eosTokenId = tokenizer.EndOfTextTokenId;
 
-            var vocab = tokenizer.VocabularySize;
-            _tokenText = new string[vocab];
-            Span<int> one = stackalloc int[1];
-            for (var t = 0; t < vocab; t++)
-            {
-                one[0] = t;
-                _tokenText[t] = tokenizer.DecodeToString(one);
-            }
+            _tokenText = TokenTextTable.For(tokenizer);
         }
 
         public bool IsComplete => _committed.IsComplete;
@@ -91,15 +84,21 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints
 
                 // Cheap prune: reject on the first character against the committed state (no copy) before
                 // the full replay — kills most of the vocabulary at each position (wrong type / wrong char).
-                if (!_tracker.IsCharAllowedBySchema(text[0], in _committed) || !Accepts(text))
+                //
+                // Evaluated ONCE. The second `if` used to be the literal negation of the first, recomputed
+                // rather than remembered, so `Accepts` — which replays the whole token text through both
+                // the state machine and the schema tracker — ran twice for every surviving token, at every
+                // decode step, over a 151 936-entry vocabulary.
+                var allowed = _tracker.IsCharAllowedBySchema(text[0], in _committed) && Accepts(text);
+
+                if (!allowed)
                 {
                     logits[t] = float.NegativeInfinity;
+
+                    continue;
                 }
 
-                if (!(!_tracker.IsCharAllowedBySchema(text[0], in _committed) || !Accepts(text)))
-                {
-                    anyAllowed = true;
-                }
+                anyAllowed = true;
             }
 
             // End-of-text is allowed once the document is complete, OR as a graceful escape from a BPE
@@ -123,10 +122,20 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints
             }
 
             var text = _tokenText[token];
+
             for (var i = 0; i < text.Length; i++)
             {
-                // The token was unmasked, so every character advances both committed machines.
-                _committed.TryAdvance(text[i]);
+                // Asserted rather than assumed — see the same repair in JsonGrammarConstraint.Accept. A
+                // discarded result under a comment claiming it cannot fail is NASA rule 7, and the failure
+                // it hides is silent desynchronisation between the machine and the text.
+                if (!_committed.TryAdvance(text[i]))
+                {
+                    throw new OverfitRuntimeException(
+                        $"Token {token} ('{text}') was accepted but character '{text[i]}' does not advance "
+                        + "the JSON state machine. The constraint's mask and its committed state have "
+                        + "diverged; continuing would compute every later mask from a wrong state.");
+                }
+
                 _tracker.OnCharAdvanced(text[i], in _committed);
             }
         }

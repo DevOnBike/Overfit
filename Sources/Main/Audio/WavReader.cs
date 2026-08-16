@@ -43,7 +43,7 @@ namespace DevOnBike.Overfit.Audio
             while (stream.Position < stream.Length)
             {
                 var chunkId = ReadTag(br);
-                var chunkSize = br.ReadInt32();
+                var chunkSize = ReadChunkSize(br, stream, chunkId);
                 if (chunkId == "fmt ")
                 {
                     audioFormat = br.ReadInt16();   // 1 = PCM, 3 = IEEE float
@@ -61,6 +61,17 @@ namespace DevOnBike.Overfit.Audio
                 if (chunkId == "data")
                 {
                     data = br.ReadBytes(chunkSize);
+
+                    // ReadBytes returns what it got, and a header that claims more than the file holds used
+                    // to leave shorter audio with nothing said about it. That is the worse half of this
+                    // defect: shorter audio is not obviously wrong, and everything downstream - transcription,
+                    // similarity scoring - accepts it and produces a plausible answer about a truncated file.
+                    if (data.Length != chunkSize)
+                    {
+                        throw new OverfitFormatException(
+                            $"The WAV data chunk claims {chunkSize} bytes and the file holds {data.Length}. "
+                            + "Reading on would silently transcribe truncated audio.");
+                    }
                 }
 
                 if (chunkId != "fmt " && chunkId != "data")
@@ -73,7 +84,7 @@ namespace DevOnBike.Overfit.Audio
                 }
             }
 
-            if (data is null || channels == 0)
+            if (data == null || channels == 0)
             {
                 throw new OverfitFormatException("WAV missing fmt/data chunk.");
             }
@@ -136,6 +147,37 @@ namespace DevOnBike.Overfit.Audio
             return mono;
         }
 #pragma warning restore OVERFIT001
+
+        /// <summary>
+        /// A chunk length, checked against the file rather than trusted.
+        ///
+        /// <para>The size is a 32-bit field inside an envelope this reader has already accepted, and it was
+        /// used directly in buffer arithmetic. A negative value reached <c>ReadBytes</c> and surfaced as a raw
+        /// <c>ArgumentOutOfRangeException</c> - not this project's format exception, so a caller catching
+        /// malformed input did not catch it - and an oversized-but-positive one truncated the audio in
+        /// silence. Same root cause as the big_values field in <c>Mp3Decoder</c>: a length taken from inside a
+        /// validated envelope and used without a second check.</para>
+        /// </summary>
+        private static int ReadChunkSize(BinaryReader br, Stream stream, string chunkId)
+        {
+            var size = br.ReadInt32();
+
+            if (size < 0)
+            {
+                throw new OverfitFormatException(
+                    $"WAV chunk '{chunkId}' declares a negative size ({size}). The file is malformed.");
+            }
+
+            var remaining = stream.Length - stream.Position;
+
+            if (size > remaining)
+            {
+                throw new OverfitFormatException(
+                    $"WAV chunk '{chunkId}' declares {size} bytes with only {remaining} left in the file.");
+            }
+
+            return size;
+        }
 
         private static string ReadTag(BinaryReader br)
         {

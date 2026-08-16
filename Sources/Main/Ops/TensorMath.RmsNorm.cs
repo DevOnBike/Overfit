@@ -112,6 +112,11 @@ namespace DevOnBike.Overfit.Ops
             var needsDInput = input.RequiresGrad;
             var needsDGamma = gamma.RequiresGrad;
 
+            // Vestigial cap. It existed to bound a `stackalloc float[chunkCount * C]`, which at 32 workers and
+            // C = 8192 is 1 MB — an entire default thread stack in one span. The buffer is pooled now, so the
+            // stack is no longer the constraint; the cap stays only because lifting it would move wide models
+            // from the sequential path to the parallel one, changing the summation order of the partials and
+            // hence the last bits of the gradient. That is a separate change, guarded by the FD tests.
             const int MaxStackallocC = 8192;
 
             if ((long)numRows * C < ParallelThreshold || C > MaxStackallocC)
@@ -128,14 +133,18 @@ namespace DevOnBike.Overfit.Ops
             var chunkCount = Math.Min(workerCount, numRows);
             var perChunk = (numRows + chunkCount - 1) / chunkCount;
 
+            // Per-worker partial dGamma avoids the cross-row shared-write race. Rented rather than
+            // stack-allocated; clearMemory is required because the workers accumulate into these slots and
+            // the pool hands back dirty arrays.
+            using var dGammaBuffer = needsDGamma
+                ? new PooledBuffer<float>(chunkCount * C, clearMemory: true)
+                : default;
+
             unsafe
             {
-                // Per-worker partial dGamma avoids the cross-row shared-write race.
-                var dGammaPartial = needsDGamma ? stackalloc float[chunkCount * C] : default;
-                if (needsDGamma)
-                {
-                    dGammaPartial.Clear();
-                }
+                // A default PooledBuffer yields an empty Span — the same `default` the fixed block expects
+                // when dGamma is not required.
+                var dGammaPartial = dGammaBuffer.Span;
 
                 fixed (float* inPtr = inS, dOutPtr = dOutS, gPtr = gammaS,
                               invPtr = invRmsS, dGammaPartialPtr = dGammaPartial)

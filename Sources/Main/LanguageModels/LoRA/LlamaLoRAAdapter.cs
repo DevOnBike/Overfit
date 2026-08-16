@@ -213,6 +213,21 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
             }
 
             var count = br.ReadInt32();
+
+            // Against the file's own size, not merely against zero. The smallest record this format can
+            // encode is 12 bytes of key plus whatever LoRAWeight.Load needs, so a count needing more than
+            // the file holds is a malformed header — and believed, it is a loop the file gets to choose the
+            // length of, each iteration reading and allocating.
+            const long SmallestRecordBytes = 12;
+            var remaining = fs.Length - fs.Position;
+
+            if (count < 0 || (long)count * SmallestRecordBytes > remaining)
+            {
+                throw new OverfitFormatException(
+                    $"LoRA file '{path}' declares {count} weight records, which need at least "
+                    + $"{(long)count * SmallestRecordBytes} bytes and only {remaining} remain.");
+            }
+
             for (var i = 0; i < count; i++)
             {
                 var layer = br.ReadInt32();

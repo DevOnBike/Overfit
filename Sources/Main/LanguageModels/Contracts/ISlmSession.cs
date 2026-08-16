@@ -75,7 +75,7 @@ namespace DevOnBike.Overfit.LanguageModels.Contracts
         /// </summary>
         int GenerateNextToken(in SamplingOptions sampling, ITokenConstraint? constraint)
 #pragma warning disable RS0030 // Type.Name = compile-time-safe type name for a diagnostic, not runtime reflection (AOT-safe)
-            => constraint is null
+            => constraint == null
                 ? GenerateNextToken(in sampling)
                 : throw new OverfitRuntimeException(
                     $"{GetType().Name} does not support constrained generation.");

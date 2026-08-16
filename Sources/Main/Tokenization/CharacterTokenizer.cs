@@ -149,6 +149,16 @@ namespace DevOnBike.Overfit.Tokenization
             File.WriteAllLines(path, _idToToken);
         }
 
+        // OVERFIT040 for `Load`. THE CONSTRAINT: one small vocabulary file — one token per line — read once at
+        // construction time on the caller's own thread, before any text is encoded. No pool thread is behind
+        // it.
+        //
+        // WHAT IS GIVEN UP: `Load` is public API of the shipped `DevOnBike.Overfit` package. Its counterpart
+        // `Save` above is not flagged, because `File.WriteAllLines(string, string[])` has no async sibling
+        // taking the same argument types — which is an accident of the BCL's overloads, not a difference in
+        // kind between the two methods.
+#pragma warning disable OVERFIT040
+
         /// <summary>Loads vocabulary from a text file saved by <see cref="Save"/>.</summary>
         public static CharacterTokenizer Load(string path)
         {
@@ -165,5 +175,6 @@ namespace DevOnBike.Overfit.Tokenization
 
             return new CharacterTokenizer(charToId, lines);
         }
+#pragma warning restore OVERFIT040
     }
 }

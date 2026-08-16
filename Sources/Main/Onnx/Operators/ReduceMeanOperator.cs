@@ -37,7 +37,7 @@ namespace DevOnBike.Overfit.Onnx.Operators
             // Test the out-value, not the bool: through a separate variable the compiler loses axesAttr's
             // null state (CS8602), which the AOT guard promotes to an error. hasAxesAttribute still drives
             // the fallback below, so the control flow is unchanged.
-            if (axesAttr is not null)
+            if (axesAttr != null)
             {
                 axes = axesAttr.IntArray;
             }

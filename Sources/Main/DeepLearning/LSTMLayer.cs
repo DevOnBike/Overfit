@@ -191,11 +191,38 @@ namespace DevOnBike.Overfit.DeepLearning
         {
             _cell.Dispose();
         }
+        /// <summary>
+        /// Writes the recurrent weights to <paramref name="path"/>.
+        ///
+        /// <para>Empty bodies until 2026-08-02, on both this and <see cref="Load(string)"/> - so a caller
+        /// that saved a trained layer to a file got a file, and a caller that loaded one got random
+        /// initialisation, with nothing raised at either end. Same defect as the pair on <c>LstmCell</c>, one
+        /// level up and reachable by a different API.</para>
+        /// </summary>
         public void Save(string path)
         {
+            ArgumentException.ThrowIfNullOrWhiteSpace(path);
+
+            using var fs = new FileStream(path, FileMode.Create);
+            using var bw = new BinaryWriter(fs);
+
+            Save(bw);
         }
+
+        /// <inheritdoc cref="Save(string)"/>
         public void Load(string path)
         {
+            ArgumentException.ThrowIfNullOrWhiteSpace(path);
+
+            if (!File.Exists(path))
+            {
+                throw new FileNotFoundException($"Weight file not found: {path}");
+            }
+
+            using var fs = new FileStream(path, FileMode.Open);
+            using var br = new BinaryReader(fs);
+
+            Load(br);
         }
     }
 }

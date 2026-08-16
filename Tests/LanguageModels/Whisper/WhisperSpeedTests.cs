@@ -8,7 +8,6 @@ using DevOnBike.Overfit.Audio;
 using DevOnBike.Overfit.Audio.Mp3;
 using DevOnBike.Overfit.LanguageModels.Whisper;
 using DevOnBike.Overfit.Tests.TestSupport;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Whisper
 {
@@ -20,7 +19,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Whisper
         private readonly ITestOutputHelper _out;
         public WhisperSpeedTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("4s")]
         public void Measure_Decode_And_Transcription_Speed()
         {
             // ── MP3 decode speed ──
@@ -42,7 +41,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Whisper
             }
         }
 
-        [LongFact]
+        [LongFact("4s")]
         public void Profile_Pipeline_Breakdown()
         {
             var model = WhisperGgmlLoader.Load(TestModelPaths.Whisper.RequireTinyGgmlPath());

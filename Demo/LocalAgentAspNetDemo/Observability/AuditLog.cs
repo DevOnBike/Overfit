@@ -18,7 +18,11 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.Observability
     {
         private static readonly JsonSerializerOptions Json = new() { WriteIndented = false };
 
-        private readonly object _gate = new();
+        // A SemaphoreSlim rather than a lock because the write is awaited: `lock` cannot span an await, and
+        // the write is the whole reason this type is asynchronous (see RecordAsync). SemaphoreSlim.Wait in
+        // Dispose is not a task and is deliberately outside OVERFIT039 — it is a synchronisation primitive
+        // with no continuation to starve.
+        private readonly SemaphoreSlim _gate = new(1, 1);
         private readonly StreamWriter? _writer;
         private readonly ILogger<AuditLog> _logger;
 
@@ -42,28 +46,67 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.Observability
                 Path.GetFullPath(path));
         }
 
-        /// <summary>Records one audit entry (an anonymous metadata object). Serialized to one JSON line.</summary>
-        public void Record(object record)
+        /// <summary>
+        /// Records one audit entry (an anonymous metadata object). Serialized to one JSON line.
+        ///
+        /// <para><b>Asynchronous because it runs on the request path.</b> This is called once per handled
+        /// request, from <c>AuditMiddleware</c>'s <c>finally</c>, and the writer has
+        /// <c>AutoFlush = true</c> on a <see cref="FileStream"/> — so the synchronous version put an append
+        /// AND a flush to disk on the Kestrel thread serving the caller, for every request. That is the
+        /// synchronous island OVERFIT040 exists to find, and the fix is the method rather than the call: the
+        /// caller is already asynchronous and awaits this, so nothing blocks anywhere.</para>
+        ///
+        /// <para><b>No CancellationToken on purpose.</b> The one token available at the call site is
+        /// <c>HttpContext.RequestAborted</c>, and an aborted request is exactly the one whose audit record
+        /// matters most — taking that token would drop the trail for cancelled and failed requests, which
+        /// is the opposite of what an audit log is for.</para>
+        /// </summary>
+        public async Task RecordAsync(object record)
         {
             var line = JsonSerializer.Serialize(record, Json);
             _logger.LogInformation("audit {Audit}", line);
 
-            if (_writer is null)
+            if (_writer == null)
             {
                 return;
             }
 
-            lock (_gate)
+            await _gate.WaitAsync().ConfigureAwait(false);
+
+            try
             {
-                _writer.WriteLine(line);
+                // AutoFlush is on, so this also flushes — asynchronously now, off the request thread.
+                await _writer.WriteLineAsync(line).ConfigureAwait(false);
+            }
+            finally
+            {
+                _gate.Release();
             }
         }
 
+        // OVERFIT040 — synchronous by design, and this site is a CONSEQUENCE of making Record asynchronous:
+        // the gate became a SemaphoreSlim, whose Wait() has a WaitAsync() sibling, so the rule now sees this
+        // method. It cannot be obeyed: IDisposable.Dispose has no await, and SemaphoreSlim.Wait is a
+        // blocking synchronisation primitive with no continuation to starve — the exact class OVERFIT039
+        // excludes for the same reason. Disposal happens once, at host shutdown, when no request can be
+        // holding the gate.
+        //
+        // WHAT IS LOST: nothing measurable here; the alternative is IAsyncDisposable, which would make the
+        // DI container dispose this asynchronously but buys a demo nothing.
+#pragma warning disable OVERFIT040
         public void Dispose()
+#pragma warning restore OVERFIT040
         {
-            lock (_gate)
+            _gate.Wait();
+
+            try
             {
                 _writer?.Dispose();
+            }
+            finally
+            {
+                _gate.Release();
+                _gate.Dispose();
             }
         }
     }

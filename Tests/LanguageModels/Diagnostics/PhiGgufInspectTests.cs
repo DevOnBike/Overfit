@@ -4,7 +4,6 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using DevOnBike.Overfit.LanguageModels.Loading;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
 {
@@ -19,14 +18,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
         private readonly ITestOutputHelper _out;
         public PhiGgufInspectTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [ModelFact(Path, "12ms")]
         public void Dump_Phi_Metadata_And_Tensors()
         {
-            if (!File.Exists(Path))
-            {
-                _out.WriteLine("missing C:\\phi gguf");
-                return;
-            }
 
             using var reader = new GgufReader(Path);
 

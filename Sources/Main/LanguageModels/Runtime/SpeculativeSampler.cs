@@ -41,7 +41,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
             probabilities.CopyTo(residualScratch);
             residualScratch[draft] = 0f;   // residual: norm(max(0, p − e_draft))
-            return Sample(residualScratch[..probabilities.Length], random);
+            return Sample(residualScratch.Slice(0, probabilities.Length), random);
         }
 
         /// <summary>Samples a token index from a (sub-)distribution span; falls back to the argmax if the mass is ≤ 0.</summary>

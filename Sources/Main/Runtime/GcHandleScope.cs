@@ -11,7 +11,7 @@ namespace DevOnBike.Overfit.Runtime
     /// A scoped <see cref="GCHandle"/> — wraps Alloc/Free in a <c>using</c> so call sites stay clean instead of a
     /// hand-rolled try/finally. A <c>ref struct</c>, so it can't escape its scope or be boxed. Two modes:
     /// <list type="bullet">
-    ///   <item><b>Normal</b> (<c>new GCHandleScope(obj)</c>): keeps a managed object reachable and yields a stable
+    ///   <item><b>Normal</b> (<c>new GcHandleScope(obj)</c>): keeps a managed object reachable and yields a stable
     ///   <see cref="Token"/> to hand to an unsafe <c>void*</c> context (e.g. an
     ///   <see cref="OverfitParallel"/> worker that must call a method on it), recovered with
     ///   <see cref="Recover{T}"/>.</item>

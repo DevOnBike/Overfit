@@ -100,6 +100,17 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
 
         // ── Load ────────────────────────────────────────────────────────────
 
+        // OVERFIT040 for `Load` (and, further down, for `ResolveSpecialIds`, the private helper it calls).
+        // Scoped to those two rather than the file ON PURPOSE: the Encode / Decode section below is the hot
+        // path, and a file-wide disable here would cover it too and hide a future I/O call that landed there.
+        //
+        // THE CONSTRAINT: `Load` reads one `tokenizer.json` once, at model-construction time, on the caller's
+        // own thread — before any session, any request or any decode exists. No pool thread is behind it.
+        //
+        // WHAT IS GIVEN UP: `Load` is public API of the shipped `DevOnBike.Overfit` package and is how every
+        // consumer of this tokenizer constructs one; a task-returning form is a breaking change.
+#pragma warning disable OVERFIT040
+
         /// <summary>Loads from a directory containing <c>tokenizer.json</c>, or directly from a tokenizer.json path.</summary>
         public static HuggingFaceBpeTokenizer Load(string pathOrDirectory)
         {
@@ -134,6 +145,7 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
 
             return new HuggingFaceBpeTokenizer(vocab, decoder, mergeRanks, specialTokens, split, eos, unk, addPrefixSpace);
         }
+#pragma warning restore OVERFIT040
 
         // ── Encode / Decode ─────────────────────────────────────────────────
 
@@ -171,7 +183,7 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
 
             foreach (var id in tokens)
             {
-                if (id < 0 || id >= _decoder.Length || _decoder[id] is null)
+                if (id < 0 || id >= _decoder.Length || _decoder[id] == null)
                 {
                     continue;
                 }
@@ -272,19 +284,57 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
             {
                 if (m.Index > pos)
                 {
-                    result.Add((text[pos..m.Index], false));
+                    result.Add((text.Substring(pos, m.Index - pos), false));
                 }
                 result.Add((m.Value, true));
                 pos = m.Index + m.Length;
             }
             if (pos < text.Length)
             {
-                result.Add((text[pos..], false));
+                result.Add((text.Substring(pos), false));
             }
             return result;
         }
 
         // ── tokenizer.json parsing ──────────────────────────────────────────
+
+        /// <summary>
+        /// Holes tolerated between the highest token id and the number of tokens that actually exist.
+        ///
+        /// <para>The decoder is a flat array indexed by token id, so its length is decided by the largest id
+        /// in the file — which is not a length and is therefore bounded by nothing about the file's size. A
+        /// two-entry <c>tokenizer.json</c> naming id 2 000 000 000 asks for a two-billion-element
+        /// <c>string[]</c>: 16 GB of references, from a few dozen bytes of JSON, and on a large machine it
+        /// <b>succeeds silently</b> rather than failing.</para>
+        ///
+        /// <para>Real vocabularies are dense. The gap comes from added/reserved tokens sitting just past the
+        /// base vocabulary — Llama-3 reserves 256, Qwen-2.5 about 293 — so 65 536 is roughly two orders of
+        /// magnitude of headroom over anything observed, while still bounding a hostile file to a 512 KB
+        /// table. The array stays flat: this is a validation, not a change to the decode hot path.</para>
+        /// </summary>
+        private const int MaxDecoderHoles = 65_536;
+
+        /// <summary>
+        /// Refuses a decoder table whose size is driven by an id far beyond the tokens the file actually
+        /// contains — see <see cref="MaxDecoderHoles"/> for why that is the right thing to bound.
+        /// </summary>
+        private static void RequireDecoderTableIsPlausible(int maxId, int tokenCount, string section)
+        {
+            if (maxId < 0)
+            {
+                throw new OverfitFormatException(
+                    $"tokenizer.json '{section}' contains a negative token id ({maxId}).");
+            }
+
+            if (maxId - tokenCount > MaxDecoderHoles)
+            {
+                throw new OverfitFormatException(
+                    $"tokenizer.json '{section}' declares token id {maxId} but holds only {tokenCount} "
+                    + $"tokens, which would size the decoder table at {(long)maxId + 1} entries for "
+                    + $"{tokenCount} of them. More than {MaxDecoderHoles} unused ids means the file is "
+                    + "corrupt, not merely sparse.");
+            }
+        }
 
         private static Dictionary<string, int> ReadVocab(JsonElement vocabJson, out string[] decoder)
         {
@@ -299,6 +349,8 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
                     maxId = id;
                 }
             }
+            RequireDecoderTableIsPlausible(maxId, vocab.Count, "vocab");
+
             decoder = new string[maxId + 1];
             foreach (var kv in vocab)
             {
@@ -329,7 +381,7 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
                     left = parts.Length == 2 ? parts[0] : null;
                     right = parts.Length == 2 ? parts[1] : null;
                 }
-                if (left is not null && right is not null
+                if (left != null && right != null
                     && vocab.TryGetValue(left, out var a) && vocab.TryGetValue(right, out var b))
                 {
                     ranks[(a, b)] = rank++;
@@ -355,6 +407,8 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
 
                 if (id >= decoder.Length)
                 {
+                    RequireDecoderTableIsPlausible(id, decoder.Length, "added_tokens");
+
                     var extended = new string[id + 1];
 
                     decoder.AsSpan().CopyTo(extended);
@@ -409,7 +463,7 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
 #pragma warning disable OVERFIT022 // Bounded: MaxPreTokenizerDepth checked immediately above; throws catchably.
                     var found = FindSplitPattern(child, depth + 1);
 #pragma warning restore OVERFIT022
-                    if (found is not null)
+                    if (found != null)
                     {
                         return found;
                     }
@@ -464,12 +518,15 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
             return null;
         }
 
+        // OVERFIT040: same constraint as `Load` above, of which this is a private helper — it reads the
+        // sibling `tokenizer_config.json` once, inside that same one-shot construction, on the same thread.
+#pragma warning disable OVERFIT040
         // EOS/UNK: tokenizer_config.json eos_token/unk_token (string or {content}) → id; else heuristics.
         private static (int eos, int unk) ResolveSpecialIds(string? dir, Dictionary<string, int> specialTokens, Dictionary<string, int> vocab, JsonElement model)
         {
             string? eosText = null, unkText = null;
 
-            if (dir is not null)
+            if (dir != null)
             {
                 var cfgPath = Path.Combine(dir, "tokenizer_config.json");
 
@@ -499,6 +556,7 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
             }
             return (eos, unk);
         }
+#pragma warning restore OVERFIT040
 
         private static string? ReadTokenString(JsonElement root, string key)
         {
@@ -517,7 +575,7 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
 
         private static int ResolveId(string? token, Dictionary<string, int> specialTokens, Dictionary<string, int> vocab, int fallback)
         {
-            if (token is null)
+            if (token == null)
             {
                 return fallback;
             }

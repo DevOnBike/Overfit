@@ -7,7 +7,6 @@ using System.Runtime.InteropServices;
 using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Runtime;
 using DevOnBike.Overfit.LanguageModels.Tokenizers;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
 {
@@ -17,14 +16,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
         private readonly ITestOutputHelper _out;
         public QwenSpeculativeNovelBench(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [ModelFact(ModelPath)]  // heavy group, never measured — see Scripts/longfact_heavy.txt
         public void Speculative_OnNovelPrompt_RealisticCase()
         {
-            if (!File.Exists(ModelPath) || !File.Exists(@"C:\qwen3b\tokenizer.json"))
-            {
-                _out.WriteLine("missing");
-                return;
-            }
             using var engine = CachedLlamaInferenceEngine.LoadGguf(ModelPath);
             var tok = QwenTokenizer.Load(@"C:\qwen3b");
             // Novel, non-echoing prompt — the model generates fresh prose; the n-gram drafter rarely matches.

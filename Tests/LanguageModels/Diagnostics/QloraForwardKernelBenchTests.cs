@@ -9,7 +9,6 @@ using DevOnBike.Overfit.LanguageModels.Loading;
 using DevOnBike.Overfit.LanguageModels.Runtime;
 using DevOnBike.Overfit.Tensors;
 using DevOnBike.Overfit.Tensors.Core;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
 {
@@ -27,7 +26,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
         private readonly ITestOutputHelper _out;
         public QloraForwardKernelBenchTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("1s")]
         public void TrainingForward_F32Dequant_vs_Int8Batched()
         {
             const int n = 256, k = 2048, m = 11008;

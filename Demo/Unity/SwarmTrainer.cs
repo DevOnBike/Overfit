@@ -8,6 +8,7 @@ using System.Numerics;
 using DevOnBike.Overfit.Evolutionary.Fitness;
 using DevOnBike.Overfit.Evolutionary.Storage;
 using DevOnBike.Overfit.Evolutionary.Strategies;
+using DevOnBike.Overfit.Runtime;
 
 namespace DevOnBike.Overfit.Demo.Unity.Server
 {
@@ -77,7 +78,7 @@ namespace DevOnBike.Overfit.Demo.Unity.Server
 
             _environment = new SwarmEnvironment(config);
 
-            // One brain per ES candidate; they run in parallel from Parallel.For and each
+            // One brain per ES candidate; they run in parallel from OverfitParallel.For and each
             // invokes Sequential.ForwardInference, whose internal PooledBuffer<float> uses
             // a shared ArrayPool — safe under concurrency, cheap to reacquire.
             _brains = new SwarmBrain[config.PopulationSize];
@@ -173,7 +174,7 @@ namespace DevOnBike.Overfit.Demo.Unity.Server
             // Load each candidate's weights into its dedicated brain. Parallel across
             // candidates — LoadGenome does no shared-state work, the adapter writes to its
             // own network's tensors.
-            Parallel.For(0, _config.PopulationSize, i =>
+            OverfitParallel.For(0, _config.PopulationSize, i =>
             {
                 var slice = new ReadOnlySpan<float>(_genomes, i * _config.GenomeSize, _config.GenomeSize);
                 _brains[i].LoadGenome(slice);
@@ -225,7 +226,7 @@ namespace DevOnBike.Overfit.Demo.Unity.Server
             var outputSize = _config.OutputSize;
             var population = _config.PopulationSize;
 
-            Parallel.For(0, population, genomeIndex =>
+            OverfitParallel.For(0, population, genomeIndex =>
             {
                 var botStart = genomeIndex * botsPerGenome;
                 var brain = _brains[genomeIndex];

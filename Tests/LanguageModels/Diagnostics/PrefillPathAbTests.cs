@@ -8,7 +8,6 @@ using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Runtime;
 using DevOnBike.Overfit.LanguageModels.Tokenizers;
 using DevOnBike.Overfit.Tests.TestSupport;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
 {
@@ -41,7 +40,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
 
         public PrefillPathAbTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("41s")]
         public void Prefill_WeightStationaryVsReDecode()
         {
             var path = TestModelPaths.Qwen3B.Q4KmGgufPath;

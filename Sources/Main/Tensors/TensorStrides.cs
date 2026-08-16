@@ -44,6 +44,12 @@ namespace DevOnBike.Overfit.Tensors
 
         /// <summary>
         /// Computes contiguous row-major strides for the given shape.
+        ///
+        /// <para><b>Unchecked on purpose — see <see cref="TensorShape.Size"/> for the measurement and the
+        /// reasoning.</b> Briefly: these dimensions come from the caller's own code rather than from a
+        /// model file, overflowing one needs a tensor larger than the machine can allocate, and the check
+        /// measured at ~0.12 ns per call for no benefit at this layer. The file-driven products in the GGUF
+        /// and ONNX loaders are checked, and that difference is the point.</para>
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static TensorStrides Contiguous(TensorShape shape)

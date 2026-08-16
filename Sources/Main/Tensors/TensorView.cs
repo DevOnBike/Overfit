@@ -146,6 +146,9 @@ namespace DevOnBike.Overfit.Tensors
                 throw new OverfitRuntimeException("Nie można zmienić kształtu nieciągłego widoku.");
             }
 
+            // Unchecked on purpose — see TensorShape.Size for the measurement and the reasoning. The
+            // dimensions here come from the caller, not from a file, and reshaping to a product above
+            // 2.1 billion elements means asking for a tensor the machine cannot hold.
             if (newS0 * newS1 != Size)
             {
                 throw new ArgumentException($"Nowy rozmiar {newS0 * newS1} nie pasuje do obecnego {Size}");

@@ -11,7 +11,6 @@ using DevOnBike.Overfit.Optimizers;
 using DevOnBike.Overfit.Parameters;
 using DevOnBike.Overfit.Tokenization;
 using DevOnBike.Overfit.Training;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Experimental
 {
@@ -53,7 +52,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Experimental
             _output = output;
         }
 
-        [LongFact]
+        [LongFact("1min45s")]
         [Trait("Category", "Demo")]
         [Trait("Category", "LongRunning")]
         [Trait("Category", "Experimental")]

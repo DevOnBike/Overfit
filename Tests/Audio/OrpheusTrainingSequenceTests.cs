@@ -26,7 +26,7 @@ namespace DevOnBike.Overfit.Tests.Audio
             Assert.Equal(3 + 7 + 1, ex.InputIds.Length);
             Assert.Equal(8, ex.TargetLength);
             Assert.Equal([1, 2, 3], ex.InputIds[..3]);     // prompt preserved
-            Assert.Equal(eos, ex.InputIds[^1]);            // ends with end-of-speech
+            Assert.Equal(eos, ex.InputIds[ex.InputIds.Length - 1]);            // ends with end-of-speech
             // First audio token: base + code(5) + 10 + 0 = 1015.
             Assert.Equal(1015, ex.InputIds[3]);
         }

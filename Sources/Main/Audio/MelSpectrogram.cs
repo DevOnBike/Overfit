@@ -5,6 +5,7 @@
 
 using System.Runtime.CompilerServices;
 using DevOnBike.Overfit.Runtime;
+using DevOnBike.Overfit.Tensors;
 
 namespace DevOnBike.Overfit.Audio
 {
@@ -211,8 +212,13 @@ namespace DevOnBike.Overfit.Audio
         {
             ref var c = ref Unsafe.AsRef<MelFrameCtx>(ctxPtr);
             var m = c.M;
-            Span<float> aRe = stackalloc float[m];
-            Span<float> aIm = stackalloc float[m];
+            // Bluestein length m is the next power of two above 2*NFft-1, and NFft is caller-supplied,
+            // so nothing here bounds it — at Whisper's NFft = 400 this was already 2 x 4 KB of stack.
+            // Pooled instead: a rent per frame is nanoseconds against a multi-millisecond STFT.
+            using var aReBuffer = new PooledBuffer<float>(m, clearMemory: false);
+            using var aImBuffer = new PooledBuffer<float>(m, clearMemory: false);
+            var aRe = aReBuffer.Span;
+            var aIm = aImBuffer.Span;
             var twRe = new ReadOnlySpan<float>(c.TRe, m / 2);
             var twIm = new ReadOnlySpan<float>(c.TIm, m / 2);
 
@@ -342,7 +348,7 @@ namespace DevOnBike.Overfit.Audio
             }
             // OVERFIT001: parity hook (internal, for tests) — returns a fresh spectrogram the caller owns.
 #pragma warning disable OVERFIT001
-            var power = new float[_nFreqs * frames];
+            var power = new float[(long)_nFreqs * frames];
 #pragma warning restore OVERFIT001
             ComputePowerSpectrogram(padded, frames, power);
             return power;
@@ -392,7 +398,7 @@ namespace DevOnBike.Overfit.Audio
 #pragma warning disable OVERFIT001
         private static float[] ReflectPad(ReadOnlySpan<float> x, int pad)
         {
-            var outp = new float[x.Length + 2 * pad];
+            var outp = new float[x.Length + (2L * pad)];
             ReflectPadInto(x, pad, outp);
             return outp;
         }
@@ -436,7 +442,7 @@ namespace DevOnBike.Overfit.Audio
                 fftFreqs[f] = (double)f * sampleRate / nFft;
             }
 
-            var filters = new float[nMels * nFreqs];
+            var filters = new float[(long)nMels * nFreqs];
             for (var m = 0; m < nMels; m++)
             {
                 var lower = hzPoints[m];

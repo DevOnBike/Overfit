@@ -16,6 +16,19 @@ namespace DevOnBike.Overfit.Server.AspNet
     /// exchange streams tokens from a synchronous generate callback — so synchronous body IO is enabled on
     /// entering the stream; Kestrel disallows it by default.
     /// </summary>
+    // OVERFIT040 for this class's two writing methods, at the type because they share one constraint.
+    //
+    // THE CONSTRAINT IS THE CALLBACK ABOVE THEM: these implement `IOpenAiResponseSink`, whose members return
+    // void, and the caller is `ChatCompletionExchange`, which writes each token from inside the decode
+    // callback the model invokes per token. There is no `await` point available inside a synchronous callback,
+    // so an asynchronous sink would have to be blocked on at the call site — which is OVERFIT039, the worse
+    // shape of the same problem. `EndpointHelpers.EnableSynchronousIO` exists exactly to let this work, and
+    // the interface is public API in the Server assembly rather than this file's to change.
+    //
+    // WHAT IS GIVEN UP: the request thread that entered the endpoint is held for the whole generation. That is
+    // the server's design — one thread per in-flight completion, for its duration — and it is why the session
+    // pool bounds concurrency instead of the thread pool doing it.
+#pragma warning disable OVERFIT040
     internal sealed class AspNetResponseSink : IOpenAiResponseSink
     {
         private readonly HttpResponse _response;
@@ -49,4 +62,5 @@ namespace DevOnBike.Overfit.Server.AspNet
             _response.Body.Flush();
         }
     }
+#pragma warning restore OVERFIT040
 }

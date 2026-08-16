@@ -158,8 +158,19 @@ namespace DevOnBike.Overfit.Audio.Mp3
                     point += ht[off + point] >> 8;
                 }
             }
-            while (--bitsleft > 0 && point < treelen);
+            while (--bitsleft > 0 && point < treelen); // KEEP: see the 2026-08-11 note below before removing.
 
+            // `point < treelen` above has never once been the condition that stopped a walk. Exhaustively
+            // enumerated (2026-08-11) over all 34 non-empty table selects in Mp3HuffmanData.Table: every
+            // reachable point via either chase (low-byte/bit=1, high-byte/bit=0), full state space, to a
+            // max depth of 20 outer iterations against the real bitsleft<=32 cap (so the enumeration was
+            // not cut short) -- and for every table, the highest point any chain reaches is exactly
+            // treelen-1, including table_select=33 (off=2773, treelen=31), which has zero slack before the
+            // end of the whole 2804-entry array. These are complete, ISO-standard binary Huffman trees: the
+            // >=250 byte-chaining only expresses an in-table jump too large for one byte, never an escape.
+            // The guard is kept anyway -- it is exactly what would catch a future edit to the table data
+            // that broke that property, and removing a bound because it has never fired is how the next
+            // defect gets in.
             x = 0; // illegal code in data
             y = 0;
             return false;

@@ -8,7 +8,6 @@ using DevOnBike.Overfit.Audio;
 using DevOnBike.Overfit.Audio.Tts.Orpheus;
 using DevOnBike.Overfit.LanguageModels.Whisper;
 using DevOnBike.Overfit.Tests.TestSupport;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.Audio
 {
@@ -29,7 +28,7 @@ namespace DevOnBike.Overfit.Tests.Audio
             _out = output;
         }
 
-        [LongFact]
+        [LongFact("1min25s")]
         public void Acronyms_SpelledConvention_HeardBackByWhisper()
         {
             TestModelPaths.Orpheus.RequireGgufPath();

@@ -132,8 +132,10 @@ namespace DevOnBike.Overfit.Ops
         /// </summary>
         private static void GeluForwardSimd(ReadOnlySpan<float> input, Span<float> output)
         {
+#pragma warning disable OVERFIT025 // 4 KB activation tile. Eight times the OVERFIT025 budget, kept deliberately: GeluTile / SiLUTile are cache-blocking constants on a measured hot path, so shrinking them or pooling them is a PERFORMANCE change needing an A/B, not a cleanup. Signed here rather than hidden in a directory budget, so new code in Ops/ is still checked.
             Span<float> innerBuf = stackalloc float[GeluTile];
             Span<float> tanhBuf = stackalloc float[GeluTile];
+#pragma warning restore OVERFIT025
 
             var len = input.Length;
             for (var offset = 0; offset < len; offset += GeluTile)
@@ -141,8 +143,8 @@ namespace DevOnBike.Overfit.Ops
                 var n = Math.Min(GeluTile, len - offset);
                 var x = input.Slice(offset, n);
                 var y = output.Slice(offset, n);
-                var inner = innerBuf[..n];
-                var tanh = tanhBuf[..n];
+                var inner = innerBuf.Slice(0, n);
+                var tanh = tanhBuf.Slice(0, n);
 
                 // inner = sqrt2pi * x * (1 + c * x²)
                 TensorPrimitives.Multiply(x, x, inner);                 // inner = x²
@@ -172,9 +174,11 @@ namespace DevOnBike.Overfit.Ops
             ReadOnlySpan<float> gradOutput,
             Span<float> gradInput)
         {
+#pragma warning disable OVERFIT025 // 4 KB activation tile. Eight times the OVERFIT025 budget, kept deliberately: GeluTile / SiLUTile are cache-blocking constants on a measured hot path, so shrinking them or pooling them is a PERFORMANCE change needing an A/B, not a cleanup. Signed here rather than hidden in a directory budget, so new code in Ops/ is still checked.
             Span<float> innerBuf = stackalloc float[GeluTile];
             Span<float> tanhBuf = stackalloc float[GeluTile];
             Span<float> factor = stackalloc float[GeluTile];
+#pragma warning restore OVERFIT025
 
             var len = input.Length;
             for (var offset = 0; offset < len; offset += GeluTile)
@@ -183,9 +187,9 @@ namespace DevOnBike.Overfit.Ops
                 var x = input.Slice(offset, n);
                 var dO = gradOutput.Slice(offset, n);
                 var dI = gradInput.Slice(offset, n);
-                var inner = innerBuf[..n];
-                var tanh = tanhBuf[..n];
-                var f = factor[..n];
+                var inner = innerBuf.Slice(0, n);
+                var tanh = tanhBuf.Slice(0, n);
+                var f = factor.Slice(0, n);
 
                 // inner = sqrt2pi · (x + c·x³)   AND   f = sqrt2pi · (1 + 3·c·x²)
                 TensorPrimitives.Multiply(x, x, inner);                 // inner = x²

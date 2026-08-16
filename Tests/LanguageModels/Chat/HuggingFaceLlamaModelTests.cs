@@ -9,7 +9,6 @@ using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Loading;
 using DevOnBike.Overfit.LanguageModels.Tokenizers;
 using DevOnBike.Overfit.Tests.TestSupport;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Chat
 {
@@ -26,7 +25,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Chat
         private readonly ITestOutputHelper _out;
         public HuggingFaceLlamaModelTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("430ms")]
         public void Tokenizer_RoundTrips_OnLlamaFamily()
         {
             if (!File.Exists(TestModelPaths.Llama.TokenizerJsonPath))
@@ -58,7 +57,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Chat
         // the RoPE row-permute on Llama dims + GQA + tied LM head) says " Paris"; a mapping bug
         // yields word-salad. The chat test below is structural-only because the dropped model
         // is a base, not an instruct, model.
-        [LongFact]
+        [LongFact("12s")]
         public void Generate_RealLlama1B_FromSafetensors_CompletesCoherently()
         {
             if (!File.Exists(TestModelPaths.Llama.SafetensorsPath))
@@ -95,7 +94,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Chat
             Assert.Contains("Paris", completion, StringComparison.OrdinalIgnoreCase);
         }
 
-        [LongFact]
+        [LongFact("9s")]
         public void Chat_OnLlamaFamily_Responds()
         {
             if (!File.Exists(TestModelPaths.Llama.SafetensorsPath))
@@ -116,7 +115,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Chat
 
             // Structural only — we don't control which Llama variant (base vs instruct) is dropped.
             Assert.False(string.IsNullOrWhiteSpace(reply), "Chat produced no text.");
-            Assert.Equal("assistant", model.Chat.History[^1].Role);
+            var history = model.Chat.History;
+
+            Assert.Equal("assistant", history[history.Count - 1].Role);
         }
     }
 }

@@ -28,10 +28,10 @@ var voice = opts.Get("voice", OrpheusPrompt.DefaultVoice)!;
 var seconds = int.TryParse(opts.Get("seconds", "5"), out var s) ? s : 5;
 var wavInput = opts.Get("wav", null);
 var savePath = opts.Get("save", null);
-var once = opts.Has("once") || wavInput is not null;
+var once = opts.Has("once") || wavInput != null;
 var noPlay = opts.Has("no-play");
 
-if (chatPath is null || !File.Exists(chatPath))
+if (chatPath == null || !File.Exists(chatPath))
 {
     Console.Error.WriteLine("Need a chat model: --chat <path-to-.gguf> (a small instruct GGUF works well).");
     return 1;
@@ -58,14 +58,14 @@ do
 {
     // Exhaustive across the wav-input / microphone pair below (see VoiceClone for the same note).
     float[] micSamples = [];
-    if (wavInput is not null)
+    if (wavInput != null)
     {
         var raw = AudioFile.ReadMono(wavInput, out var rate);
         micSamples = rate == MicCapture.SampleRate ? raw : AudioResampler.Resample(raw, rate, MicCapture.SampleRate);
         Console.WriteLine($"[input] {Path.GetFileName(wavInput)} ({micSamples.Length / (double)MicCapture.SampleRate:F1}s)");
     }
 
-    if (!(wavInput is not null))
+    if (wavInput == null)
     {
         Console.Write($"Press Enter to record {seconds}s (or type 'q' to quit): ");
         if (string.Equals(Console.ReadLine()?.Trim(), "q", StringComparison.OrdinalIgnoreCase))
@@ -92,7 +92,7 @@ do
     Console.WriteLine($"Assistant: {reply}");
 
     var audio = tts.Synthesize(reply, voice);
-    if (savePath is not null)
+    if (savePath != null)
     {
         WavWriter.WriteMono(savePath, audio, tts.SampleRate, WavSampleFormat.Pcm16,
             SyntheticSpeechMetadata.ForNow(voice).ToInfoComment());
@@ -127,7 +127,7 @@ static Options ParseArgs(string[] argv)
         {
             continue;
         }
-        var key = argv[i][2..];
+        var key = argv[i].Substring(2);
         // Capture BEFORE consuming the value: `argv[++i]` advances i, so re-testing would look at the
         // NEXT argument and could null out the value that was just parsed.
         var hasValue = i + 1 < argv.Length && !argv[i + 1].StartsWith("--", StringComparison.Ordinal);
@@ -145,9 +145,16 @@ static Options ParseArgs(string[] argv)
     return new Options(map);
 }
 
-internal sealed class Options(Dictionary<string, string?> map)
+internal sealed class Options
 {
-    public string? Get(string key, string? fallback) => map.TryGetValue(key, out var v) && v is not null ? v : fallback;
+    private readonly Dictionary<string, string?> _map;
 
-    public bool Has(string key) => map.ContainsKey(key);
+    public Options(Dictionary<string, string?> map)
+    {
+        _map = map;
+    }
+
+    public string? Get(string key, string? fallback) => _map.TryGetValue(key, out var v) && v != null ? v : fallback;
+
+    public bool Has(string key) => _map.ContainsKey(key);
 }

@@ -5,7 +5,6 @@
 
 using DevOnBike.Overfit.LanguageModels;
 using DevOnBike.Overfit.LanguageModels.Runtime;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
 {
@@ -26,7 +25,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
         private readonly ITestOutputHelper _out;
         public AttentionWholeMatrixDecodeCoherenceTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("5s")]
         public void Qwen3B_Q4KM_WholeMatrixAttn_GeneratesCoherent()
         {
             if (!File.Exists(Model))

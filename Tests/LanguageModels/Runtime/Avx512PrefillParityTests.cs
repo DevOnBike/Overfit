@@ -125,6 +125,77 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
             }
         }
 
+        /// <summary>
+        /// The banded call, which is the path that was silently 256-bit until 2026-08-02.
+        ///
+        /// <para><c>BatchedQuantProjection.TiledBandChunk</c> had no <c>if (c.Avx512)</c> branch while its
+        /// three siblings all did, so a machine configured for AVX-512 ran the narrow kernel on precisely the
+        /// short-prompt case banding exists for. Wiring it up meant giving <c>GemmTiled512</c> the
+        /// <c>groupStart</c>/<c>groupCount</c> parameters <c>GemmTiled</c> already had — new code, and this is
+        /// what pins it.</para>
+        ///
+        /// <para>Every band is checked, and the union of the bands is checked against the unbanded result:
+        /// a band that computed the wrong groups but computed them correctly would pass the first check
+        /// alone.</para>
+        /// </summary>
+        [Theory]
+        [InlineData(1)]
+        [InlineData(2)]
+        [InlineData(4)]
+        public void GemmTiled512_Banded_IsBitIdenticalTo_GemmTiled_Banded(int groupsPerBand)
+        {
+            if (!Avx512BW.IsSupported || !Avx512F.IsSupported)
+            {
+                return;
+            }
+
+            const int Cols = 8;
+
+            var (weight, quants, scales, bsums) = BuildInputs(Cols);
+            var repacked = weight.EnsureRepacked();
+            var totalGroups = OutputSize / 8;
+
+            var wholeReference = new float[Cols * OutputSize];
+            var assembled = new float[Cols * OutputSize];
+
+            Q4KGemvKernel.GemmTiled(
+                repacked, OutputSize, InputSize, Cols, quants, scales, bsums, wholeReference);
+
+            for (var groupStart = 0; groupStart < totalGroups; groupStart += groupsPerBand)
+            {
+                var groupCount = Math.Min(groupsPerBand, totalGroups - groupStart);
+
+                var reference = new float[Cols * OutputSize];
+                var wide = new float[Cols * OutputSize];
+
+                Q4KGemvKernel.GemmTiled(
+                    repacked, OutputSize, InputSize, Cols, quants, scales, bsums, reference, [],
+                    groupStart, groupCount);
+
+                Q4KGemvKernel.GemmTiled512(
+                    repacked, OutputSize, InputSize, Cols, quants, scales, bsums, wide, [], [],
+                    groupStart, groupCount);
+
+                Assert.Equal(reference, wide);
+
+                // Bands are disjoint, so accumulating them must reconstruct the whole matrix exactly.
+                for (var c = 0; c < Cols; c++)
+                {
+                    for (var g = 0; g < groupCount; g++)
+                    {
+                        var row = (groupStart + g) * 8;
+
+                        for (var r = row; r < row + 8; r++)
+                        {
+                            assembled[(c * OutputSize) + r] = wide[(c * OutputSize) + r];
+                        }
+                    }
+                }
+            }
+
+            Assert.Equal(wholeReference, assembled);
+        }
+
         private static (Q4KWeight Weight, sbyte[] Quants, float[] Scales, short[] Bsums) BuildInputs(int cols)
         {
             var rng = new Random(20260722);

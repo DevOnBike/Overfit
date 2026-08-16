@@ -1,0 +1,501 @@
+// Copyright (c) 2026 DevOnBike.
+// This file is part of DevonBike Overfit.
+// DevonBike Overfit is licensed under the GNU AGPLv3.
+// For commercial licensing options, contact: devonbike@gmail.com
+
+using System.Globalization;
+using System.Text;
+using DevOnBike.Overfit.Anomalies.Contracts;
+
+namespace DevOnBike.Overfit.Anomalies.Monitoring
+{
+    /// <summary>
+    /// The single place a <see cref="MetricIndex"/> becomes PromQL. Both
+    /// <see cref="PrometheusMetricSource"/> (instant) and <see cref="PrometheusHistoricalSource"/> (range)
+    /// go through here, so a metric name or a label matcher exists exactly once.
+    ///
+    /// <para><b>Metric names are a property of whoever exports them, not a contract.</b> The built-in
+    /// templates use OpenTelemetry naming and are a starting point; any deployment whose exporter disagrees
+    /// supplies <see cref="IPrometheusQuerySelector.QueryOverrides"/>. <see cref="OverfitServerQueries"/> is
+    /// the worked example, and every template in it was run against a live Prometheus before being written
+    /// down — which is how the built-ins were found to match nothing here.</para>
+    /// </summary>
+    public static class PromqlCatalog
+    {
+        /// <summary>
+        /// Placeholder every template expands to the label matcher set. A token rather than
+        /// <c>string.Format</c> because PromQL is full of braces and every template would otherwise need them
+        /// doubled — exactly the kind of quoting that produces a query which looks right and matches nothing.
+        /// </summary>
+        public const string SelectorToken = "%selector%";
+
+        /// <summary>
+        /// A label value, escaped for the quoted string PromQL expects.
+        ///
+        /// <para><b>A quote or a backslash in a namespace or pod regex produced a malformed query.</b> Not a
+        /// hypothetical: a pod regex is written by a human and regex syntax and PromQL string syntax overlap
+        /// on exactly the backslash. The query then fails, and the caller reads that as "these pods export
+        /// nothing" - the same answer a correct query gives about a metric that is genuinely absent, and the
+        /// two call for opposite fixes.</para>
+        ///
+        /// <para>Backslash first, or the escaping would double-escape the ones it just added. A newline is
+        /// escaped too: PromQL string literals do not span lines, so an unescaped one truncates the query at a
+        /// point that still parses.</para>
+        /// </summary>
+        public static string EscapeLabelValue(string value)
+        {
+            ArgumentNullException.ThrowIfNull(value);
+
+            if (value.IndexOfAny(NeedsEscaping) < 0)
+            {
+                return value;
+            }
+
+            var sb = new StringBuilder(value.Length + 8);
+
+            for (var i = 0; i < value.Length; i++)
+            {
+                var c = value[i];
+
+                if (c == '\\' || c == '"')
+                {
+                    sb.Append('\\');
+                    sb.Append(c);
+
+                    continue;
+                }
+
+                if (c == '\n')
+                {
+                    sb.Append("\\n");
+
+                    continue;
+                }
+
+                sb.Append(c);
+            }
+
+            return sb.ToString();
+        }
+
+        private static readonly char[] NeedsEscaping = ['\\', '"', '\n'];
+
+        /// <summary>
+        /// The label matcher set every template expands <see cref="SelectorToken"/> to. Built once per data
+        /// centre and shared by all twelve queries, so a namespace or pod-regex mistake is wrong everywhere at
+        /// once rather than in eleven places out of twelve.
+        /// </summary>
+        public static string BuildSelector(IPrometheusQuerySelector selector, DataCenter dc)
+        {
+            ArgumentNullException.ThrowIfNull(selector);
+
+            var sb = new StringBuilder(96);
+            sb.Append("pod=~\"").Append(EscapeLabelValue(selector.PodRegex)).Append('"');
+
+            if (selector.Namespace.Length > 0)
+            {
+                sb.Append(",namespace=\"").Append(EscapeLabelValue(selector.Namespace)).Append('"');
+            }
+
+            if (IsSingleDataCenter(selector))
+            {
+                return sb.ToString();
+            }
+
+            var value = dc == DataCenter.West ? selector.DcWestLabel : selector.DcEastLabel;
+            sb.Append(',').Append(selector.DataCenterLabel).Append("=\"")
+                .Append(EscapeLabelValue(value)).Append('"');
+
+            return sb.ToString();
+        }
+
+        /// <summary>
+        /// Label matchers for series that carry no <c>pod</c> label — ReplicaSet and Deployment metadata. Namespace
+        /// and data centre still apply; the pod regex cannot.
+        /// </summary>
+        public static string BuildNamespaceSelector(IPrometheusQuerySelector selector)
+        {
+            ArgumentNullException.ThrowIfNull(selector);
+
+            var sb = new StringBuilder(64);
+
+            if (selector.Namespace.Length > 0)
+            {
+                sb.Append("namespace=\"").Append(EscapeLabelValue(selector.Namespace)).Append('"');
+            }
+
+            if (IsSingleDataCenter(selector))
+            {
+                return sb.ToString();
+            }
+
+            if (sb.Length > 0)
+            {
+                sb.Append(',');
+            }
+
+            sb.Append(selector.DataCenterLabel).Append("=\"").Append(selector.DcWestLabel).Append('"');
+
+            return sb.ToString();
+        }
+
+        /// <summary>
+        /// <b>Pod to ReplicaSet.</b> On a Deployment the ReplicaSet is the version, so this is the query that makes
+        /// a rollout visible — and it is the only thing standing between the guard and going blind through one.
+        ///
+        /// <para>The answer is in the series' <c>owner_name</c> <b>label</b>, not its value: kube-state-metrics
+        /// emits a constant 1 and carries the relationship in labels. A reader for these has to keep the labels,
+        /// which is why the metric sources cannot be reused as-is — they parse for a value.</para>
+        /// </summary>
+        public static string PodOwnershipQuery(IPrometheusQuerySelector selector)
+        {
+            var matchers = BuildSelector(selector, DataCenter.West);
+
+            return $"kube_pod_owner{{{matchers},owner_kind=\"ReplicaSet\"}}";
+        }
+
+        /// <summary><b>ReplicaSet to Deployment</b>, closing the chain from a pod up to the workload a human names.</summary>
+        public static string ReplicaSetOwnershipQuery(IPrometheusQuerySelector selector)
+        {
+            var matchers = BuildNamespaceSelector(selector);
+
+            return matchers.Length > 0
+                ? $"kube_replicaset_owner{{{matchers}}}"
+                : "kube_replicaset_owner";
+        }
+
+        /// <summary>
+        /// <b>Pod to node.</b> Fills the coordinate that catches the fault nobody looks for — a failing node
+        /// degrading workloads with nothing else in common. Currently nothing populates it.
+        /// </summary>
+        public static string PodNodeQuery(IPrometheusQuerySelector selector)
+        {
+            var matchers = BuildSelector(selector, DataCenter.West);
+
+            return $"kube_pod_info{{{matchers}}}";
+        }
+
+        /// <summary>
+        /// <b>Pod labels.</b> Carries the one fact the guard cannot work out for itself: which replicas are
+        /// meant to be compared against each other.
+        ///
+        /// <para>A rollout, a canary and an elected leader all look identical from the metrics — a minority of
+        /// pods behaving unlike the majority — and each calls for a different answer. The cluster already
+        /// knows which is which, because the operator that runs the workload publishes it as a label and
+        /// updates it on failover. Reading that beats both guessing and asking a human to keep a list.</para>
+        ///
+        /// <para>kube-state-metrics exposes every pod label as <c>label_&lt;key&gt;</c> on this series, with
+        /// dots and dashes flattened to underscores.</para>
+        /// </summary>
+        public static string PodLabelsQuery(IPrometheusQuerySelector selector)
+        {
+            var matchers = BuildSelector(selector, DataCenter.West);
+
+            return $"kube_pod_labels{{{matchers}}}";
+        }
+
+        /// <summary>
+        /// The Prometheus label name kube-state-metrics gives a Kubernetes pod label. Anything that is not a
+        /// letter, digit or underscore becomes an underscore, which is what makes <c>app.kubernetes.io/name</c>
+        /// reachable at all.
+        /// </summary>
+        public static string PodLabelSeriesName(string kubernetesLabel)
+        {
+            ArgumentNullException.ThrowIfNull(kubernetesLabel);
+
+            var text = new StringBuilder(kubernetesLabel.Length + 6);
+            text.Append("label_");
+
+            for (var i = 0; i < kubernetesLabel.Length; i++)
+            {
+                var c = kubernetesLabel[i];
+
+                text.Append(char.IsAsciiLetterOrDigit(c) || c == '_' ? c : '_');
+            }
+
+            return text.ToString();
+        }
+
+        /// <summary>
+        /// <b>When each pod was created</b>, as a unix time in the sample's value.
+        ///
+        /// <para>The trend family needs it to tell a leak from a warm-up. Measured on the lab: a freshly
+        /// created replica's working set climbs 13-17% of typical over its first ten to twenty minutes, with
+        /// a Kendall tau of 0.70-0.94 — a textbook trend, entirely real, and about nothing. Every deploy and
+        /// every autoscale event produces one per new pod.</para>
+        /// </summary>
+        public static string PodCreatedQuery(IPrometheusQuerySelector selector)
+        {
+            var matchers = BuildSelector(selector, DataCenter.West);
+
+            return matchers.Length > 0
+                ? $"kube_pod_created{{{matchers}}}"
+                : "kube_pod_created";
+        }
+
+        /// <summary>
+        /// <b>The rollout timestamp</b>, as a unix time in the sample's value rather than in a label.
+        ///
+        /// <para>An incident whose start coincides with this moving is <i>more</i> informative, not less: "this
+        /// began when version N went out" is the attribution a bare recording rule cannot produce. Suppressing
+        /// alerts during a rollout — the common workaround — hides exactly the faults a rollout causes.</para>
+        /// </summary>
+        public static string DeploymentCreatedQuery(IPrometheusQuerySelector selector)
+        {
+            var matchers = BuildNamespaceSelector(selector);
+
+            return matchers.Length > 0
+                ? $"kube_deployment_created{{{matchers}}}"
+                : "kube_deployment_created";
+        }
+
+        /// <summary>
+        /// <b>How many pods each ReplicaSet holds</b> — the old-versus-new split during a rollout, in one query.
+        /// A workload with two non-zero entries is mid-rollout, which is the condition under which the peer family
+        /// should be partitioned rather than trusted.
+        /// </summary>
+        public static string ReplicaSetPopulationQuery(IPrometheusQuerySelector selector)
+        {
+            return $"sum by (owner_name) ({PodOwnershipQuery(selector)})";
+        }
+
+        /// <summary>Whether queries should omit the data-centre matcher and run once rather than per centre.</summary>
+        public static bool IsSingleDataCenter(IPrometheusQuerySelector selector)
+        {
+            ArgumentNullException.ThrowIfNull(selector);
+
+            return string.IsNullOrWhiteSpace(selector.DataCenterLabel);
+        }
+
+        /// <summary>
+        /// The PromQL for one feature with <paramref name="labelSelector"/> substituted, or <c>null</c> when
+        /// this deployment has no source for it.
+        /// </summary>
+        public static string? Build(
+            IPrometheusQuerySelector selector,
+            MetricIndex metric,
+            string labelSelector)
+        {
+            var template = ResolveTemplate(selector, metric);
+
+            if (template.Length == 0)
+            {
+                return null;
+            }
+
+            return template.Replace(SelectorToken, labelSelector, StringComparison.Ordinal);
+        }
+
+        /// <summary>
+        /// Configured override if one exists — <b>including an empty one</b>, which is how a deployment
+        /// declares that a feature has no source — otherwise the built-in template.
+        /// </summary>
+        public static string ResolveTemplate(IPrometheusQuerySelector selector, MetricIndex metric)
+        {
+            ArgumentNullException.ThrowIfNull(selector);
+
+            var overrides = selector.QueryOverrides;
+
+            if (overrides != null && overrides.TryGetValue(metric, out var configured))
+            {
+                return string.IsNullOrWhiteSpace(configured) ? string.Empty : configured;
+            }
+
+            return DefaultTemplate(metric);
+        }
+
+        /// <summary>
+        /// Query set for a cluster running this project's own ASP.NET server, scraped by
+        /// kube-prometheus-stack — the shape the repository's <c>k8s/</c> lab stands up.
+        ///
+        /// <para><b>Two features are approximations, and the deviation is stated rather than hidden.</b>
+        /// <c>CpuUsageRatio</c> is documented as a fraction of the pod's CPU limit, but a limit is optional in
+        /// Kubernetes and three of the lab's four pods have none — so this returns cores consumed, and a
+        /// consumer comparing it against a 0…1 expectation will be wrong. <c>GcGen2HeapBytes</c> maps to the
+        /// whole managed heap, because the server exposes <c>dotnet_gc_heap_size_bytes</c> with no generation
+        /// label.</para>
+        ///
+        /// <para><c>sum by (pod)</c> wraps the cAdvisor queries deliberately: cAdvisor emits one series per
+        /// container plus a pod-level aggregate, and without the aggregation a single pod arrives as several
+        /// samples that overwrite each other during feature assembly.</para>
+        /// </summary>
+        /// <param name="window">Range used by every <c>rate()</c>. Should be at least four scrape intervals,
+        /// or a rate over a restart-truncated window reads as a spike.</param>
+        public static Dictionary<MetricIndex, string> OverfitServerQueries(TimeSpan? window = null)
+        {
+            var range = FormatRange(window ?? TimeSpan.FromMinutes(2));
+            const string S = SelectorToken;
+
+            return new Dictionary<MetricIndex, string>((int)MetricIndex.Count)
+            {
+                [MetricIndex.CpuUsageRatio] =
+                    $"sum by (pod) (rate(container_cpu_usage_seconds_total{{{S}}}[{range}]))",
+
+                // Present only on pods that carry a CPU limit — CFS accounting does not exist without a
+                // quota. Pods without a limit produce no series at all, which is not the same as zero.
+                [MetricIndex.CpuThrottleRatio] =
+                    $"sum by (pod) (rate(container_cpu_cfs_throttled_periods_total{{{S}}}[{range}]))"
+                    + $" / sum by (pod) (rate(container_cpu_cfs_periods_total{{{S}}}[{range}]))",
+
+                [MetricIndex.MemoryWorkingSetBytes] =
+                    $"sum by (pod) (container_memory_working_set_bytes{{{S}}})",
+
+                // NOT container_oom_events_total. Measured 2026-08-08 against a pod Kubernetes reported as
+                // OOMKilled with exit 137: that series read 0 for the killed pod, and across 43 series
+                // cluster-wide over an hour the only distinct value present was 0.0 — cAdvisor does not
+                // populate it on this runtime. A channel pinned at zero is worse than one with no series at
+                // all, because the missing one is counted as blind in every cycle line while this one
+                // reports a number, satisfies coverage checks and can never fire.
+                //
+                // kube-state-metrics carries the fact. The restart increase says an event happened inside
+                // the window; the last-terminated reason says it was an OOM. Multiplying keeps both
+                // properties: measured 1.00 for the killed pod and NO series for the other eleven.
+                //
+                // The reason flag alone was rejected on the same measurement. It is a STATE that persists
+                // for the container's lifetime, so it would hold the pod anomalous forever; this product
+                // decays with the window — measured 0 at 2/5/15 min and 1.00 at 30 min for a kill 17
+                // minutes old. Matching on (namespace, pod, container) rather than pod alone because pod
+                // names are unique per namespace, not per cluster.
+                //
+                // Known limit, stated rather than hidden: a container that OOMs and then restarts for a
+                // different reason has its flag overwritten, so that OOM stops being attributed. That is a
+                // narrower gap than reading a series which is always zero.
+                //
+                // The `or` tail is not decoration. A join produces NO SERIES for a pod whose right-hand side
+                // is absent, and on a healthy cluster that is every pod — so the first version of this fix
+                // turned the channel from "always zero" into "always blind", measured on the lab within
+                // twenty minutes of deploying it: blind went 1 -> 2 and `Blind on OomEventsRate` fired every
+                // cycle. That is the same per-cycle noise the unbound-channel handling exists to suppress,
+                // and it would train an operator to skip the line the real case shares. The tail is the same
+                // counter multiplied by zero, so it contributes one zero series per pod that reports
+                // restarts at all, and `or` fills in only the pods the join left out.
+                [MetricIndex.OomEventsRate] =
+                    $"sum by (pod) (increase(kube_pod_container_status_restarts_total{{{S}}}[{range}])"
+                    + " * on (namespace, pod, container) group_left()"
+                    + $" kube_pod_container_status_last_terminated_reason{{{S},reason=\"OOMKilled\"}})"
+                    + $" or sum by (pod) (increase(kube_pod_container_status_restarts_total{{{S}}}[{range}]) * 0)",
+
+                [MetricIndex.LatencyP50Ms] = LatencyQuery(0.50, S, range),
+                [MetricIndex.LatencyP95Ms] = LatencyQuery(0.95, S, range),
+                [MetricIndex.LatencyP99Ms] = LatencyQuery(0.99, S, range),
+
+                [MetricIndex.RequestsPerSecond] =
+                    $"sum by (pod) (rate(overfit_chat_requests_total{{{S}}}[{range}]))",
+
+                // Undefined while no requests are arriving, and left undefined on purpose: 0/0 yields NaN,
+                // which is the honest answer. Substituting zero would report a perfect error rate for a
+                // server that is not serving anything.
+                [MetricIndex.ErrorRate] =
+                    $"sum by (pod) (rate(overfit_http_responses_total{{{S},status=\"5xx\"}}[{range}]))"
+                    + $" / sum by (pod) (rate(overfit_http_responses_total{{{S}}}[{range}]))",
+
+                [MetricIndex.GcGen2HeapBytes] =
+                    $"sum by (pod) (dotnet_gc_heap_size_bytes{{{S}}})",
+
+                [MetricIndex.GcPauseRatio] =
+                    $"sum by (pod) (rate(dotnet_gc_pause_seconds_total{{{S}}}[{range}]))",
+
+                [MetricIndex.ThreadPoolQueueLength] =
+                    $"sum by (pod) (dotnet_threadpool_queue_length{{{S}}})",
+
+                // increase(), not the raw counter: the absolute restart total says how old a pod is, while its
+                // increase over the window says whether it restarted just now. Only the second is a signal.
+                [MetricIndex.ContainerRestarts] =
+                    $"sum by (pod) (increase(kube_pod_container_status_restarts_total{{{S}}}[{range}]))"
+            };
+        }
+
+        /// <summary>
+        /// The built-in queries, in OpenTelemetry naming. A starting point, not a promise — see the class
+        /// remarks.
+        /// </summary>
+        public static string DefaultTemplate(MetricIndex metric)
+        {
+            const string S = SelectorToken;
+
+            return metric switch
+            {
+                MetricIndex.CpuUsageRatio =>
+                    $"sum by (pod) (rate(container_cpu_usage_seconds_total{{{S}}}[1m]))",
+
+                MetricIndex.CpuThrottleRatio =>
+                    $"sum by (pod) (rate(container_cpu_cfs_throttled_periods_total{{{S}}}[1m]))"
+                    + $" / sum by (pod) (rate(container_cpu_cfs_periods_total{{{S}}}[1m]))",
+
+                MetricIndex.MemoryWorkingSetBytes =>
+                    $"sum by (pod) (container_memory_working_set_bytes{{{S}}})",
+
+                // See OverfitServerQueries for the measurement: container_oom_events_total is zero on every
+                // series this lab's runtime produces, including for a pod Kubernetes reported as OOMKilled.
+                MetricIndex.OomEventsRate =>
+                    $"sum by (pod) (increase(kube_pod_container_status_restarts_total{{{S}}}[1m])"
+                    + " * on (namespace, pod, container) group_left()"
+                    + $" kube_pod_container_status_last_terminated_reason{{{S},reason=\"OOMKilled\"}})"
+                    + $" or sum by (pod) (increase(kube_pod_container_status_restarts_total{{{S}}}[1m]) * 0)",
+
+                MetricIndex.LatencyP50Ms => OtelLatencyQuery(0.50, S),
+                MetricIndex.LatencyP95Ms => OtelLatencyQuery(0.95, S),
+                MetricIndex.LatencyP99Ms => OtelLatencyQuery(0.99, S),
+
+                MetricIndex.RequestsPerSecond =>
+                    $"sum by (pod) (rate(http_server_request_duration_seconds_count{{{S}}}[1m]))",
+
+                MetricIndex.ErrorRate =>
+                    $"sum by (pod) (rate(http_server_request_duration_seconds_count{{{S},http_response_status_code=~\"5..\"}}[1m]))"
+                    + $" / sum by (pod) (rate(http_server_request_duration_seconds_count{{{S}}}[1m]))",
+
+                MetricIndex.GcGen2HeapBytes =>
+                    $"sum by (pod) (process_runtime_dotnet_gc_heap_size_bytes{{{S},generation=\"2\"}})",
+
+                MetricIndex.GcPauseRatio =>
+                    $"sum by (pod) (rate(process_runtime_dotnet_gc_pause_total_seconds_total{{{S}}}[1m]))",
+
+                MetricIndex.ThreadPoolQueueLength =>
+                    $"sum by (pod) (process_runtime_dotnet_thread_pool_queue_length{{{S}}})",
+
+                MetricIndex.ContainerRestarts =>
+                    $"sum by (pod) (increase(kube_pod_container_status_restarts_total{{{S}}}[1m]))",
+
+                _ => throw new ArgumentOutOfRangeException(nameof(metric), metric, null)
+            };
+        }
+
+        /// <summary>
+        /// <c>sum by (pod, le)</c> keeps the pod label through the quantile. Without it the result carries no
+        /// pod and every sample is discarded during parsing — a silent, total loss of the latency features.
+        /// </summary>
+        private static string LatencyQuery(double quantile, string selector, string range)
+        {
+            return $"histogram_quantile({Format(quantile)},"
+                   + $" sum by (pod, le) (rate(overfit_chat_response_time_seconds_bucket{{{selector}}}[{range}])))"
+                   + " * 1000";
+        }
+
+        private static string OtelLatencyQuery(double quantile, string selector)
+        {
+            return $"histogram_quantile({Format(quantile)},"
+                   + $" sum by (pod, le) (rate(http_server_request_duration_seconds_bucket{{{selector}}}[1m])))"
+                   + " * 1000";
+        }
+
+        private static string Format(double value) => value.ToString(CultureInfo.InvariantCulture);
+
+        /// <summary>Whole seconds or minutes, because PromQL ranges take no fractional units.</summary>
+        private static string FormatRange(TimeSpan window)
+        {
+            var seconds = (long)window.TotalSeconds;
+
+            if (seconds <= 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(window), window, "Range must be positive.");
+            }
+
+            if (seconds % 60 == 0)
+            {
+                return $"{seconds / 60}m";
+            }
+
+            return $"{seconds}s";
+        }
+    }
+}

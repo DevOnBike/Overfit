@@ -1,0 +1,283 @@
+{
+  "// what this is": [
+    "The guard's configuration for the synthetic lab workload — the stand-in for a client's application.",
+    "Nothing here is recognised by name: the guard knows MetricIndex.LatencyP95Ms, the cluster exports",
+    "labapp_request_duration_seconds, and this file is the only thing that connects them. That is the point.",
+    "",
+    "CpuThrottleRatio comes from cadvisor rather than the app, and is unbound here because no pod carries",
+    "a CPU limit. OomEventsRate comes from kube-state-metrics; see its own comment for why not cadvisor.",
+    "ErrorRate is derived from the",
+    "app's own error counter over its request counter, which the map cannot express as a single source, so it",
+    "is left out and reported blind.",
+    "It was bound anyway in the ConfigMap the same day, and the parity test later copied that binding into this file; removed 2026-08-10 (AN-D12). A parity gate makes two artefacts agree and has no opinion about which one was right."
+  ],
+  "prometheus": "http://127.0.0.1:9090",
+  "namespace": "lab",
+  "podRegex": "lab-workload-.*",
+  "metrics": {
+    "RequestsPerSecond": {
+      "source": "labapp_requests_total",
+      "kind": "Counter"
+    },
+    "LatencyP50Ms": {
+      "source": "labapp_request_duration_seconds",
+      "kind": "HistogramSeconds",
+      "quantile": 0.5
+    },
+    "LatencyP95Ms": {
+      "source": "labapp_request_duration_seconds",
+      "kind": "HistogramSeconds",
+      "quantile": 0.95
+    },
+    "LatencyP99Ms": {
+      "source": "labapp_request_duration_seconds",
+      "kind": "HistogramSeconds",
+      "quantile": 0.99
+    },
+    "CpuUsageRatio": {
+      "source": "container_cpu_usage_seconds_total",
+      "kind": "Counter"
+    },
+    "MemoryWorkingSetBytes": {
+      "source": "container_memory_working_set_bytes",
+      "kind": "Gauge"
+    },
+    "GcGen2HeapBytes": {
+      "source": "dotnet_gc_heap_size_bytes",
+      "kind": "Gauge"
+    },
+    "GcPauseRatio": {
+      "source": "dotnet_gc_pause_seconds_total",
+      "kind": "Counter"
+    },
+    "ThreadPoolQueueLength": {
+      "source": "dotnet_threadpool_queue_length",
+      "kind": "Gauge"
+    },
+    "OomEventsRate": {
+      "source": "kube_pod_container_status_restarts_total",
+      "kind": "EventCount",
+      "query": "sum by (pod) (increase(kube_pod_container_status_restarts_total{%selector%}[2m]) * on (namespace, pod, container) group_left() kube_pod_container_status_last_terminated_reason{%selector%,reason=\"OOMKilled\"}) or sum by (pod) (increase(kube_pod_container_status_restarts_total{%selector%}[2m]) * 0)",
+      "_comment": [
+        "NOT container_oom_events_total. Measured 2026-08-08 against a pod Kubernetes reported as OOMKilled",
+        "with exit 137: that series read 0 for the killed pod, and across 43 series cluster-wide over an hour",
+        "the only distinct value present was 0.0 - cAdvisor does not populate it on this runtime. The channel",
+        "bound, reported a number, satisfied every coverage check and could never fire.",
+        "kube-state-metrics carries the fact in two series: the restart increase says an event happened inside",
+        "the window, the last-terminated reason says it was an OOM. A name and a kind cannot express a join,",
+        "which is why 'query' exists. Verbatim queries carry their own range - keep [2m] in step with",
+        "prometheus rate window by hand."
+      ]
+    },
+    "ContainerRestarts": {
+      "source": "kube_pod_container_status_restarts_total",
+      "kind": "EventCount"
+    },
+    "CpuThrottleRatio": {
+      "source": "container_cpu_cfs_throttled_periods_total",
+      "kind": "Ratio",
+      "_comment": [
+        "Bound 2026-08-09. It was absent from the metrics block, so the guard issued no query and counted",
+        "the channel blind in every cycle — 1 of 1, unchanged for the whole run.",
+        "The series only exist because the workload now carries a CPU limit: CFS accounting is created by a",
+        "quota, so without one there is nothing to read and no amount of binding would help.",
+        "1000m, not 200m, because SustainedThresholdOptions.ForCpuThrottling was calibrated on a pod limited",
+        "to one core, and a threshold describes the regime it was measured in.",
+        "Measured healthy at 1000m: per-pod share of a 20-minute window at or above the 5% threshold is",
+        "14.6-19.0%, against the rule's 25% - so the healthy population is quiet with margin on both sides.",
+        "CORRECTED 2026-08-09. The first binding set kind=Ratio and nothing else, and MetricMap.Build renders",
+        "Ratio as `{name}{selector}` — no rate(), no division. The channel therefore queried the raw cumulative",
+        "counter, which only ever rises, and the trend family reported it in every window: 12 findings across a",
+        "replay window where the true ratio was 0.0000 on all twelve pods. A config entry overrode a correct",
+        "built-in template with a broken one.",
+        "Deleting the entry is not the fix: an unbound channel is issued no query and counts blind. The verbatim",
+        "query below is what PromqlCatalog would have built."
+      ],
+      "query": "sum by (pod) (rate(container_cpu_cfs_throttled_periods_total{%selector%}[2m])) / sum by (pod) (rate(container_cpu_cfs_periods_total{%selector%}[2m]))"
+    }
+  },
+  "thresholds": {
+    "CpuUsageRatio": {
+      "minGap": "0.00041",
+      "minTrendChange": "0.000326"
+    },
+    "MemoryWorkingSetBytes": {
+      "minGap": "9.52MB",
+      "minTrendChange": "25.85MB"
+    },
+    "GcGen2HeapBytes": {
+      "minGap": "0.93MB",
+      "minTrendChange": "3.93MB"
+    },
+    "RequestsPerSecond": {
+      "minGap": "0.0238",
+      "minTrendChange": "0.333"
+    },
+    "GcPauseRatio": {
+      "minGap": "0.0000209"
+    },
+    "LatencyP50Ms": {
+      "minTrendChange": "50"
+    },
+    "LatencyP95Ms": {
+      "minTrendChange": "50"
+    },
+    "LatencyP99Ms": {
+      "minTrendChange": "50"
+    },
+    "ErrorRate": {
+      "minGap": "0.01",
+      "minTrendChange": "0.01"
+    }
+  },
+  "customMetrics": {
+    "GcCommittedBytes": {
+      "source": "dotnet_gc_committed_bytes",
+      "kind": "Gauge",
+      "loadSensitive": false,
+      "class": "Resource",
+      "minGap": "1.0MB",
+      "minTrendChange": "3.0MB"
+    },
+    "ActiveRequests": {
+      "source": "labapp_active_requests",
+      "kind": "Gauge",
+      "loadSensitive": false,
+      "class": "Symptom",
+      "minGap": "3",
+      "minTrendChange": "3",
+      "ruleThreshold": "3",
+      "ruleMinBreachFraction": 0.25,
+      "_comment": [
+        "ActiveRequests closes the hung-request gap: a request only enters the duration histogram when it",
+        "FINISHES, so while one hangs every latency percentile stays quiet. Measured 2026-08-09 with five",
+        "requests deliberately hung: labapp_active_requests read 6 while the histogram count read 0.",
+        "The exporter subtracts the scrape itself, so 0 means idle. Before that subtraction every pod",
+        "reported a flat 1.0 and the observer dominated the signal.",
+        "Floors from measurement: at rest 0 on all twelve pods, ten-minute maxima 0/1/2."
+      ]
+    },
+    "LockContentions": {
+      "source": "labapp_lock_contentions_total",
+      "kind": "Counter",
+      "loadSensitive": false,
+      "class": "Resource",
+      "minGap": "0.119",
+      "minTrendChange": "0.119",
+      "ruleThreshold": "0.119",
+      "ruleMinBreachFraction": 0.25,
+      "_comment": [
+        "Closes a gap every current channel is structurally blind to: contention produces a latency cliff",
+        "with NORMAL CPU and NORMAL GC, because a thread waiting on a monitor is not running.",
+        "Measured 2026-08-09 with the contended lock ON THE REQUEST PATH: p50 47 -> 1210 ms, p95 63 -> 5837 ms,",
+        "throughput 759 -> 26 requests per 10 s, contention rate 2 -> 12/s. Clearing the fault returned every",
+        "number to its starting value.",
+        "The instrument is OBSERVABLE, so it reports nothing until polled - before RecordObservableInstruments",
+        "was called it read a clean, well-formed, permanent zero through sixteen contending threads.",
+        "Floor RECALIBRATED 2026-08-09. The first value, 0.064, came from a peak of 0.0514 measured over only",
+        "~3 minutes on pods that had just started, and it produced a false positive on an unfaulted pod within",
+        "the hour. Re-measured over a settled 20-minute window across both pod generations: healthy per-pod peak",
+        "0.0952/s, so healthy replicas routinely exceeded the old floor. 0.0952 x 1.25 = 0.119, which is still",
+        "about 97x below the injected fault at 11.6/s.",
+        "The lesson is the window, not the number: a floor calibrated on three minutes of a freshly rolled",
+        "population describes the rollout, not the workload."
+      ]
+    },
+    "Exceptions": {
+      "source": "labapp_exceptions_total",
+      "kind": "Counter",
+      "loadSensitive": false,
+      "class": "Symptom",
+      "minGap": "0.0167",
+      "minTrendChange": "0.0167",
+      "ruleThreshold": "0.0167",
+      "ruleMinBreachFraction": 0.25,
+      "_comment": [
+        "First-chance exceptions. Distinct from ErrorRate, which counts 5xx RESPONSES: an exception that is",
+        "caught and retried never becomes a 5xx, so the error rate stays flat while the process is already",
+        "failing.",
+        "Measured 2026-08-09 with half of requests throwing-and-catching: exceptions 0 -> 40/s while the 5xx",
+        "rate stayed at 0, p95 went 63.2 -> 63.1 -> 63.2 ms, throughput was unchanged and NOT ONE response",
+        "was other than 200. This is the one of the three runtime channels where every existing channel is",
+        "genuinely blind - unlike lock contention, where CPU also moved.",
+        "Healthy is exactly 0 on all twelve pods, so InertChannels() will report it as constant-zero and",
+        "AMBIGUOUS. That is correct: it is what a working rare-event channel looks like when the rare event",
+        "has not happened."
+      ]
+    },
+    "CpuPressure": {
+      "source": "container_pressure_cpu_waiting_seconds_total",
+      "kind": "Counter",
+      "loadSensitive": false,
+      "class": "Infrastructure",
+      "minGap": "0.00004",
+      "minTrendChange": "0.00004",
+      "_comment": [
+        "CPU pressure (PSI): time tasks spent waiting for CPU, from the kernel, per cgroup.",
+        "It measures DENIAL rather than usage, and unlike CpuThrottleRatio it needs no CPU quota to exist -",
+        "which is why it covers starvation on clusters that set no limits.",
+        "Measured 2026-08-09 on 12 pods, healthy then with one pod starved (~2 cores of demand against a",
+        "1-core quota): healthy max 0.00003, starved max 0.48682 - a separation of 16485x, the sharpest of",
+        "any channel in this system. Peers stayed under 0.00005 throughout.",
+        "waiting, not stalled: both were measured side by side and read 0.48682 vs 0.48681 under starvation.",
+        "For a single-container cgroup 'some task delayed' and 'all tasks delayed' are the same event, so",
+        "binding both would duplicate one signal.",
+        "Floor 0.00004 = healthy max x 1.25, about 12000x below the fault. No absolute rule yet - that is",
+        "PS-3, which needs its own calibration.",
+        "Absolute rule armed 2026-08-09 (PS-3). Threshold 0.01 = 1% of time with a task waiting on CPU,",
+        "held for a quarter of the window.",
+        "Measured, both sides: healthy peak across twelve pods 0.00005, starved MINIMUM sample 0.167 - the",
+        "threshold is 200x above the first and 16x below the second. Three orders of magnitude of empty space",
+        "between health and fault, which is why the exact value inside it is not load-bearing.",
+        "Breach fraction 0.25 follows ForCpuThrottling's measured shape: persistence separates a starved pod",
+        "from a busy one, not height."
+      ],
+      "ruleThreshold": "0.01",
+      "ruleMinBreachFraction": 0.25
+    },
+    "ScrapeCoverage": {
+      "source": "up",
+      "kind": "Ratio",
+      "query": "avg_over_time(up{%selector%}[15m])",
+      "loadSensitive": false,
+      "class": "Symptom",
+      "requirePersistence": true,
+      "calibrated": false,
+      "_comment": [
+        "AN-D9. The fraction of scrape attempts that succeeded, per pod, over the trailing 15 minutes.",
+        "Closes the PARTIAL-reporting gap: RunSilentPods already catches a pod that reports nothing at all,",
+        "but one successful sample resets its counter, so a pod answering some scrapes and missing others",
+        "keeps full membership in the window and has its incomplete series used as if complete.",
+        "SOURCE, and this is the part that is not interchangeable. The five container-level channels come",
+        "from kubelet/cAdvisor - a different scrape target from the app's own /metrics, which is the one that",
+        "saturates (RS-6). Coverage computed from any of them would read 100% throughout the fault. Prometheus",
+        "writes `up` on every scrape ATTEMPT regardless of outcome, so it is the only series that can answer.",
+        "WHY A VERBATIM QUERY. kind=Ratio renders `name{selector}` - the raw 0/1 gauge. Measured against the",
+        "detector: the peer comparison's size gate reads each pod's MEDIAN, and the median of a 0/1 series is",
+        "1.0 for any pod above 50% coverage, so a pod at 65% is indistinguishable from a healthy one. Only a",
+        "value that is already a fraction moves the median. avg_over_time is what produces one.",
+        "RANGE 15m = AnomalyGuardOptions.RecentWindow, not a new number. At the lab's measured 15 s scrape",
+        "interval (count_over_time(up[1m]) = 4 on all 12 pods, 2026-08-10) that is 60 attempts per value.",
+        "NO minGap, and its absence is a decision rather than an omission. MinAbsoluteGap exists because the",
+        "relative gate cannot say 'fourteen percent of nothing is nothing' - it divides by the signal's",
+        "magnitude. Here the magnitude is exactly 1.0 by construction, so the 8% relative gate IS the absolute",
+        "one: 8% of coverage, about 5 missed scrapes in 15 minutes. An absolute floor above ordinary noise",
+        "still needs a faulted arm to measure and none has been run; adding a guessed one would be a",
+        "threshold with a measurement's authority on a gate whose failure mode is silence.",
+        "calibrated:false is REQUIRED, not tidiness. Healthy coverage is a constant 1.0, so every folded peer",
+        "gap is |1.0-1.0| = 0 and FloorCalibrator would propose exactly 0.0 while healthy - and 1.25x the",
+        "first real fault once it has seen one, permanently raising the bar against the event the channel",
+        "exists for. It also stops InertChannels() reporting a WORKING channel as a confirmed dead binding:",
+        "Min == Max == 1.0 and InertChannel.IsConclusive tests Value != 0.0 unconditionally. That arrives",
+        "after 240 observations, which is one per pod per window - twenty cycles, about 100 minutes at 12",
+        "replicas and a 5-minute cadence.",
+        "requirePersistence:true because a pod being replaced stops answering for a moment on every rollout,",
+        "and a rollout replaces all of them. The count is silentPodCycles, not a second knob.",
+        "PRECONDITION for any other cluster: this assumes exactly one `up` series per pod. A service mesh",
+        "sidecar or a second scrape target against the same pods produces more, and the selector then needs",
+        "job=\"...\" added explicitly. Verified on this lab 2026-08-10: 12 pods, 12 series, job=lab-workload."
+      ]
+    }
+  },
+  "workload": "lab-workload"
+}

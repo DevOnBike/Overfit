@@ -23,7 +23,7 @@ namespace DevOnBike.Overfit.Server.OpenAi
             ArgumentNullException.ThrowIfNull(tts);
             ArgumentNullException.ThrowIfNull(sink);
 
-            if (req is null || string.IsNullOrWhiteSpace(req.Input))
+            if (req == null || string.IsNullOrWhiteSpace(req.Input))
             {
                 WriteError(sink, 400, "'input' is required.");
                 return;
@@ -40,7 +40,14 @@ namespace DevOnBike.Overfit.Server.OpenAi
             var audio = tts.Synthesize(req.Input!, voice);
 
             var isPcm = format == "pcm";
-            var contentType = isPcm ? "audio/pcm" : "audio/wav";
+
+            // Raw PCM has no container, so the marker cannot travel inside the payload. It travels on the
+            // media type instead, which is a legitimate place for parameters and reaches the client in the
+            // Content-Type header. This response is generated speech either way; the format a caller asked
+            // for must not decide whether it says so.
+            var contentType = isPcm
+                ? "audio/pcm; synthetic=true; generated-by=Overfit"
+                : "audio/wav";
             var bytes = isPcm ? ToPcm16Bytes(audio) : ToWavBytes(audio, tts.SampleRate, voice);
 
             sink.WriteBinary(200, contentType, bytes);

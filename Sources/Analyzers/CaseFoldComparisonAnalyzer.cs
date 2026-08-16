@@ -54,7 +54,7 @@ namespace DevOnBike.Overfit.Analyzers
 
             var offender = CaseFoldCall(operation.LeftOperand) ?? CaseFoldCall(operation.RightOperand);
 
-            if (offender is null)
+            if (offender == null)
             {
                 return;
             }

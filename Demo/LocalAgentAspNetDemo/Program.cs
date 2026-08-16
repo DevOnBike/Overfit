@@ -30,7 +30,6 @@ using DevOnBike.Overfit.Demo.LocalAgent.Rag;
 using DevOnBike.Overfit.Demo.LocalAgent.Swagger;
 using DevOnBike.Overfit.Demo.LocalAgent.Tools;
 using DevOnBike.Overfit.LanguageModels;
-using OpenTelemetry.Metrics;
 
 namespace DevOnBike.Overfit.Demo.LocalAgent
 {
@@ -40,7 +39,14 @@ namespace DevOnBike.Overfit.Demo.LocalAgent
     /// </summary>
     public static class Program
     {
+        // OVERFIT040 — synchronous by design, and this is the shape the rule's own text names as legitimate:
+        // a process entry point. `app.Run()` blocks THIS thread — the application's main thread, which exists
+        // for nothing else — until the host shuts down. No pool thread is waiting on it, so nothing is held
+        // that could otherwise serve a request; `async Task Main` + `await app.RunAsync()` would move the
+        // same block onto a state machine and free nothing.
+#pragma warning disable OVERFIT040
         public static void Main(string[] args)
+#pragma warning restore OVERFIT040
         {
             var builder = WebApplication.CreateBuilder(args);
 
@@ -90,20 +96,6 @@ namespace DevOnBike.Overfit.Demo.LocalAgent
                 ModelFingerprint = MetricsCollector.FingerprintModel(modelFile),
                 MmapEnabled = isGguf,
                 ModelLoadSeconds = Math.Round(loadStopwatch.Elapsed.TotalSeconds, 3),
-            });
-
-            builder.Services.AddOpenTelemetry().WithMetrics(metrics =>
-            {
-                metrics.AddMeter(MetricsCollector.MeterName);
-                // Latency-shaped buckets for the retrieval histogram (defaults start at 0 then jump to 5s, useless
-                // for ~10-50 ms searches); the rest keep their defaults.
-                metrics.AddView(
-                    "overfit.rag.search",
-                    new ExplicitBucketHistogramConfiguration
-                    {
-                        Boundaries = [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1],
-                    });
-                metrics.AddPrometheusExporter();
             });
 
             // Audit trail (production gate): append-only metadata log of every request — never prompt/response
@@ -179,7 +171,7 @@ namespace DevOnBike.Overfit.Demo.LocalAgent
             //   /readyz  = readiness — the model is loaded and the host can serve (loaded eagerly at startup).
             app.MapGet("/healthz", () => Results.Ok(new { status = "live" }));
             app.MapGet("/readyz", (OverfitClient client) =>
-                client is not null
+                client != null
                     ? Results.Ok(new
                     {
                         status = "ready"
@@ -363,9 +355,14 @@ namespace DevOnBike.Overfit.Demo.LocalAgent
             app.MapOpenAiApi(modelDisplay, systemMessage);
 
             // ── Metrics (Phase 4): Prometheus scrape endpoint ─────────────────────────
-            // OpenTelemetry serves the Prometheus exposition at /metrics from the Meter instruments recorded by
-            // MetricsCollector — the idiomatic ASP.NET Core path, no hand-rolled text.
-            app.MapPrometheusScrapingEndpoint();
+            // Written by MetricsCollector itself rather than by an exporter package. The only one that
+            // served this format was OpenTelemetry.Exporter.Prometheus.AspNetCore, in prerelease since 2022
+            // with no stable release ever, and it was the repository's only prerelease pin. The product
+            // hand-rolls the same format in Sources/Server.AspNet and Sources/Anomalies, so this now matches
+            // it. The Meter instruments are untouched: attach OpenTelemetry to MetricsCollector.MeterName if
+            // you want it, without editing this file.
+            app.MapGet("/metrics", (MetricsCollector metrics) =>
+                Results.Text(metrics.WriteExposition(), "text/plain; version=0.0.4"));
 
             app.Run();
         }

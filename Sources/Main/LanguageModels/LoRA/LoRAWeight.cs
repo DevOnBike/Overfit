@@ -4,6 +4,7 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using System.Numerics.Tensors;
+using DevOnBike.Overfit.Tensors;
 
 namespace DevOnBike.Overfit.LanguageModels.LoRA
 {
@@ -40,10 +41,10 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
             OutDim = outDim;
             Rank = rank;
 
-            _a = new float[inDim * rank];
-            _b = new float[rank * outDim];
-            _gradA = new float[inDim * rank];
-            _gradB = new float[rank * outDim];
+            _a = new float[(long)inDim * rank];
+            _b = new float[(long)rank * outDim];
+            _gradA = new float[(long)inDim * rank];
+            _gradB = new float[(long)rank * outDim];
 
             InitializeA(rng ?? new Random(42));
             // B stays zero — standard LoRA initialization
@@ -114,7 +115,10 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
             // r[] is used as accumulator below (MultiplyAdd reads r[k] then writes).
             // With `[module: SkipLocalsInit]` stackalloc no longer pre-zeroes —
             // explicit Clear() is required so the accumulation starts from 0.
-            Span<float> r = stackalloc float[Rank];
+            using var rBuffer = Rank <= 256 ? default : new PooledBuffer<float>(Rank, clearMemory: false);
+#pragma warning disable OVERFIT026 // BOUND: guarded at 256 floats = 1 KB. LoRA rank is caller-supplied and validated only as positive upstream, so the bound lives here; ranks above 256 (unheard of in practice) take the pooled branch instead of the stack.
+            Span<float> r = Rank <= 256 ? stackalloc float[Rank] : rBuffer.Span;
+#pragma warning restore OVERFIT026
             r.Clear();
 
             // r[k] = sum_i( A[i,k] * x[i] )
@@ -171,6 +175,17 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
             var inDim = r.ReadInt32();
             var outDim = r.ReadInt32();
             var rank = r.ReadInt32();
+
+            // Three unvalidated file fields going straight into a constructor that allocates
+            // (inDim*rank + rank*outDim) floats four times over. The constructor's
+            // ThrowIfNegativeOrZero catches the degenerate values and nothing catches the large ones:
+            // 30000 x 30000 x 8 is a well-formed-looking header and 28 GB of allocation.
+            //
+            // Bounded against the bytes left in the file, which is what the loop below actually reads —
+            // the same guard shape as RepackedWeightsFile and LlamaLoRAAdapter, both of which sit one
+            // directory away. Found by OVERFIT038 on its first inventory over the tree.
+            RequireDeclaredShapeFitsInFile(r, inDim, outDim, rank);
+
             var lw = new LoRAWeight(inDim, outDim, rank);
             for (var i = 0; i < lw._a.Length; i++)
             {
@@ -181,6 +196,34 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
                 lw._b[i] = r.ReadSingle();
             }
             return lw;
+        }
+
+        /// <summary>
+        /// Rejects a declared A/B shape that the remaining bytes cannot hold.
+        ///
+        /// <para>The floats this record contains are exactly what <see cref="Load"/> reads next, so the
+        /// arithmetic is not an estimate: <c>(inDim*rank + rank*outDim) * 4</c> bytes have to be there. A
+        /// non-seekable stream has no length to compare against, and the check degrades rather than
+        /// guessing.</para>
+        /// </summary>
+        private static void RequireDeclaredShapeFitsInFile(BinaryReader r, int inDim, int outDim, int rank)
+        {
+            if (!r.BaseStream.CanSeek)
+            {
+                return;
+            }
+
+            var remaining = r.BaseStream.Length - r.BaseStream.Position;
+            var needed = ((long)inDim * rank + (long)rank * outDim) * sizeof(float);
+
+            if (inDim > 0 && outDim > 0 && rank > 0 && needed <= remaining)
+            {
+                return;
+            }
+
+            throw new OverfitFormatException(
+                $"LoRA weight declares {inDim}x{rank} and {rank}x{outDim}, needing {needed} bytes, "
+                + $"and {remaining} bytes remain in the file.");
         }
 
         // ── Private ───────────────────────────────────────────────────────────

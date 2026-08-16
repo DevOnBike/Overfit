@@ -11,7 +11,6 @@ using DevOnBike.Overfit.Parameters;
 using DevOnBike.Overfit.Tensors;
 using DevOnBike.Overfit.Tensors.Core;
 using DevOnBike.Overfit.Training;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.Data.Mnist
 {
@@ -85,16 +84,11 @@ namespace DevOnBike.Overfit.Tests.Data.Mnist
             }
         }
 
-        [LongFact]
+        [FixtureFact(TestFixture.MnistTrainingImages, "4s")]
         public void SingleReplica_vs_DataParallel()
         {
             var imgs = TestSupport.TestModelPaths.Mnist.TrainImagesPath;
             var lbls = TestSupport.TestModelPaths.Mnist.TrainLabelsPath;
-            if (!File.Exists(imgs))
-            {
-                _out.WriteLine("MNIST files not found");
-                return;
-            }
             var (trainX, trainY) = MnistLoader.Load(imgs, lbls);
             var batches = TrainSize / BatchSize;
 

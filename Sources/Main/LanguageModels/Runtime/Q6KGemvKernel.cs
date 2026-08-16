@@ -267,24 +267,6 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// caller splits a longer prompt into tiles of this many columns.</summary>
         public const int MaxTileCols = 16;
 
-        /// <summary>
-        /// Register-tiled Q6_K prefill GEMM over the repacked <c>block_q6_Kx8</c> layout: produces
-        /// <paramref name="cols"/> output columns (prompt tokens) at once, unpacking each weight super-block
-        /// <b>once</b> and reusing it across every column — the loop the decode <see cref="GemvAvx2"/> has
-        /// nothing to tile.
-        ///
-        /// <para><b>Why this and not the weight-stationary shape.</b> A weight-stationary Q6_K kernel was
-        /// built first, modelled on the Q4_K one, and measured <b>13.5% slower</b>: it hoisted the whole 6-bit
-        /// unpack into a stack buffer, so each row paid a store+reload through L1 instead of consuming the
-        /// quants from registers, and inverting the loops made activation reads strided. Tiling keeps the
-        /// unpacked quants <i>in registers</i> and amortises them across columns instead — which is exactly
-        /// why the Q4_K tiled kernel measures ~3.3× over its own weight-stationary variant.</para>
-        ///
-        /// <para><b>Bit-identical to <see cref="GemvAvx2"/> per column:</b> the per-(row, column) operation
-        /// sequence and accumulation order are unchanged; only weight decoding moves outward. Layout matches
-        /// the Q4_K tiled kernel — activations column-contiguous, output column-major
-        /// (<c>output[c*outputSize + row]</c>). AVX2 + FMA.</para>
-        /// </summary>
         /// <summary>Floats written per weight block by <see cref="DecodeBlockScales"/>: the eight row scales.</summary>
         public const int DecodedScalesPerBlock = 8;
 
@@ -324,6 +306,29 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             }
         }
 
+        /// <summary>
+        /// Register-tiled Q6_K prefill GEMM over the repacked <c>block_q6_Kx8</c> layout: produces
+        /// <paramref name="cols"/> output columns (prompt tokens) at once, unpacking each weight super-block
+        /// <b>once</b> and reusing it across every column — the loop the decode <see cref="GemvAvx2"/> has
+        /// nothing to tile.
+        ///
+        /// <para><b>Why this and not the weight-stationary shape.</b> A weight-stationary Q6_K kernel was
+        /// built first, modelled on the Q4_K one, and measured <b>13.5% slower</b>: it hoisted the whole 6-bit
+        /// unpack into a stack buffer, so each row paid a store+reload through L1 instead of consuming the
+        /// quants from registers, and inverting the loops made activation reads strided. Tiling keeps the
+        /// unpacked quants <i>in registers</i> and amortises them across columns instead.</para>
+        ///
+        /// <para>This sentence used to end "— which is exactly why the Q4_K tiled kernel measures ~3.3× over
+        /// its own weight-stationary variant", a number copied here from the Q4_K kernel with the wrong
+        /// baseline attached. Q4_K tiled versus Q4_K weight-stationary is an <b>exact tie (0.999×)</b>; the
+        /// ~3× belongs to a comparison against re-decode-per-row. The Q6_K argument above stands on its own
+        /// 13.5% measurement and never needed the borrowed one. Corrected 2026-08-07.</para>
+        ///
+        /// <para><b>Bit-identical to <see cref="GemvAvx2"/> per column:</b> the per-(row, column) operation
+        /// sequence and accumulation order are unchanged; only weight decoding moves outward. Layout matches
+        /// the Q4_K tiled kernel — activations column-contiguous, output column-major
+        /// (<c>output[c*outputSize + row]</c>). AVX2 + FMA.</para>
+        /// </summary>
         public static unsafe void GemmTiled(
             ReadOnlySpan<byte> repacked,
             int outputSize,
@@ -350,8 +355,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             var reduce = Vector256.Create(0, 1, 4, 5, 2, 3, 6, 7);
 
             // Per-column accumulators. cols <= MaxTileCols keeps this a small bounded frame.
+#pragma warning disable OVERFIT026 // BOUND: cols is validated to [1, MaxTileCols=16] by the throw at the top of this method. Worst case 2 spans x 16 x 32 B = 1024 B.
             Span<Vector256<float>> sumf = stackalloc Vector256<float>[cols];
             Span<Vector256<int>> iacc = stackalloc Vector256<int>[cols];
+#pragma warning restore OVERFIT026
 
             fixed (byte* rep = repacked)
             fixed (sbyte* aqAll = actQuants)
@@ -382,7 +389,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
                         // Pre-decoded when the caller hoisted the F16 widening out of the tile loop; identical
                         // values either way, so the two paths are bit-identical.
-                        var dVec = dsc is not null
+                        var dVec = dsc != null
                             ? Vector256.Load(dsc + (((long)x * nb) + l) * DecodedScalesPerBlock)
                             : LoadF16x8Int(blk);
 
@@ -505,8 +512,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             var ones = Vector512.Create((short)1);
             var reduce = Vector256.Create(0, 1, 4, 5, 2, 3, 6, 7);
 
+#pragma warning disable OVERFIT026 // BOUND: cols is validated to [1, MaxTileCols=16] by the throw at the top of this method. Worst case 2 spans x 16 x 32 B = 1024 B.
             Span<Vector256<float>> sumf = stackalloc Vector256<float>[cols];
             Span<Vector256<int>> iacc = stackalloc Vector256<int>[cols];
+#pragma warning restore OVERFIT026
 
             fixed (byte* rep = repacked)
             fixed (sbyte* aqAll = actQuants)
@@ -535,7 +544,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                         var ql = blk + DstQlOffset;
                         var qh = blk + DstQhOffset;
 
-                        var dVec = dsc is not null
+                        var dVec = dsc != null
                             ? Vector256.Load(dsc + (((long)x * nb) + l) * DecodedScalesPerBlock)
                             : LoadF16x8Int(blk);
 

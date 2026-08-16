@@ -52,6 +52,23 @@ namespace DevOnBike.Overfit.Maths
         ///     Returns a random number from a standard normal distribution N(0, 1) using the Box-Muller transform.
         /// </summary>
         /// <returns>A random float following the Gaussian distribution.</returns>
+        /// <summary>
+        /// A uniform float in <c>[0, 1)</c> from the same per-thread generator <see cref="SetSeed"/>
+        /// controls.
+        ///
+        /// <para><b>Why this exists rather than callers using <c>Random.Shared</c>.</b> Weight
+        /// initialisation that draws from <c>Random.Shared</c> is invisible to <see cref="SetSeed"/>, so a
+        /// model containing such a layer cannot be made reproducible no matter what the caller does.
+        /// Measured 2026-08-07: <c>CtcOcrLettersDemoTests</c> seeds its data order with
+        /// <c>new Random(20260527)</c> and looks deterministic, but its CRNN contains an LSTM whose weights
+        /// came from <c>Random.Shared</c> — the same test scored 5/24 on one run and 23/24 on another,
+        /// with no code change in between.</para>
+        /// </summary>
+        public static float NextSingle()
+        {
+            return Rng.NextSingle();
+        }
+
         public static float NextGaussian()
         {
             var u1 = 1.0f - Rng.NextSingle();

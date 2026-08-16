@@ -100,8 +100,8 @@ namespace DevOnBike.Overfit.Evolutionary.Runtime
             _archive = archive;
             _evaluator = evaluator;
 
-            _candidateParameters = new float[batchSize * parameterCount];
-            _candidateDescriptors = new float[batchSize * DescriptorDimensions];
+            _candidateParameters = new float[(long)batchSize * parameterCount];
+            _candidateDescriptors = new float[(long)batchSize * DescriptorDimensions];
             _candidateFitness = new float[batchSize];
             _bestEvaluatedParameters = new float[parameterCount];
 
@@ -668,7 +668,7 @@ namespace DevOnBike.Overfit.Evolutionary.Runtime
 
             // Annotate the activity span with the headline numbers so distributed traces
             // are useful even without metric backend.
-            if (activity is not null)
+            if (activity != null)
             {
                 activity.SetTag("iteration", metrics.Iteration);
                 activity.SetTag("batch_size", BatchSize);

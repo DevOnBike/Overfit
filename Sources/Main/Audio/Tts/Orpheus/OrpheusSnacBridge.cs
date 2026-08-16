@@ -61,7 +61,7 @@ namespace DevOnBike.Overfit.Audio.Tts.Orpheus
                     $"SNAC level lengths must be F, 2F, 4F; got {l0.Length}, {l1.Length}, {l2.Length}.");
             }
 
-            var flat = new int[frames * FrameStride];
+            var flat = new int[(long)frames * FrameStride];
             for (var j = 0; j < frames; j++)
             {
                 var i = FrameStride * j;
@@ -88,13 +88,13 @@ namespace DevOnBike.Overfit.Audio.Tts.Orpheus
             {
                 return false;
             }
-            var rest = text[(start + CustomTokenPrefix.Length)..];
+            var rest = text.Slice(start + CustomTokenPrefix.Length);
             var end = rest.IndexOf('>');
             if (end <= 0)
             {
                 return false;
             }
-            return int.TryParse(rest[..end], out number);
+            return int.TryParse(rest.Slice(0, end), out number);
         }
 
         /// <summary>
@@ -112,8 +112,8 @@ namespace DevOnBike.Overfit.Audio.Tts.Orpheus
             }
 
             var level0 = new int[frames];
-            var level1 = new int[frames * 2];
-            var level2 = new int[frames * 4];
+            var level1 = new int[(long)frames * 2];
+            var level2 = new int[(long)frames * 4];
 
             for (var j = 0; j < frames; j++)
             {

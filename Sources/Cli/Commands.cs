@@ -4,7 +4,6 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using System.Globalization;
-using System.Net;
 using DevOnBike.Overfit.Audio;
 using DevOnBike.Overfit.Audio.Tts;
 using DevOnBike.Overfit.Audio.Tts.Orpheus;
@@ -24,6 +23,21 @@ using DevOnBike.Overfit.Trees;
 
 namespace DevOnBike.Overfit.Cli
 {
+    // OVERFIT039 for this file: every blocking call below is a CLI verb's synchronous handler bridging to
+    // an async helper (HfDownloader.*Async and friends). The rule guards against a thread-pool thread
+    // blocking while the pool is saturated and the awaited continuation cannot get a thread; a console
+    // command's main thread is not that, and there is no pool pressure to deadlock against. The fix that
+    // would remove them for real is making System.CommandLine's handlers async, which is a separate change
+    // and not one to smuggle in under a lint sweep.
+#pragma warning disable OVERFIT039
+
+    // The OVERFIT040 file-scoped disable that used to sit here is GONE, fixed at the source instead
+    // (XC-25, 2026-08-12). All 13 of its sites were `Console.Out.WriteLine` / `Console.Error.WriteLine`,
+    // which the rule reached only because the invoked symbol is `TextWriter.WriteLine` and its exclusion
+    // tested the containing type. `SynchronousIslandAnalyzer.IsConsoleStreamReceiver` now tests the
+    // RECEIVER, and a rebuild of this project with the severity raised to warning reports 0 sites — so
+    // there is nothing left under the pragma to justify keeping it.
+
     /// <summary>Command implementations for the <c>overfit</c> CLI.</summary>
     internal static class Commands
     {
@@ -38,13 +52,13 @@ namespace DevOnBike.Overfit.Cli
 
             // A sentence-embedder alias (minilm / bge / e5) → download the small BERT directory, not a GGUF.
             var embedderRepo = EmbedderAliases.Resolve(spec);
-            if (embedderRepo is not null)
+            if (embedderRepo != null)
             {
                 return PullEmbedder(embedderRepo);
             }
 
             var resolved = ModelAliases.Resolve(spec);
-            if (resolved is null)
+            if (resolved == null)
             {
                 Console.Error.WriteLine($"Unknown model '{spec}'. Pass a HuggingFace GGUF repo (owner/repo), a direct https URL, or an alias:");
                 Console.Error.WriteLine("  chat:      " + string.Join(", ", ModelAliases.Known));
@@ -55,9 +69,15 @@ namespace DevOnBike.Overfit.Cli
             var (repo, pattern) = resolved.Value;
             try
             {
+                using var interrupt = CreateInterruptSource();
+                var cancellationToken = interrupt.Token;
+
                 ModelCache.Ensure();
                 Console.WriteLine($"Resolving {repo} ...");
-                var chosen = HfDownloader.ResolveFileAsync(repo, pattern, file).GetAwaiter().GetResult();
+                var chosen = HfDownloader
+                    .ResolveFileAsync(repo, pattern, file, cancellationToken)
+                    .GetAwaiter()
+                    .GetResult();
                 var dest = Path.Combine(ModelCache.Dir, Path.GetFileName(chosen));
 
                 if (File.Exists(dest))
@@ -67,16 +87,60 @@ namespace DevOnBike.Overfit.Cli
                 }
 
                 Console.WriteLine($"Downloading {chosen} into {ModelCache.Dir}");
-                var expectedSha = HfDownloader.GetExpectedSha256Async(repo, chosen).GetAwaiter().GetResult();
-                HfDownloader.DownloadAsync(repo, chosen, dest, expectedSha).GetAwaiter().GetResult();
+                var expectedSha = HfDownloader
+                    .GetExpectedSha256Async(repo, chosen, cancellationToken)
+                    .GetAwaiter()
+                    .GetResult();
+                HfDownloader
+                    .DownloadAsync(repo, chosen, dest, expectedSha, cancellationToken)
+                    .GetAwaiter()
+                    .GetResult();
                 Console.WriteLine($"Done. Chat with it:  overfit chat {Path.GetFileNameWithoutExtension(dest)}");
                 return 0;
+            }
+            catch (OperationCanceledException)
+            {
+                return ReportInterrupted();
             }
             catch (Exception ex)
             {
                 Console.Error.WriteLine($"pull failed: {ex.Message}");
                 return 1;
             }
+        }
+
+
+        /// <summary>
+        /// A cancellation source wired to Ctrl+C. Without this the token threaded through
+        /// <see cref="HfDownloader"/> would be an ornament: a parameter nobody ever signals is worse than no
+        /// parameter, because it reads like the operation can be abandoned when it cannot.
+        ///
+        /// <para><c>e.Cancel = true</c> stops the runtime from tearing the process down at the keypress, so
+        /// the download loop exits through its own cancellation path and the <c>.part</c> file is left intact
+        /// and resumable rather than truncated mid-write.</para>
+        /// </summary>
+        private static CancellationTokenSource CreateInterruptSource()
+        {
+            var source = new CancellationTokenSource();
+
+            Console.CancelKeyPress += (_, e) =>
+            {
+                e.Cancel = true;
+                source.Cancel();
+            };
+
+            return source;
+        }
+
+        /// <summary>Exit code for an interrupted download — the shell convention for SIGINT.</summary>
+        private const int InterruptedExitCode = 130;
+
+        private static int ReportInterrupted()
+        {
+            Console.WriteLine();
+            Console.WriteLine("Download interrupted. The partial file was kept — run the same command again to resume it.");
+
+            return InterruptedExitCode;
         }
 
         private static int PullFromUrl(Uri uri)
@@ -94,6 +158,9 @@ namespace DevOnBike.Overfit.Cli
 
             try
             {
+                using var interrupt = CreateInterruptSource();
+                var cancellationToken = interrupt.Token;
+
                 ModelCache.Ensure();
                 var dest = Path.Combine(ModelCache.Dir, fileName);
                 if (File.Exists(dest))
@@ -104,10 +171,20 @@ namespace DevOnBike.Overfit.Cli
 
                 Console.WriteLine($"Downloading {uri}");
                 // Optional integrity check: a sibling {url}.sha256 if the server publishes one.
-                var expectedSha = HfDownloader.GetSiblingSha256Async(uri.AbsoluteUri).GetAwaiter().GetResult();
-                HfDownloader.DownloadUrlAsync(uri.AbsoluteUri, dest, expectedSha).GetAwaiter().GetResult();
+                var expectedSha = HfDownloader
+                    .GetSiblingSha256Async(uri.AbsoluteUri, cancellationToken)
+                    .GetAwaiter()
+                    .GetResult();
+                HfDownloader
+                    .DownloadUrlAsync(uri.AbsoluteUri, dest, expectedSha, cancellationToken)
+                    .GetAwaiter()
+                    .GetResult();
                 Console.WriteLine($"Done. Chat with it:  overfit chat {Path.GetFileNameWithoutExtension(dest)}");
                 return 0;
+            }
+            catch (OperationCanceledException)
+            {
+                return ReportInterrupted();
             }
             catch (Exception ex)
             {
@@ -118,9 +195,12 @@ namespace DevOnBike.Overfit.Cli
 
         private static int PullEmbedder(string repo)
         {
-            var dirName = repo[(repo.LastIndexOf('/') + 1)..];   // canonical folder name, e.g. all-MiniLM-L6-v2
+            var dirName = repo.Substring(repo.LastIndexOf('/') + 1);   // canonical folder name, e.g. all-MiniLM-L6-v2
             try
             {
+                using var interrupt = CreateInterruptSource();
+                var cancellationToken = interrupt.Token;
+
                 ModelCache.Ensure();
                 var dir = Path.Combine(ModelCache.Dir, dirName);
                 Directory.CreateDirectory(dir);
@@ -136,12 +216,22 @@ namespace DevOnBike.Overfit.Cli
                     }
 
                     Console.WriteLine($"Downloading {file} ...");
-                    var sha = HfDownloader.GetExpectedSha256Async(repo, file).GetAwaiter().GetResult();
-                    HfDownloader.DownloadAsync(repo, file, dest, sha).GetAwaiter().GetResult();
+                    var sha = HfDownloader
+                        .GetExpectedSha256Async(repo, file, cancellationToken)
+                        .GetAwaiter()
+                        .GetResult();
+                    HfDownloader
+                        .DownloadAsync(repo, file, dest, sha, cancellationToken)
+                        .GetAwaiter()
+                        .GetResult();
                 }
 
                 Console.WriteLine($"Done. Serve embeddings:  overfit serve <model> --embed-model {dirName}");
                 return 0;
+            }
+            catch (OperationCanceledException)
+            {
+                return ReportInterrupted();
             }
             catch (Exception ex)
             {
@@ -159,7 +249,7 @@ namespace DevOnBike.Overfit.Cli
             var startup = ValueStopwatch.StartNew();
 
             var path = ModelCache.Resolve(model);
-            if (path is null)
+            if (path == null)
             {
                 Console.Error.WriteLine($"Model '{model}' not found in {ModelCache.Dir}.");
                 Console.Error.WriteLine($"Download it first:  overfit pull {model}   (or pass a .gguf path directly)");
@@ -204,7 +294,7 @@ namespace DevOnBike.Overfit.Cli
             if (!string.IsNullOrWhiteSpace(embedModel))
             {
                 var embedDir = ResolveEmbedderDir(embedModel);
-                if (embedDir is null)
+                if (embedDir == null)
                 {
                     Console.Error.WriteLine($"Embedding model '{embedModel}' not found.");
                     Console.Error.WriteLine($"Pull it first:  overfit pull minilm   (or pass a directory path with config.json + vocab.txt + model.safetensors)");
@@ -231,11 +321,11 @@ namespace DevOnBike.Overfit.Cli
             {
                 var orpheus = ResolveOrpheusModel(ttsModel);
                 var snac = ResolveSnacDir(ttsSnac);
-                if (orpheus is null || snac is null)
+                if (orpheus == null || snac == null)
                 {
                     Console.Error.WriteLine("TTS not started: need both an Orpheus GGUF (--tts-model) and SNAC weights (--tts-snac).");
-                    Console.Error.WriteLine(orpheus is null ? "  • Orpheus GGUF not found (pull it, or pass --tts-model <file.gguf>)." : $"  • Orpheus: {orpheus}");
-                    Console.Error.WriteLine(snac is null ? "  • SNAC weights not found (run Scripts/convert_snac.py, or pass --tts-snac <dir>)." : $"  • SNAC: {snac}");
+                    Console.Error.WriteLine(orpheus == null ? "  • Orpheus GGUF not found (pull it, or pass --tts-model <file.gguf>)." : $"  • Orpheus: {orpheus}");
+                    Console.Error.WriteLine(snac == null ? "  • SNAC weights not found (run Scripts/convert_snac.py, or pass --tts-snac <dir>)." : $"  • SNAC: {snac}");
                     embedder?.Dispose();
                     pool.Dispose();
                     return 1;
@@ -267,8 +357,8 @@ namespace DevOnBike.Overfit.Cli
                 // The server may bind 0.0.0.0 (all interfaces) but you can't *connect* to 0.0.0.0 — show a
                 // reachable address in the copy-paste examples.
                 var connectUrl = baseUrl.Replace("0.0.0.0", "127.0.0.1");
-                var embedEp = embedder is not null ? " | POST /v1/embeddings" : string.Empty;
-                var ttsEp = tts is not null ? " | POST /v1/audio/speech" : string.Empty;
+                var embedEp = embedder != null ? " | POST /v1/embeddings" : string.Empty;
+                var ttsEp = tts != null ? " | POST /v1/audio/speech" : string.Empty;
                 Console.WriteLine();
                 Console.WriteLine($"Overfit OpenAI-compatible server (ASP.NET / Kestrel, AOT) listening on {baseUrl}");
                 Console.WriteLine($"  ready in:  {startup.GetElapsedTime().TotalSeconds:F2} s");
@@ -285,9 +375,10 @@ namespace DevOnBike.Overfit.Cli
             try
             {
                 OverfitAspNetServer.Serve(
-                    pool, modelName, host, port, DefaultSystemPrompt, embedder, tts,
-                    onListening: PrintBanner,
-                    cancellationToken: cts.Token);
+                    pool, modelName, host, port, DefaultSystemPrompt, cts.Token,
+                    embedder: embedder,
+                    tts: tts,
+                    onListening: PrintBanner);
             }
             finally
             {
@@ -309,7 +400,7 @@ namespace DevOnBike.Overfit.Cli
         public static int Repack(string model, string? output)
         {
             var path = ModelCache.Resolve(model);
-            if (path is null)
+            if (path == null)
             {
                 Console.Error.WriteLine($"Model '{model}' not found in {ModelCache.Dir}.");
                 Console.Error.WriteLine($"Download it first:  overfit pull {model}   (or pass a .gguf path directly)");
@@ -350,7 +441,7 @@ namespace DevOnBike.Overfit.Cli
         public static int Doctor(string model)
         {
             var path = ModelCache.Resolve(model);
-            if (path is null)
+            if (path == null)
             {
                 Console.Error.WriteLine($"Model '{model}' not found in {ModelCache.Dir}.");
                 Console.Error.WriteLine($"Download it first:  overfit pull {model}   (or pass a .gguf path directly)");
@@ -542,7 +633,30 @@ namespace DevOnBike.Overfit.Cli
 
             using var audit = new JsonLinesAuditSink(auditPath);
             Console.WriteLine($"audit log: {Path.GetFullPath(auditPath)}");
-            RedactionGateway.Serve(host, port, resolvedUpstream, key, redactor, audit, policy, clientKeys, resolvedScanResponses);
+
+            // Same wiring as `serve` above, and it closes a behaviour gap rather than a formality (XC-23):
+            // this command used to hand CancellationToken.None to a call that blocks for the lifetime of the
+            // process, so the only way out was the default console handler terminating it. What that skipped
+            // is the gateway's own `app.StopAsync()` — a proxied request in flight was cut rather than
+            // drained. The audit log was never at risk (JsonLinesAuditSink writes with AutoFlush), but
+            // `audit` is now disposed on the way out too.
+            //
+            // NOT COVERED BY A TEST, and deliberately not made testable: the handler below is raised by the
+            // OS console control handler, and Tests.csproj has no ProjectReference to Sources/Cli, so neither
+            // half is reachable from the suite. What IS pinned is the half that does the work —
+            // RedactionGatewayShutdownTests proves RedactionGateway.Serve returns and releases the port when
+            // its token is cancelled. Inventing a seam here whose only consumer is a test would buy nothing.
+            using var cts = new CancellationTokenSource();
+            Console.CancelKeyPress += (_, e) =>
+            {
+                e.Cancel = true;   // don't kill the process; unwind the gateway cleanly.
+                cts.Cancel();
+            };
+
+            RedactionGateway.Serve(
+                host, port, resolvedUpstream, key, redactor, audit, policy, cts.Token,
+                clientKeys: clientKeys,
+                scanResponses: resolvedScanResponses);
             return 0;
         }
 
@@ -650,15 +764,15 @@ namespace DevOnBike.Overfit.Cli
                 model.PredictBatchParallel(flat, rows.Count, outputs);
             }
 
-            using var writer = outputPath is null ? null : new StreamWriter(outputPath);
+            using var writer = outputPath == null ? null : new StreamWriter(outputPath);
             void Emit(string text)
             {
-                if (writer is null)
+                if (writer == null)
                 {
                     Console.Out.WriteLine(text);
                 }
 
-                if (!(writer is null))
+                if (writer != null)
                 {
                     writer.WriteLine(text);
                 }
@@ -674,7 +788,7 @@ namespace DevOnBike.Overfit.Cli
             Console.Error.WriteLine(
                 $"Scored {rows.Count:N0} rows · {model.NumTrees} trees · {model.Objective} · "
                 + $"{model.NumGroups} output(s) · {sw.GetElapsedTime().TotalMilliseconds:F1} ms ({nsPerRow:F0} ns/row)"
-                + (outputPath is null ? string.Empty : $" → {outputPath}"));
+                + (outputPath == null ? string.Empty : $" → {outputPath}"));
             return 0;
         }
 
@@ -847,7 +961,7 @@ namespace DevOnBike.Overfit.Cli
         public static int Mcp(string model, string? ragDir, string? whisperModel)
         {
             var path = ModelCache.Resolve(model);
-            if (path is null)
+            if (path == null)
             {
                 Console.Error.WriteLine($"Model '{model}' not found in {ModelCache.Dir}.");
                 Console.Error.WriteLine($"Download it first:  overfit pull {model}   (or pass a .gguf path directly)");
@@ -901,7 +1015,10 @@ namespace DevOnBike.Overfit.Cli
                 var version = typeof(Commands).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
                 var server = new McpServer("overfit", version, tools, Console.Error);
                 Console.Error.WriteLine($"[overfit-mcp] serving {tools.Count} tool(s) over stdio ({Path.GetFileNameWithoutExtension(path)}). The host stops the server by closing stdin.");
-                server.Run(Console.In, Console.Out);
+                // CancellationToken.None by design, not by omission: MCP's shutdown signal is the host
+                // closing our stdin, which Run already returns on, and no other token exists in this
+                // command. There is nothing to cancel from here.
+                server.Run(Console.In, Console.Out, CancellationToken.None);
                 return 0;
             }
             catch (Exception ex)
@@ -925,9 +1042,9 @@ namespace DevOnBike.Overfit.Cli
             }
 
             var repo = EmbedderAliases.Resolve(spec);
-            if (repo is not null)
+            if (repo != null)
             {
-                var aliasDir = Path.Combine(ModelCache.Dir, repo[(repo.LastIndexOf('/') + 1)..]);
+                var aliasDir = Path.Combine(ModelCache.Dir, repo.Substring(repo.LastIndexOf('/') + 1));
                 if (Directory.Exists(aliasDir))
                 {
                     return aliasDir;
@@ -969,7 +1086,7 @@ namespace DevOnBike.Overfit.Cli
             {
                 var orpheus = ResolveOrpheusModel(model);
                 var snac = ResolveSnacDir(snacDir);
-                if (orpheus is not null && snac is not null)
+                if (orpheus != null && snac != null)
                 {
                     return TtsOrpheus(text, voice, outPath, orpheus, snac);
                 }
@@ -1027,10 +1144,10 @@ namespace DevOnBike.Overfit.Cli
             Console.WriteLine($"Wrote {outPath}  (voice '{profile.Id}', {engine.SampleRate} Hz, placeholder tone — watermarked).");
             Console.WriteLine();
             Console.WriteLine("This is the placeholder tone engine — real neural speech needs two models:");
-            Console.WriteLine(orpheus is null
+            Console.WriteLine(orpheus == null
                 ? "  • Orpheus GGUF: overfit pull isaiahbjork/orpheus-3b-0.1-ft-Q4_K_M-GGUF   (then pass --model <file.gguf>)"
                 : $"  • Orpheus GGUF: found ({orpheus})");
-            Console.WriteLine(snac is null
+            Console.WriteLine(snac == null
                 ? "  • SNAC weights: python Scripts/convert_snac.py --out %USERPROFILE%\\.overfit\\snac   (or pass --snac <dir>)"
                 : $"  • SNAC weights: found ({snac})");
             return 0;
@@ -1048,7 +1165,7 @@ namespace DevOnBike.Overfit.Cli
             if (!string.IsNullOrWhiteSpace(envDir) && Directory.Exists(envDir))
             {
                 var hit = FindOrpheusGguf(envDir);
-                if (hit is not null)
+                if (hit != null)
                 {
                     return hit;
                 }
@@ -1299,7 +1416,7 @@ namespace DevOnBike.Overfit.Cli
             float typicalP = 0f)
         {
             var path = ModelCache.Resolve(model);
-            if (path is null)
+            if (path == null)
             {
                 Console.Error.WriteLine($"Model '{model}' not found in {ModelCache.Dir}.");
                 Console.Error.WriteLine($"Download it first:  overfit pull {model}   (or pass a .gguf path directly)");
@@ -1336,7 +1453,7 @@ namespace DevOnBike.Overfit.Cli
                 // Bound stated in the header (OVERFIT023): the REPL ends when stdin closes — ReadLine
                 // returns null on EOF, a closed pipe or Ctrl+Z/Ctrl+D. `/exit` is the interactive shortcut
                 // for the same thing and stays an explicit break.
-                for (var line = ReadCommand(); line is not null; line = ReadCommand())
+                for (var line = ReadCommand(); line != null; line = ReadCommand())
                 {
                     if (line.Equals("/exit", StringComparison.OrdinalIgnoreCase))
                     {
@@ -1375,4 +1492,6 @@ namespace DevOnBike.Overfit.Cli
             }
         }
     }
+
+#pragma warning restore OVERFIT039
 }

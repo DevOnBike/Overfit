@@ -5,7 +5,6 @@
 
 using DevOnBike.Overfit.LanguageModels.LoRA;
 using DevOnBike.Overfit.Tests.TestSupport;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.LoRA
 {
@@ -19,7 +18,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.LoRA
         private readonly ITestOutputHelper _out;
         public QLoRAFineTunerFacadeTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("15min50s")]
         public void Facade_TeachesFact_AndAnswers()
         {
             var ggufPath = TestModelPaths.Qwen3B.RequireQ4KmGgufPath();
@@ -37,7 +36,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.LoRA
             _out.WriteLine($"BEFORE: \"{prompt}\" -> \"{before.Trim()}\"");
 
             var history = ft.FineTune(passage);
-            _out.WriteLine($"fine-tuned: loss {history[0]:F3} -> {history[^1]:F4} over {history.Count} steps");
+            _out.WriteLine($"fine-tuned: loss {history[0]:F3} -> {history[history.Count - 1]:F4} over {history.Count} steps");
 
             var after = ft.Ask(prompt, maxNewTokens: 8);
             _out.WriteLine($"AFTER:  \"{prompt}\" -> \"{after.Trim()}\"");

@@ -8,7 +8,6 @@ using System.Text.Json;
 using DevOnBike.Overfit.LanguageModels;
 using DevOnBike.Overfit.LanguageModels.Constraints;
 using DevOnBike.Overfit.LanguageModels.Tools;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
 {
@@ -43,14 +42,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
                 ]),
         ];
 
-        [LongFact]
+        [ModelFact(Path, "20s")]
         public void Bielik_ToolCalling_And_Json_Work_OnSpm()
         {
-            if (!File.Exists(Path))
-            {
-                _out.WriteLine("missing Bielik gguf");
-                return;
-            }
 
             using var client = OverfitClient.LoadGguf(Path);
 

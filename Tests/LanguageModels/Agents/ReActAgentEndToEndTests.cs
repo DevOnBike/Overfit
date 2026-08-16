@@ -11,7 +11,6 @@ using DevOnBike.Overfit.LanguageModels.Loading;
 using DevOnBike.Overfit.LanguageModels.Tokenizers;
 using DevOnBike.Overfit.LanguageModels.Tools;
 using DevOnBike.Overfit.Tests.TestSupport;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Agents
 {
@@ -33,7 +32,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Agents
         private readonly ITestOutputHelper _out;
         public ReActAgentEndToEndTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("6s")]
         public void Run_OnQwen_DispatchesToolThenFinishes()
         {
             TestModelPaths.Qwen3B.RequireQ4KmGgufPath();

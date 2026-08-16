@@ -56,7 +56,7 @@ namespace DevOnBike.Overfit.Server
                 list.AddRange(PolishRedactionRules.All());
             }
 
-            if (rules.Custom is not null)
+            if (rules.Custom != null)
             {
                 foreach (var custom in rules.Custom)
                 {
@@ -76,7 +76,7 @@ namespace DevOnBike.Overfit.Server
 
             // Allowlist: known-good values that must never be redacted (own domain, test data) — cuts over-redaction.
             var allowlist = new List<Regex>();
-            if (rules.Allowlist is not null)
+            if (rules.Allowlist != null)
             {
                 foreach (var pattern in rules.Allowlist)
                 {
@@ -92,13 +92,13 @@ namespace DevOnBike.Overfit.Server
 
         private static RedactionPolicy BuildPolicy(PolicyConfig? policy)
         {
-            if (policy is null)
+            if (policy == null)
             {
                 return RedactionPolicy.Default();
             }
 
             var map = new Dictionary<string, RedactionAction>(StringComparer.Ordinal);
-            if (policy.Categories is not null)
+            if (policy.Categories != null)
             {
                 foreach (var pair in policy.Categories)
                 {

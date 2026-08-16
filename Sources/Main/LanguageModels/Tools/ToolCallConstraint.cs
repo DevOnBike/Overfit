@@ -229,13 +229,13 @@ namespace DevOnBike.Overfit.LanguageModels.Tools
                         if (++_midIndex == Mid.Length)
                         {
                             // Switch to schema-driven arguments when the chosen tool declares them.
-                            if (schemas[_toolIndex] is null)
+                            if (schemas[_toolIndex] == null)
                             {
                                 _stage = Stage.Args;
                                 _args = default;
                             }
 
-                            if (!(schemas[_toolIndex] is null))
+                            if (!(schemas[_toolIndex] == null))
                             {
                                 _stage = Stage.ArgsSchema;
                                 _segIndex = 0;

@@ -6,7 +6,7 @@
 using System.Text.Json;
 using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Loading;
-using Xunit.Abstractions;
+using DevOnBike.Overfit.Tests.TestSupport;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
 {
@@ -23,21 +23,16 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
     public sealed class BielikSafetensorsParityTests
     {
         private const string Dir = @"C:\bielik-st";
-        private const string RefJson = @"D:\Overfit\bielik_st_ref.json";
+        private const string RefJson = "bielik_st_ref.json";
 
         private readonly ITestOutputHelper _out;
         public BielikSafetensorsParityTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [ModelFact([Dir, RefJson], "3ms")]
         public void Bielik_Safetensors_GreedyParity_vs_HF()
         {
-            if (!Directory.Exists(Dir) || !File.Exists(RefJson))
-            {
-                _out.WriteLine("missing C:\\bielik-st or bielik_st_ref.json (run the python ref first)");
-                return;
-            }
 
-            using var doc = JsonDocument.Parse(File.ReadAllText(RefJson));
+            using var doc = JsonDocument.Parse(File.ReadAllText(RepositoryPaths.FromRoot(RefJson)));
             var promptIds = doc.RootElement.GetProperty("prompt_ids").EnumerateArray().Select(e => e.GetInt32()).ToArray();
             var hfGen = doc.RootElement.GetProperty("gen_ids").EnumerateArray().Select(e => e.GetInt32()).ToArray();
             _out.WriteLine("PROMPT_IDS  " + string.Join(",", promptIds));

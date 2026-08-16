@@ -7,7 +7,6 @@ using DevOnBike.Overfit.LanguageModels.Embeddings;
 using DevOnBike.Overfit.LanguageModels.Retrieval;
 using DevOnBike.Overfit.LanguageModels.Retrieval.Evaluation;
 using DevOnBike.Overfit.Tests.TestSupport;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Retrieval
 {
@@ -113,7 +112,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Retrieval
             new("who is allowed to drive the vehicles", "drivers"),
         ];
 
-        [LongFact]
+        [LongFact("2s")]
         public void Hybrid_VsDense_RecallByQueryKind()
         {
             if (!File.Exists(TestModelPaths.MiniLm.SafetensorsPath))

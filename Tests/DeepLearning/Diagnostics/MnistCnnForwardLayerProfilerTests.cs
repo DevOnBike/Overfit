@@ -8,7 +8,6 @@ using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Tensors;
 using DevOnBike.Overfit.Tensors.Core;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.DeepLearning.Diagnostics
 {
@@ -34,7 +33,7 @@ namespace DevOnBike.Overfit.Tests.DeepLearning.Diagnostics
             _output = output;
         }
 
-        [LongFact]
+        [LongFact("91ms")]
         [Trait("Category", "Diagnostics")]
         public void Profile_MnistCnnForward_PerLayer()
         {

@@ -51,19 +51,19 @@ namespace DevOnBike.Overfit.Redaction
             get;
         }
 
-        /// <summary>Summarizes a <see cref="RedactionResult"/> into an audit record (counts per category).</summary>
+        /// <summary>
+        /// Summarises a <see cref="RedactionResult"/> into an audit record at a caller-supplied instant.
+        ///
+        /// <para>The counting lives in <see cref="RedactionAuditEntry.FromResult"/> and this delegates to it:
+        /// two copies of the same per-category tally would drift, and the difference between the two types is
+        /// the timestamp, not the arithmetic.</para>
+        /// </summary>
         public static RedactionAuditRecord FromResult(string requestId, DateTimeOffset timestamp, RedactionResult result)
         {
-            ArgumentNullException.ThrowIfNull(result);
+            var entry = RedactionAuditEntry.FromResult(requestId, result);
 
-            var counts = new Dictionary<string, int>(StringComparer.Ordinal);
-
-            foreach (var match in result.Matches)
-            {
-                counts[match.Category] = counts.GetValueOrDefault(match.Category) + 1;
-            }
-
-            return new RedactionAuditRecord(requestId, timestamp, result.Matches.Count, counts);
+            return new RedactionAuditRecord(
+                entry.RequestId, timestamp, entry.TotalRedactions, entry.CategoryCounts);
         }
     }
 }

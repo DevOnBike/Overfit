@@ -187,7 +187,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         // layer's hidden and project it through the head with the logit lens to see the prediction form.
 
         /// <summary>Turns on/off per-layer residual-stream capture for subsequent decodes. Off by default
-        /// (zero hot-path cost). See <see cref="GetLayerActivation"/> / <see cref="LogitLens"/>.</summary>
+        /// (zero hot-path cost). See <see cref="GetLayerActivation"/> / <see cref="LogitLens"/>.
+        /// <para>Engine-wide, not per session: the capture buffers live in the shared scratch, so this
+        /// affects every session created from this engine.</para></summary>
         public void EnableActivationCapture(bool enabled)
         {
             ThrowIfDisposed();
@@ -196,7 +198,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
         /// <summary>Copies the captured residual stream after transformer <paramref name="layer"/> (0-based,
         /// pre-final-norm) for the most recent decoded token into <paramref name="destination"/> (length DModel).
-        /// Requires <see cref="EnableActivationCapture"/>(true) before the decode.</summary>
+        /// Requires <see cref="EnableActivationCapture"/>(true) before the decode.
+        /// <para>"Most recent" means through this ENGINE, by whichever session decoded last — the capture
+        /// buffers are shared. On an engine with more than one session this does not answer a question about
+        /// a particular session.</para></summary>
         public void GetLayerActivation(int layer, Span<float> destination)
         {
             ThrowIfDisposed();
@@ -249,6 +254,21 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             var ropeTheta = reader.ReadSingle();
             var ffnActivation = (FeedForwardActivation)reader.ReadInt32();
             var tieWeights = reader.ReadInt32() != 0;
+
+            // Every dimension above came out of the file and every one of them sizes an allocation below —
+            // `new LayerWeightBuffers[nLayers]`, `new DecodeWeight[nHeads]`, four arrays on `nKvHeads`. Taken
+            // at face value they are allocation requests the file gets to choose the size of, and four bytes
+            // in this header can ask for more memory than the machine has.
+            //
+            // Found by OVERFIT038 on its first inventory. The 2026-08-02 hand sweep that produced that rule
+            // did NOT find this one: its window was a few lines and here the reads and their uses are thirty
+            // apart, which is exactly the distance a text scan cannot cross and local data flow can.
+            //
+            // Bounded against the file's own length rather than against zero, the same way WhisperGgmlLoader
+            // and RepackedWeightsFile are. The weights are F32, so the embedding alone needs
+            // vocabSize * dModel * 4 bytes and each layer needs at least its two attention norms — a declared
+            // shape needing more than the file holds is a malformed header, not a very large model.
+            RequireDeclaredShapeFitsInFile(reader, nLayers, dModel, nHeads, nKvHeads, vocabSize);
 
             var config = new GPT1Config
             {
@@ -356,6 +376,14 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// (default, full precision) or <see cref="KvCacheDType.Q8"/> (per-vector int8 — ~4× less KV RAM and
         /// attention read traffic, for long-context / low-memory decode). When null it falls back to the
         /// <c>OVERFIT_KV_DTYPE</c> env var (<c>q8</c> → Q8, anything else → F32).
+        ///
+        /// <para><b>The session is not independent of this engine.</b> Only its <see cref="KeyValueCache"/>
+        /// is per session; the transformer scratch belongs to the engine and is shared by every session
+        /// created from it. <b>Sessions of one engine must not decode concurrently</b> — the second caller
+        /// is refused with an <see cref="OverfitRuntimeException"/> (before 10.1.0 it silently corrupted both
+        /// forward passes). Sequential use, and interleaving sessions on one thread, are supported.
+        /// For concurrent streams create one engine per stream, or serialise around a shared engine. See
+        /// <see cref="CachedLlamaSession"/> for the full contract.</para>
         /// </summary>
         public CachedLlamaSession CreateSession(int? maxContextLength = null, KvCacheDType? kvCacheDType = null)
         {
@@ -412,7 +440,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 layer.FfnUp.Dispose();
                 layer.FfnDown.Dispose();
 
-                if (layer.MoeGate is not null)
+                if (layer.MoeGate != null)
                 {
                     foreach (var w in layer.MoeGate)
                     {
@@ -592,6 +620,65 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             => weight.F32Storage ?? throw new OverfitRuntimeException(
                 $"{context} requires F32-resident weights; this model was loaded with Q8_0 " +
                 "quantization. Operations on quantized weights are not supported.");
+
+        /// <summary>
+        /// Rejects a header whose declared shape cannot fit in the bytes that are left.
+        ///
+        /// <para><b>Against the file's own length, not merely against zero.</b> Positivity alone still lets a
+        /// four-byte field ask for two billion layers; the bytes remaining is the only bound the file cannot
+        /// lie about. All weights on this path are F32, so the embedding needs
+        /// <c>vocabSize * dModel * 4</c> bytes and each layer needs at least its two attention-norm vectors —
+        /// a lower bound, deliberately, because rejecting a valid model would be worse than accepting a
+        /// slightly generous one.</para>
+        ///
+        /// <para><c>nHeads</c> is checked separately and first: <c>dModel / nHeads</c> runs a few lines below,
+        /// so zero here is an uncatchable-looking <see cref="DivideByZeroException"/> out of a file parse
+        /// rather than a format error the caller can report.</para>
+        ///
+        /// <para>A non-seekable stream has no length to check against, so the shape check degrades to the
+        /// positivity checks and says so by omission rather than by pretending.</para>
+        /// </summary>
+        private static void RequireDeclaredShapeFitsInFile(
+            BinaryReader reader,
+            int nLayers,
+            int dModel,
+            int nHeads,
+            int nKvHeads,
+            int vocabSize)
+        {
+            if (nLayers <= 0 || dModel <= 0 || nHeads <= 0 || nKvHeads <= 0 || vocabSize <= 0)
+            {
+                throw new OverfitFormatException(
+                    $"Malformed header: layers={nLayers}, dModel={dModel}, heads={nHeads}, "
+                    + $"kvHeads={nKvHeads}, vocab={vocabSize}. Every dimension must be positive.");
+            }
+
+            if (nHeads > dModel)
+            {
+                throw new OverfitFormatException(
+                    $"Malformed header: {nHeads} attention heads over a model dimension of {dModel} "
+                    + "leaves a head dimension of zero.");
+            }
+
+            var stream = reader.BaseStream;
+
+            if (!stream.CanSeek)
+            {
+                return;
+            }
+
+            var remaining = stream.Length - stream.Position;
+            const long BytesPerFloat = 4;
+            var smallest = ((long)vocabSize * dModel + (long)nLayers * 2 * dModel) * BytesPerFloat;
+
+            if (smallest > remaining)
+            {
+                throw new OverfitFormatException(
+                    $"Header declares a shape needing at least {smallest} bytes of weights "
+                    + $"(vocab {vocabSize} x dModel {dModel}, {nLayers} layers) and only {remaining} "
+                    + "bytes remain in the file.");
+            }
+        }
 
         /// <summary>Reads a float tensor directly into a new TensorStorage.</summary>
         private static TensorStorage<float> ReadTensor(BinaryReader reader, int count)

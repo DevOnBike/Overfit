@@ -1,7 +1,17 @@
 ﻿<Project>
     <PropertyGroup>
-        <Version>10.0.31</Version>
-        <FileVersion>10.0.31</FileVersion>
+        <Version>10.1.0</Version>
+        <FileVersion>10.1.0</FileVersion>
+
+        <!-- The last version actually ON nuget.org, which is NOT the same thing as `Version` above and is
+             the only correct anchor for anything that must reference a published package — today just
+             `Templates/content/OverfitChat`, whose content may not point into this repository at all.
+             Added 2026-08-14 after the template was found pinned at 10.0.29 while nuget held 10.0.31 and
+             this file said 10.1.0: a checker anchored on `Version` would have bumped the template to an
+             unpublished package and broken `dotnet new overfit-chat` on first restore.
+             UPDATE THIS WHEN YOU PUBLISH, in the same commit that stamps the CHANGELOG.
+             `Scripts/check_template_pins.py` reads it; it is not consumed by any build. -->
+        <LastPublishedVersion>10.1.0</LastPublishedVersion>
         <InformationalVersion>release+id</InformationalVersion>
         <Authors>DevOnBike</Authors>
         <Company>Sharp IT</Company>
@@ -19,18 +29,22 @@
              errors) keeps ONLY the IL* trim/AOT diagnostics fatal under the guard. OVERFIT008 / OVERFIT015 are
              deliberately omitted — they are error-severity hard conventions and must stay fatal (the
              analyzer-guard CI job's tripwire depends on OVERFIT008 firing).
-             RS0030 is also here for one narrow reason: the System.Text.Json source-generated
-             OverfitJsonContext legitimately uses System.Reflection internally (the AOT-safe source-gen path)
-             and is analysed under a synthetic path no .editorconfig section matches, so RS0030 falls back to
-             its default Warning there and TreatWarningsAsErrors would promote it. Exempting the *warning*
-             does NOT weaken RS0030 on real code, which stays error-severity via the [*.cs] editorconfig
-             section (a genuine error, not a promoted warning, so WarningsNotAsErrors cannot downgrade it). -->
+             RS0030 IS NOT IN THIS LIST, and must not be added — a long paragraph here used to explain why it
+             was, and outlived the entry by describing a state that had not been true for some time. What it
+             described is real and is a different problem: .editorconfig severities are matched per syntax
+             tree against the csc command line, so no section reaches a SOURCE-GENERATED tree and RS0030
+             falls back to its analyzer default Warning there, which TreatWarningsAsErrors promotes. Putting
+             the id here does fix that — and, per the note immediately below, ALSO disarms the ban on real
+             code, which is the 2026-08-08 incident that must not be repeated. The correct instrument is a
+             per-project global AnalyzerConfig, which the compiler consults only for the trees the per-path
+             map misses: see Sources/Anomalies/SourceGenerated.globalconfig, added 2026-08-16 for the
+             configuration-binder generator, which carries the measurement and the two-arm proof. -->
         <!-- Do NOT add an ID here that .editorconfig promotes to `error` anywhere: this maps to
              -warnaserror-:ID, which reverts the diagnostic to warning EVEN in directories where
              .editorconfig says error, silently neutering the per-directory ratchet. Measured 2026-07-19:
              OVERFIT001/002/009 (error in Kernels+Intrinsics) and OVERFIT900 (error repo-wide) were all
              inert for this reason; removing them from this list cost 0 new errors. -->
-        <WarningsNotAsErrors>$(WarningsNotAsErrors);RS0030;OVERFIT003;OVERFIT004;OVERFIT005;OVERFIT006;OVERFIT007;OVERFIT010;OVERFIT011;OVERFIT012;OVERFIT013;OVERFIT014;OVERFIT016;OVERFIT017;OVERFIT018;OVERFIT019;OVERFIT020;IDISP001;IDISP002;IDISP003;IDISP004;IDISP005;IDISP006;IDISP007;IDISP008;IDISP009;IDISP010;IDISP011;IDISP012;IDISP013;IDISP014;IDISP015;IDISP016;IDISP017</WarningsNotAsErrors>
+        <WarningsNotAsErrors>$(WarningsNotAsErrors);OVERFIT003;OVERFIT004;OVERFIT005;OVERFIT006;OVERFIT007;OVERFIT010;OVERFIT011;OVERFIT012;OVERFIT013;OVERFIT014;OVERFIT016;OVERFIT017;OVERFIT018;OVERFIT019;OVERFIT020;IDISP001;IDISP002;IDISP003;IDISP004;IDISP005;IDISP006;IDISP007;IDISP008;IDISP009;IDISP010;IDISP011;IDISP012;IDISP013;IDISP014;IDISP015;IDISP016;IDISP017</WarningsNotAsErrors>
 
     </PropertyGroup>
 

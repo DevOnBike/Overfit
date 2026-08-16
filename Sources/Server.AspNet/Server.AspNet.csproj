@@ -20,6 +20,24 @@
         <EnableRequestDelegateGenerator>true</EnableRequestDelegateGenerator>
         <PackageId>DevOnBike.Overfit.Server.AspNet</PackageId>
         <RootNamespace>DevOnBike.Overfit.Server.AspNet</RootNamespace>
+
+        <!-- NOT PUBLISHED, and this line is what makes that a decision rather than an omission.
+             Added 2026-08-13 after the release gate found the project packs: it carries a PackageId but
+             none of the metadata its published siblings set (Server, Mcp, Extensions.AI all declare
+             Description, PackageLicenseFile and PackageReadmeFile), and `dotnet pack` produced it with
+             NuGet warning about the missing readme.
+
+             The missing metadata was the SYMPTOM, not the defect. `DevOnBike.Overfit.Server.AspNet` has
+             never existed on nuget.org — checked, zero versions, against 8-11 for every sibling — because
+             this assembly hosts `RedactionGateway`, which is on-prem commercial work and not part of the
+             published surface. Filling in a description and a licence file would have made it shippable,
+             which is the opposite of what is wanted.
+
+             Nothing leaked: `.github/workflows/publish-nuget.yml` packs an explicit five-project list
+             (Main, Extensions.AI, Server, Mcp, Cli) and only then pushes `./packages/*.nupkg`. That
+             protection lives in a workflow file, so it holds only while nobody adds a project to that list
+             or switches it to a solution-wide glob. This line holds regardless. -->
+        <IsPackable>false</IsPackable>
     </PropertyGroup>
 
     <ItemGroup>
@@ -29,4 +47,16 @@
         <ProjectReference Include="..\Main\Main.csproj" />
     </ItemGroup>
 
+    <ItemGroup>
+      <ProjectReference Include="..\Anomalies\Anomalies.csproj" />
+    </ItemGroup>
+
+
+    <ItemGroup>
+        <PackageReference Include="Microsoft.CodeAnalysis.BannedApiAnalyzers">
+            <PrivateAssets>all</PrivateAssets>
+            <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+        </PackageReference>
+        <AdditionalFiles Include="BannedSymbols.txt" />
+    </ItemGroup>
 </Project>

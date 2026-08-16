@@ -98,7 +98,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             var d = maxScale / 63f;
             var dmin = maxMin / 63f;
 
-            BinaryPrimitives.WriteUInt16LittleEndian(block144[..2], BitConverter.HalfToUInt16Bits((Half)d));
+            BinaryPrimitives.WriteUInt16LittleEndian(block144.Slice(0, 2), BitConverter.HalfToUInt16Bits((Half)d));
             BinaryPrimitives.WriteUInt16LittleEndian(block144.Slice(2, 2), BitConverter.HalfToUInt16Bits((Half)dmin));
             PackScalesMins(sc, m, block144.Slice(4, 12));
 

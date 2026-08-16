@@ -14,7 +14,6 @@ using DevOnBike.Overfit.Tensors;
 using DevOnBike.Overfit.Tensors.Core;
 using DevOnBike.Overfit.Tests.TestSupport;
 using DevOnBike.Overfit.Tests.TestSupport.Helpers;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.Data.Mnist
 {
@@ -58,7 +57,7 @@ namespace DevOnBike.Overfit.Tests.Data.Mnist
         /// epoch-time / loss / CPU-utilization lines match the beast format for side-by-side reading.
         /// Expected vs beast: ~3-3.5× faster epochs, CPU ~50% → ~90%+.
         /// </summary>
-        [LongFact]
+        [LongFact]  // heavy group, never measured — see Scripts/longfact_heavy.txt
         public void Mnist_FullTrain60k_CnnDataParallel8_Benchmark()
         {
             const int trainSize = 60_000;
@@ -169,7 +168,7 @@ namespace DevOnBike.Overfit.Tests.Data.Mnist
             }
         }
 
-        [LongFact]
+        [LongFact]  // heavy group, never measured — see Scripts/longfact_heavy.txt
         public void Mnist_FullTrain60k_CnnBeastMode_Benchmark()
         {
             const int trainSize = 60_000;

@@ -6,7 +6,6 @@
 using System.Diagnostics;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.LanguageModels.Runtime;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
 {
@@ -65,7 +64,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
             }
         }
 
-        [LongFact]
+        [LongFact("9s")]
         public void Ttft_BatchedVsSingleToken_Gpt2SmallDims()
         {
             // GPT-2-Small dimensions, random weights (timing doesn't need real weights).

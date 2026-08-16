@@ -176,7 +176,7 @@ namespace DevOnBike.Overfit.Evolutionary.Evaluators
 
             // Run user-supplied cleanup for every live thread-local context before disposing
             // the ThreadLocal container itself.
-            if (_contextDispose is not null)
+            if (_contextDispose != null)
             {
                 foreach (var context in _contextLocal.Values)
                 {

@@ -3,13 +3,12 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using DevOnBike.Overfit.Anomalies.Contracts;
 using DevOnBike.Overfit.Anomalies.Gpt;
-using DevOnBike.Overfit.Anomalies.Monitoring.Contracts;
 using DevOnBike.Overfit.Anomalies.Training;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.LanguageModels.LoRA;
 using DevOnBike.Overfit.LanguageModels.Runtime;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.Anomalies
 {
@@ -32,15 +31,17 @@ namespace DevOnBike.Overfit.Tests.Anomalies
         private readonly ITestOutputHelper _out;
         public GptAnomalyLoRATargetComparisonProductionTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        // SKIPS, it does not pass. Until 2026-08-07 a missing fixture made this test return early and
+        // report success in under a second, having executed nothing — unnoticed because no [LongFact] had
+        // ever been run. This is the test whose whole purpose is to confirm the tiny-base finding on the
+        // real trained artifact, so a green result from a run that loaded nothing is the most misleading
+        // outcome available. It carries no runtime for the same reason: the <1 s the 2026-08-07 run
+        // recorded is the duration of the vacuous pass, and writing it down would preserve a number
+        // produced by the defect.
+        [ProductionAnomalyBaseFact]  // runtime unknown — the 2026-08-07 run recorded <1 s, but that was the vacuous pass (missing fixture returned early); it now skips instead
         public void LoRATargetStages_OnProductionBase_FlattenBenign_AndKeepDetection()
         {
-            var path = ResolveProductionBase();
-            if (path is null)
-            {
-                _out.WriteLine("Production base not found (k8s_anomaly_production.bin) — skipping.");
-                return;
-            }
+            var path = ProductionAnomalyBaseFact.Resolve();
 
             var config = DetectConfigFromCheckpoint(path);
             _out.WriteLine($"Loaded base: {config.DModel}d / {config.NLayers}L from {path}");
@@ -159,24 +160,9 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             return (normal, detector.Score(incident).Score);
         }
 
-        private static string? ResolveProductionBase()
-        {
-            var dir = Environment.GetEnvironmentVariable("OVERFIT_MODEL_DIR");
-            var candidates = new[]
-            {
-                dir is null ? null : Path.Combine(dir, "k8s_anomaly_production.bin"),
-                Path.Combine("test_fixtures", "k8s_anomaly_production.bin"),
-                @"D:\k8s_anomaly_production.bin",
-            };
-            foreach (var c in candidates)
-            {
-                if (c is not null && File.Exists(c))
-                {
-                    return c;
-                }
-            }
-            return null;
-        }
+        // The resolver moved to ProductionAnomalyBaseFact so the attribute and the test body cannot
+        // disagree about where the fixture lives. Two copies of a search path is how a test skips for one
+        // reason and then fails for another.
 
         private static GptTrainingConfig DetectConfigFromCheckpoint(string path)
         {

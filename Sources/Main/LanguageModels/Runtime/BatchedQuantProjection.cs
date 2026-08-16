@@ -52,7 +52,32 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// <para>A <c>*.gguf.repack</c> sidecar sets <c>IsPrepacked</c> and therefore turns the repacked path
         /// on regardless of the env flag — which is exactly how <c>BatchedPrefillParityTests</c> came to be
         /// failing unnoticed for two days, being <c>[LongFact]</c>.</para>
+        ///
+        /// <para><b><see cref="ThreadStaticAttribute"/>, and this field alone.</b> xunit runs collections in
+        /// parallel, so as a plain <c>static</c> this switched the kernel under whatever else was mid-assertion:
+        /// measured as <c>6.63813305</c> vs <c>6.63813257</c> in a fast-suite test that passed when run alone.
+        /// Per-thread state confines a parity scope to the thread that opened it. It is admissible here because
+        /// every one of the <b>five</b> production reads happens on the calling thread before any fan-out: the two
+        /// dispatcher reads (<c>DispatchQ6K</c>, <c>DispatchQ4K</c>) are plain; the two tiled ones
+        /// (<c>DispatchTiledQ4K</c>, <c>DispatchTiledQ6K</c>) are evaluated while <i>constructing</i> the context
+        /// that <c>OverfitParallel.For</c> then receives by pointer; and the fifth is
+        /// <c>CachedMultiHeadAttention.DecodeBatchedQuant</c>'s <c>useWholeO</c>, a local computed once before the
+        /// projections run. So no worker body reads the field and the flag cannot go inert inside the parallel
+        /// region. (Count it with <c>find_references</c> if you change this — an auditor coming up one short is
+        /// how a sound argument gets doubted.)</para>
+        ///
+        /// <para><b>Do not copy the attribute onto the sibling flags above.</b> A <c>[ThreadStatic]</c> field
+        /// initialiser runs on the first thread only; this field's correct default is <c>default(bool)</c> and
+        /// it has no initialiser, while <see cref="UseWeightStationaryQ4K"/>, <see cref="UseTiledPrefillQ4K"/>
+        /// and <see cref="UseTiledPrefillQ6K"/> all do and would silently lose theirs on every other thread.</para>
+        ///
+        /// <para><b>Failure mode this buys, named rather than assumed away:</b> the flag must be set on the
+        /// thread that drives the prefill. A test that opens the scope and then runs the engine from another
+        /// thread — an <c>async</c> continuation, <c>Task.Run</c>, <c>GenerateStreamAsync</c>'s
+        /// <c>await Task.Yield()</c> — silently gets the repacked kernel, and its parity assertion then compares
+        /// two different kernels instead of two runs of one.</para>
         /// </summary>
+        [ThreadStatic]
         internal static bool DisableRepackedKernelsForParity;
 
         /// <summary>Forces a specific prefill column-tile width; 0 leaves <see cref="ResolveTileCols"/> to choose.</summary>
@@ -395,8 +420,15 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             int inputSize, Span<sbyte> quants, Span<float> scales, Span<short> sums, bool preQuantized)
         {
             // Register-tiled GEMM: repacked block_q4_Kx8, decode each super-block once and reuse across a
-            // tile of NR columns - measured ~3x vs weight-stationary under parallelism, 1.61x end-to-end
-            // prefill. Default-on when the weight is already prepacked (an offline sidecar mmap'd it -> zero
+            // tile of NR columns - measured ~3x vs RE-DECODE-PER-ROW, 1.61x end-to-end prefill.
+            //
+            // The baseline in that "~3x" is the point, and this comment named the wrong one until
+            // 2026-08-07: it said "vs weight-stationary". Against weight-stationary the measured result is
+            // an EXACT TIE (0.999x), because ProjectBatchedWeightStationary already amortises weight decode
+            // across the row tile - the same thing the tiling does. See Runtime/README.md, which has
+            // carried the correction since the bias-support measurement.
+            //
+            // Default-on when the weight is already prepacked (an offline sidecar mmap'd it -> zero
             // extra RAM); otherwise opt-in via OVERFIT_TILED_PREFILL since repacking copies the weight.
             // No-bias only (GemmTiled applies none). AVX2/FMA required - the kernel is x86-only, so on ARM
             // (e.g. the Android app) this falls through to the weight-stationary path even if a sidecar
@@ -799,20 +831,39 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 {
                     var s = t * c.Nr;
                     var cols = Math.Min(c.Nr, c.Rows - s);
+                    var weights = new ReadOnlySpan<byte>(c.Repacked, c.RepackedLength);
+                    var quants = new ReadOnlySpan<sbyte>(c.Quants + (long)s * c.InputSize, cols * c.InputSize);
+                    var scales = new ReadOnlySpan<float>(c.Scales + (long)s * c.Spr, cols * c.Spr);
+                    var sums = new ReadOnlySpan<short>(c.Bsums + (long)s * c.BsumsPerRow, cols * c.BsumsPerRow);
+                    var dst = new Span<float>(c.Output + (long)s * c.OutputSize, cols * c.OutputSize);
+                    var bias = new ReadOnlySpan<float>(c.Bias, c.BiasLength);
+                    var decoded = new ReadOnlySpan<float>(c.DecodedScales, c.DecodedScalesLength);
+
+                    // This branch was missing while TiledChunk, TiledQ6KChunk and TiledQ6KBandChunk all had
+                    // it, which is what identified it as an omission rather than a decision: the band path
+                    // silently ran 256-bit on a machine configured for 512.
+                    if (c.Avx512)
+                    {
+                        Q4KGemvKernel.GemmTiled512(
+                            weights, c.OutputSize, c.InputSize, cols, quants, scales, sums, dst, bias,
+                            decoded, groupStart, groupCount);
+
+                        continue;
+                    }
 
                     Q4KGemvKernel.GemmTiled(
-                        new ReadOnlySpan<byte>(c.Repacked, c.RepackedLength),
+                        weights,
                         c.OutputSize,
                         c.InputSize,
                         cols,
-                        new ReadOnlySpan<sbyte>(c.Quants + (long)s * c.InputSize, cols * c.InputSize),
-                        new ReadOnlySpan<float>(c.Scales + (long)s * c.Spr, cols * c.Spr),
-                        new ReadOnlySpan<short>(c.Bsums + (long)s * c.BsumsPerRow, cols * c.BsumsPerRow),
-                        new Span<float>(c.Output + (long)s * c.OutputSize, cols * c.OutputSize),
-                        new ReadOnlySpan<float>(c.Bias, c.BiasLength),
+                        quants,
+                        scales,
+                        sums,
+                        dst,
+                        bias,
                         groupStart,
                         groupCount,
-                        new ReadOnlySpan<float>(c.DecodedScales, c.DecodedScalesLength));
+                        decoded);
                 }
             }
         }

@@ -13,10 +13,10 @@
 // judgments; the evaluator prompts are tuned against GPT-4o-class models, so treat small local
 // judges (<7B) as a demo of the PLUMBING, not a calibrated quality gate.
 
-using DevOnBike.Overfit.Runtime;
 using DevOnBike.Overfit.Demo.Evaluation;
 using DevOnBike.Overfit.Extensions.AI;
 using DevOnBike.Overfit.LanguageModels;
+using DevOnBike.Overfit.Runtime;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.AI.Evaluation;
 using Microsoft.Extensions.AI.Evaluation.Quality;
@@ -80,7 +80,7 @@ foreach (var (label, answer) in new[] { ("GOOD answer", goodAnswer), ("BAD answe
         foreach (var metric in result.Metrics.Values)
         {
             var value = metric is NumericMetric numeric ? numeric.Value?.ToString("0.#") ?? "n/a" : "n/a";
-            var interpretation = metric.Interpretation is null
+            var interpretation = metric.Interpretation == null
                 ? ""
                 : $"  [{metric.Interpretation.Rating}{(metric.Interpretation.Failed ? " / FAILED" : "")}]";
             Console.WriteLine($"  {metric.Name,-14} {value}/5{interpretation}");
@@ -99,18 +99,31 @@ Console.WriteLine("All scoring above ran in-process on the local CPU — no clou
 return 0;
 
 static string Truncate(string s, int max)
-    => s.Length <= max ? s : s[..max] + "…";
+    => s.Length <= max ? s : s.Substring(0, max) + "…";
 
 namespace DevOnBike.Overfit.Demo.Evaluation
 {
     /// <summary>Ensures every judge call gets a generous output budget unless the caller set one.</summary>
-    internal sealed class MaxTokensChatClient(IChatClient inner, int maxOutputTokens) : DelegatingChatClient(inner)
+    internal sealed class MaxTokensChatClient : DelegatingChatClient
     {
+        private readonly int _maxOutputTokens;
+
+        public MaxTokensChatClient(IChatClient inner, int maxOutputTokens)
+            : base(inner)
+        {
+            _maxOutputTokens = maxOutputTokens;
+        }
+
+        // This OVERRIDES DelegatingChatClient.GetResponseAsync from Microsoft.Extensions.AI 10.8.3, so both
+        // the parameter order and the defaults are the package's — `options` precedes the token, and callers
+        // reach this through IChatClient, where the interface's defaults bind whatever an override writes.
+#pragma warning disable OVERFIT041
         public override Task<ChatResponse> GetResponseAsync(
             IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
+#pragma warning restore OVERFIT041
         {
             options = options?.Clone() ?? new ChatOptions();
-            options.MaxOutputTokens ??= maxOutputTokens;
+            options.MaxOutputTokens ??= _maxOutputTokens;
             return base.GetResponseAsync(messages, options, cancellationToken);
         }
     }

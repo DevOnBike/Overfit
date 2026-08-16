@@ -337,7 +337,9 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
         {
             ref var c = ref Unsafe.AsRef<MhaCtx>(ctxPtr);
             using var scoresPool = c.Tkv <= 8192 ? default : new PooledBuffer<float>(c.Tkv, clearMemory: false);
+#pragma warning disable OVERFIT026 // BOUND: guarded at Tkv <= 8192 floats = 32 KB — the largest stack frame left in the library, 64x the budget. Bounded, but on a worker thread this is a real fraction of the stack. Highest-priority candidate for lowering; the pooled fallback already exists on the same line.
             Span<float> scores = c.Tkv <= 8192 ? stackalloc float[c.Tkv] : scoresPool.Span;
+#pragma warning restore OVERFIT026
             var q = new ReadOnlySpan<float>(c.Q, c.Tq * c.DModel);
             var k = new ReadOnlySpan<float>(c.K, c.Tkv * c.DModel);
             var v = new ReadOnlySpan<float>(c.V, c.Tkv * c.DModel);

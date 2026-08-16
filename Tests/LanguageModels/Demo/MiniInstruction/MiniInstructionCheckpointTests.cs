@@ -12,7 +12,6 @@ using DevOnBike.Overfit.LanguageModels.Runtime;
 using DevOnBike.Overfit.Optimizers;
 using DevOnBike.Overfit.Parameters;
 using DevOnBike.Overfit.Tokenization;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Demo.MiniInstruction
 {
@@ -73,7 +72,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Demo.MiniInstruction
             _output = output;
         }
 
-        [LongFact]
+        [LongFact]  // heavy group, never measured — see Scripts/longfact_heavy.txt
         [Trait("Category", "Demo")]
         [Trait("Category", "LongRunning")]
         public void Demo_Train_MiniInstruction_AndWriteCheckpointBin()
@@ -252,7 +251,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Demo.MiniInstruction
             Assert.False(float.IsNaN(finalValLoss) || float.IsInfinity(finalValLoss), "Final validation loss is NaN/Infinity.");
         }
 
-        [LongFact]
+        [LongFact]  // heavy group, never measured — see Scripts/longfact_heavy.txt
         [Trait("Category", "Demo")]
         public void Demo_LoadCheckpoint_AndShowMiniInstructionGeneration()
         {

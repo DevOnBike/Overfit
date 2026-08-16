@@ -4,7 +4,6 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using DevOnBike.Overfit.LanguageModels;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
 {
@@ -23,7 +22,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
         private readonly ITestOutputHelper _out;
         public BielikSpeedTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("32s")]
         public void Bielik_Q4KM_vs_Q8_DecodeSpeed()
         {
             Bench(Q8, "Q8_0  ");

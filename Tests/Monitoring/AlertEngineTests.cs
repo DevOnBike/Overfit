@@ -5,7 +5,8 @@
 
 using DevOnBike.Overfit.Anomalies.Alerting;
 using DevOnBike.Overfit.Anomalies.Alerting.Abstractions;
-using DevOnBike.Overfit.Anomalies.Alerting.Contracts;
+using DevOnBike.Overfit.Anomalies.Contracts;
+using DevOnBike.Overfit.Tests.TestSupport;
 
 namespace DevOnBike.Overfit.Tests.Monitoring
 {
@@ -243,17 +244,92 @@ namespace DevOnBike.Overfit.Tests.Monitoring
             Assert.False(second);
         }
 
+        /// <summary>
+        /// <b>Tested at the duration that ships, and without a sleep.</b> This was
+        /// <c>cooldown: 30 ms</c> plus <c>await Task.Delay(60)</c> — which covered a value nobody runs and
+        /// raced the machine, the same failure family as <c>TG-T12</c>. The default is five minutes, and
+        /// with an injected clock five minutes costs nothing to test.
+        /// </summary>
         [Fact]
         public async Task TryAlert_WhenCooldownExpired_ThenReturnsTrue()
         {
-            var config = MakeConfig(cooldown: TimeSpan.FromMilliseconds(30));
-            await using var engine = new AlertEngine(config, new CapturingSink());
+            var clock = new ManualClock();
+            var config = new AlertEngineConfig();          // the SHIPPED cooldown, five minutes
+            await using var engine = new AlertEngine(config, clock, new CapturingSink());
 
-            engine.TryAlert("pod-1", 0.9f, 0.03f); // first — fires
-            await Task.Delay(60); // wait for cooldown to expire
+            Assert.True(engine.TryAlert("pod-1", 0.9f, 0.03f));
 
-            var second = engine.TryAlert("pod-1", 0.9f, 0.03f);
-            Assert.True(second);
+            clock.Advance(config.CooldownDuration + TimeSpan.FromSeconds(1));
+
+            Assert.True(engine.TryAlert("pod-1", 0.9f, 0.03f));
+        }
+
+        /// <summary>
+        /// The other side of the boundary, which the sleeping version could not express: one tick short of
+        /// the cooldown is still inside it. A guard that is off by a comparison would pass the test above.
+        /// </summary>
+        [Fact]
+        public async Task TryAlert_OneTickBeforeTheCooldownExpires_ThenReturnsFalse()
+        {
+            var clock = new ManualClock();
+            var config = new AlertEngineConfig();
+            await using var engine = new AlertEngine(config, clock, new CapturingSink());
+
+            Assert.True(engine.TryAlert("pod-1", 0.9f, 0.03f));
+
+            clock.Advance(config.CooldownDuration - TimeSpan.FromTicks(1));
+
+            Assert.False(engine.TryAlert("pod-1", 0.9f, 0.03f));
+        }
+
+        /// <summary>
+        /// <b>The replay case, and the reason the clock is a dependency rather than a convenience.</b> The
+        /// guard drives recorded history through <c>RunCycleAsync(DateTimeOffset)</c> — a day of data in
+        /// seconds of wall clock. Reading <c>DateTime.UtcNow</c> here would suppress every alert after the
+        /// first for the whole replay, and stamp each one with the time the replay ran.
+        /// </summary>
+        [Fact]
+        public async Task TryAlert_WhenDrivenByReplayedTime_ThenCooldownFollowsTheDataNotTheMachine()
+        {
+            var start = new DateTimeOffset(2026, 8, 10, 6, 0, 0, TimeSpan.Zero);
+            var clock = new ManualClock(start);
+            var sink = new CapturingSink();
+            var config = new AlertEngineConfig();          // five-minute cooldown
+            await using var engine = new AlertEngine(config, clock, sink);
+
+            // Six hours of history, one anomalous sample every ten minutes: every one clears a five-minute
+            // cooldown, so every one must fire. Real time spent here is microseconds.
+            var fired = 0;
+
+            for (var i = 0; i < 36; i++)
+            {
+                if (engine.TryAlert("pod-1", 0.9f, 0.03f))
+                {
+                    fired++;
+                }
+
+                clock.Advance(TimeSpan.FromMinutes(10));
+            }
+
+            Assert.Equal(36, fired);
+            Assert.Equal(36, engine.AlertsFired);
+            Assert.Equal(0, engine.AlertsSuppressed);
+        }
+
+        /// <summary>The stamp is the data's instant, not the machine's — otherwise a replayed incident lies.</summary>
+        [Fact]
+        public async Task TryAlert_StampsTheEventWithTheInjectedClock()
+        {
+            var start = new DateTimeOffset(2026, 8, 10, 6, 0, 0, TimeSpan.Zero);
+            var clock = new ManualClock(start);
+            var sink = new CapturingSink();
+
+            await using (var engine = new AlertEngine(MakeConfig(), clock, sink))
+            {
+                engine.TryAlert("pod-1", 0.9f, 0.03f);
+            }
+
+            Assert.Equal(start.UtcDateTime, Assert.Single(sink.Received).DetectedAt);
         }
 
         [Fact]
@@ -323,7 +399,7 @@ namespace DevOnBike.Overfit.Tests.Monitoring
             public IReadOnlyList<AlertEvent> Received => _received;
             public int SendCount => _received.Count;
 
-            public Task SendAsync(AlertEvent alert, CancellationToken ct = default)
+            public Task SendAsync(AlertEvent alert, CancellationToken ct)
             {
                 lock (_received)
                 {
@@ -335,17 +411,24 @@ namespace DevOnBike.Overfit.Tests.Monitoring
 
         private sealed class ThrowingSink : IAlertSink
         {
-            public Task SendAsync(AlertEvent alert, CancellationToken ct = default)
+            public Task SendAsync(AlertEvent alert, CancellationToken ct)
             {
                 return Task.FromException(new InvalidOperationException("Sink failure"));
             }
         }
 
-        private sealed class SlowSink(int delayMs = 50) : IAlertSink
+        private sealed class SlowSink : IAlertSink
         {
-            public Task SendAsync(AlertEvent alert, CancellationToken ct = default)
+            private readonly int _delayMs;
+
+            public SlowSink(int delayMs = 50)
             {
-                return Task.Delay(delayMs, ct);
+                _delayMs = delayMs;
+            }
+
+            public Task SendAsync(AlertEvent alert, CancellationToken ct)
+            {
+                return Task.Delay(_delayMs, ct);
             }
         }
     }

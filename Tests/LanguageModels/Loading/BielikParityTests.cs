@@ -7,7 +7,6 @@ using System.Runtime.InteropServices;
 using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Loading;
 using DevOnBike.Overfit.LanguageModels.Tokenizers;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
 {
@@ -28,7 +27,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
         private readonly ITestOutputHelper _out;
         public BielikParityTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("3ms")]
         public void Bielik_GreedyParity_PrintTokens()
         {
             if (!File.Exists(Fp16Path))

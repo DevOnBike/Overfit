@@ -7,7 +7,7 @@ namespace DevOnBike.Overfit.LanguageModels.Contracts
 {
     /// <summary>
     /// Configuration for streaming token generation via
-    /// <c>CachedLlamaSession.StreamGenerate(...)</c>.
+    /// <c>CachedLlamaSession.StreamGenerateAsync(...)</c>.
     ///
     /// Use sane defaults via the static factories rather than constructing
     /// directly: <see cref="Default"/>, <see cref="WithStopTokens"/>.

@@ -272,6 +272,9 @@ out_temp/
 # Jetbrains Rider
 .idea/
 
+# Claude Code scratch
+.claude/
+
 # Claude Code per-user overrides
 .claude/settings.local.json
 
@@ -282,3 +285,10 @@ out_temp/
 *.zip
 # Audio demo materials (downloaded models + samples; not committed)
 Demo/materials/
+
+# backups
+*.bak
+
+# Python bytecode from Scripts/ (lab helpers are imported, so importing them writes a cache)
+__pycache__/
+*.pyc

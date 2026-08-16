@@ -76,7 +76,7 @@ namespace DevOnBike.Overfit.LanguageModels.Retrieval
 
             var buffer = new VectorMatch[topK];
             var written = Fuse(first, second, buffer, k);
-            return written == buffer.Length ? buffer : buffer[..written];
+            return written == buffer.Length ? buffer : buffer.AsSpan(0, written).ToArray();
         }
 
         private static void Accumulate(
@@ -92,7 +92,7 @@ namespace DevOnBike.Overfit.LanguageModels.Retrieval
                 scores.TryGetValue(id, out var current);
                 scores[id] = current + (1f / (k + rank + 1f)); // rank is 0-based here, 1-based in the formula
 
-                if (ranked[rank].Payload is not null)
+                if (ranked[rank].Payload != null)
                 {
                     payloads[id] = ranked[rank].Payload;
                 }

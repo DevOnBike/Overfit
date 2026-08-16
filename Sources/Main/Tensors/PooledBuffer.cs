@@ -58,17 +58,17 @@ namespace DevOnBike.Overfit.Tensors
         public readonly Span<T> Span
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => _rented is null ? default : _rented.AsSpan(0, _length);
+            get => _rented == null ? default : _rented.AsSpan(0, _length);
         }
 
         /// <summary>The buffer as memory of exactly the requested size (empty once disposed).</summary>
-        public readonly Memory<T> Memory => _rented is null ? default : _rented.AsMemory(0, _length);
+        public readonly Memory<T> Memory => _rented == null ? default : _rented.AsMemory(0, _length);
 
         /// <summary>Logical length (what was requested), not the pool's possibly-larger rented length.</summary>
         public readonly int Length => _length;
 
         /// <summary>False once disposed (or for a <c>default</c> instance).</summary>
-        public readonly bool IsAllocated => _rented is not null;
+        public readonly bool IsAllocated => _rented != null;
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void Dispose()
@@ -76,7 +76,7 @@ namespace DevOnBike.Overfit.Tensors
             var array = _rented;
             _rented = null;
 
-            if (array is not null)
+            if (array != null)
             {
                 ArrayPool<T>.Shared.Return(array);
             }

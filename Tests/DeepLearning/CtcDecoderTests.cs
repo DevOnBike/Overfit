@@ -87,7 +87,7 @@ namespace DevOnBike.Overfit.Tests.DeepLearning
         {
             public double LogProbability(ReadOnlySpan<int> prefix, int nextLabel)
             {
-                if (prefix.Length > 0 && prefix[^1] == 0)
+                if (prefix.Length > 0 && prefix[prefix.Length - 1] == 0)
                 {
                     if (nextLabel == 2)
                     {

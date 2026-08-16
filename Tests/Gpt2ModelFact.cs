@@ -3,6 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Runtime.CompilerServices;
 using DevOnBike.Overfit.Tests.TestSupport;
 
 namespace DevOnBike.Overfit.Tests
@@ -22,7 +23,10 @@ namespace DevOnBike.Overfit.Tests
     /// </summary>
     internal sealed class Gpt2ModelFact : FactAttribute
     {
-        public Gpt2ModelFact()
+        public Gpt2ModelFact(
+            [CallerFilePath] string sourceFilePath = null,
+            [CallerLineNumber] int sourceLineNumber = -1)
+            : base(sourceFilePath, sourceLineNumber)
         {
             if (!File.Exists(TestModelPaths.Gpt2Small.BinaryPath)
                 || !File.Exists(TestModelPaths.Gpt2Small.VocabPath)

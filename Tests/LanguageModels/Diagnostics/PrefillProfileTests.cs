@@ -8,7 +8,6 @@ using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Runtime;
 using DevOnBike.Overfit.LanguageModels.Tokenizers;
 using DevOnBike.Overfit.Tests.TestSupport;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
 {
@@ -31,7 +30,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
 
         public PrefillProfileTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("38s")]
         public void Prefill_TokenizeVsForward_Shares()
         {
             var path = TestModelPaths.Qwen3B.Q4KmGgufPath;
@@ -118,7 +117,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
         /// that decides where the 2.34×-at-equal-ISA gap to llama.cpp actually sits: in the FFN matmuls, or
         /// in the attention path where Q and O are dispatched once per head over the same activations.
         /// </summary>
-        [LongFact]
+        [LongFact("31s")]
         public void Prefill_ComponentBreakdown()
         {
             var path = TestModelPaths.Qwen3B.Q4KmGgufPath;

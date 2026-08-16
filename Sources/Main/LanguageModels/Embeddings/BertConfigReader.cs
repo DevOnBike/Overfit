@@ -14,6 +14,14 @@ namespace DevOnBike.Overfit.LanguageModels.Embeddings
     /// <c>num_attention_heads</c>, <c>intermediate_size</c>, <c>max_position_embeddings</c>,
     /// <c>vocab_size</c>, <c>type_vocab_size</c>, <c>layer_norm_eps</c>.
     /// </summary>
+    // OVERFIT040 for this type — same constraint as `LlamaConfigReader`, which this mirrors. `Read` slurps a
+    // few-kilobyte `config.json` once, at model-construction time, on the caller's own thread; there is no
+    // pool thread behind it. `Parse` takes a `ReadOnlySpan<byte>` and a span cannot cross an `await`, so the
+    // bytes could not be passed straight through an async version.
+    //
+    // WHAT IS GIVEN UP: `Read` and `ReadFromDirectory` are public API of the shipped `DevOnBike.Overfit`
+    // package, on the path every sentence-embedding model takes.
+#pragma warning disable OVERFIT040
     public static class BertConfigReader
     {
         public static BertConfig ReadFromDirectory(string modelDir)
@@ -126,4 +134,5 @@ namespace DevOnBike.Overfit.LanguageModels.Embeddings
             return new BertConfig(hidden, layers, heads, ffn, maxPos, vocab, typeVocab, eps);
         }
     }
+#pragma warning restore OVERFIT040
 }

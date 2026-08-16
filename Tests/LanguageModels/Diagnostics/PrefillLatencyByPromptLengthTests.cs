@@ -8,7 +8,6 @@ using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Runtime;
 using DevOnBike.Overfit.LanguageModels.Tokenizers;
 using DevOnBike.Overfit.Tests.TestSupport;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
 {
@@ -44,7 +43,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
 
         public PrefillLatencyByPromptLengthTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("22s")]
         public void Prefill_CostPerPromptToken_AcrossLengths()
         {
             var path = TestModelPaths.Qwen3B.Q4KmGgufPath;

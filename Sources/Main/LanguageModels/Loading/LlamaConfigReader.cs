@@ -28,6 +28,15 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
     /// SwiGLU + RoPE are assumed (the whole Llama/Qwen/Mistral family); the context
     /// length is capped at 8192 for memory sanity, matching <see cref="GgufLlamaLoader"/>.
     /// </summary>
+    // OVERFIT040 for this type. THE CONSTRAINT: `Read` slurps a `config.json` — a few kilobytes, once, before
+    // any weights are mapped — on the thread that asked for the model. The parse it feeds (`Parse`) takes a
+    // `ReadOnlySpan<byte>`, and a span cannot cross an `await`, so an async `Read` would have to buffer and
+    // hand off rather than pass the bytes straight through.
+    //
+    // WHAT IS GIVEN UP: `Read` and `ReadFromDirectory` are public API of the shipped `DevOnBike.Overfit`
+    // package, called from `SafetensorsLlamaLoader` and from user code; a task-returning version is a
+    // breaking change to the model-loading surface.
+#pragma warning disable OVERFIT040
     public static class LlamaConfigReader
     {
         private const int ContextCap = 8192;
@@ -303,4 +312,5 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                 : null;
         }
     }
+#pragma warning restore OVERFIT040
 }

@@ -127,7 +127,7 @@ namespace DevOnBike.Overfit.LanguageModels.Retrieval
             var written = ReciprocalRankFusion.Fuse(
                 dense.AsSpan(0, denseCount), lexical.AsSpan(0, lexicalCount), results, fusionK);
 
-            return written == results.Length ? results : results[..written];
+            return written == results.Length ? results : results.AsSpan(0, written).ToArray();
         }
     }
 }

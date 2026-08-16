@@ -173,14 +173,29 @@ namespace DevOnBike.Overfit.Runtime
         /// <summary>
         /// Worker cap for small, numerous single-token decode dispatches (the FFN
         /// projection matmuls). These ~0.2 ms matmuls are dispatch-overhead bound, not
-        /// bandwidth bound: measured on a 32-core box, fanning a 12.7 MB FFN matrix across
-        /// all 32 workers runs it at ~11 GB/s, while a handful of workers hits ~37 GB/s
-        /// (≈3×) — and end-to-end Bielik-4.5B Q4_K_M decode goes 12.55 → 14.0 tok/s (+11%).
-        /// The tok/s-vs-cap curve plateaus around 10-12 on a 32-core box (6→11.8, 8→13.4,
-        /// 10→14.0, 12→14.1, 32→12.5). Defaults to <c>min(WorkerCount, 10)</c>; override
-        /// with <c>OVERFIT_DECODE_WORKERS</c>. Prefill / training are unaffected (they pass
-        /// the full <see cref="WorkerCount"/>).
+        /// bandwidth bound: measured 2026-06-11 on a 32-core box (not re-audited since),
+        /// fanning a 12.7 MB FFN matrix across all 32 workers runs it at ~11 GB/s, while a
+        /// handful of workers hits ~37 GB/s (≈3×). Defaults to <c>min(WorkerCount, 10)</c>;
+        /// override with <c>OVERFIT_DECODE_WORKERS</c>. Prefill / training are unaffected
+        /// (they pass the full <see cref="WorkerCount"/>).
         /// </summary>
+        /// <remarks>
+        /// What the cap is worth end-to-end, re-audited 2026-08-14 (<c>PB-12</c>): Bielik-4.5B Q4_K_M on a
+        /// Ryzen 9 9950X3D (32 logical), .NET 10.0.8, Release, HEAD e21e7c3, ABAB, best-of-3.
+        /// Isolated to this cap's ORIGINAL mechanism — decode pool OFF, cap 10 against 32 — it is
+        /// <c>+3.8%</c>, every paired cycle positive (1.025 / 1.057 / 1.038). The <c>+11%</c>
+        /// (12.55 → 14.0 tok/s) published here from 2026-06-11 is NOT supported as stated: the sign is
+        /// real, the magnitude is not.
+        /// <para>
+        /// At HEAD's default the same knob measures <c>+87%</c>, because the cap now also sizes the decode
+        /// spin pool — it is no longer one lever, and the two figures are not comparable. Correspondingly
+        /// <c>OVERFIT_DECODE_WORKERS=32</c> costs <c>-47%</c> today (15.17 → 8.10 tok/s), which supersedes
+        /// the ~-11% implied by the 2026-06-11 cap curve (6→11.8, 8→13.4, 10→14.0, 12→14.1, 32→12.5). That
+        /// curve was measured before the pool existed and only its <c>32</c> endpoint has been re-measured;
+        /// the plateau at 10-12 is the reason for the default and has NOT been re-checked point by point.
+        /// Canonical copy: <c>docs/measured-baselines.md</c>.
+        /// </para>
+        /// </remarks>
         public static int DecodeMaxWorkers { get; set; } = ResolveDecodeMaxWorkers();
 
         private static int ResolveDecodeMaxWorkers()
@@ -273,40 +288,128 @@ namespace DevOnBike.Overfit.Runtime
         // all-32 spin barrier: there 22/32 spun for nothing and starved the workers).
         // Spawned only when the flag is on; prefill / training keep the main parking pool.
         // SpinWait backs off (hot-spin → yield → Sleep(1)), so the pool cools between
-        // tokens / when decode is idle. One-claim-per-generation = race-free (a worker only
-        // claims after observing a fresh _decodeGen, published after the descriptors).
+        // tokens / when decode is idle.
+        //
+        // CLAIMS CARRY THEIR GENERATION, and this comment used to claim the opposite — that observing a
+        // fresh _decodeGen before claiming made the protocol race-free. It did not. A worker can be
+        // descheduled between reading the generation and taking an index; by the time it resumes the
+        // dispatch it saw may have completed, released _decodeGate, and been replaced by the next one,
+        // which rewrites _decodeChunks[] wholesale. The straggler then indexed into descriptors being
+        // overwritten and could read Body from one dispatch and Context from another — observed
+        // 2026-08-14 as a DivideByZeroException with an FFN dispatch frame beneath an attention body.
+        // The quieter consequence was worse: its extra decrement of _decodeRemaining let a LATER
+        // dispatch's wait finish early, returning a partially written output buffer with no exception at
+        // all. The generation, the chunk count AND the next index now live in ONE word (_decodeClaim) so
+        // all three are read and advanced by a single CAS. The chunk count joined them on 2026-08-14
+        // (`XC-50`): while it lived in its own field it was published BEFORE the tag, so for the length of
+        // that window the word said "generation G" while the bound already said "G+1" — see
+        // DecodeChunkClaim for the full account.
         private const string DecodePoolEnvVar = OverfitEnvironment.DecodePool;
         private static readonly bool _decodePool = ResolveDecodePool();
-        private static readonly int _decodePoolSize = ResolveDecodeMaxWorkers();
+
+        // Clamped to what a claim word's count field can carry. chunkCount is Math.Min(_decodePoolSize,
+        // totalWork) and travels INSIDE the claim word, so bounding the pool size here — once, at
+        // resolution — makes an over-wide count unrepresentable instead of something every dispatch has to
+        // test for. ResolveDecodeMaxWorkers already caps at Environment.ProcessorCount, so on any real box
+        // this clamp is inert; it exists so that silent truncation of the bound (which would revive
+        // `XC-50`) cannot become the failure mode if that cap ever changes.
+        private static readonly int _decodePoolSize = ClampDecodePoolSize(ResolveDecodeMaxWorkers());
+
+        /// <summary>
+        /// Clamps a resolved decode-pool size to what a claim word's count field can carry
+        /// (<see cref="DecodeChunkClaim.MaxChunkCount"/>).
+        ///
+        /// <para><b>It is a named method rather than an inline <c>Math.Min</c> so it can be driven from a
+        /// test.</b> On every real box the clamp is inert — <see cref="ResolveDecodeMaxWorkers"/> already
+        /// caps at <see cref="Environment.ProcessorCount"/>, which is five orders of magnitude below the
+        /// field's limit — so a test that reads <c>_decodePoolSize</c> would assert nothing about the
+        /// clamp and would additionally depend on the machine it ran on. An unexercised clamp is the same
+        /// defect class as an untested bound: if <see cref="ResolveDecodeMaxWorkers"/> ever grows a
+        /// configuration path, silent truncation of the count field revives `XC-50`.</para>
+        /// </summary>
+        /// <param name="resolvedWorkers">The pool size before clamping.</param>
+        /// <returns>The pool size, never above <see cref="DecodeChunkClaim.MaxChunkCount"/>.</returns>
+        internal static int ClampDecodePoolSize(int resolvedWorkers)
+        {
+            return Math.Min(resolvedWorkers, DecodeChunkClaim.MaxChunkCount);
+        }
+
+        /// <summary>
+        /// Diagnostics only: the resolved decode-pool size actually in force, after
+        /// <see cref="ResolveDecodeMaxWorkers"/> and <see cref="ClampDecodePoolSize"/>.
+        ///
+        /// <para><b>It exists so a test can tell whether it exercised the dispatcher at all.</b> When this
+        /// is <c>1</c> — a 2-vCPU box, or <c>OVERFIT_DECODE_WORKERS=1</c> — <see cref="ForDecode"/> runs the
+        /// body inline and never publishes a dispatch, so every assertion a dispatcher test makes passes
+        /// without the subject having run. <see cref="DecodeMaxWorkers"/> is <b>not</b> a substitute: it is
+        /// a settable public property that the resolved field does not track.</para>
+        /// </summary>
+        internal static int DecodePoolSize => _decodePoolSize;
+
+        /// <summary>
+        /// Diagnostics only: whether the decode spin pool is on (<c>OVERFIT_DECODE_POOL=0</c> turns it off,
+        /// and it is off by default on Android). When it is off, <see cref="ForDecode"/> delegates to the
+        /// capped park path and the decode claim protocol never runs — the other half of the capability
+        /// question <see cref="DecodePoolSize"/> answers.
+        /// </summary>
+        internal static bool DecodePoolEnabled => _decodePool;
+
         private static readonly Lock _decodeGate = new();
         private static ChunkState[] _decodeChunks = [];
         private static long _decodeGen;
 
-        // Spin-then-park: workers hot-spin for SpinBudget iterations after the last observed
-        // generation, then PARK on this semaphore (0% CPU in idle — a serving container must not
-        // burn cores between requests). The dispatcher wakes parked workers after bumping the
-        // generation. Protocol is missed-wake-free: worker registers (parked++) BEFORE its final
-        // generation re-check; dispatcher bumps the generation BEFORE reading the parked count —
-        // Interlocked/Volatile fences order the two, so a worker that saw a stale generation is
-        // always visible to the dispatcher's release. Stale semaphore tokens only cause a benign
-        // spurious wake (loop re-checks the generation and spins/parks again).
-        private static readonly SemaphoreSlim _decodeParkSemaphore = new(0);
-        private static int _decodeParkedCount;
+        // Spin-then-park: workers hot-spin for SpinBudget iterations after the last observed generation,
+        // then PARK here (0% CPU in idle — a serving container must not burn cores between requests).
+        //
+        // A MONITOR ON A PREDICATE, not a counted semaphore, and the difference was worth 14.85 cores.
+        // The previous protocol counted parked workers and released exactly that many tokens. A worker
+        // that registered itself, then observed the generation move and skipped its Wait, left its token
+        // in the semaphore permanently — nothing ever consumed it except a LATER park, which returned
+        // immediately. This comment used to call that "a benign spurious wake"; it is not benign, because
+        // tokens accumulate faster than parks consume them, and the pool stops sleeping altogether.
+        // Measured 2026-08-14 by `DecodePoolIdleBurnTests`: 44.61 s of CPU across a 3 s idle window,
+        // 14.85 effective cores, on a pool that is supposed to be at zero.
+        //
+        // Monitor.Wait re-tests the condition it slept on, so neither a missed pulse nor a surplus one
+        // can strand a worker or spin it. The dispatcher pulses unconditionally rather than consulting a
+        // parked count: deciding from a count read outside the lock races with a worker that has decided
+        // to park and not yet blocked, and an uncontended Monitor acquisition costs ~20 ns against a
+        // dispatch that does microseconds of work.
+        // Deliberately `object` and not `System.Threading.Lock`, which is this repository's default
+        // elsewhere: `lock` on a `Lock` does NOT go through Monitor, so `Monitor.Wait`/`Monitor.PulseAll`
+        // on the same instance would operate on a different mechanism than the critical section itself and
+        // the park protocol would be silently broken. The compiler says so as CS9216 — heeded rather than
+        // suppressed, because a warning about the wrong locking primitive is the warning to believe.
+        private static readonly object _decodeParkLock = new();
 
         // ~1-2 ms of Thread.SpinWait(32) — comfortably covers the µs-scale gaps between the ~180
         // per-token dispatches (so a token in flight never parks), while a quiet server parks
         // within a couple of milliseconds of the last token.
         private const int DecodeSpinBudgetIterations = 20_000;
-        private static int _decodeChunkCount;
-        private static PaddedCounter _decodeNextChunk;
+        private static PaddedClaim _decodeClaim;
         private static PaddedCounter _decodeRemaining;
 
         private static bool ResolveDecodePool()
         {
-            // Default ON — measured best-of-3: Qwen3-0.6B +28% (56.7→72.3 tok/s), Phi-3.5-3.8B +3% (13.27→13.69),
-            // 0 B/token preserved, bit-identical. Bigger win on small models (dispatch overhead is a larger fraction
-            // of their small matmuls). Set OVERFIT_DECODE_POOL=0/false to opt out. Idle cost is ~0: the pool
-            // spins-then-parks (see _decodeParkSemaphore), so there is no idle-CPU reason to disable it.
+            // Default ON. Re-measured 2026-08-14 (`PB-12`) on a Ryzen 9 9950X3D (32 logical), .NET 10.0.8,
+            // Release, HEAD e21e7c3 — 24 processes, ABAB at process level, best-of-3 within each, a canary
+            // before and after every timed block: Qwen3-0.6B Q8_0 +25.1% (56.56→70.75 tok/s), Q4_K_M +23.0%;
+            // 0 B/token preserved, bit-identical. This supersedes the `+28% (56.7→72.3)` published here from
+            // 2026-06-11, which recorded no quantisation.
+            //
+            // Phi-3.5-mini 3.8B is NEUTRAL TO NEGATIVE, not the `+3%` published here until 2026-08-14: the
+            // sign reversed, to -1.9% (13.38→13.12 tok/s). That point estimate is itself inside this box's
+            // +-3-4% cross-process floor, so no number is quoted — but it is not the box moving, because the
+            // untouched arm reproduced to 0.8% while the treated arm fell 4.2%. The mechanism is a WRONG
+            // DENOMINATOR: on Phi-3.5 the pool captures only ~75% of dispatches, because 52 per token still
+            // go through OverfitParallel.For via the GQA For(0, KvHeadCount, ...) in CachedMultiHeadAttention.
+            //
+            // Bigger win on small models (dispatch overhead is a larger fraction of their small matmuls).
+            // Set OVERFIT_DECODE_POOL=0/false to opt out. The pool spins-then-parks (see _decodeParkLock) so
+            // idle cost is meant to be ~0 — but that has NOT been demonstrated: `DecodePoolIdleBurnTests`
+            // measures the whole PROCESS, so inside a 52-test run it charges other tests' threads to the pool
+            // and reports 15-17 cores; run alone it is green. See `TG-T13`. Full table, dispatch census and
+            // method: docs/measured-baselines.md.
             var raw = Environment.GetEnvironmentVariable(DecodePoolEnvVar);
             if (!string.IsNullOrEmpty(raw))
             {
@@ -550,8 +653,14 @@ namespace DevOnBike.Overfit.Runtime
         /// <c>OVERFIT_DECODE_POOL</c> is on, routes to the spinning decode pool so the
         /// per-token burst of dispatches skips the per-op semaphore wake; otherwise
         /// delegates to the capped park path (<see cref="DecodeMaxWorkers"/>). The pool is
-        /// sized to the cap, so there are no idle spinners. Same one-claim-per-generation
-        /// protocol as the main pool; serialised by <c>_decodeGate</c>.
+        /// sized to the cap, so there are no idle spinners. Serialised by <c>_decodeGate</c>.
+        ///
+        /// <para><b>Its claim protocol is NOT the main pool's</b> — this line used to say it was, and the
+        /// difference is why only this pool needed the 2026-08-14 fix. The main pool commits to completion
+        /// before a worker claims anything: one <c>SemaphoreSlim</c> token is consumed per chunk, so a
+        /// straggler cannot take work belonging to a later dispatch because there is no token for it. This
+        /// pool has no such token — workers poll a generation counter — so the claim itself has to carry
+        /// the generation it belongs to. See <see cref="TryClaimDecodeChunk"/>.</para>
         /// </summary>
         public static void ForDecode(
             int rangeStart,
@@ -587,8 +696,27 @@ namespace DevOnBike.Overfit.Runtime
 
             lock (_decodeGate)
             {
-                _decodeNextChunk.Value = 0;
-                _decodeChunkCount = chunkCount;
+                var generation = _decodeGen + 1;
+
+                // Resetting the completion counter BEFORE the dispatch is published looks wrong and is
+                // not, but it is safe only as a CONSEQUENCE of the claim invariant, so the reasoning is
+                // recorded here rather than left to be re-derived. _decodeRemaining is decremented exactly
+                // once per SUCCESSFUL claim (ExecuteDecodeChunk's finally). Claims tagged G total exactly
+                // chunkCount_G, because the bound they test against is G's own and travels in G's word.
+                // So when G's dispatcher observed _decodeRemaining == 0 below, every G execution had
+                // already decremented and no further G claim can succeed — no G decrement can survive into
+                // G+1 and land on this reset value. That argument holds ONLY while the claim's bound is
+                // generation-correct: under the pre-`XC-50` shape the extra claim a straggler could win is
+                // precisely what broke it.
+                //
+                // WHY THAT PREMISE HOLDS ACROSS TWO DIFFERENT ForDecode CALLS — the step the paragraph
+                // above assumes and never states: `_decodeGate` serialises dispatches end to end. G's
+                // dispatcher takes the lock, publishes, drains, and only LEAVES it after its own spin
+                // below has observed _decodeRemaining == 0; G+1's dispatcher cannot reach this line until
+                // then, because it is still waiting on the same lock. So "G observed zero" is not a
+                // property of some earlier call in the abstract — it is a fact established before this
+                // reset can execute at all. Remove the lock, or move the completion spin outside it, and
+                // this reset stops being safe.
                 Volatile.Write(ref _decodeRemaining.Value, chunkCount);
 
                 for (var i = 0; i < chunkCount; i++)
@@ -603,30 +731,38 @@ namespace DevOnBike.Overfit.Runtime
                     _decodeChunks[i].Error = null;
                 }
 
-                // Publish descriptors, then release the spinning pool (release fence).
-                Volatile.Write(ref _decodeGen, _decodeGen + 1);
+                // Publish the claim word first, then the generation. Both writes are releases, so the
+                // descriptors above are visible to anyone who acquires the word.
+                //
+                // THIS COMMENT USED TO ARGUE THAT A WORKER "only starts claiming once it has seen the new
+                // generation, so it can never observe a claim word that still belongs to the previous
+                // dispatch". That reasoning is about the wrong worker and it is what hid `XC-50`. The hole
+                // belongs to a straggler still draining the OLD generation, which never looks at
+                // _decodeGen again — it is holding G in a local and re-entering the claim. Nothing about
+                // publication order restrains it.
+                //
+                // What restrains it is that everything its claim tests is in the one word: tag, bound and
+                // next index are written here by a single store, so it either sees G's word (its own tag,
+                // its own exhausted bound) or G+1's (tag mismatch). While the bound lived in a separate
+                // field published earlier, a third state existed — G's tag with G+1's bound — and a
+                // straggler drove straight through it.
+                DecodeChunkClaim.Publish(ref _decodeClaim.Value, chunkCount, generation);
+                Volatile.Write(ref _decodeGen, generation);
 
-                // Wake any parked workers (idle pool). During an active decode the workers stay
-                // inside their spin budget, the count is 0 and this is a single volatile read.
-                var parked = Volatile.Read(ref _decodeParkedCount);
-                if (parked > 0)
+                // Wake parked workers. Unconditional — see _decodeParkLock for why a "is anybody parked"
+                // fast path cannot be made correct without a full fence that costs the same as the lock.
+                lock (_decodeParkLock)
                 {
-                    _decodeParkSemaphore.Release(parked);
+                    Monitor.PulseAll(_decodeParkLock);
                 }
 
                 // Calling thread participates — greedy drain (safe under _decodeGate).
-                // BOUND: _decodeChunkCount. Interlocked.Increment advances a shared counter every pass, so
-                // the index strictly increases and the `index >= _decodeChunkCount` break is always reached.
-#pragma warning disable OVERFIT023
-                while (true)
-#pragma warning restore OVERFIT023
+                // BOUND: the chunk count carried in the claim word — this dispatch's `chunkCount`, just
+                // published above. Every successful claim advances the word's index field, so the loop
+                // runs at most chunkCount times before TryClaimDecodeChunk returns false. No OVERFIT023
+                // suppression needed any more — the condition is no longer `true`.
+                while (TryClaimDecodeChunk(generation, out var index))
                 {
-                    var index = Interlocked.Increment(ref _decodeNextChunk.Value) - 1;
-                    if (index >= _decodeChunkCount)
-                    {
-                        break;
-                    }
-
                     ExecuteDecodeChunk(index);
                 }
 
@@ -642,6 +778,20 @@ namespace DevOnBike.Overfit.Runtime
                     _decodeChunks[i].Error?.Throw();
                 }
             }
+        }
+
+        /// <summary>
+        /// Binds this class's claim word to the claim protocol, which lives in
+        /// <see cref="DecodeChunkClaim.TryClaim"/> — see there for why the generation, the chunk count and
+        /// the index share one word.
+        ///
+        /// <para>The word is the only thing that crosses: nothing else about the dispatch is passed, and
+        /// nothing else could be, since this class's dispatch state is private to it. Any future parameter
+        /// added here is `XC-50` returning.</para>
+        /// </summary>
+        private static bool TryClaimDecodeChunk(long generation, out int index)
+        {
+            return DecodeChunkClaim.TryClaim(ref _decodeClaim.Value, generation, out index);
         }
 
         private static void ExecuteDecodeChunk(int index)
@@ -667,6 +817,28 @@ namespace DevOnBike.Overfit.Runtime
         /// generation. Pool size == the decode cap, so a worker almost always gets a chunk —
         /// no idle spin-burn.
         /// </summary>
+        // OVERFIT040 for the two worker loops below (DecodeWorkerLoop and WorkerLoop).
+        //
+        // THE CONSTRAINT: these run on DEDICATED BACKGROUND THREADS this class creates and owns for the
+        // process's lifetime — not on thread-pool threads. Blocking one is what it is FOR: a parked worker
+        // holding its own thread is how it resumes in nanoseconds when the next generation is dispatched.
+        // `WaitAsync` would hand the continuation back to the thread pool and reintroduce exactly the
+        // scheduling latency this pool exists to avoid.
+        //
+        // WHAT IT IS WORTH, measured — re-audited 2026-08-14 (`PB-12`) on a Ryzen 9 9950X3D (32 logical),
+        // .NET 10.0.8, Release, HEAD e21e7c3, single-process ABAB, 183 dispatches over a 4096 range:
+        // the decode pool runs 617 us / 0 B against `Parallel.For` at 1502 us / 505 KB when that arm is
+        // capped at DecodeMaxWorkers — which is the arm OVERFIT_DECODE_POOL=0 actually falls back to — and
+        // 2223 us / 862 KB uncapped. So 2.4x against the comparison the product makes and 3.6x against the
+        // one it no longer makes anywhere; ~+25% end-to-end on Qwen3-0.6B. The `455 us vs 2059 us = 4.5x`
+        // published here until 2026-08-14 quoted the UNCAPPED pair and is retired — see
+        // docs/measured-baselines.md, which is the canonical copy. Zero allocation instead of hundreds of KB
+        // (862 KB - 1.13 MB, shape-dependent) is the other half, and together they are the reason the answer
+        // here is not "await it".
+        //
+        // WHAT IS GIVEN UP: one OS thread per pool slot, parked, for as long as the process runs. The pool is
+        // sized to the decode cap (<= core count), which is the bound that makes that acceptable.
+#pragma warning disable OVERFIT040
         private static void DecodeWorkerLoop()
         {
             var seen = 0L;
@@ -698,20 +870,20 @@ namespace DevOnBike.Overfit.Runtime
                         continue;
                     }
 
-                    // Budget exhausted — park until the next dispatch. Register FIRST, then
-                    // re-check the generation (closes the race with a dispatcher that bumped
-                    // it before seeing the registration).
-                    Interlocked.Increment(ref _decodeParkedCount);
-                    try
+                    // Budget exhausted — park until the generation moves. The wait is on the CONDITION,
+                    // re-tested under the lock after every wake, so a surplus pulse costs one re-check and
+                    // a missed one is impossible: the dispatcher publishes the generation and then pulses
+                    // while holding this same lock. The counted-semaphore version leaked a token every
+                    // time a worker registered and then skipped its wait, which stopped the pool sleeping
+                    // at all — 14.85 effective cores on an idle box.
+                    lock (_decodeParkLock)
                     {
-                        if (Volatile.Read(ref _decodeGen) == seen)
+                        // BOUND: the generation is monotonic and every dispatch pulses this lock, so the
+                        // predicate is false after at most one dispatch.
+                        while (Volatile.Read(ref _decodeGen) == seen)
                         {
-                            _decodeParkSemaphore.Wait();
+                            Monitor.Wait(_decodeParkLock);
                         }
-                    }
-                    finally
-                    {
-                        Interlocked.Decrement(ref _decodeParkedCount);
                     }
 
                     spins = 0;
@@ -719,13 +891,15 @@ namespace DevOnBike.Overfit.Runtime
 
                 seen = gen;
 
-                var index = Interlocked.Increment(ref _decodeNextChunk.Value) - 1;
-                if (index < _decodeChunkCount)
+                // Drain this generation greedily. Claims are generation-checked, so a worker that arrives
+                // late simply finds nothing to take rather than stealing from the dispatch that replaced it.
+                while (TryClaimDecodeChunk(gen, out var index))
                 {
                     ExecuteDecodeChunk(index);
                 }
             }
         }
+#pragma warning restore OVERFIT040
 
         /// <summary>
         /// Runs one chunk's body, capturing any thrown exception into the chunk
@@ -752,6 +926,9 @@ namespace DevOnBike.Overfit.Runtime
             }
         }
 
+        // OVERFIT040: same constraint and same measurement as DecodeWorkerLoop above — a dedicated background
+        // thread this class owns, parked on its own semaphore, where blocking IS the design.
+#pragma warning disable OVERFIT040
         private static void WorkerLoop()
         {
             // BOUND: none by design — daemon worker, parks on _startSemaphore until the process exits. Runs on
@@ -790,6 +967,7 @@ namespace DevOnBike.Overfit.Runtime
                 ExecuteChunk(index);
             }
         }
+#pragma warning restore OVERFIT040
 
         /// <summary>
         /// Per-chunk descriptor. Padded to one cache line because workers
@@ -834,6 +1012,24 @@ namespace DevOnBike.Overfit.Runtime
         {
             [FieldOffset(64)]
             public int Value;
+        }
+
+        /// <summary>
+        /// Cache-line-padded 64-bit work claim: the dispatch generation in the high 32 bits, the chunk
+        /// count in the next 16, the next unclaimed chunk index in the low 16 (layout owned by
+        /// <see cref="DecodeChunkClaim"/>). Padded for the same reason as <see cref="PaddedCounter"/> —
+        /// every worker hammers it with a compare-and-swap.
+        ///
+        /// <para>One word rather than three fields so that <see cref="TryClaimDecodeChunk"/> can verify the
+        /// generation, test the bound and take the index in a single atomic operation; see
+        /// <see cref="DecodeChunkClaim"/> for what went wrong each time one of the three was read from
+        /// somewhere else.</para>
+        /// </summary>
+        [StructLayout(LayoutKind.Explicit, Size = 128)]
+        private struct PaddedClaim
+        {
+            [FieldOffset(64)]
+            public long Value;
         }
     }
 }

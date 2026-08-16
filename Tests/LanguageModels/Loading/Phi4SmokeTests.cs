@@ -5,7 +5,6 @@
 
 using DevOnBike.Overfit.LanguageModels;
 using DevOnBike.Overfit.LanguageModels.Loading;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
 {
@@ -26,14 +25,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
 
         public Phi4SmokeTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [ModelFact(Path, "25s")]
         public void Phi4_Loads_And_Generates_Coherent_English()
         {
-            if (!File.Exists(Path))
-            {
-                _out.WriteLine("missing Phi-4 gguf (expected C:\\phi\\phi-4-Q4_K_M.gguf)");
-                return;
-            }
 
             using (var reader = new GgufReader(Path))
             {

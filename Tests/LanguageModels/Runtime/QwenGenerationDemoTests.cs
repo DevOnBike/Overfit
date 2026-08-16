@@ -9,7 +9,6 @@ using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Runtime;
 using DevOnBike.Overfit.LanguageModels.Tokenizers;
 using DevOnBike.Overfit.Tests.TestSupport;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
 {
@@ -100,13 +99,11 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
                 .Concat([QwenTokenizer.ImEnd, 198, QwenTokenizer.ImStart, 77091, 198])
                 .ToArray();
 
-        [LongFact]
+        [FixtureFact(TestFixture.Qwen3BBinaryAndTokenizer, "7s")]
         public void Demo_EncodeDecodeRoundtrip_Sanity()
         {
-            if (!TryLoad(out _, out var tok))
-            {
-                return;
-            }
+            TryLoad(out _, out var tok);
+
             const string text = "What is 7 * 8?";
             var decoded = tok!.Decode(tok.Encode(text));
             _out.WriteLine($"Input  : '{text}'");
@@ -116,14 +113,12 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
             Assert.Equal(text, decoded);
         }
 
-        /// <summary>Greedy bez system message — najlepsza szansa dla 0.5B FP32.</summary>
-        [LongFact]
+        /// <summary>Greedy with no system message — the best chance for 0.5B FP32.</summary>
+        [FixtureFact(TestFixture.Qwen3BBinaryAndTokenizer, "13s")]
         public void Demo_Math_NoSystem_Greedy()
         {
-            if (!TryLoad(out var engine, out var tok))
-            {
-                return;
-            }
+            TryLoad(out var engine, out var tok);
+
             using (engine)
             {
                 using var session = engine!.CreateSession(MaxCtx);
@@ -140,13 +135,11 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
         }
 
         /// <summary>Temperature 0.3 without a system message — may perform better than greedy.</summary>
-        [LongFact]
+        [FixtureFact(TestFixture.Qwen3BBinaryAndTokenizer, "11s")]
         public void Demo_Math_NoSystem_Temperature()
         {
-            if (!TryLoad(out var engine, out var tok))
-            {
-                return;
-            }
+            TryLoad(out var engine, out var tok);
+
             using (engine)
             {
                 using var session = engine!.CreateSession(MaxCtx);
@@ -159,13 +152,11 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
         }
 
         /// <summary>With the full Qwen2.5-Instruct system message.</summary>
-        [LongFact]
+        [FixtureFact(TestFixture.Qwen3BBinaryAndTokenizer, "16s")]
         public void Demo_Math_WithSystem_Greedy()
         {
-            if (!TryLoad(out var engine, out var tok))
-            {
-                return;
-            }
+            TryLoad(out var engine, out var tok);
+
             using (engine)
             {
                 using var session = engine!.CreateSession(MaxCtx);
@@ -178,13 +169,11 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
             }
         }
 
-        [LongFact]
+        [FixtureFact(TestFixture.Qwen3BBinaryAndTokenizer, "18s")]
         public void Demo_Polish_NoSystem()
         {
-            if (!TryLoad(out var engine, out var tok))
-            {
-                return;
-            }
+            TryLoad(out var engine, out var tok);
+
             using (engine)
             {
                 using var session = engine!.CreateSession(MaxCtx);
@@ -196,13 +185,11 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
             }
         }
 
-        [LongFact]
+        [FixtureFact(TestFixture.Qwen3BBinaryAndTokenizer)]  // heavy group, never measured — see Scripts/longfact_heavy.txt
         public void Demo_SpeedBenchmark()
         {
-            if (!TryLoad(out var engine, out var tok))
-            {
-                return;
-            }
+            TryLoad(out var engine, out var tok);
+
             using (engine)
             {
                 using var session = engine!.CreateSession(MaxCtx);

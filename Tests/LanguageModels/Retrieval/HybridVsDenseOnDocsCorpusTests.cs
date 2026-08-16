@@ -8,7 +8,6 @@ using DevOnBike.Overfit.LanguageModels.Embeddings;
 using DevOnBike.Overfit.LanguageModels.Retrieval;
 using DevOnBike.Overfit.LanguageModels.Retrieval.Evaluation;
 using DevOnBike.Overfit.Tests.TestSupport;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Retrieval
 {
@@ -107,14 +106,16 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Retrieval
             new("mixed", "how do I evaluate prompts locally for free?", "skill-eval.md"),
         ];
 
-        [LongFact]
+        [FixtureFact(TestFixture.MiniLmSafetensors, "1min17s")]
         public void Hybrid_VsDense_OnRealDocsCorpus()
         {
             var indexed = BuildIndex();
-            if (indexed is null)
-            {
-                return;
-            }
+
+            // Asserted, not returned. BuildIndex() has two ways to yield null and they deserve opposite
+            // treatment: a missing MiniLM fixture is a legitimate skip and the attribute above now handles
+            // it, but a missing docs/ folder when the suite runs from a checkout means the tree layout is
+            // wrong — that is a defect, and it should fail rather than disappear as a pass.
+            Assert.NotNull(indexed);
 
             var (embedder, hybrid, chunkIdsByFile, fileCount) = indexed.Value;
             using var _ = embedder;
@@ -200,14 +201,16 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Retrieval
         /// found by ONE arm at rank 1 (1/61 ≈ 0.016) loses to a document found by BOTH arms at ranks 5 and 3
         /// (1/65 + 1/63 ≈ 0.031). k is exactly the knob that sets that balance.
         /// </summary>
-        [LongFact]
+        [FixtureFact(TestFixture.MiniLmSafetensors)]
         public void Fusion_KSweep_OnRealDocsCorpus()
         {
             var indexed = BuildIndex();
-            if (indexed is null)
-            {
-                return;
-            }
+
+            // Asserted, not returned. BuildIndex() has two ways to yield null and they deserve opposite
+            // treatment: a missing MiniLM fixture is a legitimate skip and the attribute above now handles
+            // it, but a missing docs/ folder when the suite runs from a checkout means the tree layout is
+            // wrong — that is a defect, and it should fail rather than disappear as a pass.
+            Assert.NotNull(indexed);
 
             var (embedder, hybrid, chunkIdsByFile, _) = indexed.Value;
             using var disposable = embedder;
@@ -367,20 +370,22 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Retrieval
         // Walks up from the test output directory to the repository root (the folder holding Overfit.sln).
         private static string? FindDocsDirectory()
         {
-            var directory = new DirectoryInfo(AppContext.BaseDirectory);
+            // Shared walk (XC-4), local policy: null means "not in a checkout", which this test turns into a
+            // skip. Replacing it with RepositoryPaths.Root would convert that skip into a failure.
+            //
+            // The old copy stopped after 12 levels. That bound is not carried over and nothing is lost:
+            // `Parent` reaches null at the drive root, so the walk terminates either way, and a checkout
+            // nested deeper than twelve directories would have been silently unfindable.
+            var root = RepositoryPaths.TryFindRoot();
 
-            for (var depth = 0; depth < 12 && directory is not null; depth++)
+            if (root is null)
             {
-                if (File.Exists(Path.Combine(directory.FullName, "Overfit.sln")))
-                {
-                    var docs = Path.Combine(directory.FullName, "docs");
-                    return Directory.Exists(docs) ? docs : null;
-                }
-
-                directory = directory.Parent;
+                return null;
             }
 
-            return null;
+            var docs = Path.Combine(root, "docs");
+
+            return Directory.Exists(docs) ? docs : null;
         }
     }
 }

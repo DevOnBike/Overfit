@@ -10,7 +10,6 @@ using DevOnBike.Overfit.LanguageModels.Loading;
 using DevOnBike.Overfit.LanguageModels.Tokenizers;
 using DevOnBike.Overfit.LanguageModels.Tools;
 using DevOnBike.Overfit.Tests.TestSupport;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Tools
 {
@@ -26,7 +25,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Tools
         private readonly ITestOutputHelper _out;
         public ToolCallingChatTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact("4s")]
         public void Send_WithToolConstraint_ProducesDispatchableToolCall()
         {
             TestModelPaths.Qwen3B.RequireQ4KmGgufPath();

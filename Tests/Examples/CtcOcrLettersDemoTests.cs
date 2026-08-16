@@ -6,10 +6,10 @@
 using System.Text;
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning;
+using DevOnBike.Overfit.Maths;
 using DevOnBike.Overfit.Ops;
 using DevOnBike.Overfit.Optimizers;
 using DevOnBike.Overfit.Training;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.Examples
 {
@@ -69,13 +69,20 @@ namespace DevOnBike.Overfit.Tests.Examples
         private readonly ITestOutputHelper _out;
         public CtcOcrLettersDemoTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact]  // runtime unmeasured — the test failed after 8s (2026-08-07)
         [Trait("Category", "Demo")]
         public void RecognisesLexiconWords_WithNGramLanguageModel()
         {
             const int optSteps = 400;
             const int accumWords = 8;
             const float lrMax = 0.01f, lrMin = 1e-4f;
+
+            // SEED THE WEIGHTS, not just the data order. The `new Random(20260527)` below seeds which
+            // words this test draws; it does NOT touch weight initialisation, which is what actually made
+            // this test flaky. Measured 2026-08-07 on unchanged code: 5/24 recognised on one run, 23/24 on
+            // another. The LSTM inside the CRNN drew from `Random.Shared`, outside any seed's reach, until
+            // it was routed through MathUtils the same day.
+            MathUtils.SetSeed(20260527);
 
             using var ocr = new Crnn(
                 imageHeight: H, imageWidth: Wmax, classCount: Classes,
@@ -97,6 +104,14 @@ namespace DevOnBike.Overfit.Tests.Examples
             var tailSum = 0f;
             var tailCount = 0;
 
+            // Non-finite CTC losses used to be swallowed silently by the `continue` below: no count, no
+            // report, no assertion. When every word in a batch produced one, `optimizer.Step()` still ran —
+            // on gradients that had just been zeroed — so training quietly stopped advancing and the only
+            // symptom was the recognition assertion at the end failing with "5/24 too low". That says the
+            // model did not learn; it does not say why, and this counter is what tells the difference
+            // between a diverged run and a decoder problem.
+            var nonFiniteLosses = 0;
+
             for (var step = 0; step < optSteps; step++)
             {
                 optimizer.LearningRate = LearningRateSchedule.Cosine(step, optSteps, lrMax, lrMin);
@@ -115,6 +130,8 @@ namespace DevOnBike.Overfit.Tests.Examples
                     var loss = ocr.ComputeCtcLoss(logits, label);
                     if (!float.IsFinite(loss))
                     {
+                        nonFiniteLosses++;
+
                         continue;
                     }
 
@@ -139,7 +156,29 @@ namespace DevOnBike.Overfit.Tests.Examples
                 }
             }
 
-            _out.WriteLine($"loss: {firstLoss:F4} -> tail-avg {tailSum / tailCount:F4}");
+            var tailLoss = tailSum / tailCount;
+            _out.WriteLine($"loss: {firstLoss:F4} -> tail-avg {tailLoss:F4}   "
+                           + $"non-finite losses {nonFiniteLosses}/{optSteps * accumWords}");
+
+            // TRAINING FIRST, RECOGNITION SECOND — the order is the point. Measured 2026-08-07, on the first
+            // run this test ever had, it failed with "LM-beam recognition 5/24 too low", which is the
+            // downstream symptom of a network that did not learn and says nothing about the cause. Whoever
+            // reads that has to reconstruct by hand whether training diverged, whether the CRNN is fine and
+            // the beam search is wrong, or whether the n-gram model is at fault. These two assertions answer
+            // the first question before the third one is asked.
+            Assert.True(nonFiniteLosses == 0,
+                $"{nonFiniteLosses} of {optSteps * accumWords} CTC losses were not finite, so those steps "
+                + "contributed no gradient. Training did not run as written; any recognition number below "
+                + "is meaningless.");
+
+            // 0.5x is NOT a measured threshold and should not be read as one — it is a collapse detector,
+            // chosen loose on purpose. The weight initialisation here is not seedable (MathUtils seeds from
+            // a GUID, LSTMCell draws from Random.Shared), so a run-to-run spread exists that nobody has
+            // quantified; a tight bound would turn this into a second flaky assertion instead of a
+            // diagnostic. Tighten it to a real number once the initialisation takes a seed.
+            Assert.True(tailLoss < firstLoss * 0.5f,
+                $"CTC loss barely moved: {firstLoss:F4} -> {tailLoss:F4} over {optSteps} steps. The network "
+                + "did not train, so the recognition assertions below would only be measuring noise.");
 
             // ── Greedy vs LM-rescored beam over the lexicon ──
             ocr.Eval();

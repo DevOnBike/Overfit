@@ -1,223 +1,103 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
-    <PropertyGroup>
-        <TargetFramework>net10.0</TargetFramework>
-        <ImplicitUsings>enable</ImplicitUsings>
-        <Nullable>enable</Nullable>
-        <DebugType>embedded</DebugType>
-        <NoWarn>$(NoWarn);1591</NoWarn>
-        <RootNamespace>DevOnBike.Overfit</RootNamespace>
-        <AssemblyName>DevOnBike.Overfit</AssemblyName>
-        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-        <SourceRevisionId>N/A</SourceRevisionId>
-        <InformationalVersion>$(Version)+$(SourceRevisionId)</InformationalVersion>
-        <PackageId>DevOnBike.Overfit</PackageId>
-        <Authors>DevOnBike</Authors>
-        <Copyright>Copyright (c) 2026 DevOnBike</Copyright>
-        <Description>Pure-C# in-process LLM and deep-learning runtime for .NET 10. Loads GGUF / HF safetensors / ONNX directly (Qwen, Llama, Mistral, Mixtral, MoE, BERT-family embeddings). Zero-allocation CPU inference, Native AOT-compatible, no Python, no native dependencies, no exposed server. Dual-licensed: AGPL-3.0-or-later for open source, commercial license available — see COMMERCIAL.md.</Description>
-        <PackageTags>llm;qwen;llama;mistral;gguf;onnx;embeddings;rag;agentic;tool-calling;machine-learning;deep-learning;native-aot;zero-allocation;simd;tensor;ai;csharp;in-process</PackageTags>
-        <RepositoryUrl>https://github.com/DevOnBike/Overfit</RepositoryUrl>
-        <RepositoryType>git</RepositoryType>
-        <!-- Dual-licensed: AGPL-3.0-or-later for OSS use, Commercial license available for closed-source / SaaS / regulated use.
+	<PropertyGroup>
+		<TargetFramework>net10.0</TargetFramework>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<Nullable>enable</Nullable>
+		<DebugType>embedded</DebugType>
+		<NoWarn>$(NoWarn);1591</NoWarn>
+		<RootNamespace>DevOnBike.Overfit</RootNamespace>
+		<AssemblyName>DevOnBike.Overfit</AssemblyName>
+		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+		<SourceRevisionId>N/A</SourceRevisionId>
+		<InformationalVersion>$(Version)+$(SourceRevisionId)</InformationalVersion>
+		<PackageId>DevOnBike.Overfit</PackageId>
+		<Authors>DevOnBike</Authors>
+		<Copyright>Copyright (c) 2026 DevOnBike</Copyright>
+		<Description>Pure-C# in-process LLM and deep-learning runtime for .NET 10. Loads GGUF / HF safetensors / ONNX directly (Qwen, Llama, Mistral, Mixtral, MoE, BERT-family embeddings). Zero-allocation CPU inference, Native AOT-compatible, no Python, no native dependencies, no exposed server. Dual-licensed: AGPL-3.0-or-later for open source, commercial license available — see COMMERCIAL.md.</Description>
+		<PackageTags>llm;qwen;llama;mistral;gguf;onnx;embeddings;rag;agentic;tool-calling;machine-learning;deep-learning;native-aot;zero-allocation;simd;tensor;ai;csharp;in-process</PackageTags>
+		<RepositoryUrl>https://github.com/DevOnBike/Overfit</RepositoryUrl>
+		<RepositoryType>git</RepositoryType>
+		<!-- Dual-licensed: AGPL-3.0-or-later for OSS use, Commercial license available for closed-source / SaaS / regulated use.
              PackageLicenseFile (not PackageLicenseExpression) is used because SPDX expressions cannot describe a custom dual-license
              arrangement; the full text — both AGPLv3 terms and the commercial alternative — lives in LICENSE.md. -->
-        <PackageLicenseFile>LICENSE.md</PackageLicenseFile>
-        <PackageReadmeFile>README.md</PackageReadmeFile>
-        <PackageIcon>logo.png</PackageIcon>
-        <GenerateDocumentationFile>true</GenerateDocumentationFile>
+		<PackageLicenseFile>LICENSE.md</PackageLicenseFile>
+		<PackageReadmeFile>README.md</PackageReadmeFile>
+		<PackageIcon>logo.png</PackageIcon>
+		<GenerateDocumentationFile>true</GenerateDocumentationFile>
 
-        <PublishRepositoryUrl>true</PublishRepositoryUrl>
-        <EmbedUntrackedSources>true</EmbedUntrackedSources>
-        <!-- Debug symbols are embedded in the dll (DebugType=embedded above), so do NOT emit a separate symbol
+		<PublishRepositoryUrl>true</PublishRepositoryUrl>
+		<EmbedUntrackedSources>true</EmbedUntrackedSources>
+		<!-- Debug symbols are embedded in the dll (DebugType=embedded above), so do NOT emit a separate symbol
              package — IncludeSymbols=true would produce a legacy *.symbols.nupkg with no pdb to carry. -->
 
-        <PublishAot>true</PublishAot>
-        <IsAotCompatible>true</IsAotCompatible>
-        <OptimizationPreference>Speed</OptimizationPreference>
-        <IsTrimmable>true</IsTrimmable>
-    </PropertyGroup>
+		<PublishAot>true</PublishAot>
+		<IsAotCompatible>true</IsAotCompatible>
+		<OptimizationPreference>Speed</OptimizationPreference>
+		<IsTrimmable>true</IsTrimmable>
+	</PropertyGroup>
 
-    <ItemGroup>
-        <None Include="logo.png" Pack="true" PackagePath="\" />
-        <None Include="README.md" Pack="true" PackagePath="\" />
-        <None Include="..\..\LICENSE.md" Pack="true" PackagePath="\" />
-        <None Include="..\..\COMMERCIAL.md" Pack="true" PackagePath="\" />
-        <InternalsVisibleTo Include="DevOnBike.Overfit.Tests" />
+	<ItemGroup>
+		<None Include="logo.png" Pack="true" PackagePath="\" />
+		<None Include="README.md" Pack="true" PackagePath="\" />
+		<None Include="..\..\LICENSE.md" Pack="true" PackagePath="\" />
+		<None Include="..\..\COMMERCIAL.md" Pack="true" PackagePath="\" />
+		<InternalsVisibleTo Include="DevOnBike.Overfit.Tests" />
 		<InternalsVisibleTo Include="Benchmarks" />
-    </ItemGroup>
+		<!--
+          The anomaly guard was split out of this project on 2026-08-05 and reaches back for exactly ONE
+          internal: MedianSelector, a statistical primitive it uses in the threshold rules. One type across a
+          120-file move is the measurement that says the seam was in the right place — if this list grows,
+          the thing being reached for probably belongs in Main's public surface or in the guard itself.
+        -->
+		<InternalsVisibleTo Include="DevOnBike.Overfit.Anomalies" />
+	</ItemGroup>
 
-    <ItemGroup>
-        <PackageReference Include="IDisposableAnalyzers">
-            <PrivateAssets>all</PrivateAssets>
-            <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-        </PackageReference>
-        <PackageReference Include="Microsoft.CodeAnalysis.BannedApiAnalyzers">
-            <PrivateAssets>all</PrivateAssets>
-            <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-        </PackageReference>
-        <PackageReference Include="System.Numerics.Tensors" />
-        <PackageReference Include="Microsoft.SourceLink.GitHub" PrivateAssets="all" />
-    </ItemGroup>
+	<ItemGroup>
+		<PackageReference Include="IDisposableAnalyzers">
+			<PrivateAssets>all</PrivateAssets>
+			<IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+		</PackageReference>
+		<PackageReference Include="Microsoft.CodeAnalysis.BannedApiAnalyzers">
+			<PrivateAssets>all</PrivateAssets>
+			<IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+		</PackageReference>
+		<PackageReference Include="System.Numerics.Tensors" />
+		<PackageReference Include="Microsoft.SourceLink.GitHub" PrivateAssets="all" />
+	</ItemGroup>
 
-    <ItemGroup>
-        <AdditionalFiles Include="BannedSymbols.txt" />
-        <Using Remove="System.Linq" />
-        <!-- Overfit's exception hierarchy is available everywhere in Main (it replaces the BCL domain
+	<ItemGroup>
+		<AdditionalFiles Include="BannedSymbols.txt" />
+		<!-- Every **/Schemas/*.json becomes a const on OverfitSchemas. The generator that does it is
+		     OverfitSchemasGenerator in Sources/Analyzers, wired to every project by Directory.Build.props;
+		     handing the files to it is all this project has to do. -->
+		<AdditionalFiles Include="**\Schemas\*.json" />
+		<Using Remove="System.Linq" />
+		<!-- Overfit's exception hierarchy is available everywhere in Main (it replaces the BCL domain
              exceptions at throw sites) without a per-file using. -->
-        <Using Include="DevOnBike.Overfit.Exceptions" />
-    </ItemGroup>
+		<Using Include="DevOnBike.Overfit.Exceptions" />
+	</ItemGroup>
 
-    <!--
-        Guard: jagged `float[][]` is banned in Sources/Main. BannedApiAnalyzers (RS0030) can only ban named
-        symbols, not array types, so this is enforced here as a build error. Use a flat `float[]` (Span-sliced
-        per row — one allocation, cache-friendly) or an Overfit buffer type (PooledBuffer<float>, TensorStorage<float>).
-        Lines that are comments (`//`, `///`, `*`) are ignored, as is anything after `//` on a code line.
+	<!--
+        THIS FILE NO LONGER CONTAINS CODE, and that is the point of the last three changes.
+
+        Until 2026-08-05 it carried three RoslynCodeTaskFactory tasks — roughly 120 lines of C# embedded in
+        XML, with no IDE, no debugger, no tests and no compiler checking any of it until a build failed.
+
+        BanJaggedFloatArrays  -> OVERFIT033, a Roslyn analyzer with 8 tests
+        BanMultipleTopLevelTypes -> OVERFIT034, a Roslyn analyzer with 7 tests
+        EmbedJsonSchemas      -> OverfitSchemasGenerator, an incremental source generator
+
+        Each move fixed a real defect that the embedded version hid. The two guards matched text with
+        regular expressions: one reported `float[][]` written inside a block comment, the other anchored on
+        four spaces of indentation and would have stopped applying to the first file-scoped namespace
+        anybody wrote. The generator escapes with Roslyn's literal formatter instead of doubling quotes into
+        a verbatim string, and checks that a schema file name can actually be a C# identifier — which the
+        task never did, so `tool-call.json` would have emitted `public const string tool-call`.
+
+        Writing the tests is what found the third defect: OVERFIT033 missed `float[][][]`, because the first
+        version compared one level down instead of walking to the innermost element. The rule had shipped,
+        the tree was clean, and nothing but a test would ever have said so.
     -->
-    <UsingTask TaskName="BanJaggedFloatArrays" TaskFactory="RoslynCodeTaskFactory"
-               AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.Core.dll">
-        <ParameterGroup>
-            <Files ParameterType="Microsoft.Build.Framework.ITaskItem[]" Required="true" />
-        </ParameterGroup>
-        <Task>
-            <Using Namespace="System.IO" />
-            <Using Namespace="System.Text.RegularExpressions" />
-            <Code Type="Fragment" Language="cs"><![CDATA[
-                var rx = new Regex(@"float\s*\[\s*\]\s*\[\s*\]");
-                foreach (var item in Files)
-                {
-                    var path = item.GetMetadata("FullPath");
-                    if (!File.Exists(path)) { continue; }
-                    var lines = File.ReadAllLines(path);
-                    for (var i = 0; i < lines.Length; i++)
-                    {
-                        var trimmed = lines[i].TrimStart();
-                        if (trimmed.StartsWith("//") || trimmed.StartsWith("*")) { continue; }
-                        var code = lines[i];
-                        var slash = code.IndexOf("//");
-                        if (slash >= 0) { code = code.Substring(0, slash); }
-                        if (rx.IsMatch(code))
-                        {
-                            Log.LogError("OVERFIT-JAGGED: float[][] (jagged array) is banned in Sources/Main — use a flat float[] (Span-sliced per row) or an Overfit buffer type. {0}({1})", path, i + 1);
-                        }
-                    }
-                }
-            ]]></Code>
-        </Task>
-    </UsingTask>
-
-    <Target Name="BanJaggedFloatArraysGuard" BeforeTargets="CoreCompile">
-        <BanJaggedFloatArrays Files="@(Compile)" />
-    </Target>
-
-    <!--
-        Guard: one top-level type per file. Each .cs file may declare at most one namespace-level type
-        (class / struct / interface / enum / record); nested types are fine, and partial declarations of the
-        SAME type across files are fine (collapsed by name). Keeps the file = type mapping 1:1. Assumes
-        block-scoped namespaces (top-level types indented exactly 4 spaces, as enforced by .editorconfig).
-    -->
-    <UsingTask TaskName="BanMultipleTopLevelTypes" TaskFactory="RoslynCodeTaskFactory"
-               AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.Core.dll">
-        <ParameterGroup>
-            <Files ParameterType="Microsoft.Build.Framework.ITaskItem[]" Required="true" />
-        </ParameterGroup>
-        <Task>
-            <Using Namespace="System.Collections.Generic" />
-            <Using Namespace="System.IO" />
-            <Using Namespace="System.Text.RegularExpressions" />
-            <Code Type="Fragment" Language="cs"><![CDATA[
-                var rx = new Regex(@"^    [A-Za-z][A-Za-z0-9<>, ]*\b(?:class|struct|interface|enum|record)\b(?:\s+(?:struct|class))?\s+([A-Za-z_][A-Za-z0-9_]*)");
-                foreach (var item in Files)
-                {
-                    var path = item.GetMetadata("FullPath");
-                    if (!File.Exists(path)) { continue; }
-                    var names = new HashSet<string>();
-                    foreach (var line in File.ReadAllLines(path))
-                    {
-                        var trimmed = line.TrimStart();
-                        if (trimmed.StartsWith("//") || trimmed.StartsWith("*")) { continue; }
-                        var m = rx.Match(line);
-                        if (m.Success) { names.Add(m.Groups[1].Value); }
-                    }
-                    if (names.Count > 1)
-                    {
-                        Log.LogError("OVERFIT-ONETYPE: {0} declares {1} top-level types ({2}) — keep one type per file (nested types and same-name partials are fine).", path, names.Count, string.Join(", ", names));
-                    }
-                }
-            ]]></Code>
-        </Task>
-    </UsingTask>
-
-    <Target Name="BanMultipleTopLevelTypesGuard" BeforeTargets="CoreCompile">
-        <BanMultipleTopLevelTypes Files="@(Compile)" />
-    </Target>
-    <!-- Codegen: every **/Schemas/*.json becomes a const on OverfitSchemas (see JudgeSchema's doc comment for
-         why this is codegen and not an <EmbeddedResource>). -->
-    <UsingTask TaskName="EmbedJsonSchemas" TaskFactory="RoslynCodeTaskFactory"
-               AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.Core.dll">
-        <ParameterGroup>
-            <Schemas ParameterType="Microsoft.Build.Framework.ITaskItem[]" Required="true" />
-            <OutputFile ParameterType="System.String" Required="true" />
-        </ParameterGroup>
-        <Task>
-            <Using Namespace="System.Collections.Generic" />
-            <Using Namespace="System.IO" />
-            <Using Namespace="System.Text" />
-            <Code Type="Fragment" Language="cs"><![CDATA[
-                var sb = new StringBuilder();
-                sb.AppendLine("// <auto-generated/>");
-                sb.AppendLine("// Generated from Schemas/*.json by the EmbedJsonSchemas task in Main.csproj. Do not edit.");
-                sb.AppendLine("namespace DevOnBike.Overfit.Schemas");
-                sb.AppendLine("{");
-                sb.AppendLine("    internal static class OverfitSchemas");
-                sb.AppendLine("    {");
-
-                // Every Schemas/*.json across the tree collapses into this ONE class, so the file name is the
-                // const name and must be globally unique. Without this check a collision surfaces as a baffling
-                // "duplicate member" error in generated code the author never wrote.
-                var seen = new Dictionary<string, string>();
-                foreach (var item in Schemas)
-                {
-                    var path = item.GetMetadata("FullPath");
-                    if (!File.Exists(path)) { continue; }
-                    var name = Path.GetFileNameWithoutExtension(path);
-
-                    string previous;
-                    if (seen.TryGetValue(name, out previous))
-                    {
-                        Log.LogError("OVERFIT-SCHEMA-DUP: two schema files map to the same const 'OverfitSchemas.{0}'. Schema file names must be unique across ALL Schemas/ folders. Conflict: {1} vs {2}", name, previous, path);
-                        continue;
-                    }
-                    seen.Add(name, path);
-
-                    var json = File.ReadAllText(path);
-                    sb.AppendLine("        public const string " + name + " = @\"" + json.Replace("\"", "\"\"") + "\";");
-                }
-                sb.AppendLine("    }");
-                sb.AppendLine("}");
-
-                var dir = Path.GetDirectoryName(OutputFile);
-                if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir)) { Directory.CreateDirectory(dir); }
-                File.WriteAllText(OutputFile, sb.ToString());
-            ]]></Code>
-        </Task>
-    </UsingTask>
-
-    <ItemGroup>
-        <OverfitJsonSchema Include="**\Schemas\*.json" />
-    </ItemGroup>
-
-    <!-- Keep $(IntermediateOutputPath) in target attributes only: the SDK targets that define it import after
-         this body, so a PropertyGroup here would silently resolve to an empty path. -->
-    <Target Name="GenerateOverfitSchemas" BeforeTargets="CoreCompile"
-            Inputs="@(OverfitJsonSchema)" Outputs="$(IntermediateOutputPath)OverfitSchemas.g.cs">
-        <EmbedJsonSchemas Schemas="@(OverfitJsonSchema)"
-                          OutputFile="$(IntermediateOutputPath)OverfitSchemas.g.cs" />
-    </Target>
-
-    <Target Name="IncludeOverfitSchemas" BeforeTargets="CoreCompile" DependsOnTargets="GenerateOverfitSchemas">
-        <ItemGroup>
-            <Compile Include="$(IntermediateOutputPath)OverfitSchemas.g.cs" />
-        </ItemGroup>
-    </Target>
 
 </Project>

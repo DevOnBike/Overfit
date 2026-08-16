@@ -20,7 +20,7 @@ namespace DevOnBike.Overfit.Tests.Redaction
     public sealed class RedactionGatewayResponseScanTests
     {
         [Fact]
-        public void ScanResponses_MasksModelLeak_ButRestoresCallerValue()
+        public async Task ScanResponses_MasksModelLeak_ButRestoresCallerValue()
         {
             var upstreamPort = FreePort();
             using var upstream = new HttpListener();
@@ -85,6 +85,7 @@ namespace DevOnBike.Overfit.Tests.Redaction
                         Redactor.CreateDefault(),
                         new NullAuditSink(),
                         RedactionPolicy.Default(),
+                        CancellationToken.None,
                         clientKeys: null,
                         scanResponses: true);
                 }
@@ -101,7 +102,7 @@ namespace DevOnBike.Overfit.Tests.Redaction
             var baseUrl = $"http://127.0.0.1:{gatewayPort}";
             try
             {
-                WaitForHealth($"{baseUrl}/health");
+                await WaitForHealth($"{baseUrl}/health");
                 using var client = new HttpClient();
 
                 const string request =
@@ -111,7 +112,7 @@ namespace DevOnBike.Overfit.Tests.Redaction
                     Content = new StringContent(request, Encoding.UTF8, "application/json")
                 };
                 using var resp = client.Send(msg);
-                var clientGot = resp.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+                var clientGot = await resp.Content.ReadAsStringAsync();
 
                 Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
 
@@ -130,7 +131,7 @@ namespace DevOnBike.Overfit.Tests.Redaction
 
         private sealed class NullAuditSink : IRedactionAuditSink
         {
-            public void Record(RedactionAuditRecord record)
+            public void Record(in RedactionAuditEntry entry)
             {
             }
         }
@@ -144,7 +145,15 @@ namespace DevOnBike.Overfit.Tests.Redaction
             return port;
         }
 
-        private static void WaitForHealth(string url)
+        /// <summary>
+        /// Polls until the gateway answers, or gives up after fifteen seconds.
+        ///
+        /// <para>Asynchronous since 2026-08-11 (<c>XC-18</c>): it used to block on the probe with
+        /// <c>GetAwaiter().GetResult()</c>, which xunit v3's <c>xUnit1031</c> flags as a deadlock risk. The
+        /// <c>Task.Delay</c> between attempts is deliberate and is NOT the sleep-as-synchronisation smell —
+        /// the loop is polling an external process's startup, which has no event to wait on.</para>
+        /// </summary>
+        private static async Task WaitForHealth(string url)
         {
             using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(1) };
             var deadline = Environment.TickCount64 + 15_000;
@@ -152,7 +161,7 @@ namespace DevOnBike.Overfit.Tests.Redaction
             {
                 try
                 {
-                    if (client.GetAsync(url).GetAwaiter().GetResult().IsSuccessStatusCode)
+                    if ((await client.GetAsync(url)).IsSuccessStatusCode)
                     {
                         return;
                     }
@@ -161,7 +170,7 @@ namespace DevOnBike.Overfit.Tests.Redaction
                 {
                     // not up yet
                 }
-                Thread.Sleep(100);
+                await Task.Delay(100);
             }
             throw new TimeoutException($"gateway did not become healthy at {url}");
         }

@@ -248,7 +248,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         public ReadOnlySpan<float> PostFfwNorm => _postFfwNorm.AsReadOnlySpan();
 
         /// <summary>KV heads for GQA. Null for standard MHA (GPT-1, GPT-2).</summary>
-        public bool HasGqa => _kvHeads is not null;
+        public bool HasGqa => _kvHeads != null;
         public int KvHeadCount => _kvHeads?.Length ?? _heads.Length;
         public ref readonly KvHeadWeights KvHead(int kvH) => ref _kvHeads![kvH];
 
@@ -271,7 +271,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
         // ── Mixture of Experts (qwen2moe) ─────────────────────────────────────
         /// <summary>True when this block's FFN is a Mixture-of-Experts.</summary>
-        public bool IsMoe => _moeRouter is not null;
+        public bool IsMoe => _moeRouter != null;
         public ReadOnlySpan<float> MoeRouter => _moeRouter;
         public DecodeWeight[] MoeGate => _moeGate!;
         public DecodeWeight[] MoeUp => _moeUp!;
@@ -283,7 +283,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
         private static TensorStorage<float> CreateStorage(float[]? source)
         {
-            if (source is null || source.Length == 0)
+            if (source == null || source.Length == 0)
             {
                 return new TensorStorage<float>(0);
             }

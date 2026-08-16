@@ -1,0 +1,94 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<!--
+      The Kubernetes anomaly guard, as its own assembly.
+
+      Split out of Sources/Main on 2026-08-05. Two products lived in one project: a zero-allocation CPU
+      inference engine and a cluster anomaly detector, sharing a package, a set of analyzers and a release
+      cadence while having nothing to do with each other.
+
+      IT KEEPS EVERY RULE Main ENFORCES, deliberately: the banned-API list, no jagged float[][] (OVERFIT033),
+      one top-level type per file (OVERFIT034), `System.Linq` removed from implicit usings. The guard runs
+      once every five minutes and none of those rules is about its hot path — they are about the codebase
+      reading one way, and a project that quietly relaxes them becomes the place where exceptions accumulate.
+
+      Those last two used to be RoslynCodeTaskFactory tasks pasted into the csproj. Duplicating forty lines
+      of embedded C# into a second project is what finally moved them into real analyzers; the severities are
+      in .editorconfig, scoped to exactly the directories the MSBuild guards used to cover.
+
+      IT IS NATIVE-AOT CLEAN. `overfit anomaly-guard` is published without AOT today (see guard.Dockerfile),
+      but that is a deployment choice and not a licence to write code that could never be published that way.
+      The one place that cannot be AOT — binding an IConfiguration section by reflection — is a single method
+      and stays that way.
+
+      It carries its own ASP.NET hosting: the BackgroundService loop, the DI registration and the ILogger
+      sink. That is the whole deployable, and keeping it beside the detectors means the thing shipped and the
+      thing tested are one project.
+    -->
+
+	<PropertyGroup>
+		<TargetFramework>net10.0</TargetFramework>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<Nullable>enable</Nullable>
+		<DebugType>embedded</DebugType>
+		<NoWarn>$(NoWarn);1591</NoWarn>
+		<RootNamespace>DevOnBike.Overfit.Anomalies</RootNamespace>
+		<AssemblyName>DevOnBike.Overfit.Anomalies</AssemblyName>
+		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+		<GenerateDocumentationFile>true</GenerateDocumentationFile>
+
+		<!--
+		  NOT packable, decided 2026-08-05. The guard ships as a container image built from the CLI, so a
+		  NuGet package would be metadata with no consumer — and a published package is a promise about a
+		  public surface nobody has designed yet. Reverse this the day somebody wants to reference the guard
+		  from their own host; until then `dotnet pack` on the solution should not produce it.
+		-->
+		<IsPackable>false</IsPackable>
+		<IsAotCompatible>true</IsAotCompatible>
+		<IsTrimmable>true</IsTrimmable>
+		<OptimizationPreference>Speed</OptimizationPreference>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<InternalsVisibleTo Include="DevOnBike.Overfit.Tests" />
+		<InternalsVisibleTo Include="Benchmarks" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<ProjectReference Include="..\Main\Main.csproj" />
+		<!--
+          The hosting half: BackgroundService, DI, ILogger. FrameworkReference rather than PackageReference,
+          which is what keeps this trim/AOT-clean — the shared framework is already on the machine and the
+          package form would drag a second copy into the trimmer's graph.
+        -->
+		<FrameworkReference Include="Microsoft.AspNetCore.App" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<PackageReference Include="IDisposableAnalyzers">
+			<PrivateAssets>all</PrivateAssets>
+			<IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+		</PackageReference>
+		<PackageReference Include="Microsoft.CodeAnalysis.BannedApiAnalyzers">
+			<PrivateAssets>all</PrivateAssets>
+			<IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+		</PackageReference>
+	</ItemGroup>
+
+	<ItemGroup>
+		<AdditionalFiles Include="BannedSymbols.txt" />
+		<!--
+          A GLOBAL AnalyzerConfig, which is a different thing from .editorconfig and is here for one
+          reason: .editorconfig severities are matched per syntax tree against the csc command line, so
+          they never reach a SOURCE-GENERATED tree. The configuration-binder generator runs only under
+          PublishAot/PublishTrimmed and emits LINQ, so RS0030 fell through to its default Warning and the
+          aot-guard's TreatWarningsAsErrors turned it into an error. The file itself carries the
+          measurement and the reason a NoWarn/WarningsNotAsErrors fix is forbidden.
+          Named so it is NOT auto-discovered as `.globalconfig`; it must be included explicitly.
+        -->
+		<EditorConfigFiles Include="SourceGenerated.globalconfig" />
+		<Using Remove="System.Linq" />
+		<Using Include="DevOnBike.Overfit.Exceptions" />
+	</ItemGroup>
+
+</Project>

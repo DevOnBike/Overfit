@@ -6,7 +6,6 @@
 using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Runtime;
 using DevOnBike.Overfit.LanguageModels.Tokenizers;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
 {
@@ -23,14 +22,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
 
         public Bielik15BDiagTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [ModelFact(Path, "3s")]
         public void RawCompletion_PolishPrefix()
         {
-            if (!File.Exists(Path))
-            {
-                _out.WriteLine("missing gguf");
-                return;
-            }
 
             using var engine = CachedLlamaInferenceEngine.LoadGguf(Path);
             var tok = GgufTokenizer.Load(Path);

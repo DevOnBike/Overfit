@@ -21,6 +21,15 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
     /// <see cref="ChatTemplate.Detect"/>'s default. Parsed with the reflection-free
     /// <see cref="Utf8JsonReader"/> to stay Native-AOT clean.
     /// </summary>
+    // OVERFIT040 for this type. THE CONSTRAINT: `FromDirectory` reads one `tokenizer_config.json` once, at
+    // model-construction time, on the caller's own thread, to fingerprint a chat template — the safetensors
+    // counterpart of reading the same string out of GGUF metadata, which is likewise synchronous. No pool
+    // thread is behind it and nothing is queued on it. Its `Parse` takes a `ReadOnlySpan<byte>`, which cannot
+    // cross an `await`.
+    //
+    // WHAT IS GIVEN UP: `FromDirectory` is public API of the shipped `DevOnBike.Overfit` package; a
+    // task-returning form is a breaking change for every caller that resolves a chat template.
+#pragma warning disable OVERFIT040
     public static class HuggingFaceChatTemplate
     {
         /// <summary>Reads <c>tokenizer_config.json</c> from a model directory.</summary>
@@ -134,4 +143,5 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             return defaultTemplate ?? first;
         }
     }
+#pragma warning restore OVERFIT040
 }

@@ -1,6 +1,8 @@
 ---
 name: overfit-spec
-description: Spec-driven development for the Overfit engine. Use when starting a new feature, model/op/kernel/loader/runtime change, or any change touching multiple files — writes an Overfit-native spec (architecture path, AOT / zero-alloc / parity gates, git-read-only boundary) and a gated plan BEFORE coding. Prefer this over the generic spec-driven-development skill inside this repo.
+description: Spec-driven development for the Overfit engine. Use when starting a new feature, model/op/kernel/loader/runtime change, or any change touching multiple files — writes an Overfit-native spec (architecture path, AOT / zero-alloc / parity gates, git-read-only boundary) and a gated plan BEFORE coding. Prefer this over the generic overfit-spec-driven-development skill inside this repo.
+model: opus
+color: blue
 ---
 
 # Overfit Spec-Driven Development
@@ -13,7 +15,7 @@ expensive mistakes are architectural (mixing the inference and training paths), 
 `float[][]`), and epistemic (shipping a perf "win" that was never measured). The spec exists to
 catch those *before* the diff, and to end every change at a **clean/staged tree** — never a commit.
 
-This is the repo-specific counterpart to the generic `spec-driven-development` skill. When they
+This is the repo-specific counterpart to the generic `overfit-spec-driven-development` skill. When they
 disagree, **this one wins inside Overfit** (the generic one has web examples, dangling skill
 references, and "commit the spec / test before commit" advice that violates Overfit's git boundary).
 
@@ -26,6 +28,48 @@ references, and "commit the spec / test before commit" advice that violates Over
 
 **When NOT to use:** a one-line fix, a doc typo, a rename, or a self-contained change with obvious
 acceptance. A two-line spec (objective + acceptance) is still fine for small things.
+
+
+## When Not to Use
+
+- A change confined to one file with no public surface — write it and let the reviewer catch what matters
+- Work already covered by a signed plan in `docs/specs/`. Two specs for one change is worse than none
+- A pure measurement question. State the mechanism and the unit instead (`overfit-anomalies-lab-window`)
+- Generic project scaffolding — that is `overfit-spec-driven-development`, and inside this repository this
+  skill supersedes it
+
+## Inputs
+
+| Input | Required | Description |
+|---|---|---|
+| Feature or change | Yes | What is being built, in the requester's words |
+| Execution path | Yes | Inference or training. The single most important line in the spec |
+| Verification oracle | Yes | Named **before** coding: parity target, FD gradient check, known-good output |
+| AOT reach | Yes | Whether the change is reachable from `Tests/AotSmokeTest` |
+| Allocation policy | Yes | Per-call, load-time or training. Decides which analyzer rules are errors |
+
+## Who owns what — read this before using the workflow below
+
+**This skill is the shared FORMAT and CHECKLIST for a plan. It does not drive the change.** The phases below
+describe the shape of the work; each one is owned by an agent, and the transitions between them are owned by
+`/overfit-delivery`:
+
+| phase | owner |
+|---|---|
+| SPECIFY | `overfit-analyst` — problem, goal, users, success metric, scope, acceptance criteria |
+| DESIGN | `overfit-architect` — boundaries, execution path, allocation policy, AOT reach, quality parameters |
+| TASKS / IMPLEMENT | `overfit-developer` — one task at a time, correctness pass then a separate measured pass |
+| VERIFY | `overfit-verifier` then `overfit-reviewer` — does the evidence prove it, and does the diff match the plan |
+| STAGE | the user. Never an agent. |
+
+**Use this skill for its section templates, its gate questions and its Overfit-specific checks** — the
+execution path, the verification oracle, the AOT reach, the allocation policy. Do not use it as a second
+process that advances phases on its own: if this skill and the agent chain both think they are driving,
+neither gate means anything.
+
+There is also a generic `overfit-spec-driven-development` skill in this repository whose scope overlaps this one.
+**Inside Overfit, this file wins** — the generic one carries web examples and advice that violates the git
+boundary here.
 
 ## The gated workflow
 
@@ -48,8 +92,13 @@ ASSUMPTIONS:
 
 ### Phase 1 — SPECIFY
 
-Write the spec to a file (e.g. `docs/<feature>-spec.md`). Reframe vague asks as **testable success
-criteria**: not "make decode faster" but "Qwen-3B Q4_K decode ≥ X tok/s best-of-5 on the dev box,
+Write the spec into **`docs/specs/<slug>-plan.md`** — the same single file `overfit-analyst` and
+`overfit-architect` use, never a second document beside it. There is exactly one plan per change; a spec and
+a plan that disagree are worse than either alone, and nothing reconciles them once they have separate authors.
+If a plan already exists for this change, **add to it** rather than starting one. See `docs/specs/README.md`
+for who owns which sections.
+
+Reframe vague asks as **testable success criteria**: not "make decode faster" but "Qwen-3B Q4_K decode ≥ X tok/s best-of-5 on the dev box,
 bit-identical output (or cosine ≥ 0.9999 if reassociated), suite still green."
 
 Spec template (keep it short):
@@ -170,10 +219,21 @@ baseline for any perf task. Re-run the task's verify before moving on.
 - "It builds green" used as proof — a green build says nothing about parity, allocations, or the AOT guard.
 - Reaching for a commit as the next step (that's the human's action, always).
 
-## Verification checklist
+## Validation
 
 - [ ] Spec saved to a file; execution path + verification oracle + AOT reach stated.
 - [ ] Boundaries block pasted and any project-specific Ask-first items called out.
 - [ ] Human reviewed and approved the spec and the plan.
 - [ ] Success criteria are specific and testable (parity threshold; perf = measured best-of-N both sides).
 - [ ] Ends at a clean/staged tree with the exact commit commands handed to the human.
+
+## Common Pitfalls
+
+| Pitfall | Solution |
+|---|---|
+| Naming the oracle after the code is written | Then it is fitted to what the code does. Name it in the spec, before |
+| Leaving the execution path implicit | Inference and training have different allocation policies; mixing them is the most common architectural mistake here |
+| Writing a second spec for a change already planned | One plan file per change. `docs/specs/` is the registry |
+| Assuming AOT reach | Check whether `Tests/AotSmokeTest` reaches it. Each new touched type widens verification and can surface latent trim warnings |
+| A success criterion only the author can check | Write it so somebody else can decide whether it holds |
+| Listing a git or GitHub step as a next action | Claude is read-only there. Name the exact command for the user instead |

@@ -30,7 +30,7 @@ namespace DevOnBike.Overfit.Evolutionary.Runtime
             _algorithm = algorithm ?? throw new ArgumentNullException(nameof(algorithm));
             _evaluator = evaluator ?? throw new ArgumentNullException(nameof(evaluator));
 
-            if (workspace is null)
+            if (workspace == null)
             {
                 _workspace = new EvolutionWorkspace(
                     _algorithm.PopulationSize,
@@ -125,7 +125,7 @@ namespace DevOnBike.Overfit.Evolutionary.Runtime
                 _algorithm.PopulationSize,
                 _algorithm.ParameterCount);
 
-            if (activity is not null)
+            if (activity != null)
             {
                 activity.SetTag("generation", metrics.Generation);
                 activity.SetTag("population_size", _algorithm.PopulationSize);
@@ -142,8 +142,8 @@ namespace DevOnBike.Overfit.Evolutionary.Runtime
 
         public void Run(
             int generations,
-            Action<EvolutionGenerationMetrics>? onGenerationCompleted = null,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken,
+            Action<EvolutionGenerationMetrics>? onGenerationCompleted = null)
         {
             ThrowIfDisposed();
 
@@ -162,8 +162,8 @@ namespace DevOnBike.Overfit.Evolutionary.Runtime
             int generations,
             int checkpointEvery,
             Func<int, string?> checkpointPathFactory,
-            Action<EvolutionGenerationMetrics>? onGenerationCompleted = null,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken,
+            Action<EvolutionGenerationMetrics>? onGenerationCompleted = null)
         {
             ThrowIfDisposed();
 

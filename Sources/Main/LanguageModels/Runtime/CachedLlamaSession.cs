@@ -20,8 +20,27 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
     ///   - Token embedding lookup is a direct row-read from embed_weights.
     ///   - RoPE table is passed into stack.Decode per step.
     ///   - GQA cache uses kvHeadCount &lt; nHeads slots.
+    ///   - The transformer scratch (<see cref="CachedGptStack"/>) belongs to the ENGINE and is shared by
+    ///     every session it creates; a GPT-1/2 session builds its own. See the thread-safety note below.
     ///
-    /// Thread-safety: one session per thread.
+    /// <para><b>Thread-safety — NOT one session per thread.</b> A session is a cheap view over the scratch
+    /// owned by the <see cref="CachedLlamaInferenceEngine"/> that created it: only the
+    /// <see cref="KeyValueCache"/> is per session. <b>Two sessions of the same engine must not decode
+    /// concurrently.</b> Doing so corrupted both forward passes silently in every version before 10.1.0,
+    /// because the per-session KV caches make the sharing invisible; the shared scratch now refuses the
+    /// second caller with an <see cref="OverfitRuntimeException"/> naming the cause instead.</para>
+    ///
+    /// <para>Supported: sequential use, and interleaving sessions of one engine on a single thread. A decode
+    /// step is atomic with respect to the shared scratch and carries nothing between steps, so two sessions
+    /// taking turns produce exactly the results each would produce alone.</para>
+    ///
+    /// <para>For concurrent streams, create <b>one engine per stream</b> (what <c>overfit serve</c> does), or
+    /// serialise the decodes yourself around a shared engine (what the ASP.NET host does with a
+    /// <c>SemaphoreSlim(1, 1)</c>).</para>
+    ///
+    /// <para><see cref="LastHiddenState"/> — and the engine's interpretability readers — reflect the most
+    /// recent decode through the engine, <b>by whichever session made it</b>. On an engine with more than one
+    /// session they do not answer a question about "this session".</para>
     /// </summary>
     public sealed class CachedLlamaSession : ISlmSession
     {
@@ -133,7 +152,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         public bool SlidingWindowEnabled => _slidingWindow;
 
         /// <summary>This RoPE-capable session supports sliding-window eviction (<see cref="ISlmSession"/>).</summary>
-        public bool SupportsSlidingWindow => _rope is not null;
+        public bool SupportsSlidingWindow => _rope != null;
 
         /// <summary>
         /// Enables sliding-window KV eviction (RoPE models only): once the cache fills,
@@ -146,7 +165,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         public void EnableSlidingWindow(int evictBlock = 0)
         {
             ThrowIfDisposed();
-            if (_rope is null)
+            if (_rope == null)
             {
                 throw new OverfitRuntimeException(
                     "Sliding-window eviction requires a RoPE model; learned absolute-position models cannot slide without re-embedding.");
@@ -380,7 +399,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             // Prefill below re-establishes it; dropping it first means no window where it could be believed.
             _promptLogitsPosition = -1;
             _cache.TruncateTo(reusable);
-            Prefill(promptTokens[reusable..]);
+            Prefill(promptTokens.Slice(reusable));
             return reusable;
         }
 
@@ -474,7 +493,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             // Hand the token over before the pass that prepares the NEXT logits, so a streaming caller can
             // put it on the wire a full weight-pass earlier — and can tell us the answer is finished, in
             // which case that pass is pure waste and is skipped.
-            if (onSampled is not null && onSampled(token))
+            if (onSampled != null && onSampled(token))
             {
                 DecodeProfiler.EndToken();
                 return token;
@@ -559,7 +578,14 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         // ── Adaptive speculative gating state (see GenerateSpeculative) ──
         private const double SpecGateThreshold = 3.0;  // committed-per-verify break-even ≈ 3.5; gate below it
         private const double SpecEmaAlpha = 0.5;       // EMA responsiveness — fast so it gates after a few rejects
-        private const int SpecProbeInterval = 64;      // while gated, draft once every N steps to re-detect echo
+        private const int SpecProbeInterval = 64;
+
+        /// <summary>
+        /// Hard ceiling on the speculative-decode draft length. It exists to bound a <c>stackalloc</c>: without
+        /// it a caller-supplied draft length reaches the stack unchecked, which turns a tuning knob into a
+        /// StackOverflowException. 64 ints is 256 B, and no useful draft is anywhere near that long.
+        /// </summary>
+        private const int MaxSpeculativeDraft = 64;      // while gated, draft once every N steps to re-detect echo
         private double _specAcceptEma;                 // start pessimistic (0 → gated): single-token until a probe
                                                        // proves drafting pays. Novel text (chat) stays ≈ 1× — one
                                                        // probe per SpecProbeInterval; repetitive text ramps up fast.
@@ -585,11 +611,25 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// them in ONE batched forward. Each draft is accepted by speculative rejection sampling — accept
         /// with probability <c>p(draft)</c> under the sampler's target distribution, else resample from the
         /// renormalised residual <c>norm(max(0, p − e_draft))</c> — so the committed tokens are
-        /// <b>distributed exactly as sampling from the target model directly</b> (greedy is the T→0 case,
-        /// then it is bit-identical to single-token greedy). Commits the accepted prefix plus the
+        /// distributed exactly as sampling from <b>the distribution the verify forward computes</b>.
+        ///
+        /// <para><b>That distribution is not bit-identical to the single-token path's, and this doc used
+        /// to claim it was.</b> The rejection sampling is exact; what differs is its input. The verify runs
+        /// <c>PrefillBatchedQuantAllRows</c> + <c>ProjectLogitsBatched</c>, whose summation order differs
+        /// from single-token decode, and floating-point addition is not associative. Measured 2026-08-07 on
+        /// Qwen2.5-3B Q4_K_M over an identical context: <c>max|Δlogit|</c> of <b>0.47–1.02</b>, against a
+        /// top-2 gap that is routinely smaller (0.43 after one token). So under greedy the sequences agree
+        /// until the first near-tie and then diverge for good — measured on two models and two drafters,
+        /// eight divergences, seven landing on the runner-up and one on rank 3, deficits 0.046–0.569.
+        /// `Tests/TestSupport/SpeculativeDivergence.cs` is the assertion that survives this; T11 in
+        /// `docs/test-gate-backlog.md` carries the numbers and the open product decision.</para>
+        ///
+        /// Commits the accepted prefix plus the
         /// correction/bonus token (forwarded so the cache + <c>_logits</c> stay consistent) into
         /// <paramref name="committed"/>; returns the count (≥1, ≤ maxDraft+2). The win is throughput on
-        /// repetitive / structured output (the agentic moat); ~1× on novel text. Requires the batched path
+        /// repetitive / structured output (the agentic moat); ~1× on novel text — <b>unmeasured for THIS
+        /// (prompt-lookup) path</b>; the draft-MODEL variant measured 0.64–0.89× on CPU, which is a
+        /// different regime and not evidence about this one. Requires the batched path
         /// (RoPE/SwiGLU, non-sliding) — otherwise a plain single-token step.
         /// </summary>
         public int GenerateSpeculative(
@@ -663,7 +703,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
             // Early emit: t0 comes from logits we already hold, so it can reach the client before the verify
             // forward. If the caller says the answer ends here, the entire verify is wasted work — skip it.
-            if (onSampled is not null && onSampled(t0))
+            if (onSampled != null && onSampled(t0))
             {
                 committed[0] = t0;
                 return 1;
@@ -700,8 +740,20 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             }
 
             var dn = 0;
+
+            // maxDraft reached the stack unvalidated: a caller passing a large value would have turned a
+            // speculative-decode knob into a stack overflow. Bounded explicitly, which also makes the
+            // allocation below provably small (64 ints = 256 B, inside the OVERFIT025 budget).
+            if (maxDraft is < 1 or > MaxSpeculativeDraft)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(maxDraft), maxDraft, $"maxDraft must be in [1, {MaxSpeculativeDraft}].");
+            }
+
+#pragma warning disable OVERFIT026 // BOUND: maxDraft is validated to [1, MaxSpeculativeDraft] directly above.
             Span<int> draft = stackalloc int[maxDraft];
-            if (drafter is not null)
+#pragma warning restore OVERFIT026
+            if (drafter != null)
             {
                 // Draft-MODEL path: always propose (a model predicts, so the echo-detection gate doesn't
                 // apply); the drafter keeps its own KV in lockstep via Sync at the commit points below.
@@ -710,13 +762,13 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     dn = drafter.Draft(t0, draft);
                 }
             }
-            if (drafter is null && canSpeculate && (!gated || probe))
+            if (drafter == null && canSpeculate && (!gated || probe))
             {
 #pragma warning disable OVERFIT001 // exact-length contract: PromptLookupDrafter.Draft reads anchor.Length; tiny per-step array
                 var anchor = new int[history.Length + 1];
 #pragma warning restore OVERFIT001
                 history.CopyTo(anchor);
-                anchor[^1] = t0;
+                anchor[anchor.Length - 1] = t0;
                 dn = PromptLookupDrafter.Draft(anchor, draft, ngramMin, ngramMax);
             }
 
@@ -871,15 +923,15 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// var opts = StreamingOptions.WithStopTokens(
         ///     maxTokens: 256, QwenTokenizer.ImEnd, QwenTokenizer.EndOfText);
         ///
-        /// await foreach (var token in session.StreamGenerate(opts, ct))
+        /// await foreach (var token in session.StreamGenerateAsync(opts, ct))
         /// {
         ///     Console.Write(tokenizer.DecodeToken(token));
         /// }
         /// </code>
         /// </example>
-        public async IAsyncEnumerable<int> StreamGenerate(
+        public async IAsyncEnumerable<int> StreamGenerateAsync(
             StreamingOptions options,
-            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+            [EnumeratorCancellation] CancellationToken cancellationToken)
         {
             ThrowIfDisposed();
 
@@ -941,6 +993,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// Hidden state AFTER all transformer layers, BEFORE final RMSNorm.
         /// Matches Python: x before rms_norm(x, fg2, eps).
         /// Previously incorrectly returned _hidden (token embedding input).
+        ///
+        /// <para>This reads the ENGINE's shared scratch, so it reflects the most recent decode through the
+        /// engine by <b>any</b> of its sessions — not necessarily this one. It answers "this session" only
+        /// while the engine has a single session, or immediately after this session decoded.</para>
         /// </summary>
         public ReadOnlySpan<float> LastHiddenState => _stack.LastFinalHidden;
 
@@ -977,7 +1033,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             }
 
             Reset();
-            var dst = destination[..d];
+            var dst = destination.Slice(0, d);
             dst.Clear();
 
             for (var i = 0; i < tokens.Length; i++)
@@ -991,9 +1047,20 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                         dst[j] += h[j];
                     }
                 }
-                if (pooling != EmbeddingPooling.Mean && i == tokens.Length - 1)
+                // Cls is the FIRST token, LastToken the last. The branch used to be
+                // `pooling != Mean && i == tokens.Length - 1`, which quietly handed Cls the last-token
+                // vector: the right dimension, correctly normalised, nothing thrown — just worse
+                // similarities that nobody could account for. BertEncoder implements the same enum
+                // correctly, so this was one path breaking a live contract rather than an unimplemented
+                // option, and it is public API.
+                if (pooling == EmbeddingPooling.Cls && i == 0)
                 {
-                    h[..d].CopyTo(dst);
+                    h.Slice(0, d).CopyTo(dst);
+                }
+
+                if (pooling == EmbeddingPooling.LastToken && i == tokens.Length - 1)
+                {
+                    h.Slice(0, d).CopyTo(dst);
                 }
             }
 
@@ -1093,7 +1160,14 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// <summary>
         /// Batched prefill: embed all prompt tokens, advance the cache, run one batched pass per layer
         /// (<see cref="CachedGptStack.PrefillBatchedQuant"/>), then project the last token's logits —
-        /// leaving the session in exactly the state the single-token loop would (bit-identical).
+        /// leaving the session in the same LOGICAL state the single-token loop would.
+        ///
+        /// <para>"Bit-identical" is what this said until 2026-08-07, and it is not. Cache contents and
+        /// logits differ by the reassociation the quantized batched kernels introduce — measured
+        /// <b>0.47–1.02</b> in logits on Qwen2.5-3B Q4_K_M. It is the same numbers, not the same bits, and
+        /// the difference is large enough to change which token a greedy sampler picks at a near-tie.
+        /// <see cref="DisableBatchedPrefillForParity"/> above exists precisely to take this path out of the
+        /// picture when a test needs the two to agree exactly.</para>
         /// </summary>
         private void PrefillBatchedQuant(ReadOnlySpan<int> promptTokens)
         {

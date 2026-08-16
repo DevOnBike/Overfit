@@ -14,8 +14,8 @@ namespace DevOnBike.Overfit.Analyzers
     /// OVERFIT002 — jagged array allocation (<c>new T[n][]</c>) in per-call code.
     ///
     /// A jagged array is N+1 heap allocations plus a pointer-chase per row — cache-hostile and
-    /// GC-heavy, which is why <c>float[][]</c> is a build ERROR in Sources/Main outright (the
-    /// MSBuild guard). This rule covers the remaining element types (<c>int[][]</c>,
+    /// GC-heavy, which is why <c>float[][]</c> is a build ERROR in Sources/Main outright
+    /// (<c>OVERFIT033</c>). This rule covers the remaining element types (<c>int[][]</c>,
     /// <c>byte[][]</c>, …): allowed as one-time structures (lookup tables, model topology), but a
     /// per-call jagged allocation should be a flat <c>T[]</c> Span-sliced per row (one allocation,
     /// cache-friendly) or an Overfit buffer. Same one-time exemptions as OVERFIT001:
@@ -33,7 +33,7 @@ namespace DevOnBike.Overfit.Analyzers
             category: "Performance",
             defaultSeverity: DiagnosticSeverity.Warning,
             isEnabledByDefault: true,
-            description: "Jagged arrays cost one allocation per row plus the outer array and defeat cache locality. Per-call code should use a flat array sliced per row; one-time structures (field initializers, constructors) are not flagged. float[][] is banned in Sources/Main entirely by the MSBuild guard.");
+            description: "Jagged arrays cost one allocation per row plus the outer array and defeat cache locality. Per-call code should use a flat array sliced per row; one-time structures (field initializers, constructors) are not flagged. float[][] is banned in Sources/Main entirely by OVERFIT033.");
 
         public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = [Rule, OverfitPerfAnalysis.HotPathRule];
 

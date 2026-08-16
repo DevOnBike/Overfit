@@ -3,9 +3,16 @@
 Native .NET-for-Android chat app: pick a GGUF model, chat with **streaming tokens**, over an animated
 mesh-gradient background. Pure in-process inference via `OverfitClient` (no server, no Python).
 
-- App id: `com.devonbike.overthink` (shows as **Overfit** in the launcher)
+- App id: `com.devonbike.overthink` (shows as **OverThink** in the launcher)
 - Runtime: **Mono** (stable; Play-Store-appropriate). Dev builds use JIT; release builds add AOT.
-- Model is **not bundled** (too big for a base APK) — load it via the in-app picker or pre-push it.
+- A starter model **is** bundled (`Assets/smollm2-135m.gguf`, SmolLM2-135M Q4_K, ~101 MB) and extracted on
+  first run; bigger models come from the in-app picker or a pre-push. The asset is git-ignored — over
+  GitHub's 100 MB file limit — and the build scripts fetch it if it is missing.
+
+> **Read [`docs/measured-baselines.md`](../../docs/measured-baselines.md) before optimising anything here.**
+> Mobile behaves unlike the desktop in ways that are counter-intuitive and already measured: the scheduler
+> parks decode on the little cores, the shipped parallel-work threshold is wrong for a 4-core cluster, and
+> **no ARM SIMD intrinsic is available to this runtime at all**.
 
 ---
 
@@ -21,18 +28,69 @@ To use a **different** model: tap **Load model** → pick a `.gguf` from Downloa
 
 ---
 
-## Rebuild & redeploy later (after code changes)
+## Which command, and when
 
-**Shortcut:** `deploy.cmd` in this folder does build + install + launch in one go:
+Two scripts cover everything. Pick by what you are doing, not by which is newer:
 
-```bat
-Demo\OverfitChatApp\deploy.cmd                       :: device already connected (USB / prior wireless)
-Demo\OverfitChatApp\deploy.cmd 192.168.1.174:PORT    :: connect wireless first (PORT from the phone)
-Demo\OverfitChatApp\deploy.cmd 192.168.1.174:PORT aot :: + AOT (slower build, faster decode)
+| You are… | Run | Takes | Produces |
+|---|---|---|---|
+| iterating on code | `.\build-dev.ps1` | ~20 s | dev-signed APK, installed + launched |
+| on a new wireless session | `.\build-dev.ps1 -Device <ip:port>` | ~20 s | same, connects first |
+| watching what the app logs | `.\build-dev.ps1 -Log` | ~20 s + tail | same, then follows `overthink.log` |
+| measuring **startup**, or testing anything intrinsics-dependent | `.\build-dev.ps1 -Aot` | minutes | dev-signed **AOT** APK |
+| handing the app to someone (sideload, GitHub Release) | `.\build-release.ps1` | minutes | **signed APK**, upload key |
+| shipping to Google Play | `.\build-release.ps1 -Format aab -VersionCode N` | minutes | **signed AAB** |
+| setting up signing, once ever | `.\generate-upload-key.ps1` | seconds | `overthink-upload.keystore` |
+
+```powershell
+cd Demo\OverfitChatApp
+.\build-dev.ps1                                   # the one you will use 95% of the time
+.\build-release.ps1 -Install                      # release APK, and flash it to the phone too
 ```
 
-Or the manual steps below. Run these from the repo root (`D:\Overfit`) in **PowerShell**. `adb` lives at
-`%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe` — alias it for convenience:
+**Do not reach for `-Aot` during normal development.** It costs minutes per iteration and buys **nothing on
+decode** (8.5 vs 8.6 tok/s, inside noise) — only cold start (~400 ms against ~640). Use it when the launch
+time is the subject, or before handing the build to anyone.
+
+### Cutting a release, in order
+
+1. **Decide the version.** `<Version>` lives in `Directory.Build.props` and flows into the app's displayed
+   version. For an AAB, also pick a `versionCode` **strictly higher than every bundle already uploaded to
+   any Play track** — internal, closed and production share one number space.
+2. **Build it clean.** `build-release.ps1` runs `dotnet clean` first on purpose: an incremental tree can
+   carry native libraries from a previous non-AOT build, and then nobody can vouch for what is inside the
+   package.
+3. **Check the arm actually shipped.** Install it (`-Install`) and read the line the script prints:
+   `aotLibs=24 (7364 kB)`. **`aotLibs=0` in a release means AOT silently did not happen.** A number in the
+   low tens of kB means `AndroidEnableProfiledAot` was left at its default and only the startup profile got
+   compiled — 16 kB instead of 1155 kB for the engine, i.e. AOT in name only.
+4. **Smoke-test on the phone**: launch, send one message, confirm tokens stream. Discard the first ~3 cold
+   starts if you are timing anything — they run ~680-710 ms while the system settles the new package.
+5. **Then distribute**: attach the APK to a GitHub Release, or upload the AAB in Play Console → Internal
+   testing first. Both flows are written out further down.
+
+### Two properties both scripts share
+
+They **install over** the app rather than uninstalling it. `adb uninstall` wipes app data, which deletes
+`overthink.log` and every model added by hand — that has already cost one session's measurements here.
+
+They both print **which build is actually running**, read from the app's own probe of its installed
+`libaot-*.so` files. A build flag says what was *requested*; `aotLibs=` says what is executing, and those
+two have already disagreed.
+
+These scripts replaced `deploy.cmd`, `make-apk.ps1` and `make-aab.ps1`, deleted on 2026-08-14: three
+scripts had grown to cover overlapping cases, and the two `make-*` ones shipped AOT **without**
+`AndroidEnableProfiledAot=false` — "AOT" in name only, see below. (The unrelated `k8s\overfit\deploy.cmd`,
+which brings up the inference-server lab, is a different file and still exists.)
+
+Everything below this line is detail: manual equivalents of the scripts, the wireless-pairing dance, and
+the two distribution paths.
+
+## Doing it by hand (what the scripts run)
+
+Useful when something in a script fails and you need to see which step. Run these from the repo root
+(`D:\Overfit`) in **PowerShell**. `adb` lives at `%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe` —
+alias it for convenience:
 
 ```powershell
 $adb = "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe"
@@ -46,8 +104,9 @@ $sdk = "$env:LOCALAPPDATA\Android\Sdk"
 dotnet build Demo/OverfitChatApp/OverfitChatApp.csproj -c Release -f net10.0-android `
   -p:AndroidSdkDirectory="$sdk" -p:AcceptAndroidSDKLicenses=true
 
-# Faster on-device decode (slower build) — flip AOT on:
-#   add  -p:RunAOTCompilation=true
+# Faster COLD START (slower build) — AOT. Both flags, or only the startup profile is compiled:
+#   add  -p:RunAOTCompilation=true -p:AndroidEnableProfiledAot=false
+# It does NOT speed up decode — measured 8.5 vs 8.6 tok/s, inside noise.
 ```
 
 APK: `Demo/OverfitChatApp/bin/Release/net10.0-android/android-arm64/com.devonbike.overthink-Signed.apk`
@@ -103,9 +162,10 @@ they must allow "install unknown apps", but it's immediate.
 
 ```powershell
 cd Demo/OverfitChatApp
-.\make-apk.ps1                 # AOT — best on-device speed, ~10 min build
-# .\make-apk.ps1 -Aot:$false   # fast build, slower first-token on the phone
+.\build-release.ps1            # signed APK, full AOT, ~minutes
 ```
+
+(One script for both formats — pass `-Format aab` for Play.)
 
 Enter the keystore password (Enter on the key prompt if you used one password). It prints the path, e.g.
 `bin\Release\net10.0-android\android-arm64\com.devonbike.overthink-Signed.apk` (~104 MB — the bundled model is
@@ -158,10 +218,10 @@ real app-signing key.
   512×512 PNG is also needed for the store listing.
 - **ABIs:** this project builds **arm64 only** (`RuntimeIdentifier=android-arm64`) — covers ~all modern phones.
   For wider reach add `<RuntimeIdentifiers>android-arm64;android-arm</RuntimeIdentifiers>` (the AAB splits per ABI).
-- **Model for reviewers (the real hurdle):** the app ships **no model** and loads one via the file picker — a
-  Play reviewer has no `.gguf` to pick. Pick one: (a) bundle a tiny model via **Play Asset Delivery**, (b) add an
-  in-app **"download a starter model"** button, or (c) leave reviewer notes with a download link. (a) or (b) is
-  the right long-term answer.
+- **Model for reviewers — solved.** SmolLM2-135M Q4_K (~101 MB) is bundled as an asset and extracted on first
+  run, so a reviewer has something to chat with immediately. It is the reason the APK is ~104 MB. Bigger models
+  still come from the in-app picker. If the bundle size ever becomes the problem, **Play Asset Delivery** or an
+  in-app "download a starter model" button are the alternatives.
 
 ### 4. Build a signed **release AAB** (not APK)
 Google Play takes an **Android App Bundle**. Bump `ApplicationVersion` (the integer **versionCode** — must
@@ -189,8 +249,10 @@ Upload the AAB to **Internal testing** first (installs via Play on your own devi
 **Closed/Open testing** → **Production**. Review is typically hours–days; first submissions take longer.
 
 ### Notes
-- The debug `-Signed.apk` from `deploy.cmd` is **dev-signed** — fine for sideloading/testing, **not** for Play.
-- Keep `RunAOTCompilation=true` for release (faster on-device decode; the dev builds skip it for speed).
+- The debug `-Signed.apk` from `build-dev.ps1` is **dev-signed** — fine for sideloading/testing, **not** for Play.
+- Keep `RunAOTCompilation=true` **plus `AndroidEnableProfiledAot=false`** for release. It buys **cold start**
+  (~400 ms against ~640), not decode — measured, see "AOT buys startup, not tokens" below. `build-release.ps1`
+  passes both.
 
 ---
 
@@ -203,9 +265,85 @@ Upload the AAB to **Internal testing** first (installs via Play on your own devi
 
 ## Notes / known characteristics
 
-- On-device decode of a 0.5B Q4_K is ~**3.8 tok/s** on a Snapdragon 7s Gen 2 (pure-managed mobile;
-  it's ~5–10× off a tuned C++ engine like llama.cpp — that's the managed-on-mobile tax, not a bug).
-- Loads with `quantize:false` (Q4_K-resident) — measured ~4× faster on-device than the Q8 requant path,
-  at the cost of more RAM (F32 lm-head). Fine for a 0.5B on 12 GB.
-- For a Play Store release: build an **AAB** (`-p:AndroidPackageFormat=aab`), turn on
-  `RunAOTCompilation=true`, and sign with a real upload key (the debug `-Signed.apk` here is dev-signed).
+All figures below are from a Motorola Edge 50 Fusion (Snapdragon 7s Gen 2: 4x Cortex-A78 up to 2.4 GHz on
+cpu4-7, 4x A55 up to 1.96 GHz on cpu0-3), SmolLM2-135M, same prompt, ~300 generated tokens. Full conditions
+and the refuted alternatives are in [`docs/measured-baselines.md`](../../docs/measured-baselines.md).
+
+### Three things this app does that look odd and are not
+
+Each was measured; removing any of them costs throughput.
+
+**1. It pins its threads to the fast CPU cluster** (`BigCoreAffinity`). Without it, all four big cores sat
+at their 691 MHz **idle floor** for an entire generation while the little cores ran near their ceiling —
+the model was executing on the A55s. The process is not confined by the system (cpuset `top-app`, cpus
+0-7); it is placed badly, because each worker runs in short bursts and parks on a semaphore, so no thread
+ever accumulates the utilisation that earns a big core. Costs energy per token; earns 4.1 → 6.3 tok/s.
+
+**2. It sizes the worker pool to the fast cores, not `ProcessorCount`.** Eight thin workers over four big
+cores is 2x oversubscription and the governor never holds the clock; four workers, one per core, keep all
+four at 2.4 GHz for the whole run. 6.3 → 8.5 tok/s.
+
+**3. It lowers `SingleTokenProjectionKernel.ParallelWorkThresholdOverride` to 100,000.** The library
+default is 1,000,000 elements, and this model's FFN matmuls are 576x1536 = **884,736** — 12% below it — so
+every one of them took the sequential path and ran on the calling thread, which was 46% of decode wall
+time. 8.5 → ~10 tok/s. **Do not "fix" this in the library**: the same lowering measured 1.2x to 2.9x
+*slower* on a 32-core desktop, so it is set per-app on purpose.
+
+Together: **4.1 → 9.9 tok/s, 2.4x**, and the collapse users saw — ~10 tok/s for the first few tokens then
+a settle to ~3.6 — is gone. The remaining ~20% decline within a long answer is filed as `PB-11`.
+
+### AOT buys startup, not tokens
+
+| | decode | cold start (steady state) |
+|---|---|---|
+| JIT | 8.6 tok/s | 627-665 ms |
+| Full AOT | 8.5 tok/s | **~400-440 ms** |
+
+1.2% on decode is inside run-to-run noise; 240 ms on launch is not. So **AOT for release, JIT for the
+edit-build-run loop** — the old advice here ("keep AOT for faster on-device decode") was wrong.
+
+Two traps: pass `AndroidEnableProfiledAot=false` with it, or only the startup profile is compiled and the
+engine library comes out at **16 kB instead of 1155 kB** — AOT in name only. And **discard the first ~3
+launches after an install**; they run ~680-710 ms while the system settles the new package, which is
+enough to make AOT look slower than JIT.
+
+### Quantised weights are slower here, and the reason is not what it looks like
+
+The app loads models under ~550 MB with `quantize:false` (F32-resident). Forcing `quantize:true` measured
+**639 ms/token against 100 ms** — 6.4x slower while reading **5.4x fewer bytes** (0.16 GB/s against F32's
+5.5 GB/s), so it is nowhere near bandwidth-bound. RSS did drop as intended, 1035 → 652 MB.
+
+The cause is the last note below, and it is the single most important thing on this page.
+
+### .NET-for-Android exposes NO ARM hardware intrinsics
+
+**Known in this repository since 2026-07-20** — `OverfitParallel.ResolveDecodePool` says so in a comment,
+and it is why the decode spin-pool is disabled on Android. It is repeated here because that is not a place
+anyone looks before planning kernel work, and it was re-found the hard way on 2026-08-14.
+
+Logged by the app at startup, in **both** JIT and full-AOT builds:
+
+```text
+simd: Dp=False  AdvSimd=False  AdvSimd64=False  V128hw=True  forceScalar=False
+```
+
+`AdvSimd.IsSupported` false on an **arm64** device is base NEON reported as absent, and the hardware is not
+the reason — `/proc/cpuinfo` lists `asimd asimdrdm asimdhp asimddp`. **Every kernel written against
+`System.Runtime.Intrinsics.Arm.*` therefore runs its scalar fallback on Android, silently**, because the
+fallback is a correctness path and the only symptom is speed.
+
+Consequences worth knowing before you plan work here:
+
+- The repository's recorded result *"ARM NEON SDOT: correct and pointless — decode is dequant-bound"*
+  measured code that **never executed**. The port was unreachable, not pointless.
+- Keeping mobile on F32 is right, but not because "F32 beats the quantised kernels under Mono's codegen" —
+  it is because the quantised kernels have **no vector path at all** here.
+- The way to get SIMD on this platform is the portable `Vector128<T>` API, which the runtime *does*
+  accelerate (`V128hw=True`). Porting the quantised GEMV kernels to it — validated bit-identical against
+  the existing scalar oracle — is the open lever for closing the gap to llama.cpp on mobile, and its size
+  is known: 5.4x fewer bytes read, currently 6.4x slower.
+
+### Play Store
+
+Build an **AAB** (`.\build-release.ps1 -Format aab -VersionCode N`) and sign with a real upload key — the
+`-Signed.apk` from `build-dev.ps1` is dev-signed.

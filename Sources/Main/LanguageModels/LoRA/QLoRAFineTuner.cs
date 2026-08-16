@@ -64,10 +64,23 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
         /// <summary>Transformer layer count of the loaded model.</summary>
         public int LayerCount => _model.LayerCount;
 
+        // OVERFIT040 for `FineTuneOnFile`. THE CONSTRAINT: the flagged `File.ReadAllText` is the training
+        // corpus, read once, and everything after it on the same thread is `FineTune` — minutes of
+        // CPU-saturating gradient work. A thread this method holds is not held by the file read; it is held
+        // by the training, which is the point of calling it. Freeing the thread across the read would return
+        // it for microseconds before the training seized it again.
+        //
+        // WHAT IS GIVEN UP: `FineTuneOnFile` is public API of the shipped `DevOnBike.Overfit` package, and
+        // `FineTune` (the string overload it delegates to) is synchronous and CPU-bound, so a task-returning
+        // wrapper would have nothing to await — it would have to `Task.Run`, which moves the block rather
+        // than removing it and is the shape OVERFIT039 exists to stop.
+#pragma warning disable OVERFIT040
+
         /// <summary>Fine-tune on the contents of a text file. See <see cref="FineTune"/>.</summary>
         public IReadOnlyList<float> FineTuneOnFile(
             string textPath, Action<int, int, float>? onStep = null, string? checkpointPath = null, bool resume = false)
             => FineTune(File.ReadAllText(textPath), onStep, checkpointPath, resume);
+#pragma warning restore OVERFIT040
 
         /// <summary>
         /// Fine-tune the adapter on <paramref name="text"/>. The text is tokenized and split into
@@ -111,7 +124,7 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
             var step = 0;
 
             // Resume: restore adapter weights + optimizer state + position (SAME text/options assumed).
-            if (resume && checkpointPath is not null
+            if (resume && checkpointPath != null
                 && File.Exists(checkpointPath) && File.Exists(OptPath(checkpointPath)))
             {
                 _model.LoadAdapter(checkpointPath);
@@ -133,8 +146,8 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
                 for (var ci = firstChunk; ci < chunks.Count; ci++)
                 {
                     var chunk = chunks[ci];
-                    var input = chunk[..^1];
-                    var target = chunk[1..];
+                    var input = chunk.AsSpan(0, chunk.Length - 1).ToArray();
+                    var target = chunk.AsSpan(1).ToArray();
 
                     _graph.Reset();
                     optimizer.ZeroGrad();
@@ -148,7 +161,7 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
                     onStep?.Invoke(epoch, step, loss);
                     step++;
 
-                    if (checkpointPath is not null && _opt.CheckpointEvery > 0 && step % _opt.CheckpointEvery == 0)
+                    if (checkpointPath != null && _opt.CheckpointEvery > 0 && step % _opt.CheckpointEvery == 0)
                     {
                         SaveCheckpoint(checkpointPath, optimizer, epoch, ci + 1, step);
                     }
@@ -156,7 +169,7 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
             }
 
             // Final checkpoint — position past the last epoch so a resume sees the run as complete.
-            if (checkpointPath is not null)
+            if (checkpointPath != null)
             {
                 SaveCheckpoint(checkpointPath, optimizer, _opt.Epochs, 0, step);
             }
@@ -208,7 +221,7 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
 
         private static List<int[]> Chunk(ReadOnlySpan<int> ids, int chunkLength)
         {
-            // Non-overlapping windows of (chunkLength + 1) tokens → input[..^1] + target[1..]. A trailing
+            // Non-overlapping windows of (chunkLength + 1) tokens → input[..(len - 1)] + target[1..]. A trailing
             // window shorter than 2 tokens is dropped (can't form an input/target pair).
             var window = chunkLength + 1;
             var chunks = new List<int[]>();
@@ -219,7 +232,7 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
                 {
                     break;
                 }
-                chunks.Add(ids[start..(start + len)].ToArray());
+                chunks.Add(ids.Slice(start, len).ToArray());
             }
             return chunks;
         }

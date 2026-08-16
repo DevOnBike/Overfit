@@ -20,17 +20,17 @@ namespace DevOnBike.Overfit.Server.AspNet.Endpoints
     {
         public static RouteGroupBuilder MapChat(this RouteGroupBuilder v1)
         {
-            v1.MapPost("/chat/completions", async (HttpContext ctx, IOpenAiInferenceService service) =>
+            v1.MapPost("/chat/completions", static async (HttpContext ctx, IOpenAiInferenceService service) =>
             {
                 ChatCompletionRequest? req;
+
                 try
                 {
-                    req = await JsonSerializer.DeserializeAsync(
-                        ctx.Request.Body, OpenAiJsonContext.Default.ChatCompletionRequest, ctx.RequestAborted);
+                    req = await JsonSerializer.DeserializeAsync(ctx.Request.Body, OpenAiJsonContext.Default.ChatCompletionRequest, ctx.RequestAborted);
                 }
                 catch (JsonException ex)
                 {
-                    EndpointHelpers.WriteError(ctx.Response, StatusCodes.Status400BadRequest, $"invalid JSON body: {ex.Message}");
+                    await EndpointHelpers.WriteErrorAsync(ctx.Response, StatusCodes.Status400BadRequest, $"invalid JSON body: {ex.Message}", ctx.RequestAborted);
                     return;
                 }
 

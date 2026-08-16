@@ -5,7 +5,6 @@
 
 using DevOnBike.Overfit.LanguageModels;
 using DevOnBike.Overfit.LanguageModels.Loading;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
 {
@@ -20,14 +19,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
         private readonly ITestOutputHelper _out;
         public BielikSmokeTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [ModelFact(Path, "5s")]
         public void Bielik_Loads_And_Generates_Polish()
         {
-            if (!File.Exists(Path))
-            {
-                _out.WriteLine("missing Bielik gguf");
-                return;
-            }
 
             using (var reader = new GgufReader(Path))
             {

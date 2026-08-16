@@ -46,7 +46,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Chat
             // session consumed the prompt (CurrentPosition advanced past 0), and the
             // streamed callback received exactly what the return value reports.
             Assert.Equal(3, chat.History.Count);                 // system + user + assistant
-            Assert.Equal("assistant", chat.History[^1].Role);
+            Assert.Equal("assistant", chat.History[chat.History.Count - 1].Role);
             Assert.True(session.CurrentPosition > 0);
             Assert.Equal(reply, streamed.ToString());
             Assert.True(session.CurrentPosition <= session.MaxContextLength);

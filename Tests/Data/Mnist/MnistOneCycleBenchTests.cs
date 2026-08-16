@@ -12,7 +12,6 @@ using DevOnBike.Overfit.Tensors;
 using DevOnBike.Overfit.Tensors.Core;
 using DevOnBike.Overfit.Tests.TestSupport;
 using DevOnBike.Overfit.Training;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.Data.Mnist
 {
@@ -32,16 +31,11 @@ namespace DevOnBike.Overfit.Tests.Data.Mnist
         private readonly ITestOutputHelper _output;
         public MnistOneCycleBenchTests(ITestOutputHelper output) => _output = output;
 
-        [LongFact]
+        [FixtureFact(TestFixture.MnistTrainingImages, "7s")]
         public void OneCycle_FewerEpochs_VsConstantLrBaseline()
         {
             var imgs = TestModelPaths.Mnist.TrainImagesPath;
             var lbls = TestModelPaths.Mnist.TrainLabelsPath;
-            if (!File.Exists(imgs))
-            {
-                _output.WriteLine("MNIST files not found.");
-                return;
-            }
             var (trainX, trainY) = MnistLoader.Load(imgs, lbls);
 
             RunArm("A: 5ep const lr 0.008 (baseline)", trainX, trainY, epochs: 5, lrAt: (_, _) => 0.008f);

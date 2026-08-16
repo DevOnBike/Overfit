@@ -14,6 +14,469 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 Pre-release suffixes (e.g. `10.1.0-beta.1`) are used for surface changes that need real-world validation before the public release. Pre-releases are pushed to NuGet with the `-beta`, `-rc`, or `-preview` SemVer suffix.
 
+## What this file covers, and what it does not — measured 2026-08-13
+
+**This is a record of notable changes, not a per-release log, and the gap is larger than it looks.** Of the
+**27 versions published on nuget.org** (10.0.4 through 10.0.31), **22 have no section here**. Only
+`10.0.15`, `10.0.21`, `10.0.24`, `10.0.25` and `10.0.30` were ever stamped; everything else was folded into
+whatever `[Unreleased]` held at the time and shipped without a heading.
+
+Stated rather than quietly corrected, for two reasons. **Backfilling twenty-two sections from memory would
+manufacture a record nobody can check** — the commits exist, the intent behind each release does not.
+And a reader who assumes every published version is described here would draw a false conclusion from its
+silence, which is the thing worth preventing.
+
+**Two consequences to know when reading:**
+
+- **For twenty-two published versions this file says nothing at all.** A reader cannot learn what changed
+  in 10.0.26 through 10.0.29 from here; the commits are the only record. The **`[10.1.0]`** section (this
+  was `[Unreleased]` until it was stamped on 2026-08-16) is accurate for what it describes — every one of
+  the 58 API breaks it lists was introduced **after** 10.0.31 was published on 2026-07-23, so they belong
+  to that release and not to an earlier one.
+- **The one date in the file is unverified.** `## [10.0.30] - 2026-07-05` does not match nuget.org, which
+  records 10.0.30 as published **2026-07-20** — 2026-07-05 is 10.0.29's publish date. Either the heading
+  dates the work rather than the publish, or it is off by one release; nobody has said which, so it is left
+  as it stands with this note beside it.
+
+**Going forward: stamp `[Unreleased]` as `[<version>] - <publish date>` when the release is cut**, and use
+the nuget.org publish date so the two records agree. `Scripts/plan_gate_check.py` does not check this and
+neither does anything else — it is a habit, and this section exists because habits without a written
+statement are how twenty-two versions went unrecorded.
+
+## [Unreleased]
+
+_Nothing yet._
+
+## [10.1.0] - 2026-08-16
+
+_The `gimli` branch, anomaly-guard track: two new detector families, a week of memory, thresholds the guard
+calibrates for itself, and the operability layer that decides whether a customer keeps it after month one._
+
+**`MINOR` per this file's own versioning policy, which bumps `MINOR` — not `MAJOR` — for a public break,
+because `MAJOR` tracks the targeted .NET runtime.** This release carries **58 breaking changes** against
+10.0.31, itemised under `### Removed` and `### Changed` below; the largest block is the whole
+`DevOnBike.Overfit.Anomalies.*` namespace, which left the package in the 2026-08-05 assembly split and has
+**no replacement package and no type forward**. They were found by `Scripts/api_compat_check.py` on
+2026-08-13, eight days after the fact and only because a tool looked — the version had already been bumped
+by hand for seven of them.
+
+### Added
+
+- **`LevelShiftDetector` — a step is not a trend, and no threshold makes it one.** Mann-Kendall's tau counts
+  rank order, so a step scores ≈ 0.51 whatever its height: on one window shape a **2.5× step gave p = 0.0695
+  and a 10× step scored *worse*, p = 0.0794** — both the wrong side of the gate, with the larger fault less
+  visible. Theil-Sen recovered the slope perfectly well; significance is what failed, which rules out every
+  repair that is merely a lower threshold. Splitting the window and rank-testing the halves separated every
+  step at p ≤ 1.1e-3 and left a flat control alone (delta 0.19, p 0.92). It is the **only** family that
+  catches a signal rising on every replica at once — peer comparison has no outlier when everybody moves
+  together. Runs on the workload's aggregate, not per pod.
+- **Silent-pod detection.** Every other family judges a time *series*, and a pod that never started has none:
+  a replica stuck in `Pending` or `ImagePullBackOff` was invisible to the entire guard, and eleven healthy
+  pods look identical to twelve where one never came up. Compares the cluster's own roster (`IPodRoster`,
+  from kube-state-metrics via Prometheus) against who reported, requiring two consecutive silent cycles so a
+  pod that is merely starting or terminating is not accused.
+- **`MetricHistory` — cross-cycle memory, per workload, per hour of day, across seven days.** Keyed by
+  **workload rather than pod**, because pod names do not survive a deployment and a per-pod baseline would
+  reset exactly when "is the new version worse" became answerable. It supplies the trend and step families a
+  seasonal expectation, **interpolated between hours rather than held flat**: a flat reference subtracts the
+  level and leaves the slope, which is the false positive it exists to remove.
+- **`FloorCalibrator` — the guard proposes its own absolute floors.** The first question about the absolute
+  gates was always "what do I put here", and the honest answer was "only you can know" — true and useless.
+  Fitted on one synthetic population and scored on a **held-out** one: **124 → 44 hand-reasoned → 29
+  calibrated** false incidents a day, at identical detection. Where no floor is configured the learned one
+  now applies automatically, because an absent floor means the gate is off and that measured at 209 false
+  incidents a day. An explicit floor always wins, even a lower one.
+- **`MaintenanceWindow` / `IMaintenanceCalendar`.** A deployment *is* a level shift and the step detector
+  says so, about something the operator did five minutes ago. Declared windows suppress reporting **and
+  learning** — folding a known-abnormal period into "what this cluster does when it is well" takes the one
+  input certainly wrong and treats it as truth. Findings are flagged, never dropped.
+- **`GuardTelemetry` + `/metrics` on the guard itself.** It only logged, so a stopped loop or failing
+  queries produced no incidents — indistinguishable from a healthy cluster, the exact pathology the product
+  exists to eliminate. Ten series; the load-bearing one is
+  `overfit_guard_last_cycle_timestamp_seconds`, which makes `time() - … > 900` an alert anyone can write.
+- **`overfit anomaly-discover`.** Hand-authoring the metric map does not work: the map for this project's own
+  lab was written by the author of the system and still left **two channels of thirteen unbound**, reporting
+  blind for hours. Proposes a mapping from what a cluster actually exports, by name and by **suffix shape**
+  so a bespoke application matches too, and names every channel that will be blind. Ambiguous channels are
+  reported and deliberately left out of the generated file — whether a 4xx is an error is a business
+  decision, and a guess there is a guard confidently measuring the wrong thing.
+- **Durable learned state** (`LearnedState`, `ILearnedStateStore`) on its own volume. Losing it does not
+  cause duplicate notifications like losing incident state; it makes the guard quieter than it should be for
+  a week, which is the failure mode that looks like success.
+- **A recorded window of the live cluster** (`Tests/test_fixtures/lab/lab-window-healthy-12pod.csv`): 60
+  minutes, twelve replicas, 241 scrapes, 12 of 13 channels at 100% coverage.
+- **`SingleTokenProjectionKernel.ParallelWorkThresholdOverride`** — an additive public knob (`long?`, `null`
+  keeps the existing `ParallelWorkThreshold` constant, so no behaviour changes for anyone who ignores it).
+  It exists because the shipped constant is an absolute element count tuned on a 32-core desktop, and that
+  is **the wrong unit on a phone**: measured 2026-08-14 on a Snapdragon 7s Gen 2, SmolLM2-135M's FFN matmuls
+  are 576×1536 = **884,736** — 12% below the 1,000,000 bound — so every one of them took the sequential path
+  and ran on the calling thread, 46% of decode wall time. Lowering the bound to 100,000 took that device
+  from 8.7 to 10.1 tok/s. **The library default is unchanged on purpose**: the same lowering measured 1.2×
+  to 2.9× *slower* on the 32-core box, where 32 workers split a matrix row into cache-line-sized pieces. So
+  the value is a per-application decision, not a new default, and a rule that derives it from worker count
+  and matrix shape is still open work. Full conditions, including a benchmark that did **not** reproduce,
+  in `docs/measured-baselines.md`.
+
+### Changed
+
+- **Sessions created from one `CachedLlamaInferenceEngine` now throw `OverfitRuntimeException` when two of
+  them decode concurrently, instead of silently corrupting both forward passes.** They share the engine's
+  transformer scratch — only the `KeyValueCache` is per session — so overlapping decodes produced wrong
+  logits for both, with no signal of any kind. The guard is an exclusive-use flag taken per synchronous
+  entry to the shared stack and released in a `finally`, so an exception inside a decode cannot leave the
+  engine refusing every later call. **Sequential and single-threaded interleaved use is unaffected**: a
+  decode step is atomic with respect to the scratch, so two sessions taking turns produce exactly what each
+  produces alone — measured on a real Qwen engine with two different prompts, tokens identical to each
+  session run standalone. For concurrent streams create one engine per stream (what `overfit serve` does),
+  or serialise around the shared engine (what the ASP.NET host does with its `SemaphoreSlim(1, 1)` gates).
+  **`Scripts/api_compat_check.py` cannot see this change** — the public surface is unchanged and the
+  behaviour is not, which is exactly the class of break an assembly comparator is blind to (`XC-58`).
+- **Public signatures that changed shape since 10.0.31. Every one of these is a binary break**: a compiled
+  caller fails with `MissingMethodException` even where the source still compiles. Five came from the
+  `OVERFIT041` cancellation-token sweep, where the reorder was accepted deliberately because **no reorder
+  can bind silently** — no displaced argument type converts to `CancellationToken`, so every external caller
+  gets `CS1503`/`CS7036` rather than a quiet behaviour change.
+
+  | member | change |
+  |---|---|
+  | `LanguageModels.OverfitClient.SendAsync` | `cancellationToken` moved ahead of the optional parameters; its default was removed |
+  | `Evolutionary.Runtime.EvolutionRunner.Run` (both overloads) | same reorder; `cancellationToken` default removed |
+  | `Redaction.IRedactionAuditSink.Record` | takes `in RedactionAuditEntry` instead of `RedactionAuditRecord` |
+  | `Maths.PartialSort.SortIndices` | takes `Span<int>` instead of `int[]` |
+  | `LanguageModels.Runtime.Q4KGemvKernel.GemmTiled512` | two parameters added |
+  | `DeepLearning.CheckpointedModule` constructor | one parameter added |
+  | `Audio.Tts.SyntheticSpeechMetadata.ForNow` | takes an `IClock` |
+
+- `LanguageModels.Runtime.CachedLlamaSession.StreamGenerate` **removed** — superseded by the async
+  streaming path.
+
+- **Four new overloads that a recompile may bind to instead of the old ones**, which is a source-level risk
+  rather than a defect and is listed because a consumer cannot see it coming:
+  `Diagnostics.OverfitTelemetry.RecordTensorStorageCreated`, `…RecordTensorStorageDisposed`,
+  `LanguageModels.Tokenizers.GgufTokenizer.Decode`, `…QwenTokenizer.Decode`. Whether any of them captures a
+  real call site depends on consumer code no tool here can see.
+
+### Removed
+
+- **The feature-importance island in `Data` — seven public types, removed together because none of them
+  could be used.** Gone from the public API of `DevOnBike.Overfit`:
+  `DevOnBike.Overfit.Data.Contracts.FeatureImportanceReport`,
+  `DevOnBike.Overfit.Data.Contracts.FeatureImportanceAnalyzerConfig`,
+  `DevOnBike.Overfit.Data.Contracts.FeatureImportanceResult`,
+  `DevOnBike.Overfit.Data.Contracts.FeatureImportanceVerdict`,
+  `DevOnBike.Overfit.Data.Abstractions.IFeatureNameProvider`,
+  `DevOnBike.Overfit.Data.Features.IndexedFeatureNameProvider` and
+  `DevOnBike.Overfit.Data.Features.CustomFeatureNameProvider`, together with the commented-out
+  `FeatureImportanceAnalyzer.cs` they served. The `Data/Features/` directory is now empty and is gone with
+  them.
+
+  **`FeatureImportanceResult` and `FeatureImportanceVerdict` were reachable only from
+  `FeatureImportanceReport`**, which went with the first five: `Result` appeared solely as the element type
+  of `Report`'s four collections, and `Verdict` solely in `Report` and in `Result`'s own `Verdict` property.
+  Once `Report` was deleted the two referenced each other and nothing else, so leaving them would have
+  reproduced the defect this removal exists to close — a live public type in a shipped package that nothing
+  can reach.
+
+  **Nothing could have consumed them meaningfully.** The analyser was commented out on 2026-04-16
+  (`49d1e68`) after its only subject, `AnomalyAutoencoder`, was deleted five days earlier on 2026-04-11
+  (`d07ddc0`) — so these types have spent four months shipping a configuration object for an analyser that
+  does not exist, and a report type describing results nothing can produce. Resolved semantically rather
+  than by grep before removal: `FeatureImportanceReport`, `FeatureImportanceAnalyzerConfig` and
+  `CustomFeatureNameProvider` had **0** references; `IFeatureNameProvider` had **2**, both its own
+  implementations; `IndexedFeatureNameProvider` had **1**, a `<see cref>` inside that interface's own
+  documentation; `FeatureImportanceResult` had **4** and `FeatureImportanceVerdict` **4**, every one of
+  them inside the island's own two files. A closed island, referenced only by itself.
+
+  **`FeatureImportance` — the struct in `Data/Contracts/FeatureImportance.cs` — is NOT removed and is not
+  part of this.** It is one character from `FeatureImportanceResult`, it is a different type with a
+  different purpose, and it is live: `Statistical/GlobalShapAnalyzer.AnalyzeImportance` returns
+  `List<FeatureImportance>`. Named here because the two are easy to confuse when reading a removal list.
+
+  **This is a breaking change for any external consumer that referenced these names**, which is why it is
+  recorded here rather than treated as tidying. **Checked against nuget.org on 2026-08-12, not assumed**:
+  `DevOnBike.Overfit` is published with 27 versions (10.0.4 through 10.0.31) and all seven types are
+  present in the shipped `lib/net10.0/DevOnBike.Overfit.dll` of **10.0.31**, the current latest — while
+  the first published version, 10.0.4, contains none of them. So they have been in the public surface of
+  every recent release, and this removal is breaking in fact rather than in principle.
+
+  **Consequence for the next release, per this file's own versioning policy** (*"`MINOR` is bumped for any
+  breaking change to the public API surface"*): the next published version is **10.1.0**, not 10.0.32.
+  `Directory.Build.props` read `10.0.31` — exactly the last published version — so a build and push without
+  a deliberate bump would have republished a breaking change under a number already on nuget.org. **Bumped
+  to `10.1.0` (`Version` and `FileVersion`) on 2026-08-12 as part of this change**, because nothing in the
+  build enforces it and the two edits belong in the same commit as the removal that requires them.
+
+  **What the check does NOT establish**: whether anyone actually consumes these types. Total downloads are
+  3,375 spread evenly at roughly 150 per version, including versions published within the hour, which is
+  the signature of mirrors and automated feeds rather than of adoption. The download counter cannot answer
+  it and is not treated here as if it could.
+
+  Not a deprecation and not a move: feature importance for the learned anomaly family, if it is wanted,
+  is new work in `Sources/Anomalies` (`Main.csproj` has no `ProjectReference` and cannot see
+  `MetricSnapshot`), and is a separate decision.
+
+- **The entire `DevOnBike.Overfit.Anomalies.*` surface — 35 public types — is no longer in this package.**
+  It moved to a separate `Sources/Anomalies` assembly in the 2026-08-05 split, and that assembly is
+  deliberately **not published**: the anomaly guard ships as a container image, and a NuGet package would
+  be a promise about a surface nobody designed for external use. The reason is recorded in
+  `Anomalies.csproj` itself.
+
+  **There is no replacement package and no type forward.** A consumer that referenced any of these names
+  from 10.0.31 cannot get them back by taking a different package — the code is in this repository under
+  AGPL, and the guard is consumed as an image or built from source. Gone from the package:
+
+  - `Anomalies.Monitoring` (13): `Abstractions.IMetricSource`, `Abstractions.IRawMetricSource`,
+    `Contracts.DataCenter`, `Contracts.MetricIndex`, `Contracts.MetricSnapshot`, `Contracts.PodKey`,
+    `Contracts.PrometheusHistoricalSourceConfig`, `Contracts.PrometheusMetricSourceConfig`,
+    `Contracts.RawMetricSeries`, `Contracts.RawSample`, `HistoricalCsvLoader`,
+    `PrometheusHistoricalSource`, `PrometheusMetricSource`
+  - `Anomalies.Alerting` (5): `Abstractions.IAlertSink`, `AlertEngine`, `Contracts.AlertEngineConfig`,
+    `Contracts.AlertEvent`, `Contracts.AlertSeverity`
+  - `Anomalies.Neuro` (5): `AnomalyFitness`, `AnomalyFitnessOptions`, `AnomalyMlp`, `AnomalyObjective`,
+    `AnomalyPopulationEvaluator`
+  - `Anomalies.Training` (4): `GptTrainingConfig`, `OfflineTrainingJob`, `OfflineTrainingResult`,
+    `TrainingProgress`
+  - `Anomalies.Gpt` (3): `AnomalyScore`, `GptAnomalyDetector`, `MetricTokenizer`
+  - `Anomalies.Adaptive` (2): `AdaptiveAnomalyMonitor`, `AdaptivePolicy`
+  - `Anomalies.Live` (2): `LiveMonitoringOptions`, `LiveMonitoringPipeline`
+  - `Anomalies.Baseline` (1): `EwmaAnomalyDetector`
+
+  **Recorded here on 2026-08-13, eight days after the fact, and only because a tool found it.** The split
+  changed the published surface and nothing said so; the API-compatibility gate added the same day compares
+  a build against the last published package and reported **58 blocking findings against 10.0.31** where the
+  notes recorded 7. That gap is the reason the gate exists, and it is why the entries below — all of them
+  real breaks that had also gone unrecorded — appear in this release rather than in the ones that made them.
+
+### Fixed
+
+_2026-08-02 — the six defects a code review found on paths no measurement exercises, plus eighteen from
+five `overfit-find-bugs-game` hunts. Everything below was verified by test; the kernel change was verified
+by parity, benchmark and an end-to-end generation on a real model._
+
+- **A race in the decode spin-pool could run one dispatch's body against another's context — and, more
+  quietly, return a partially computed token.** `OverfitParallel.ForDecode` had workers claim a chunk index
+  with a bare `Interlocked.Increment` after observing a fresh generation. A worker descheduled between the
+  two could resume *after* its dispatch had completed, released the gate and been replaced by the next one,
+  which rewrites the descriptor array wholesale — so the straggler indexed into descriptors being
+  overwritten and could pair a `Body` from one dispatch with a `Context` from another. Observed 2026-08-14
+  as a `DivideByZeroException` with an FFN dispatch frame beneath an attention body. **The silent
+  consequence was the worse one**: its extra decrement of the shared completion counter let a *later*
+  dispatch stop waiting early and return a partially written output buffer, with no exception at all.
+  The generation, the chunk count and the next index now occupy one 64-bit word claimed by a single
+  compare-and-swap, so a claim that loses its generation takes nothing — a failed check must not consume an
+  index, or the chunk it burned would never run and the dispatcher would wait for a completion that never
+  arrives. (The first version of this fix packed only the generation and the index, leaving the count in a
+  separate field; that left a narrower window of the same defect and is recorded below as `XC-50`.) **This affected
+  the default configuration on every non-Android platform** (the pool is on by default; Android already
+  disables it). Confirmed by two `[LongFact]` diagnostics going green, one of which —
+  `PrefillCallCountTests` — had been dismissed as a test-precision defect and was in fact counting the
+  duplicate executions this race produced.
+- **The decode pool's park protocol could leak wake tokens.** Workers registered in a parked count and the
+  dispatcher released exactly that many semaphore tokens; a worker that registered, then saw the generation
+  move and skipped its wait, left its token behind for ever, and a surplus token makes the *next* park
+  return immediately. Replaced with a `Monitor` wait on the generation predicate, which cannot leak: a
+  surplus pulse costs one re-check and a missed one is impossible, because the dispatcher publishes the
+  generation and pulses under the same lock. **Stated honestly: the benefit is un-quantified.** The test
+  that would show it (`DecodePoolIdleBurnTests`) measures process-wide CPU and is confounded by its
+  neighbours in a 52-test process — filed as `TG-T13`. The leak is real by inspection; its cost is not
+  measured.
+
+- **Escaping in the three learned-state stores did not round-trip, and the same defect was in all
+  three.** *(2026-08-04.)* Each carried a private `Escape`/`Unescape` pair built from sequential
+  `string.Replace` calls, and a chain of replacements is not a decoder: a later pass re-reads what an
+  earlier one emitted. A custom channel named `a\hb` — literal backslash, then `h` — escaped to `a\\hb`
+  and decoded to `a\#b`, so the calibration reattached under a name the operator never configured. Tab and
+  newline corrupt the same way in the label and suppression stores. One implementation now
+  (`LearnedStateText`), decoding in a single left-to-right pass, escaping `#` as well so a name or an
+  operator's typed reason cannot forge a `### labels` section boundary. Found by review, not by the
+  round-trip test that already existed — that test used `myapp_queue_depth`, which needs no escaping.
+
+- **`checked` on the tensor shape types was added and then reverted, and the measurement is why.**
+  *(Added 2026-08-03, reverted 2026-08-04.)* Five unchecked dimension products were fixed together as one
+  defect; they were two. `GgufTensorInfo.ElementCount`, `OnnxTensor.ElementCount` and the ONNX graph
+  importer multiply numbers **read out of a model file**, where a wrapped product is small, positive and
+  plausible enough to pass a later shape check and load silently wrong weights — those stay checked.
+  `TensorShape.Size`, `TensorStrides.Contiguous` and `TensorView.Reshape` multiply dimensions **from the
+  caller's own code**, where overflowing an `int` means asking for an 8.6 GB tensor. Measured at ~0.11 ns
+  per call (1.34x a sub-nanosecond property); end-to-end an A/B over a full small-CNN forward+backward
+  moved two of six arms the wrong way by up to 18%, which is that benchmark's own spread, and the
+  arithmetic bound is ~0.1%. Reverted for having no benefit at that layer rather than for the cost — and
+  because `checked` evaluates left to right, so a shape with large leading dimensions and a trailing zero
+  threw despite a correct result of zero.
+
+- **The step detector could not report anything, for any fault, once the guard had calibrated itself.**
+  *(2026-08-03. Two defects, stacked, the second hidden by the first.)* The level-shift gate was fed
+  `MinAbsoluteTrendChange`, a floor accumulated from a Theil-Sen slope fitted to each pod **individually**,
+  and applied it to a step in the **cross-pod common component** — a median over twelve replicas, roughly
+  √N less scattered. On CPU that landed near 1.5× the signal's own level. Underneath it, `FloorCalibrator`
+  observed each window at the *top* of the cycle and invalidates its proposal cache, so every gate below
+  read a floor already containing the window it was judging; with the proposal set from the maximum times a
+  1.25 margin, the floor was never below 1.25× the gated quantity and the gate could never fire. The first
+  defect hid the second by making the relationship inexact.
+
+  The gate now has `IAbsoluteFloorSource.MinAbsoluteLevelShift` with its own accumulator, fed by
+  `LevelShiftDetector.StepSize` — the same function the gate compares against — and calibration runs after
+  the detectors. **Measured on one synthetic population, both arms in one script:** detection went from 8
+  of 10 injected faults to **10 of 10**, the cluster-wide leak from 15 minutes to 5, latency 3× from 5
+  minutes to 0, and the no-fault control opened **one** incident before and one after. State files written
+  in the four-column format still load; the new accumulator starts empty and relearns.
+
+- **Restoring more incidents than `MaxOpenIncidents` could hand out an identifier that was still in use.**
+  *(2026-08-03.)* `IncidentTracker.Restore` ended its loop on the capacity bound, so saved records beyond
+  the cap were never read and never advanced the counter — and the incidents holding those identifiers are
+  fresh and still open, so the number is reused while somebody is looking at the original. The loop now
+  visits every record and advances the counter ahead of both filters. `Truncated` counts capacity refusals
+  only; stale records are not truncation, and reporting them as such sent an operator to raise a limit that
+  was not the constraint. The morning of 2026-08-02 fixed the staleness half of this and the entry
+  describing it claimed both.
+
+- **A durable store that could not be written said so to nobody.** *(2026-08-03.)* `FileIncidentStore` had
+  recorded `LastError` since it was written, the guard holds `IIncidentStore`, and the interface had no such
+  member — so the field could not be read and `GuardTelemetry.StateWriteFailed()` was called from nowhere in
+  the tree. Every piece existed and none was connected, while `overfit_guard_state_failures_total` was
+  exported and could never increment: a monitoring series that lies, which is the exact pathology this
+  subsystem exists to remove. `LastError` is now on the interface, `AnomalyGuard.StateError` is set after
+  both loads at construction and both saves each cycle, the counter increments, and the ASP.NET host logs a
+  warning every cycle it persists. **An earlier entry in this file claimed this had shipped when none of it
+  had**; that entry was removed on 2026-08-02 and this one is pinned by `GuardStateFailureTests`, four tests
+  that fail without the wiring.
+
+- **The guard's workload could be empty, and two things failed silently on it.** A maintenance window scoped
+  to a named workload could never match — the operator declared a window for their rollout and got paged
+  during it anyway — and the incident tracker's subject key collapsed to `"namespace/"`, so a memory
+  incident that closed and a CPU incident that opened were reported as one continuing problem. The lab's own
+  logs carried the evidence for weeks as `Anomaly incident in lab/:` with nothing after the slash. The
+  workload is now configurable, **derived from topology** when it is not configured, and the combination that
+  cannot work — a workload-scoped window, no workload, no topology — is refused at construction.
+- **Custom metric channels were never calibrated.** Their floors defaulted to zero, zero means the gate is
+  off, and nothing ever proposed a value: the one part of the configuration a customer is most likely to own
+  started in the state measured at 209 false incidents a day. `FloorCalibrator` now keeps name-keyed
+  accumulators, `IAbsoluteFloorSource` answers for a signal name, and the custom paths route through it.
+- **`DecomposeCommonMode` switched off the seasonal baseline as a side effect.** Turning off the
+  decomposition — which the test suite itself does — silently discarded a week of learning, and nothing in
+  the option's name suggests it.
+- **`IncidentTracker.Restore` could hand out an identifier twice**, because it advanced its counter only for
+  the incidents it adopted; one dropped for age or by `MaxOpenIncidents` left its number free. Truncation is
+  now reported rather than looking like "there were only that many".
+- **The silent-pod check trusted a roster nobody had refreshed.** A failed topology refresh keeps the
+  previous snapshot on purpose, which is right for grouping and wrong here: a pod deleted during the outage
+  is still on the list, stops reporting because it no longer exists, and is accused after two cycles.
+  `IPodRoster.LastRefreshed` and `MaxRosterAge` let the check stand down instead.
+- **A cluster-wide event could discard its own cycle.** `IncidentPipeline` threw once the grouping bound was
+  reached, so the largest event the guard had ever seen produced no incident at all. It now sheds the
+  overflow and counts it in `Dropped`.
+- **`FastRandomForest` never split its data.** It computed a feature and a threshold, then handed the
+  identical unpartitioned rows to both children — so every leaf averaged the whole target column, every tree
+  returned a constant, and the importance scores that `BorutaSelectionLayer` and `ShapSelectionLayer`
+  consume were a tally of random draws. Because the row count never shrank, the `rows < 2` stop could never
+  fire either: every tree was a **complete** binary tree, which at the `maxDepth` the constructor accepts is
+  over two billion nodes regardless of dataset size.
+- **`LstmCell.Save` and `Load` were empty method bodies** — not incomplete, `{ }` — and `LstmLayer`,
+  `LstmAutoencoder` and `Crnn` all delegate through them. A trained CRNN saved and reloaded came back with
+  its convolutions, norms and classifier intact and its recurrent core at random initialisation. Nothing
+  threw and the model reported as loaded.
+- **`DepthwiseConv2DLayer.Load` desynchronised the stream** when the file carried a bias section and the
+  layer was built without one: it consumed the flag and skipped the floats, misaligning every read after it.
+- **The synthetic-speech marker was optional where it mattered.** `WavAudioSink` wrote an unmarked file when
+  the metadata argument was omitted, so any new caller got unmarked audio by default — the wrong direction
+  for a default to fail in on a voice-cloning path. Omission now marks; unmarked output requires naming
+  `SyntheticSpeechMetadata.Unmarked` at the call site. The server's `response_format=pcm` reply has no
+  container to carry the marker and now carries it on the media type instead.
+- **Two parsers trusted a length from inside a validated envelope.** `Mp3Decoder` used the raw 9-bit
+  `big_values` field unclamped against a 576-entry buffer, so a corrupt MP3 took the process down;
+  `WavReader` accepted a negative chunk size as a raw `ArgumentOutOfRangeException` and, worse, **silently
+  truncated** the audio when a chunk claimed more than the file held.
+- **`CachedLlamaSession.Embed` returned the wrong vector for `EmbeddingPooling.Cls`** — the last token
+  instead of the first. Correct dimension, correctly normalised, nothing thrown, just worse similarities.
+- **AVX-512 was inert on the banded Q4_K prefill.** `TiledBandChunk` had no dispatch branch while its three
+  siblings all had one. Measured after wiring it up: **1.15–1.17× on `ffn_gate_up`, 1.05–1.06× on
+  `attn_qo`, a tie on `ffn_down` and `llama_ref`**, with the untouched arms flat as canaries. The banded
+  path is off by default, so this speeds an opt-in path rather than the shipped one.
+- **`Q4KWeight.EnsureRepacked` built its cache without synchronisation** while one weight set is shared
+  across concurrently created sessions by design; a `ReadOnlyMemory<byte>?` cannot be published atomically.
+- **`GenerationalGeneticAlgorithm.Tell` could rank an uninitialised population** — a `PooledBuffer<float>`
+  taken with `clearMemory: false`, so leftover pool contents rather than zeros — and store the winner as the
+  best genome.
+- **`GridEliteArchive` filed a NaN descriptor into cell 0**, because `value < min || value > max` is false
+  for NaN in both directions.
+- **`CenteredRankFitnessShaper` threw when the population shrank**, contradicting its own promise of a
+  monotonically growing reuse buffer. `PartialSort.SortIndices` now takes a `Span<int>`.
+- **`ConstantColumnFilterLayer`'s strictest setting was a no-op** — at `minUniqueRatio = 1.0` no column could
+  clear the bar, so the filter turned itself off entirely and left the constant columns that make a later
+  scaler divide by zero.
+- **`BorutaSelectionLayer` re-selected on every call**, unlike every sibling in `Prepare/`, so a second call
+  could leave later layers holding column indices that no longer refer to the same columns.
+- **`CheckpointedModule` accepted a segment it cannot recompute.** A checkpointed segment runs twice, and
+  dropout draws from an unseeded generator, so the backward recomputation would use a different mask than
+  the forward pass did — wrong gradients, no error. Refused unless explicitly allowed.
+- **`TabularToTensorConverter` could not persist its category ordering**, so re-fitting at inference
+  produced one-hot columns of the right width in the wrong order. Shapes agreed and nothing threw.
+- **`IEvolutionCheckpoint`'s documentation said the opposite of what every implementation does** about RNG
+  state and resume reproducibility — the direction that costs work, since it would send a reader off to
+  build determinism the implementations already had.
+
+- **A replica at Cliff's delta 1.00 and a 190% gap was never named.** `PeerGroupOutlierDetector` read
+  "somebody above and somebody below" as an ambiguous group, so two ordinary replicas sitting ~10% *under*
+  the group vetoed one running at 2.5× the CPU of its peers. It now resolves the group when one side dwarfs
+  the other, comparing **absolute** gaps — a relative gap is asymmetric by construction (900 against 100 is
+  +800%, 100 against 900 is −89%) and comparing by proportion would resolve exactly the groups that must
+  stay ambiguous. Measured: the injected fault went from 1 cycle detected to 33, at **zero** cost in false
+  positives.
+- **A memory-trend gate that could not fire.** A 256 MiB floor measured on a population whose pods carry
+  1.23 GB was carried to a lab whose pods carry 43 MB — 246× the calibrated value and six times the whole
+  signal. The gate meant to catch a memory leak was switched off, silently, and would have stayed off
+  through a real one.
+- **The step detector was gated on the peer floor.** It borrowed `MinAbsoluteGap` on the argument that both
+  gates ask "how large a difference matters". Four hours on the lab said otherwise: for the gen-2 heap the
+  peer floor calibrates to 0.64 MB and the trend floor to 4.23 MB — six times apart, because a GC sawtooth
+  moves a heap far more across a window than two replicas differ at any instant. At the peer floor it fired
+  about twice an hour on a healthy cluster and became the largest remaining false-positive source.
+- **`FloorCalibrator` grew without bound** — one value per pod per metric per cycle for the life of the
+  process, about a million doubles across a shadow week on twelve replicas and eight million on a hundred.
+  Now a bounded, deterministically decimated sample with an **exact** maximum, which is the statistic a floor
+  is actually derived from.
+- **A counted event must never have its floor fitted from data.** The calibrator proposed a
+  `ContainerRestarts` floor of **1.25** — arithmetically correct, since pods there restart about once a day,
+  and it would have made a single restart permanently unreportable.
+
+### Performance
+
+- **Guard cycle allocations cut 23×** — 7.41 MB → 328 KB per cycle at four replicas, 22.15 MB → 7.83 MB at
+  two hundred, with the Gen0 column falling from 141 collections per operation to none
+  (`AnomalyGuardScaleBenchmark`, `MemoryDiagnoser`). Two causes. The dominant one ignored pod count entirely,
+  which is what gave it away — a cost that ignores the size of the cluster is not doing work about the
+  cluster: the floor lookup recomputed the whole calibration **39 times a cycle**, sorting up to a thousand
+  values per signal per statistic, for an answer that cannot change within a cycle. The second was two
+  copies of every series per pod per signal, made whether or not anything came of them; the detectors now
+  read the window's own storage and a copy is taken only when a finding is actually recorded.
+
+### Measured and NOT shipped
+
+- **Work-adjusted trend for load-sensitive signals.** The trend family follows traffic (lab CPU drift
+  correlates with traffic at **+1.00**), and dividing by work or fitting an affine cost were the candidates.
+  The first attempt to measure it was **vacuous** — scored on the generator, every arm returned zero false
+  trends, because the generator does not contain the phenomenon. On the recorded cluster window: 15 false
+  trends raw against 11 for both repairs, with Poisson intervals that overlap and windows that overlap by
+  75%, so the effect does not clear its own noise; and the affine fit was **indistinguishable from plain
+  division** on the only real data available. Details and what would settle it in `ROADMAP.md`.
+
+### Known limitation
+
+- **Sessions created from one `CachedLlamaInferenceEngine` share the engine's transformer scratch and must
+  not decode concurrently.** Only the `KeyValueCache` is per session; the one `CachedGptStack` built by the
+  engine is handed to every session `CreateSession` returns — which is what makes the sharing invisible. Two
+  sessions of one engine decoding at the same time corrupt **both** forward passes, silently, with no
+  exception **until this release** — see `Changed`. Sequential use and interleaving on a single thread are
+  unaffected. For concurrent streams, create one engine per stream (what `overfit serve` does), or serialise
+  around the shared engine (what the ASP.NET host does with its `SemaphoreSlim(1, 1)` gates). **The sharing
+  is pre-existing in every published version, not new in 10.1.0** — what is new is that it is written down
+  and now refused: the XML doc shipped in the package said *"Thread-safety: one session per thread"*, which
+  named the shape that corrupts. Nothing in this repository decodes two sessions of one engine concurrently.
+  **What remains a limitation is the sharing itself**: `session.LastHiddenState` and the engine's
+  interpretability readers still answer about the most recent decode through the engine, **by whichever
+  session made it**, and giving each session its own stack is deferred behind the scratch right-sizing in
+  `XC-60`.
+
 ## [10.0.30] - 2026-07-05
 
 _The `frodo` branch: an on-device Android chat app, an advanced sampler suite, offline prefill acceleration, a local skill-eval harness, a `dotnet new` template + Microsoft.Extensions.AI drop-in, and CI-guard hardening._

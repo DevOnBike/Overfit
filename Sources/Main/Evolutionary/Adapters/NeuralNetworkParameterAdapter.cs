@@ -71,7 +71,7 @@ namespace DevOnBike.Overfit.Evolutionary.Adapters
 
             foreach (var parameter in module.Parameters())
             {
-                if (parameter is null)
+                if (parameter == null)
                 {
                     throw new OverfitRuntimeException(
                         $"Module produced a null parameter at index {index}.");

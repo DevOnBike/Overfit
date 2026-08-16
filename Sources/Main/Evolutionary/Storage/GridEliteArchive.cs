@@ -91,8 +91,8 @@ namespace DevOnBike.Overfit.Evolutionary.Storage
             _fitness = new float[cellCount];
             Array.Fill(_fitness, float.NegativeInfinity);
 
-            _parameters = new float[cellCount * _parameterCount];
-            _descriptors = new float[cellCount * DescriptorDimensions];
+            _parameters = new float[(long)cellCount * _parameterCount];
+            _descriptors = new float[(long)cellCount * DescriptorDimensions];
             _occupiedCells = new int[cellCount];
 
             _occupiedCount = 0;
@@ -480,7 +480,13 @@ namespace DevOnBike.Overfit.Evolutionary.Storage
                 var min = _descriptorMin[d];
                 var max = _descriptorMax[d];
 
-                if (value < min || value > max)
+                // !(value >= min && value <= max) rather than (value < min || value > max), because BOTH
+                // of those comparisons are false for NaN: a NaN descriptor passed the bounds test, and the
+                // conversion below then landed it in cell 0. A MAP-Elites grid whose first cell quietly
+                // collects every degenerate candidate has stopped being a map of the behaviour space. The
+                // fitness argument has had an explicit InvalidFitness path for exactly this case all along;
+                // the descriptor had none, and the contrast is what identified it.
+                if (!(value >= min && value <= max))
                 {
                     cellIndex = -1;
                     return false;

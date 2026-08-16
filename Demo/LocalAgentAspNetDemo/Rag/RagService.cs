@@ -3,7 +3,6 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using DevOnBike.Overfit.Runtime;
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
@@ -11,6 +10,7 @@ using DevOnBike.Overfit.LanguageModels;
 using DevOnBike.Overfit.LanguageModels.Embeddings;
 using DevOnBike.Overfit.LanguageModels.Retrieval;
 using DevOnBike.Overfit.LanguageModels.Retrieval.Evaluation;
+using DevOnBike.Overfit.Runtime;
 
 namespace DevOnBike.Overfit.Demo.LocalAgent.Rag
 {
@@ -77,7 +77,7 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.Rag
         private float[] Center(float[] vector)
         {
             var mean = _embeddingMean;
-            if (mean is null)
+            if (mean == null)
             {
                 return vector;
             }
@@ -118,7 +118,18 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.Rag
         /// model-embedding anisotropy mean is corpus-wide, so it must be recomputed when the corpus changes), and
         /// the fresh index is persisted for next time.
         /// </summary>
+        // OVERFIT040 — synchronous by design, for two independent reasons and either alone is enough. The
+        // body runs entirely inside `lock (_gate)`, which cannot span an await; and the cost here is
+        // EMBEDDING every chunk of every document, which is CPU-bound and occupies a thread whether or not
+        // this method returns a task. The File.ReadAllText / ReadAllBytes calls the rule points at are a
+        // rounding error beside it, so making the method asynchronous would move no work off the thread.
+        //
+        // WHAT IS LOST: POST /documents/index does hold its request thread for the whole index build. That
+        // is inherent to doing the work inline; the fix is a background job with a status endpoint, not an
+        // async signature, and it is out of scope for a demo that indexes a handful of markdown files.
+#pragma warning disable OVERFIT040
         public IndexSummary IndexDocuments()
+#pragma warning restore OVERFIT040
         {
             lock (_gate)
             {
@@ -145,7 +156,7 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.Rag
 
                 // Fast path: a persisted index whose sources + hashes exactly match → reload, no embedding.
                 var summaryFromCache = TryReloadFromCache(cachePath, dim, hashByName, files.Length);
-                if (summaryFromCache is not null)
+                if (summaryFromCache != null)
                 {
                     return summaryFromCache;
                 }
@@ -225,7 +236,7 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.Rag
 
             // Model-embedding mode needs the corpus mean restored, or query centering would be wrong.
             var mean = _useModelEmbeddings ? LoadMean(cachePath, dim) : null;
-            if (_useModelEmbeddings && mean is null)
+            if (_useModelEmbeddings && mean == null)
             {
                 _logger.LogWarning("RAG index cache is missing its mean vector; rebuilding.");
                 return null;
@@ -242,7 +253,12 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.Rag
             return new IndexSummary(loaded.Count, perFile);
         }
 
+        // OVERFIT040 — synchronous by design: private, and its only caller is IndexDocuments, which runs
+        // under `lock (_gate)`. An async signature here could not be awaited from inside that lock, so the
+        // constraint is the caller's; see the note on IndexDocuments.
+#pragma warning disable OVERFIT040
         private static string ComputeFileHash(string path)
+#pragma warning restore OVERFIT040
         {
             using var stream = File.OpenRead(path);
             return Convert.ToHexString(SHA256.HashData(stream));
@@ -254,7 +270,7 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.Rag
             try
             {
                 store.Save(cachePath);
-                if (mean is null)
+                if (mean == null)
                 {
                     if (File.Exists(meanPath))
                     {
@@ -262,7 +278,7 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.Rag
                     }
                 }
 
-                if (!(mean is null))
+                if (mean != null)
                 {
                     using var stream = new FileStream(meanPath, FileMode.Create, FileAccess.Write);
                     using var writer = new BinaryWriter(stream);
@@ -322,7 +338,7 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.Rag
             {
                 ObjectDisposedException.ThrowIf(_disposed, this);
 
-                if (_store is null || _store.Count == 0)
+                if (_store == null || _store.Count == 0)
                 {
                     throw new InvalidOperationException(
                         "No documents are indexed yet. POST /documents/index first.");
@@ -394,7 +410,7 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.Rag
             {
                 ObjectDisposedException.ThrowIf(_disposed, this);
 
-                if (_store is null || _store.Count == 0)
+                if (_store == null || _store.Count == 0)
                 {
                     throw new InvalidOperationException("No documents are indexed yet. POST /documents/index first.");
                 }
@@ -493,7 +509,7 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.Rag
 
         private SentenceEmbedder GetEmbedder()
         {
-            if (_embedder is not null)
+            if (_embedder != null)
             {
                 return _embedder;
             }
@@ -604,7 +620,7 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.Rag
             }
 
             var oneLine = text.Replace("\r\n", " ").Replace('\n', ' ').Trim();
-            return oneLine.Length <= maxChars ? oneLine : oneLine[..maxChars].TrimEnd() + "…";
+            return oneLine.Length <= maxChars ? oneLine : oneLine.Substring(0, maxChars).TrimEnd() + "…";
         }
 
         public void Dispose()

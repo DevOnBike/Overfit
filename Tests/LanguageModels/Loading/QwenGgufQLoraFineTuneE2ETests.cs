@@ -9,7 +9,6 @@ using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.LanguageModels.Runtime;
 using DevOnBike.Overfit.Optimizers;
 using DevOnBike.Overfit.Tests.TestSupport;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
 {
@@ -26,7 +25,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
         private readonly ITestOutputHelper _out;
         public QwenGgufQLoraFineTuneE2ETests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [LongFact]  // heavy group, never measured — see Scripts/longfact_heavy.txt
         public void RealQwenQ4KM_FineTune_OverfitsShortSequence_BaseFrozen()
         {
             var path = TestModelPaths.Qwen3B.RequireQ4KmGgufPath();
@@ -40,7 +39,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             // A short, fixed sequence of valid token IDs (the point is gradient mechanics on the real
             // 3B base, not natural text — no tokenizer needed). inputs predict next-token targets.
             var seq = new[] { 785, 12, 3091, 40, 264, 17556, 1614, 11, 358, 1184, 311, 6923, 1467, 13, 9085, 25, 1986 };
-            var input = seq[..^1];
+            var input = seq[..(seq.Length - 1)];
             var target = seq[1..];
 
             // Snapshot a frozen base row to prove the 4-bit weights never change.

@@ -6,8 +6,8 @@
 using System.Buffers.Binary;
 using System.Runtime.CompilerServices;
 using System.Runtime.Intrinsics;
-using DevOnBike.Overfit.Intrinsics;
 using System.Security.Cryptography;
+using DevOnBike.Overfit.Intrinsics;
 
 namespace DevOnBike.Overfit.Randomization
 {
@@ -193,7 +193,7 @@ namespace DevOnBike.Overfit.Randomization
 
                 v.CopyTo(tail);
 
-                tail[..(destination.Length - i)].CopyTo(destination[i..]);
+                tail.Slice(0, destination.Length - i).CopyTo(destination.Slice(i));
             }
         }
 
@@ -281,7 +281,9 @@ namespace DevOnBike.Overfit.Randomization
         {
             ArgumentNullException.ThrowIfNull(reader);
 
+#pragma warning disable OVERFIT026 // BOUND: UIntLaneCount is Vector256<uint>.Count, a hardware constant of 8. 32 B.
             Span<uint> state = stackalloc uint[UIntLaneCount];
+#pragma warning restore OVERFIT026
 
             for (var i = 0; i < UIntLaneCount; i++)
             {
@@ -290,7 +292,9 @@ namespace DevOnBike.Overfit.Randomization
 
             _state = Vector256.Create<uint>(state);
 
+#pragma warning disable OVERFIT026 // BOUND: UIntLaneCount is Vector256<uint>.Count, a hardware constant of 8. 32 B.
             Span<uint> lanes = stackalloc uint[UIntLaneCount];
+#pragma warning restore OVERFIT026
 
             for (var i = 0; i < UIntLaneCount; i++)
             {

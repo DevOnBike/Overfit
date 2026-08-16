@@ -85,7 +85,7 @@ namespace DevOnBike.Overfit.Audio.Tts
                 return samples.ToArray();
             }
 
-            return samples[start..(end + 1)].ToArray();
+            return samples.Slice(start, (end + 1) - start).ToArray();
         }
     }
 }

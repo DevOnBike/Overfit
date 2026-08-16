@@ -7,7 +7,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using DevOnBike.Overfit.LanguageModels.Runtime;
 using DevOnBike.Overfit.LanguageModels.Tokenizers;
-using Xunit.Abstractions;
+using DevOnBike.Overfit.Tests.TestSupport;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
 {
@@ -37,7 +37,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
         /// asserts the engine now generates coherent, correctly-spaced text. [LongFact] — needs the real
         /// model. The fast, model-free convention guards live in <c>RopeConventionTests</c>.
         /// </summary>
-        [LongFact]
+        [LongFact("2s")]
         public void Engine_GeneratesCoherentText_ForLongSystemPrompt()
         {
             if (!File.Exists(ModelPath))
@@ -93,12 +93,14 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
         [Fact]
         public void IncrementalDecode_PreservesSpaces_LikeChatSession()
         {
-            const string dir = @"C:\qwen3b";
-            if (!Directory.Exists(dir))
-            {
-                _out.WriteLine($"missing {dir}");
-                return;
-            }
+            // A skip, not a return: without the tokenizer this test asserts nothing, and a pass would be
+            // indistinguishable from "checked and correct" on a box with no fixtures (i.e. on CI).
+            // Gated on the FILE, not on the directory: an existing but empty fixture directory passes a
+            // Directory.Exists check and then throws inside QwenTokenizer.Load — measured, that arm went
+            // red rather than skipping.
+            var dir = TestModelPaths.Qwen3B.Dir;
+            Assert.SkipWhen(!File.Exists(TestModelPaths.Qwen3B.TokenizerJsonPath),
+                $"tokenizer.json not present in {dir} (set OVERFIT_QWEN3B_DIR).");
 
             var tok = QwenTokenizer.Load(dir);
             const string phrase = "The capital of France is Paris.";
@@ -125,7 +127,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
             Assert.Equal(whole, sb.ToString());
         }
 
-        [LongFact]
+        [LongFact("4s")]
         public void BatchedPrefill_MatchesSingleToken_OnRealQwen()
         {
             if (!File.Exists(ModelPath))
@@ -199,7 +201,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
         /// generated token for real text. Argmax stability is only a meaningful assertion where the model is
         /// actually confident.</para>
         /// </summary>
-        [LongFact]
+        [LongFact("2s")]
         public void RepackedPrefill_AgreesWithNonRepacked_OnArgmax()
         {
             if (!File.Exists(ModelPath))
@@ -249,7 +251,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
             Assert.Equal(argReference, argFast);
         }
 
-        [LongFact]
+        [LongFact("12s")]
         public void BatchedPrefill_MatchesSingleToken_OnRealQwenMoE()
         {
             const string moePath = @"C:\qwen-moe\Qwen1.5-MoE-A2.7B-Chat.Q8_0.gguf";
@@ -299,7 +301,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
             Assert.True(moeMaxDiff < 1e-3f, $"MoE batched vs single logit divergence {moeMaxDiff:G4} (> 1e-3).");
         }
 
-        [LongFact]
+        [LongFact("39s")]
         public void BatchedPrefill_TtftSpeedup_OnRealQwen()
         {
             if (!File.Exists(ModelPath))
@@ -336,28 +338,14 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
             _out.WriteLine($"TTFT {prompt.Length}-token prompt: single={single:F1} ms  batched={batched:F1} ms  speedup={single / batched:F2}×");
         }
         /// <summary>
-        /// Forces the NON-repacked batched kernels for the duration of the scope.
+        /// Forces the NON-repacked batched kernels for the duration of the scope — see
+        /// <see cref="NonRepackedKernelScope"/>, which carries the reasoning and is now the only writer of
+        /// the flag in the test tree. This wrapper is kept only so the call sites below still read as prose.
         ///
-        /// <para>Without this a batched-vs-single-token parity test silently stops testing what it claims.
-        /// The repacked <c>block_q*_Kx8</c> GEMMs associate their reduction differently from the per-row
-        /// kernels the single-token path uses, so they are NOT bit-identical - measured at
-        /// <c>maxAbsLogitDiff ~ 0.44</c> on Qwen-3B, enough to flip an argmax. Worse, a <c>*.gguf.repack</c>
-        /// sidecar sets <c>IsPrepacked</c> and switches that path on regardless of the env flag, which is
-        /// how this test came to fail unnoticed for two days (it is <c>[LongFact]</c>, so it never ran).
-        /// The repacked kernels are held to end-to-end coherence instead - see
-        /// <see cref="RepackedPrefill_AgreesWithNonRepacked_OnArgmax"/>.</para>
-        ///
-        /// <para>The flag is process-global, so these tests must not run concurrently with other prefill
-        /// tests - they are <c>[LongFact]</c> and run one at a time in practice.</para>
+        /// <para>The private near-twin that used to live here reset the flag to <c>false</c> rather than
+        /// restoring it, and the flag was process-global: with collections running in parallel it switched
+        /// the kernel under other tests mid-assertion.</para>
         /// </summary>
-        private static NonRepackedScope UseNonRepackedKernels() => new();
-
-        private readonly struct NonRepackedScope : IDisposable
-        {
-            public NonRepackedScope() => BatchedQuantProjection.DisableRepackedKernelsForParity = true;
-
-            public void Dispose() => BatchedQuantProjection.DisableRepackedKernelsForParity = false;
-        }
-
+        private static NonRepackedKernelScope UseNonRepackedKernels() => new();
     }
 }

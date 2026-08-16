@@ -13,6 +13,18 @@ namespace DevOnBike.Overfit.Audio.Tts
     /// format on purpose — no reflection-based JSON, so it stays Native-AOT-clean. This is the on-disk side of
     /// <c>overfit voice enroll</c>; the embedding is filled in once a cloning backend exists.
     /// </summary>
+    // OVERFIT040 for this whole type, type-scoped because every method on it is disk I/O — Save, Load and
+    // the private ReadId are the three flagged, and there is nothing else here to protect.
+    //
+    // THE CONSTRAINT: this is the on-disk side of `overfit voice enroll` — a manifest of five short lines and
+    // a small float blob, read or written once when a voice is enrolled, listed or loaded. It runs on the
+    // caller's own thread (a CLI verb's main thread, or a model-construction path), not on a pool thread, and
+    // nothing is queued behind it.
+    //
+    // WHAT IS GIVEN UP: these are public API of the shipped `DevOnBike.Overfit` package. Returning tasks
+    // would break every caller and force the CLI verbs above them async too, for an operation whose cost is
+    // one small file.
+#pragma warning disable OVERFIT040
     public static class VoiceProfileStore
     {
         private const string ManifestHeader = "overfit-voice 1";
@@ -71,8 +83,8 @@ namespace DevOnBike.Overfit.Audio.Tts
                 {
                     continue;
                 }
-                var key = line[..eq];
-                var value = line[(eq + 1)..];
+                var key = line.Substring(0, eq);
+                var value = line.Substring(eq + 1);
                 switch (key)
                 {
                     case "id":
@@ -133,7 +145,7 @@ namespace DevOnBike.Overfit.Audio.Tts
             {
                 if (line.StartsWith("id=", StringComparison.Ordinal))
                 {
-                    return line[3..];
+                    return line.Substring(3);
                 }
             }
             return Path.GetFileNameWithoutExtension(manifestPath);
@@ -153,4 +165,5 @@ namespace DevOnBike.Overfit.Audio.Tts
             return new string(chars);
         }
     }
+#pragma warning restore OVERFIT040
 }

@@ -8,7 +8,6 @@ using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Loading;
 using DevOnBike.Overfit.LanguageModels.Runtime;
 using DevOnBike.Overfit.LanguageModels.Tokenizers;
-using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
 {
@@ -24,14 +23,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
         private readonly ITestOutputHelper _out;
         public GemmaSmokeTests(ITestOutputHelper output) => _out = output;
 
-        [LongFact]
+        [ModelFact(Path, "3s")]
         public void Gemma2_Loads_And_Generates_Coherent_English()
         {
-            if (!File.Exists(Path))
-            {
-                _out.WriteLine("missing Gemma-2 gguf");
-                return;
-            }
 
             using (var reader = new GgufReader(Path))
             {

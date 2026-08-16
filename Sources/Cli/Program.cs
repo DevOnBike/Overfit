@@ -459,6 +459,174 @@ gatewayCommand.SetAction(parseResult => Commands.Gateway(
     parseResult.GetValue(gwInsecure),
     parseResult.GetValue(gwScanResponses)));
 
+// ---- anomaly-guard: the deployable guard loop, shadow by default ----
+var guardConfig = new Option<string>("--config", "-c")
+{
+    Description = "Path to the JSON configuration: Prometheus URL, namespace, pod regex, metric map, thresholds.",
+    Required = true,
+};
+
+var guardState = new Option<string?>("--state")
+{
+    Description = "File holding open incidents across restarts. Without it a restart reopens every incident "
+                + "that was running, so a rollout of this process pages an operator for problems they were "
+                + "already told about.",
+};
+
+var guardCadence = new Option<int>("--cadence-seconds")
+{
+    Description = "How often to evaluate. Default 300; consecutive windows overlap, so far below the window "
+                + "length just re-decides what it already decided.",
+};
+
+var guardWindow = new Option<int>("--window-minutes")
+{
+    Description = "How much history each cycle evaluates. Default 20. Longer is NOT safer: measured on a "
+                + "healthy population, 20 min gave 234 false incidents a day, 60 gave 93 and 240 gave 2583.",
+};
+
+var guardMetricsPort = new Option<int>("--metrics-port")
+{
+    Description = "Serve the guard's OWN metrics on this port at /metrics. Default 9469; 0 disables. "
+                + "Alert on overfit_guard_last_cycle_timestamp_seconds going stale — a guard that has "
+                + "stopped reports no incidents, which is indistinguishable from a healthy cluster.",
+    DefaultValueFactory = _ => 9469,
+};
+
+var anomalyGuardCommand = new Command(
+    "anomaly-guard",
+    "Watch a deployment's Prometheus metrics and report incidents. Shadow by default: it counts, explains "
+    + "and wakes nobody.")
+{
+    guardConfig,
+    guardState,
+    guardCadence,
+    guardWindow,
+    guardMetricsPort,
+};
+
+anomalyGuardCommand.SetAction((parseResult, ct) => AnomalyGuardCommand.RunAsync(
+    parseResult.GetValue(guardConfig)!,
+    parseResult.GetValue(guardState),
+    parseResult.GetValue(guardCadence),
+    parseResult.GetValue(guardWindow),
+    parseResult.GetValue(guardMetricsPort),
+    ct));
+
+// ---- anomaly-discover: what a cluster exports, and what the guard would be blind to ----
+var discoverPrometheus = new Option<string>("--prometheus", "-p")
+{
+    Description = "Prometheus base URL.",
+    Required = true,
+};
+
+var discoverNamespace = new Option<string>("--namespace", "-n")
+{
+    Description = "Kubernetes namespace to inspect.",
+    Required = true,
+};
+
+var discoverPods = new Option<string>("--pod-regex")
+{
+    Description = "Which pods in that namespace to inspect. Default '.*' — every pod.",
+    DefaultValueFactory = _ => ".*",
+};
+
+var discoverOut = new Option<string?>("--out", "-o")
+{
+    Description = "Write a configuration draft here. Only channels with exactly one evidenced candidate are "
+                + "written; ambiguous ones are reported and deliberately left out rather than guessed.",
+};
+
+// ---- anomaly ack / suppressions: the operator's half of the loop ----
+var ackUrl = new Option<string>("--url")
+{
+    Description = "Base URL of the running guard's metrics endpoint.",
+    DefaultValueFactory = _ => "http://127.0.0.1:9469",
+};
+var ackId = new Argument<long>("incident")
+{
+    Description = "Incident identifier, as printed in the guard's log.",
+};
+var ackReal = new Option<bool>("--real")
+{
+    Description = "The finding was correct. Pins it: no future floor proposal may silence a finding this "
+        + "size on this signal. Never opens a suppression.",
+};
+var ackNoise = new Option<bool>("--noise")
+{
+    Description = "The finding was not worth reporting. Mutes it for --for, and records the window as "
+        + "healthy so calibration folds it in.",
+};
+var ackFor = new Option<string?>("--for")
+{
+    Description = "How long to mute it: 30m, 12h, 7d. Noise only, and required for a mute to open.",
+};
+var ackReason = new Option<string?>("--reason")
+{
+    Description = "What to record alongside the judgement.",
+};
+var anomalyAckCommand = new Command(
+    "anomaly-ack",
+    "Tell a running guard whether an incident was noise or real.")
+{
+    ackId,
+    ackReal,
+    ackNoise,
+    ackFor,
+    ackReason,
+    ackUrl,
+};
+anomalyAckCommand.SetAction((parseResult, ct) =>
+{
+    var real = parseResult.GetValue(ackReal);
+    var noise = parseResult.GetValue(ackNoise);
+
+    if (real == noise)
+    {
+        Console.Error.WriteLine(
+            "Pass exactly one of --real or --noise. One silences a signal and the other pins it so nothing "
+            + "may silence it later; there is no sensible default between them.");
+
+        return Task.FromResult(2);
+    }
+
+    return AnomalyAckCommand.AckAsync(
+        parseResult.GetValue(ackUrl)!,
+        parseResult.GetValue(ackId),
+        real,
+        parseResult.GetValue(ackFor),
+        parseResult.GetValue(ackReason),
+        ct);
+});
+
+var anomalySuppressionsCommand = new Command(
+    "anomaly-suppressions",
+    "List what an operator has currently muted, and when each mute expires.")
+{
+    ackUrl,
+};
+anomalySuppressionsCommand.SetAction((parseResult, ct) =>
+    AnomalyAckCommand.ListAsync(parseResult.GetValue(ackUrl)!, ct));
+
+var anomalyDiscoverCommand = new Command(
+    "anomaly-discover",
+    "Inspect a cluster's Prometheus and propose a guard configuration: which metrics feed which channel, "
+    + "which need a human decision, and which the guard will be blind to. Run this before deploying.")
+{
+    discoverPrometheus,
+    discoverNamespace,
+    discoverPods,
+    discoverOut,
+};
+
+anomalyDiscoverCommand.SetAction((parseResult, ct) => AnomalyDiscoverCommand.RunAsync(
+    parseResult.GetValue(discoverPrometheus)!,
+    parseResult.GetValue(discoverNamespace)!,
+    parseResult.GetValue(discoverPods)!,
+    parseResult.GetValue(discoverOut),
+    ct));
+
 var rootCommand = new RootCommand("Overfit — run local LLMs, RAG and agents in pure .NET. No Python, no native runtime.")
 {
     pullCommand,
@@ -473,6 +641,10 @@ var rootCommand = new RootCommand("Overfit — run local LLMs, RAG and agents in
     benchCommand,
     scoreCommand,
     gatewayCommand,
+    anomalyGuardCommand,
+    anomalyDiscoverCommand,
+    anomalyAckCommand,
+    anomalySuppressionsCommand,
 };
 
 // Safety net for anything that escapes a command's own handler. Only OverfitException is caught: every one of
@@ -488,7 +660,7 @@ catch (OverfitException ex)
     Console.Error.WriteLine($"error: {ex.Message}");
 
     // Inner exceptions usually carry the actionable detail (the HTTP failure under a load error, etc.).
-    for (var inner = ex.InnerException; inner is not null; inner = inner.InnerException)
+    for (var inner = ex.InnerException; inner != null; inner = inner.InnerException)
     {
         Console.Error.WriteLine($"  caused by: {inner.Message}");
     }

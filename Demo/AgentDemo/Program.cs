@@ -3,7 +3,6 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using DevOnBike.Overfit.Runtime;
 using System.Text.Json;
 using DevOnBike.Overfit.LanguageModels.Chat;
 using DevOnBike.Overfit.LanguageModels.Constraints;
@@ -13,6 +12,7 @@ using DevOnBike.Overfit.LanguageModels.Retrieval;
 using DevOnBike.Overfit.LanguageModels.Runtime;
 using DevOnBike.Overfit.LanguageModels.Tokenizers;
 using DevOnBike.Overfit.LanguageModels.Tools;
+using DevOnBike.Overfit.Runtime;
 
 namespace DevOnBike.Overfit.Demo.Agent
 {
@@ -31,7 +31,7 @@ namespace DevOnBike.Overfit.Demo.Agent
         {
             var dir = Environment.GetEnvironmentVariable(OverfitEnvironment.ModelDir) ?? @"C:\qwen3b";
             var ggufPath = ResolveGguf(dir);
-            if (ggufPath is null)
+            if (ggufPath == null)
             {
                 Console.Error.WriteLine(
                     $"No .gguf found in '{dir}'. Set OVERFIT_MODEL_DIR to a Qwen2.5 GGUF directory " +
