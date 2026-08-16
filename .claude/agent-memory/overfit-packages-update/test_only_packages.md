@@ -15,6 +15,14 @@ Verified 2026-08-06 by grepping every `<PackageReference Include=` across the so
 `--deprecated`: none of the three appear in either list — all three are already at feed latest, and the old
 `xunit 2.9.3` "Legacy → xunit.v3" deprecation warning (present in every survey before this one) is gone. Nothing to
 take here; re-verify each survey since these move often.
+
+**2026-08-16: xunit.v3 4.0.0 + xunit.runner.visualstudio 4.0.0 exist (both published 2026-08-15) and are NOT a
+cheap bump — this package is no longer in the "take now" bucket.** Read the long entry in [[pinning-decisions]]
+before touching it. The one-line reason: `xunit.v3` 4.0.0 depends on `xunit.v3.mtp-v2` (was `mtp-v1`), which pulls
+`Microsoft.Testing.Platform` **2.3.3** (was 1.9.1), whose MSBuild targets add a `_MTPBeforeVSTest` target that
+**errors out `dotnet test`** on SDK >= 10 whenever `IsTestingPlatformApplication==true` — and xunit's own
+`buildTransitive/xunit.v3.core.mtp-v2.props` sets exactly that by default. `Microsoft.NET.Test.Sdk` 18.9.0 is a
+separate, genuinely cheap bump and is unaffected.
 Note: `Tests.csproj` also references `Microsoft.CodeAnalysis.CSharp` and `System.Numerics.Tensors` — those are NOT
 test-only, they're shared central pins with real consumers elsewhere (`Main`, `Analyzers`, `Cli`), so a bump there is
 not contained the way the six above are.

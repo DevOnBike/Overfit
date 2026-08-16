@@ -117,4 +117,66 @@ now move via `<LastPublishedVersion>` in `Directory.Build.props` (currently 10.0
 unpublished) rather than a hand comparison — same 2026-08-14/`XC-24` mechanism, already clean per the
 checker run above.
 
+**2026-08-16 survey (SDK 10.0.111 default, runtime 10.0.11 present; `--vulnerable --include-transitive`,
+`--deprecated` both clean across all 26 projects; feed reachable).** Exactly **6 distinct** outdated pins, and
+every other pin in the file is at feed latest stable. Four of the six are the Roslyn/ORT holds already documented
+above and unchanged. The two new ones are `Microsoft.NET.Test.Sdk` 18.8.1→18.9.0 and the xunit pair below.
+**Zero prerelease pins** — re-verified by reading every `Version=` in `Directory.Packages.props`.
+
+**`xunit.v3` 3.2.2 → 4.0.0 and `xunit.runner.visualstudio` 3.1.5 → 4.0.0 (both published 2026-08-15). DO NOT take
+as a routine bump — it breaks `dotnet test` as this repo invokes it.** The chain, each link read out of the
+shipped package rather than from release prose:
+
+1. `xunit.v3` 4.0.0's nuspec depends on `xunit.v3.mtp-v2 [4.0.0]`; 3.2.2 depended on `xunit.v3.mtp-v1 [3.2.2]`.
+2. `xunit.v3.core.mtp-v2` 4.0.0 depends on `Microsoft.Testing.Platform` **2.3.3** (mtp-v1 3.2.2 → 1.9.1), and its
+   `buildTransitive/xunit.v3.core.mtp-v2.props` sets
+   `<IsTestingPlatformApplication Condition=" '$(IsTestingPlatformApplication)' == '' ">true</IsTestingPlatformApplication>`.
+   The 3.2.2 props does **not** set this property at all.
+3. `Microsoft.Testing.Platform.MSBuild` 2.3.3 `buildMultiTargeting/…targets` adds a target absent from 1.9.1:
+   `<Target Name="_MTPBeforeVSTest" BeforeTargets="VSTest">` containing an `<Error>` ("Testing with VSTest target
+   is no longer supported… on .NET 10 SDK and later") whose condition is
+   `IsTestingPlatformApplication=='true' AND TargetFramework!='' AND _SupportsGlobalJsonTestRunner=='true'`, with
+   `_SupportsGlobalJsonTestRunner` computed in-target as `NETCoreSdkVersion` major `>= 10`.
+4. It reaches a **single-TFM** project: `build/…targets` and `buildTransitive/…targets` are one-line files that
+   `<Import>` the `buildMultiTargeting` one. `Tests.csproj` is single-TFM `net10.0`, and there is no
+   `dotnet.config` or `global.json` anywhere in the repo, so `dotnet test` runs the classic `VSTest` target.
+
+All three conditions hold here, so the predicted result is that `dotnet test -c Release` fails with that error on
+**both** CI arms (`dotnet-version: 10.x`). **NOT executed** — proving it requires editing `Directory.Packages.props`,
+which this agent may not do. Candidate escape hatch, also unverified: the props is conditional, so
+`<IsTestingPlatformApplication>false</IsTestingPlatformApplication>` in `Tests.csproj` should keep VSTest mode
+(with `xunit.runner.visualstudio` 4.0.0, which per its release notes supports v3 4.0.0+ — 3.1.5 does not).
+The alternative, migrating to the MTP `dotnet test`, costs the Linux coverage arm: `--collect:"XPlat Code Coverage"`
++ `--settings coverlet.runsettings` + `coverlet.collector` are VSTest data-collector concepts.
+
+**What 4.0.0 does NOT break, checked against the shipped assemblies so it need not be re-derived:**
+- `Assert.Skip` / `SkipWhen` / `SkipUnless` — all three present with **identical signatures** in
+  `xunit.v3.assert` 4.0.0 and 3.2.2 (`M:Xunit.Assert.Skip(System.String)` etc.). 19 call sites here are safe.
+- `[CollectionDefinition(…, DisableParallelization = true)]` — `P:Xunit.CollectionDefinitionAttribute.DisableParallelization`
+  still exists in 4.0.0, and the new `ParallelMode` enum `{None, Collections, All}` **defaults to `Collections`**,
+  stated three times in the 4.0.0 XML docs (`IParallelizationAttribute.GetMode`, `ICoreTestAssembly.ParallelMode`,
+  `ParallelModeOrDefault`). `Collections` is the v3 semantics verbatim. Only `[assembly: CollectionBehavior]`'s
+  `DisableTestParallelization`/`MaxParallelThreads`/`ParallelAlgorithm` were obsoleted (→ `[assembly: Parallelization]`),
+  and this repo uses **none** of them (grepped: 1 `[CollectionDefinition]`, 2 `[Collection(...)]`, 0 assembly attrs,
+  0 fixtures, 0 orderers). The doc summary did move from "in parallel with any other **collections**" to "any other
+  **tests**", and the whole runner was rewritten around a new `ExecutionScheduler` — so *non-overlap* is still
+  contractual but the *ordering* (runs last) that the 3.2.2 two-arm probe measured is not, and the probe needs re-running.
+- Test project stays an **exe**: mtp-v2 targets still hard-`<Error>` unless `OutputType=Exe`, and its props sets
+  `UseAppHost=true`. The orphaned-process/machine-mutex shape (`XC-42`) is unchanged.
+- Riskier and separate: `xunit.analyzers` moves **1.27.0 → 2.0.0** transitively, adding ~20 rules (xUnit1054-1069,
+  xUnit2033, xUnit3004-3007). `Tests.csproj` does not set `TreatWarningsAsErrors` and CI does not pass
+  `-warnaserror`, so these land as warnings, not a build break. `NoWarn` there carries `xUnit1051` (XC-18).
+
+**`Microsoft.NET.Test.Sdk` 18.8.1 → 18.9.0** (published 2026-08-14): bug fixes only per the vstest release notes —
+TerminalLogger character corruption, TRX attachment paths, data-collector protocol negotiation using the negotiated
+version instead of V1, AOT-compatible TranslationLayer. Nothing touching discovery. Cheap, independent of the xunit
+question. The "auto-generated Program file" coverage change does not apply here (xunit sets `GenerateProgramFile=false`).
+
+**`Microsoft.ML.OnnxRuntime` 1.28.0 → 1.29.0: nothing has changed since the PB-ORT1 analysis above** — 1.29.0
+(published 2026-08-12) is still the newest, there is no 1.29.x patch, and the pinned 1.28.0 carries no advisory
+(`--vulnerable` clean). `Microsoft.ML` and `Microsoft.ML.OnnxTransformer` do **not** move as a train with it: both
+are at 5.0.0 = latest stable (2025-11-11), next is `6.0.0-preview`. So the hold stands unchanged, and the
+outstanding obligation is still the cheap one already recorded: state the ORT version beside any published
+Overfit-vs-ORT number, since `docs/measured-baselines.md` carries no ORT entry.
+
 See also [[test-only-packages]] for the cheap-bump bucket.
