@@ -11,7 +11,7 @@
              unpublished package and broken `dotnet new overfit-chat` on first restore.
              UPDATE THIS WHEN YOU PUBLISH, in the same commit that stamps the CHANGELOG.
              `Scripts/check_template_pins.py` reads it; it is not consumed by any build. -->
-        <LastPublishedVersion>10.0.31</LastPublishedVersion>
+        <LastPublishedVersion>10.1.0</LastPublishedVersion>
         <InformationalVersion>release+id</InformationalVersion>
         <Authors>DevOnBike</Authors>
         <Company>Sharp IT</Company>
