@@ -119,7 +119,7 @@
          one at the top: it moves the other side of every published ratio. What that obliges instead is
          cheap and NOT YET DONE — state the ORT version beside any published Overfit-vs-ORT number, because
          docs/measured-baselines.md carries no ORT entry at all and a reader will assume the latest. -->
-    <PackageVersion Include="Microsoft.ML.OnnxRuntime" Version="1.28.0" />
+    <PackageVersion Include="Microsoft.ML.OnnxRuntime" Version="1.29.0" />
     <PackageVersion Include="Microsoft.ML.OnnxTransformer" Version="5.0.0" />
     <!-- Build/pack-time only (PrivateAssets="all"), so it adds no runtime surface to the shipped package.
          10.0.400 is an SDK-feature-band-aligned re-release; no changelog was found for it, which is stated
