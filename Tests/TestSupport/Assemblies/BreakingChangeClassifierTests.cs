@@ -545,6 +545,23 @@ namespace DevOnBike.Overfit.Tests.TestSupport.Assemblies
         }
 
         [Fact]
+        public void TheSnippetHelperIsIndependentOfHowThisFileWasCheckedOut()
+        {
+            // Every other test here takes its snippet from a raw string literal, so its line endings are the
+            // FILE's — LF in git, CRLF on a Windows runner because .gitattributes does not pin *.cs. That made
+            // NewTypeAdded_IsAdditive red on windows-latest and green on ubuntu-latest. The CRLF below is
+            // written explicitly instead of inherited, so this pins the normalisation in Single() on either
+            // checkout; without it, this test is the one that goes red.
+            var change = Single(
+                "namespace Sample\r\n{\r\n    public class Store\r\n    {\r\n    }\r\n}\r\n",
+                "public class Store\n    {\n    }",
+                "public class Store\n    {\n    }\n\n    public class Cache\n    {\n    }",
+                ChangeLevel.Additive);
+
+            Assert.Equal("AC-TYPE-ADDED", change.RuleId);
+        }
+
+        [Fact]
         public void DefaultValueAdded_IsAdditive()
         {
             var change = Single("""
@@ -763,9 +780,17 @@ namespace DevOnBike.Overfit.Tests.TestSupport.Assemblies
             string replace,
             ChangeLevel expected)
         {
-            Assert.Contains(find, source, StringComparison.Ordinal);
+            // `source` comes from a raw string literal, and a raw string literal carries whatever line endings
+            // the FILE has — the compiler does not normalise them. This file is LF in git and .gitattributes
+            // says nothing about *.cs, so a Windows runner checks it out as CRLF while `find` and `replace`
+            // stay LF, being escaped literals with an explicit \n. That mismatch made the guard below fail on
+            // windows-latest only. What is under test is the CONTENT of the snippet, not how it was checked
+            // out, so normalise once here and let every caller match against one form.
+            var snippet = source.Replace("\r\n", "\n", StringComparison.Ordinal);
 
-            var comparison = Compare(source, source.Replace(find, replace));
+            Assert.Contains(find, snippet, StringComparison.Ordinal);
+
+            var comparison = Compare(snippet, snippet.Replace(find, replace, StringComparison.Ordinal));
 
             Assert.Equal(expected, comparison.HighestLevel);
 
