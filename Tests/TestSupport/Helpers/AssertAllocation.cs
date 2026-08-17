@@ -16,7 +16,7 @@ namespace DevOnBike.Overfit.Tests.TestSupport.Helpers
     /// Linux CI runs. This helper tolerates that one-time infrastructure blip while still catching any real per-call
     /// allocation by orders of magnitude.</para>
     /// </summary>
-    public static class AllocationAssert
+    public static class AssertAllocation
     {
         /// <summary>
         /// Upper bound for one-time JIT/tier-up/OSR/PGO bookkeeping charged to the measuring thread (observed ~280 B).
@@ -52,12 +52,22 @@ namespace DevOnBike.Overfit.Tests.TestSupport.Helpers
         /// 2026-08-14 for `XC-38`: four non-reproducing failures are on record here with no numbers between
         /// them, and the next one has to be diagnostic on its own.</para>
         ///
-        /// <para><b>The discriminator is the split.</b> The loop is measured in two halves. Tier-up, OSR and
-        /// PGO bookkeeping are front-loaded — they land in the first half and the second half is clean. A
-        /// real per-call allocation is uniform, so both halves carry roughly the same bytes per iteration.
-        /// The GC collection counts are the third arm: a collection inside the window means another thread
-        /// was allocating hard, which is the load-sensitivity these intermittent failures are suspected of.
-        /// None of this costs anything on the passing path — two extra counter reads.</para>
+        /// <para><b>The discriminator is the split.</b> The loop is measured in two halves. A real per-call
+        /// allocation is uniform, so both halves carry roughly the same bytes per iteration; anything
+        /// one-time lands in ONE half and leaves the other clean. The GC collection counts are the third
+        /// arm: a collection inside the window means another thread was allocating hard, which is the
+        /// load-sensitivity these intermittent failures are suspected of. None of this costs anything on the
+        /// passing path — two extra counter reads.</para>
+        ///
+        /// <para><b>Corrected 2026-08-17 by the first readings this thing ever produced.</b> It was written
+        /// saying one-time work is <i>front-loaded</i> — first half dirty, second half clean. A loaded box
+        /// gave both shapes within one run: <c>16432 B / 0 B</c> on one test and <c>0 B / 8216 B</c> on
+        /// another, and the second shape was not in the reading instructions at all, so it read as
+        /// unexplained. Tier-up and OSR genuinely are front-loaded; an ambient event from another thread is
+        /// not, and lands wherever it happens. <b>So the half that is clean does not matter — that either
+        /// half is clean is the finding</b>, and the gen counters say whether it came from outside. Both
+        /// figures were ~1.6 B/call against a ~24 B floor for one object, which is by itself enough to rule
+        /// a per-call leak out.</para>
         /// </summary>
         /// <param name="label">What is under measurement, quoted verbatim in the failure message.</param>
         /// <param name="iterations">Total calls; split evenly between the two measured halves.</param>
@@ -110,10 +120,11 @@ namespace DevOnBike.Overfit.Tests.TestSupport.Helpers
                 + $"  overall:     {perCall:F1} B/call\n"
                 + $"  GC while measuring: gen0 +{GC.CollectionCount(0) - gen0}, "
                 + $"gen1 +{GC.CollectionCount(1) - gen1}, gen2 +{GC.CollectionCount(2) - gen2}\n"
-                + "  Reading it: a clean second half means the first half caught one-time JIT/tier-up work "
-                + "and the floor, not the code, is what to look at. Both halves allocating means a real "
-                + "per-call allocation. Gen collections above zero mean another thread was allocating "
-                + "hard during the window.");
+                + "  Reading it: EITHER half clean means the bytes were one-time and the floor, not the code, "
+                + "is what to look at — front-loaded is JIT/tier-up/OSR, late is an ambient event, and the "
+                + "clean half is what rules out a per-call leak either way. Both halves at a similar B/call "
+                + "means a real per-call allocation; below ~24 B/call it cannot be one object per call. Gen "
+                + "collections above zero mean another thread was allocating hard during the window.");
         }
     }
 }

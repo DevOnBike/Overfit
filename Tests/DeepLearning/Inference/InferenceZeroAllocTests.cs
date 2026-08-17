@@ -31,25 +31,19 @@ namespace DevOnBike.Overfit.Tests.DeepLearning.Inference
             model.Eval();
             model.PrepareInference(maxIntermediateElements: inputSize + outputSize + 1024);
 
+            // Built before anything is measured, so the closure allocates at this line rather than inside the
+            // window, and the warm-up runs through the same delegate.
+            Action body = () => model.ForwardInference(input, output);
+
             // Warmup: JIT + cache.
             for (var i = 0; i < 32; i++)
             {
-                model.ForwardInference(input, output);
+                body();
             }
 
             ForceFullGc();
 
-            var before = GC.GetAllocatedBytesForCurrentThread();
-
-            for (var i = 0; i < iterations; i++)
-            {
-                model.ForwardInference(input, output);
-            }
-
-            var after = GC.GetAllocatedBytesForCurrentThread();
-            var allocated = after - before;
-
-            AllocationAssert.NoPerCallAllocation(allocated, "inference");
+            AssertAllocation.NoPerCallAllocation("single-linear inference", iterations, body);
         }
 
         [Fact]
@@ -75,25 +69,19 @@ namespace DevOnBike.Overfit.Tests.DeepLearning.Inference
             model.Eval();
             model.PrepareInference(maxIntermediateElements: inputSize + hiddenSize + outputSize + 1024);
 
+            // Built before anything is measured, so the closure allocates at this line rather than inside the
+            // window, and the warm-up runs through the same delegate.
+            Action body = () => model.ForwardInference(input, output);
+
             // Warmup: JIT + cache.
             for (var i = 0; i < 32; i++)
             {
-                model.ForwardInference(input, output);
+                body();
             }
 
             ForceFullGc();
 
-            var before = GC.GetAllocatedBytesForCurrentThread();
-
-            for (var i = 0; i < iterations; i++)
-            {
-                model.ForwardInference(input, output);
-            }
-
-            var after = GC.GetAllocatedBytesForCurrentThread();
-            var allocated = after - before;
-
-            AllocationAssert.NoPerCallAllocation(allocated, "inference");
+            AssertAllocation.NoPerCallAllocation("multi-layer inference", iterations, body);
         }
 
         private static void FillDeterministic(float[] data)

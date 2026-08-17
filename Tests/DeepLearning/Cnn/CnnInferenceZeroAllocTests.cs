@@ -48,24 +48,21 @@ namespace DevOnBike.Overfit.Tests.DeepLearning.Cnn
             model.Eval();
             model.PrepareInference(maxIntermediateElements: 64 * 1024);
 
+            // Built here, before anything is measured: the closure allocates once, at this line, and the
+            // warm-up runs through it so the delegate itself is JIT-warm by the time the window opens.
+            Action body = () => model.ForwardInference(input, output);
+
             for (var i = 0; i < 32; i++)
             {
-                model.ForwardInference(input, output);
+                body();
             }
 
             ForceFullGc();
 
-            var before = GC.GetAllocatedBytesForCurrentThread();
-
-            for (var i = 0; i < iterations; i++)
-            {
-                model.ForwardInference(input, output);
-            }
-
-            var after = GC.GetAllocatedBytesForCurrentThread();
-            var allocated = after - before;
-
-            AllocationAssert.NoPerCallAllocation(allocated, "CNN inference");
+            // The two-half overload, not the one-total one: when this fails it does not reproduce, so the run
+            // that catches it has to say whether the bytes were front-loaded tier-up work or a real per-call
+            // allocation. See XC-73.
+            AssertAllocation.NoPerCallAllocation("CNN inference", iterations, body);
         }
 
         private static void FillDeterministic(float[] data)

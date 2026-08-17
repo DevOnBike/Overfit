@@ -19,7 +19,7 @@ thread-isolated, so allocations on other xunit collections' threads cannot pollu
 `PredictBatch` / `PredictBatchParallel` / `Predict` once each before the counter is read, so a cold-JIT
 first run is the shape that fits.
 
-**Not captured, and worth capturing next time**: the byte count in the `AllocationAssert` message. The run
+**Not captured, and worth capturing next time**: the byte count in the `AssertAllocation` message. The run
 filter kept only the failing test's name, so how far over the floor it was is unknown — a small overshoot
 and a large one point at different causes.
 

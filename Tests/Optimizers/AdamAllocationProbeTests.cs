@@ -41,13 +41,8 @@ namespace DevOnBike.Overfit.Tests.Optimizers
                 epsilon: 1e-8f,
                 weightDecay: 0.0001f);
 
-            GC.Collect();
-            GC.WaitForPendingFinalizers();
-            GC.Collect();
-
-            var before = GC.GetAllocatedBytesForCurrentThread();
-
-            for (var i = 0; i < iterations; i++)
+            // Built before anything is measured, so the closure allocates at this line, not inside the window.
+            Action body = () =>
             {
                 t++;
 
@@ -62,11 +57,13 @@ namespace DevOnBike.Overfit.Tests.Optimizers
                     beta2: 0.999f,
                     epsilon: 1e-8f,
                     weightDecay: 0.0001f);
-            }
+            };
 
-            var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
 
-            AllocationAssert.NoPerCallAllocation(allocated, "Adam step");
+            AssertAllocation.NoPerCallAllocation("Adam step", iterations, body);
         }
 
         [Fact]

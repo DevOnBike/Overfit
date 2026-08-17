@@ -155,7 +155,7 @@ namespace DevOnBike.Overfit.Tests.Trees
                 model.Predict(io.Features[0], single);
             };
 
-            AllocationAssert.NoPerCallAllocation("XGBoost batch + parallel + single predict", 50, body);
+            AssertAllocation.NoPerCallAllocation("XGBoost batch + parallel + single predict", 50, body);
         }
 
         [Fact]

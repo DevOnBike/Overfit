@@ -30,15 +30,11 @@ namespace DevOnBike.Overfit.Tests.Optimizers
             _ = parameter.DataView.AsSpan()[0];
             _ = parameter.GradView.AsSpan()[0];
 
-            GC.Collect();
-            GC.WaitForPendingFinalizers();
-            GC.Collect();
-
-            var before = GC.GetAllocatedBytesForCurrentThread();
-
             var checksum = 0f;
 
-            for (var i = 0; i < iterations; i++)
+            // Built before anything is measured, so the closure allocates at this line, not inside the window.
+            // The spans stay local to the body — they are what is under probe and never escape it.
+            Action body = () =>
             {
                 var dataSpan = parameter.DataView.AsSpan();
                 var gradSpan = parameter.GradView.AsSpan();
@@ -47,11 +43,13 @@ namespace DevOnBike.Overfit.Tests.Optimizers
 
                 dataSpan[0] += 0.000001f;
                 gradSpan[0] += 0.000001f;
-            }
+            };
 
-            var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
 
-            AllocationAssert.NoPerCallAllocation(allocated, "Adam mutable-span step");
+            AssertAllocation.NoPerCallAllocation("Adam mutable-span step", iterations, body);
             Assert.False(float.IsNaN(checksum));
         }
 
@@ -73,15 +71,11 @@ namespace DevOnBike.Overfit.Tests.Optimizers
             _ = parameter.DataView.AsSpan().Slice(0, length)[0];
             _ = parameter.GradView.AsSpan().Slice(0, length)[0];
 
-            GC.Collect();
-            GC.WaitForPendingFinalizers();
-            GC.Collect();
-
-            var before = GC.GetAllocatedBytesForCurrentThread();
-
             var checksum = 0f;
 
-            for (var i = 0; i < iterations; i++)
+            // Built before anything is measured, so the closure allocates at this line, not inside the window.
+            // The spans stay local to the body — they are what is under probe and never escape it.
+            Action body = () =>
             {
                 var dataSpan = parameter.DataView.AsSpan().Slice(0, length);
                 var gradSpan = parameter.GradView.AsSpan().Slice(0, length);
@@ -90,11 +84,13 @@ namespace DevOnBike.Overfit.Tests.Optimizers
 
                 dataSpan[0] += 0.000001f;
                 gradSpan[0] += 0.000001f;
-            }
+            };
 
-            var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
 
-            AllocationAssert.NoPerCallAllocation(allocated, "Adam mutable-span step");
+            AssertAllocation.NoPerCallAllocation("Adam mutable-span slice step", iterations, body);
             Assert.False(float.IsNaN(checksum));
         }
 
@@ -123,13 +119,8 @@ namespace DevOnBike.Overfit.Tests.Optimizers
                 v,
                 step);
 
-            GC.Collect();
-            GC.WaitForPendingFinalizers();
-            GC.Collect();
-
-            var before = GC.GetAllocatedBytesForCurrentThread();
-
-            for (var i = 0; i < iterations; i++)
+            // Built before anything is measured, so the closure allocates at this line, not inside the window.
+            Action body = () =>
             {
                 step++;
 
@@ -138,11 +129,13 @@ namespace DevOnBike.Overfit.Tests.Optimizers
                     m,
                     v,
                     step);
-            }
+            };
 
-            var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
 
-            AllocationAssert.NoPerCallAllocation(allocated, "Adam mutable-span step");
+            AssertAllocation.NoPerCallAllocation("Adam node-view step", iterations, body);
         }
 
         private static void ManualAdamWStepUsingNodeViews(

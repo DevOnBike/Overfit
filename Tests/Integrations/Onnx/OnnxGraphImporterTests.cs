@@ -175,8 +175,14 @@ namespace DevOnBike.Overfit.Tests.Integrations.Onnx
         // Asserts ZERO per-inference allocation. A genuine per-call leak allocates a whole object (>= ~24 B) every
         // iteration, scaling to hundreds of KB over the loop; some runtimes instead charge a single one-time JIT
         // tier-up / PGO / OSR bookkeeping allocation (observed ~280 B) to this thread inside the measured window —
-        // it lands on whichever inference test the tier-up happens during, hence the cross-platform flakiness. That
-        // is runtime infrastructure, not the inference path, so tolerate a strict sub-1-byte-per-call floor.
+        // it lands on whichever inference test the tier-up happens during, hence the cross-platform flakiness.
+        //
+        // The measurement lives in AssertAllocation rather than here, and that is the point (XC-73): the loop is
+        // measured in two halves, so a failure states which mechanism it was — a clean second half is front-loaded
+        // tier-up work, both halves allocating is a real per-call leak, and a gen collection inside the window is
+        // another thread allocating hard. This site reported one total until 2026-08-17 and duly caught a failure
+        // it could not explain; these runs do not reproduce, so the first sighting has to carry the diagnosis.
+        // `runInference` is already a delegate built by the caller, so its closure is allocated outside the window.
         private static void AssertZeroAllocPerInference(Action runInference, string label)
         {
             for (var i = 0; i < 256; i++)
@@ -184,15 +190,7 @@ namespace DevOnBike.Overfit.Tests.Integrations.Onnx
                 runInference();
             }
 
-            const int iterations = 10_000;
-            var before = GC.GetAllocatedBytesForCurrentThread();
-            for (var i = 0; i < iterations; i++)
-            {
-                runInference();
-            }
-            var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
-
-            AllocationAssert.NoPerCallAllocation(allocated, label);
+            AssertAllocation.NoPerCallAllocation(label, 10_000, runInference);
         }
 
         // ─────────────────────────────────────────────────────────────────────

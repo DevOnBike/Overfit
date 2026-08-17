@@ -89,25 +89,24 @@ namespace DevOnBike.Overfit.Tests.DeepLearning.Modules
             var adapter = new NeuralNetworkParameterAdapter(layer);
 
             var buffer = new float[adapter.ParameterCount];
-            adapter.WriteToVector(buffer);
-            adapter.ReadFromVector(buffer); // warmup
+
+            // Built before the measurement, so its closure is allocated at this line rather than inside the
+            // window, and the warm-up goes through the same delegate.
+            Action body = () =>
+            {
+                adapter.WriteToVector(buffer);
+                adapter.ReadFromVector(buffer);
+            };
+
+            body(); // warmup
 
             GC.Collect();
             GC.WaitForPendingFinalizers();
             GC.Collect();
 
-            var before = GC.GetAllocatedBytesForCurrentThread();
-
-            for (var i = 0; i < 5_000; i++)
-            {
-                adapter.WriteToVector(buffer);
-                adapter.ReadFromVector(buffer);
-            }
-
-            var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
-
-            // Zero-allocation is expected for parameter reading/writing.
-            AllocationAssert.NoPerCallAllocation(allocated, "parameter adapter read/write");
+            // Zero-allocation is expected for parameter reading/writing. The two-half overload, not the
+            // one-total one: a failure here does not reproduce, so it has to diagnose itself. See XC-73.
+            AssertAllocation.NoPerCallAllocation("parameter adapter read/write", 5_000, body);
         }
     }
 }

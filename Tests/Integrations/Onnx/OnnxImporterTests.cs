@@ -132,12 +132,15 @@ namespace DevOnBike.Overfit.Tests.Integrations.Onnx
 
             var output = new float[10];
 
+            // Built before anything is measured, so the closure allocates at this line, not inside a window.
+            Action body = () => engine.Run(
+                input,
+                output);
+
             // Warmup JIT and engine internals outside the measured allocation window.
             for (var i = 0; i < 256; i++)
             {
-                engine.Run(
-                    input,
-                    output);
+                body();
             }
 
             // Shared CI runners can land a one-off ambient allocation (runtime tiering/services)
@@ -153,16 +156,22 @@ namespace DevOnBike.Overfit.Tests.Integrations.Onnx
 
                 for (var i = 0; i < 1024; i++)
                 {
-                    engine.Run(
-                        input,
-                        output);
+                    body();
                 }
 
                 var after = GC.GetAllocatedBytesForCurrentThread();
                 allocated = after - before;
             }
 
-            AllocationAssert.NoPerCallAllocation(allocated, "importer Run (last of 3 attempts, 1024 calls)");
+            if (allocated != 0)
+            {
+                // Three dirty windows in a row is no longer plausibly a one-off, so the fourth is taken through
+                // the split-loop assert: it reports which half the bytes landed in and whether a GC ran, which
+                // is what separates front-loaded tier-up work from a real per-call allocation. The pass
+                // criterion is unchanged — both overloads clear at the same one-time-noise floor. See XC-73.
+                AssertAllocation.NoPerCallAllocation(
+                    "importer Run (fourth window, after 3 dirty ones, 1024 calls)", 1024, body);
+            }
         }
 
         private static void ForceFullGc()

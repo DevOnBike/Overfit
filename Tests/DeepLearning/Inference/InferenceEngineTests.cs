@@ -40,19 +40,12 @@ namespace DevOnBike.Overfit.Tests.DeepLearning.Inference
                     MaxIntermediateElements = 64 * 1024
                 });
 
+            // Built before anything is measured, so the closure allocates at this line, not inside the window.
+            Action body = () => engine.Run(input, output);
+
             ForceFullGc();
 
-            var before = GC.GetAllocatedBytesForCurrentThread();
-
-            for (var i = 0; i < iterations; i++)
-            {
-                engine.Run(input, output);
-            }
-
-            var after = GC.GetAllocatedBytesForCurrentThread();
-            var allocated = after - before;
-
-            AllocationAssert.NoPerCallAllocation(allocated, "engine inference");
+            AssertAllocation.NoPerCallAllocation("engine inference", iterations, body);
         }
 
         [Fact]
@@ -81,22 +74,23 @@ namespace DevOnBike.Overfit.Tests.DeepLearning.Inference
                     MaxIntermediateElements = 64 * 1024
                 });
 
-            ForceFullGc();
-
-            var before = GC.GetAllocatedBytesForCurrentThread();
-
             var checksum = 0f;
 
-            for (var i = 0; i < iterations; i++)
+            // The checksum is what stops the JIT eliding the prediction, so it stays inside the body. It used
+            // to be interpolated into the label; the label is now built before the loop runs, so it is asserted
+            // on afterwards instead — which is a real check rather than a way of consuming a value.
+            Action body = () =>
             {
                 var prediction = engine.Predict(input);
+
                 checksum += prediction[0];
-            }
+            };
 
-            var after = GC.GetAllocatedBytesForCurrentThread();
-            var allocated = after - before;
+            ForceFullGc();
 
-            AllocationAssert.NoPerCallAllocation(allocated, $"engine Predict (checksum={checksum})");
+            AssertAllocation.NoPerCallAllocation("engine Predict", iterations, body);
+
+            Assert.True(float.IsFinite(checksum), $"engine Predict checksum was {checksum}");
         }
 
         [Fact]
@@ -145,19 +139,12 @@ namespace DevOnBike.Overfit.Tests.DeepLearning.Inference
                     MaxIntermediateElements = 64 * 1024
                 });
 
+            // Built before anything is measured, so the closure allocates at this line, not inside the window.
+            Action body = () => engine.Run(input, output);
+
             ForceFullGc();
 
-            var before = GC.GetAllocatedBytesForCurrentThread();
-
-            for (var i = 0; i < iterations; i++)
-            {
-                engine.Run(input, output);
-            }
-
-            var after = GC.GetAllocatedBytesForCurrentThread();
-            var allocated = after - before;
-
-            AllocationAssert.NoPerCallAllocation(allocated, "engine CNN inference");
+            AssertAllocation.NoPerCallAllocation("engine CNN inference", iterations, body);
         }
 
         [Fact]

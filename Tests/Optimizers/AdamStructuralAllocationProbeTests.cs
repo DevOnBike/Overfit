@@ -28,22 +28,16 @@ namespace DevOnBike.Overfit.Tests.Optimizers
             using var parameter = CreateParameter(data, grad);
             using var optimizer = new MinimalAdamLike(parameter);
 
-            optimizer.Step();
+            // Built before anything is measured, so the closure allocates at this line, not inside the window.
+            Action body = () => optimizer.Step();
+
+            body(); // warmup
 
             GC.Collect();
             GC.WaitForPendingFinalizers();
             GC.Collect();
 
-            var before = GC.GetAllocatedBytesForCurrentThread();
-
-            for (var i = 0; i < iterations; i++)
-            {
-                optimizer.Step();
-            }
-
-            var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
-
-            AllocationAssert.NoPerCallAllocation(allocated, "Adam structural step");
+            AssertAllocation.NoPerCallAllocation("Adam structural step", iterations, body);
         }
 
         [Fact]

@@ -86,19 +86,15 @@ namespace DevOnBike.Overfit.Tests.Integrations.Onnx
             var input = new float[AvgPoolIn];
             var output = new float[AvgPoolOut];
 
+            // Built before anything is measured, so the closure allocates at this line, not inside the window.
+            Action body = () => engine.Run(input, output);
+
             for (var i = 0; i < 256; i++)
             {
-                engine.Run(input, output);
+                body();
             }
 
-            var before = GC.GetAllocatedBytesForCurrentThread();
-            for (var i = 0; i < 10_000; i++)
-            {
-                engine.Run(input, output);
-            }
-            var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
-
-            AllocationAssert.NoPerCallAllocation(allocated, "avgpool sequential inference");
+            AssertAllocation.NoPerCallAllocation("avgpool sequential inference", 10_000, body);
         }
 
         [Fact]
@@ -242,19 +238,15 @@ namespace DevOnBike.Overfit.Tests.Integrations.Onnx
             var input = new float[ResNetFlat];
             var output = new float[ResNetFlat];
 
+            // Built before anything is measured, so the closure allocates at this line, not inside the window.
+            Action body = () => model.RunInference(input, output);
+
             for (var i = 0; i < 256; i++)
             {
-                model.RunInference(input, output);
+                body();
             }
 
-            var before = GC.GetAllocatedBytesForCurrentThread();
-            for (var i = 0; i < 10_000; i++)
-            {
-                model.RunInference(input, output);
-            }
-            var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
-
-            AllocationAssert.NoPerCallAllocation(allocated, "dag graph inference");
+            AssertAllocation.NoPerCallAllocation("dag graph inference", 10_000, body);
         }
 
         // ─────────────────────────────────────────────────────────────────────
