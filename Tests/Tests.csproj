@@ -4,6 +4,29 @@
 		<!-- xunit v3 ships its own test host, so the project is an executable rather than a
 	     library discovered by VSTest. Without this the assembly builds and no test runs. -->
 		<OutputType>Exe</OutputType>
+		<!--
+		  Keeps `dotnet test` on the classic VSTest target (XC-70, 2026-08-17).
+
+		  `xunit.v3` 4.0.0 pulls `xunit.v3.mtp-v2` -> `Microsoft.Testing.Platform` 2.3.3, whose
+		  buildTransitive props defaults `IsTestingPlatformApplication` to true, and 2.3.3 adds a target
+		  1.9.1 did not have. With the property left at its default the build fails before a single test
+		  runs, and the message was reproduced here verbatim rather than derived:
+
+		      Microsoft.Testing.Platform.MSBuild.targets(320,5): error :
+		      Testing with VSTest target is no longer supported by Microsoft.Testing.Platform
+		      on .NET 10 SDK and later.
+
+		  BE CLEAR ABOUT WHAT THIS LINE IS: an opt-OUT of Microsoft.Testing.Platform, not a step toward it.
+		  It suppresses a target whose purpose is to say the invocation this repository uses is on its way
+		  out, so it buys time rather than progress, and the real migration deletes it.
+
+		  WHY THE TIME IS WORTH BUYING, and it is one thing: the Linux CI arm runs
+		  `collect:"XPlat Code Coverage"` with `coverlet.runsettings` and feeds Codecov with
+		  `fail_ci_if_error: true`. Those are VSTest data-collector concepts. Under MTP they are gone and
+		  nothing here has yet shown what replaces them — that is `XC-75`, and it is the question to answer
+		  before this line is deleted.
+		-->
+		<IsTestingPlatformApplication>false</IsTestingPlatformApplication>
 		<Nullable>annotations</Nullable>
 		<ImplicitUsings>enable</ImplicitUsings>
 		<IsPackable>false</IsPackable>

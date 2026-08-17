@@ -179,4 +179,22 @@ are at 5.0.0 = latest stable (2025-11-11), next is `6.0.0-preview`. So the hold 
 outstanding obligation is still the cheap one already recorded: state the ORT version beside any published
 Overfit-vs-ORT number, since `docs/measured-baselines.md` carries no ORT entry.
 
+**2026-08-17 survey (triggered by "new Microsoft.ML.OnnxRuntime").** Queried the NuGet flat-container index
+directly (`api.nuget.org/v3-flatcontainer/microsoft.ml.onnxruntime/index.json`) rather than trusting
+`dotnet list --outdated`: newest published version is still **1.29.0**, same as the 2026-08-16 survey — no
+1.30.0 or later exists. So the trigger was stale: 1.29.0 is exactly the version `PB-ORT1` already measured
+(six clean A/B pairs, closed 2026-08-13, "numbers do not separate", pin stays 1.28.0), and
+`docs/measured-baselines.md` already carries the "measured against 1.28.0" table with the resolving-power
+caveat. Nothing new to add; re-check the flat-container index (not just `dotnet list`) each survey since
+that is the one source that would show a same-day release `dotnet list`'s cache might miss.
+
+`--vulnerable --include-transitive` and `--deprecated` both clean across all 26 projects, SDK unchanged at
+10.0.111 default (Roslyn pin conclusion from 2026-08-14 still holds, not re-verified byte-for-byte this
+time). **Confirmed `xunit.v3`/`xunit.runner.visualstudio` 4.0.0 + `IsTestingPlatformApplication=false`
+(`XC-70`, landed 2026-08-17) actually works**, not just read out of the package: ran
+`dotnet test ./Tests/Tests.csproj -c Release --filter "FullyQualifiedName~DoesNotExist12345"` live — VSTest
+18.0.2 adapter runs, no `_MTPBeforeVSTest` error, clean "no test matches filter" exit. `Microsoft.NET.Test.Sdk`
+18.9.0 unaffected. Move `xunit.v3`/`xunit.runner.visualstudio` from "needs the escape hatch" to "current and
+verified working" in [[test-only-packages]].
+
 See also [[test-only-packages]] for the cheap-bump bucket.

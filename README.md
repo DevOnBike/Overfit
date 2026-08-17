@@ -446,7 +446,7 @@ figure below is the AVX-512 one.
 
 | Workload | Result | Allocation |
 |---|---:|---:|
-| Single inference `Linear(784 -> 10)` | ~8.0x faster than ONNX Runtime (234 ns vs 1883 ns) | 0 B |
+| Single inference `Linear(784 -> 10)` | ~8.3x faster than ONNX Runtime (237 ns vs 1963 ns) — **this ratio shrinks and then reverses as the model grows; see [how it scales](#how-that-onnx-runtime-ratio-scales) before quoting it** | 0 B |
 | GPT-2 Small KV-cache decode | ~6.5x faster than naive O(N²), parity vs PyTorch | 0 B/token |
 | Qwen2.5-3B Q4_K_M decode | ~19 tok/s default, **~25 tok/s** with opt-in repacked GEMV (`OVERFIT_REPACK_GEMV=1` + `OVERFIT_DECODE_WORKERS=16`) | ~1 B/token |
 | Bielik-4.5B Q4_K_M decode | ~17 tok/s, −36% working set vs same-file llama.cpp | ~1 B/token |
@@ -461,10 +461,40 @@ Honest positioning:
 - llama.cpp / LLamaSharp are still faster for raw CPU LLM decode (~1.15× same-file vs a current AVX-512 llama.cpp build with our repacked-GEMV flag on, narrowed from ~1.6×). Single-stream decode is DRAM-bandwidth-bound and we measured our GEMV at **82% of this box's DRAM read ceiling**, with its compute rate *above* that ceiling — so the remaining gap is memory, not kernel quality, and a wider instruction set cannot close it (`Sources/Benchmark/DecodeGemvRooflineBenchmark.cs`).
 - On **prefill** the gap is now ~1.8× against an AVX-512 llama.cpp build and **~1.15× against their AVX2 build** — i.e. on machines without AVX-512 we are close to parity. Measured on one box (Ryzen 9 9950X3D) with one model; treat it as a data point, not a general claim. Our Q4_K matmul measured *faster* than llama.cpp's at equal instruction set and thread count (1.70 vs 1.56 TFLOP/s on their own test shape).
 - PyTorch CPU is faster for large-scale training.
-- ONNX Runtime is mature and fast if native dependencies are acceptable.
+- ONNX Runtime is mature and fast if native dependencies are acceptable — and **on convolutional models it
+  is roughly 5x faster than us**, which is the honest reading of the table below.
 - XGBoost's C++ kernel is still ~1.5× faster for raw batch tree scoring; Overfit wins decisively on in-process online (per-request) latency where the Python/native marshalling tax dominates.
 - Overfit's axis is pure-managed .NET, in-process deployment, Native AOT,
   low allocation pressure and no native model server.
+
+#### How that ONNX Runtime ratio scales
+
+A single "faster than ONNX Runtime" number is misleading in both directions, so here is the whole curve.
+Same box, same run, ONNX Runtime 1.29.0, 2026-08-17:
+
+| model | Overfit | ONNX Runtime | who wins |
+|---|---:|---:|---|
+| `Linear(784→10)` — 7,840 params | **237 ns** | 1,963 ns | Overfit **8.3×** |
+| MLP `784→256→128→10` — ~235k params | 8.9 µs | 9.4 µs | roughly parity |
+| MNIST CNN (imported ONNX) | **5.4 µs** | 6.6 µs | Overfit **1.2×** |
+| a 60.9 MB CNN | 66.7 ms | **11.2 ms** | ONNX Runtime **6.0×** |
+| VGG-16 — ~15.5 GFLOPs/inference | 100.7 ms | **20.7 ms** | ONNX Runtime **4.9×** |
+
+**What the two ends actually measure.** On a 7,840-parameter `Linear` the arithmetic takes a few hundred
+nanoseconds, so the result is dominated by ONNX Runtime's ~1.7 µs of per-call dispatch — that 8.3× is a real
+property you feel on small models called at high rates, and it is mostly a measure of **call overhead**. On
+VGG-16 the arithmetic dominates and the result measures **kernel quality**, where Microsoft's MLAS is about
+5× ahead of us.
+
+**The CNN gap is kernels, not threading**, and that is measured rather than assumed: with thread counts
+matched on both sides the gap is 4.9× on all cores and 4.2× on one, and the two engines scale about equally
+(Overfit 4.2×, ONNX Runtime 4.9× going from one thread to the whole machine). Allocation stays 0 B on the
+Overfit side throughout, against 224–904 B per call for ONNX Runtime, and 117 MB across the 8-thread
+concurrent run.
+
+**Pick on the shape of your workload, not on one ratio**: many small in-process inferences favour Overfit;
+one big convolutional model favours ONNX Runtime, and if you can ship native dependencies you should use it
+for that. Method and full caveats: [`docs/measured-baselines.md`](docs/measured-baselines.md).
 
 Full benchmark tables and caveats live in [`docs/TECHNICAL.md`](docs/TECHNICAL.md).
 

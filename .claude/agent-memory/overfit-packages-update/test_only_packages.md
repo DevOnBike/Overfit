@@ -16,11 +16,20 @@ Verified 2026-08-06 by grepping every `<PackageReference Include=` across the so
 `xunit 2.9.3` "Legacy → xunit.v3" deprecation warning (present in every survey before this one) is gone. Nothing to
 take here; re-verify each survey since these move often.
 
-**2026-08-16: xunit.v3 4.0.0 + xunit.runner.visualstudio 4.0.0 exist (both published 2026-08-15) and are NOT a
-cheap bump — this package is no longer in the "take now" bucket.** Read the long entry in [[pinning-decisions]]
-before touching it. The one-line reason: `xunit.v3` 4.0.0 depends on `xunit.v3.mtp-v2` (was `mtp-v1`), which pulls
-`Microsoft.Testing.Platform` **2.3.3** (was 1.9.1), whose MSBuild targets add a `_MTPBeforeVSTest` target that
-**errors out `dotnet test`** on SDK >= 10 whenever `IsTestingPlatformApplication==true` — and xunit's own
+**2026-08-17: xunit.v3 4.0.0 + xunit.runner.visualstudio 4.0.0 are TAKEN and VERIFIED WORKING (`XC-70`).**
+`Directory.Packages.props` pins both at 4.0.0, and `Tests.csproj` carries
+`<IsTestingPlatformApplication>false</IsTestingPlatformApplication>` as the opt-out of the MTP `_MTPBeforeVSTest`
+error described below. Confirmed live, not just read out of the package: `dotnet test ./Tests/Tests.csproj -c
+Release --filter "FullyQualifiedName~DoesNotExist12345"` runs the VSTest 18.0.2 adapter cleanly, no
+`_MTPBeforeVSTest` error. Back to "current, cheap bucket" — nothing to flag here on future surveys unless the
+opt-out property is removed (that's `XC-75`, the eventual MTP migration, which needs an answer for the Linux
+`--collect:"XPlat Code Coverage"` arm first).
+
+**History, kept because it explains WHY the opt-out property exists** — 2026-08-16: xunit.v3 4.0.0 +
+xunit.runner.visualstudio 4.0.0 shipped 2026-08-15 and were NOT a cheap bump as-is. The one-line reason:
+`xunit.v3` 4.0.0 depends on `xunit.v3.mtp-v2` (was `mtp-v1`), which pulls `Microsoft.Testing.Platform`
+**2.3.3** (was 1.9.1), whose MSBuild targets add a `_MTPBeforeVSTest` target that **errors out `dotnet test`**
+on SDK >= 10 whenever `IsTestingPlatformApplication==true` — and xunit's own
 `buildTransitive/xunit.v3.core.mtp-v2.props` sets exactly that by default. `Microsoft.NET.Test.Sdk` 18.9.0 is a
 separate, genuinely cheap bump and is unaffected.
 Note: `Tests.csproj` also references `Microsoft.CodeAnalysis.CSharp` and `System.Numerics.Tensors` — those are NOT

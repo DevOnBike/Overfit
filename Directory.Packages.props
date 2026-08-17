@@ -88,7 +88,39 @@
     <PackageVersion Include="Microsoft.Extensions.AI.Evaluation" Version="10.9.0" />
     <PackageVersion Include="Microsoft.Extensions.AI.Evaluation.Quality" Version="10.9.0" />
     <PackageVersion Include="Microsoft.ML" Version="5.0.0" />
-    <!-- HELD at 1.28.0 while 1.29.0 exists, deliberately, and NOT for the usual "it might be slower" reason:
+    <!-- TAKEN 1.28.0 -> 1.29.0 on 2026-08-17, REVERSING the hold recorded below. Read the hold first: it is
+         kept in full because the reasoning it was reversed on is the interesting part.
+
+         THE HOLD DID NOT SURVIVE ITS OWN MEASUREMENT. Its stated reason was "moving the baseline moves every
+         published Overfit-vs-ORT ratio" — true in principle, and refuted in magnitude by the paragraph three
+         below it: the ORT-side effect is 0.3-1.5%, against a measured cross-process floor of 4.26%. Concretely,
+         the largest published claim is "7.31x faster than ORT"; a 1.5% faster ORT makes that 7.20x, which is
+         a smaller change than the error bar on the 7.31x itself. The pin was protecting the numbers from a
+         movement nobody can detect.
+
+         AND THE REMEDY IT CHOSE INSTEAD HAS SINCE BEEN DELIVERED. The last paragraph says the honest
+         obligation is "state the ORT version beside any published number ... NOT YET DONE". That was done on
+         2026-08-13: docs/measured-baselines.md now opens with a "what the comparisons are measured AGAINST"
+         table naming the version and the resolving power. So the alternative to bumping was completed, and
+         what remained was a pin with no argument left under it.
+
+         WHAT THIS PIN IS FOR, stated so the next reader does not have to re-derive it: a CURRENT comparison.
+         A reader asking "how does Overfit compare to ONNX Runtime" means today's ORT, and the header of that
+         same baselines table says so — "a reader assumes the other side is the version they would install
+         today, so a comparison whose baseline is not named quietly flatters us by however much that baseline
+         has moved". Freezing the comparator serves a different purpose (tracking our own progress against an
+         unmoving other side) which our own baselines already serve.
+
+         WHAT WAS DELIBERATELY NOT DONE: the five benchmark classes were NOT re-run. They do not need to be.
+         PB-ORT1 bounds the flattery any published ratio carries at <= 1.5%, which is under the +/-3-4% floor
+         of the measurement that produced the ratio in the first place, so no number changes by a detectable
+         amount. What IS obliged, and is done: the baselines table now says the build uses 1.29.0 while the
+         published ratios were measured against 1.28.0. Do not silently restate a ratio against a version it
+         was not measured on.
+
+         Original hold, 2026-08-12, unedited below this line.
+
+         HELD at 1.28.0 while 1.29.0 exists, deliberately, and NOT for the usual "it might be slower" reason:
          this package is not in any Overfit code path at all. Its only consumer is Sources/Benchmark, where it
          is the OTHER SIDE of the comparison — InferenceBenchmark, BatchScalingBenchmark,
          ConcurrentInferenceBenchmark, ColdStartBenchmark and ImportedOnnxMnistCnnBenchmark each pair an
@@ -118,8 +150,11 @@
          So the bump is neither justified nor refuted by performance, and the honest reason to hold is the
          one at the top: it moves the other side of every published ratio. What that obliges instead is
          cheap and NOT YET DONE — state the ORT version beside any published Overfit-vs-ORT number, because
-         docs/measured-baselines.md carries no ORT entry at all and a reader will assume the latest. -->
-    <PackageVersion Include="Microsoft.ML.OnnxRuntime" Version="1.28.0" />
+         docs/measured-baselines.md carries no ORT entry at all and a reader will assume the latest.
+
+         (End of the original hold. Both of its load-bearing sentences are addressed at the top of this
+         comment: the movement it feared is under the noise floor, and the obligation it named was met.) -->
+    <PackageVersion Include="Microsoft.ML.OnnxRuntime" Version="1.29.0" />
     <PackageVersion Include="Microsoft.ML.OnnxTransformer" Version="5.0.0" />
     <!-- Build/pack-time only (PrivateAssets="all"), so it adds no runtime surface to the shipped package.
          10.0.400 is an SDK-feature-band-aligned re-release; no changelog was found for it, which is stated
@@ -166,7 +201,26 @@
          runtime and SDK, which DOES change the JIT. That install is a separate action and does warrant a
          canary. See XC-21. -->
     <PackageVersion Include="System.Numerics.Tensors" Version="10.0.11" />
-    <PackageVersion Include="xunit.v3" Version="3.2.2" />
-    <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5" />
+    <!-- 3.2.2 -> 4.0.0 and 3.1.5 -> 4.0.0 on 2026-08-17 (`XC-70`). THE TWO MOVE IN LOCKSTEP: `xunit.v3`
+         4.0.0 depends on `xunit.v3.mtp-v2` where 3.2.2 depended on `mtp-v1`, and the VSTest adapter has to
+         match. Taking either alone does not build.
+
+         THIS BUMP IS NOT SELF-CONTAINED — it needs `<IsTestingPlatformApplication>false</...>` in
+         Tests.csproj, and without it `dotnet test` fails before a single test runs. The chain, read out of
+         the shipped packages rather than release prose: `xunit.v3.mtp-v2` -> `Microsoft.Testing.Platform`
+         2.3.3 (was 1.9.1) -> its `buildTransitive` props defaults `IsTestingPlatformApplication` to true ->
+         2.3.3 adds `_MTPBeforeVSTest`, which hard-errors "Testing with VSTest target is no longer supported
+         ... on .NET 10 SDK and later". Reproduced verbatim before the property was added.
+
+         So the property is an OPT-OUT of Microsoft.Testing.Platform, not a step toward it, and it is the
+         line the eventual MTP migration deletes. That migration is `XC-75`, and the question it has to
+         answer first is what replaces the `collect:"XPlat Code Coverage"` switch for the Linux coverage arm.
+
+         (That switch is written without its two leading dashes on purpose. A double dash is illegal inside
+         an XML comment, and putting one here broke this file in a way that reports as NU1010 on EVERY
+         package in the solution — nine projects, every PackageReference "missing" — rather than as a parse
+         error. The message names the last thing you would look at.) -->
+    <PackageVersion Include="xunit.v3" Version="4.0.0" />
+    <PackageVersion Include="xunit.runner.visualstudio" Version="4.0.0" />
   </ItemGroup>
 </Project>

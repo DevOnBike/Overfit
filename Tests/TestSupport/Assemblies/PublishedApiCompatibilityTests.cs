@@ -167,7 +167,11 @@ namespace DevOnBike.Overfit.Tests.TestSupport.Assemblies
         [InlineData(null)]
         [InlineData("")]
         [InlineData("   ")]
-        public void AnUnsetOverrideUsesTheProjectsOwnReleaseOutput(string configured)
+        // `string?`, not `string`: the first case IS null, and that is the point of the theory —
+        // "unset" is the case this method exists to pin. Reported by `xunit.analyzers` 2.0.0 as xUnit1012
+        // when the analyzer arrived transitively with xunit.v3 4.0.0 (XC-70); the rule is right and the
+        // signature was wrong, so it is fixed rather than suppressed.
+        public void AnUnsetOverrideUsesTheProjectsOwnReleaseOutput(string? configured)
         {
             var (path, overridden) = ApiCompatibilityGate.ResolveCandidate(configured);
 

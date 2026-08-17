@@ -318,12 +318,100 @@ however much that baseline has moved.
 
 | the other side | version used | how stale, and how much it matters |
 |---|---|---|
-| **ONNX Runtime** (`Microsoft.ML.OnnxRuntime`, `Sources/Benchmark` only — it is in **no** Overfit code path) | **1.28.0** | 1.29.0 shipped 2026-08-12 and the pin is held deliberately, because moving it moves every published Overfit-vs-ORT ratio without a line of Overfit changing. **Measured, six clean A/B process pairs (`PB-ORT1`, 2026-08-12): the two versions do not separate.** Every steady-state ORT arm was faster on 1.29.0 (0.9848–0.9974) and it means nothing — the canaries moved the same way and `Overfit_Batch64` moved further, at 0.9825. **Resolving power stated before the verdict: median cross-process canary spread 4.26%, against an effect of 0.3–1.5%.** So the experiment is *silent* in that band, not negative, and the flattery any published ratio carries is bounded at **≤1.5% — under the noise floor.** No ratio needs restating; the version needs naming. |
+| **ONNX Runtime** (`Microsoft.ML.OnnxRuntime`, `Sources/Benchmark` only — it is in **no** Overfit code path) | **1.29.0, and the two headline ratios were RE-MEASURED against it on 2026-08-17 — see the re-measurement block below this table** | 1.29.0 shipped 2026-08-12 and the pin is held deliberately, because moving it moves every published Overfit-vs-ORT ratio without a line of Overfit changing. **Measured, six clean A/B process pairs (`PB-ORT1`, 2026-08-12): the two versions do not separate.** Every steady-state ORT arm was faster on 1.29.0 (0.9848–0.9974) and it means nothing — the canaries moved the same way and `Overfit_Batch64` moved further, at 0.9825. **Resolving power stated before the verdict: median cross-process canary spread 4.26%, against an effect of 0.3–1.5%.** So the experiment is *silent* in that band, not negative, and the flattery any published ratio carries is bounded at **≤1.5% — under the noise floor.** No ratio needs restating; the version needs naming. **PIN TAKEN 2026-08-17, reversing the hold.** The hold's stated reason — *"moving it moves every published ratio"* — is refuted in magnitude by the measurement in the same breath: the largest published claim is **7.31× faster than ORT**, and a 1.5% faster ORT makes it **7.20×**, a smaller change than the error bar on the 7.31× itself. The pin was protecting the numbers from a movement nobody can detect, and the alternative it chose instead — naming the version, this row — had already been delivered. **The five benchmark classes were deliberately NOT re-run**, because the flattery is bounded at ≤1.5% and that is under the ±3–4% floor of the measurement that produced the ratios. **That sentence stood for about an hour: the classes WERE then re-run against 1.29.0 (same day, at the user's instruction) and the block below carries the result. It is kept because the reasoning — that no re-run was *needed* — is still correct, and the re-run confirms it.** The bump was verified live rather than assumed — `runtimes/win-x64/native/onnxruntime.dll` resolves to **16,149,344 B**, exactly the 1.29.0 figure `PB-ORT1` recorded against 1.28.0's 15,809,848, which is the check that stops a stale `bin/` copy from making a re-measurement look flat. |
 | **llama.cpp** (the `~1.13× uniform` decode row below) | **`3292da0` = tag `b9441`**, recovered 2026-08-17 — see the section *"Recovering the llama.cpp baseline"* below for how, and for the one thing still unknown | Not written down when the number was taken; reconstructed from the local clone's **reflog**, which is evidence about the checkout rather than about the run. **The `b10088` that appears in `ROADMAP-COMPLETED.md:819` is a DIFFERENT measurement** — that row is prefill, taken 2026-07-22, and `b10088` is dated 2026-07-22, seven weeks *after* the decode sprint, so it cannot be the decode baseline and must not be cited as one. |
 
 **The cross-process floor is intrinsic here, not background load.** Canary spread was median 3.17% on a
 loaded box and median 4.26% after a reboot to a single process — slightly *worse* clean. An effect under a
 few percent therefore needs a different experiment shape, not a quieter machine.
+
+### Overfit vs ONNX Runtime 1.29.0 — re-measured 2026-08-17
+
+**Provenance, because a ratio without it is not citable.** BenchmarkDotNet 0.15.8 · Windows 11
+(10.0.26200.9168) · AMD Ryzen 9 9950X3D, 32 logical / 16 physical · .NET SDK 10.0.111, runtime .NET 10.0.11,
+X64 RyuJIT `x86-64-v4` · `Microsoft.ML.OnnxRuntime` **1.29.0**, native asset verified at 16,149,344 B ·
+ORT sessions pinned `IntraOpNumThreads = InterOpNumThreads = 1` in both classes · one BDN process per class.
+
+| subject | Overfit | ONNX Runtime | ratio | allocation |
+|---|---:|---:|---:|---|
+| `Linear(784→10)`, single inference | **236.8 ns** ± 1.33 | 1,962.7 ns ± 26.98 (preallocated `OrtValue`) | **8.29×** | 0 B vs 224 B |
+| same, against ORT's ordinary API | — | 3,665.5 ns ± 47.84 (`NamedOnnxValue`) | **15.5×** | 0 B vs 952 B |
+| **3-layer MLP `784→256→128→10`** | **8.883 µs** ± 0.25 | 9.445 µs ± 0.22 | **1.06×** | 0 B vs 224 B |
+| concurrent inference, 8 threads | **571.5 ms** ± 17.0 | 2,075.3 ms ± 72.8 | **3.63×** | **0 B vs 117,440,512 B** |
+
+**The two published claims hold.** `README.md:449` says ~8.0× on `Linear(784→10)` and `:455` says ~3.6×
+concurrent; measured 8.29× and 3.63×. The single-inference claim is if anything **understated**. Ratios are
+**within-process** comparisons — both arms in one BDN process — so the ±3–4% *cross-process* floor recorded
+above governs a different experiment and does not apply; the error bar here is BDN's `RatioSD`, 0.02 and 0.05
+respectively.
+
+**The row that is NOT in the README is the one worth reading.** On the 3-layer MLP — the same suite, the same
+box, the same run — Overfit is **1.06×**, not 8×. Nothing is wrong with either number: `Linear(784→10)` is a
+single 7,840-parameter matmul, small enough that ORT's ~1.7 µs of per-call dispatch overhead dominates the
+result, while the MLP is ~235k parameters and actual compute dominates. **So the 8× measures ORT's call
+overhead and the 1.06× measures kernel quality**, and only the first is published. The README does name its
+model, which is honest as far as it goes; it has no larger-model ORT row at all. *Caveat on the 1.06× itself:
+`RatioSD` 0.03 against a 6% difference, with `MultimodalDistribution` and outliers flagged — it is marginally
+resolved and should be re-run best-of-N before being published as a number rather than as a direction.*
+
+**What the absolute numbers do NOT support.** ORT's `Linear` figure reads 1,962.7 ns here against the
+README's 1,883 ns — **+4.2%, and that is not attributable to 1.29.0.** It is a cross-run comparison against a
+figure of unrecorded date and machine state, sitting exactly in the ±3–4% cross-process band. `PB-ORT1`
+measured the version difference properly and found it silent. **Quote the ratio, not the nanoseconds.**
+
+**Parity was checked before speed, by the harness itself**: `SingleInferenceBenchmark.Setup()` asserts
+Overfit's output matches ORT's to 1e-3 before any timing, and the run completed, so 1.29.0 did not move the
+numerics.
+
+**Still not measured**: `MLNetSingleInferenceBenchmark`'s ML.NET arms were carried along by the filter and are
+reported above only for the Overfit-vs-ORT pair. `InferenceBenchmark` and `ColdStartBenchmark` were
+deliberately skipped — `PB-ORT1` measured the first at 61% within-version spread (wrong job for the workload)
+and found the second unable to resolve anything (BDN raises `MinIterationTime`; one iteration is 1.07 ms
+against a 100 ms target).
+
+### CNN inference vs ONNX Runtime — where .NET loses, quantified (2026-08-17)
+
+Same box and provenance as the block above; `Microsoft.ML.OnnxRuntime` **1.29.0**. Models from
+`C:\onnxmodels\`. **The advantage reverses with model size, and the crossover is not subtle.**
+
+| model | ORT threads | Overfit | ORT | verdict |
+|---|---|---:|---:|---|
+| `Linear(784→10)` | 1 | 236.8 ns | 1,962.7 ns | Overfit **8.29×** |
+| MLP `784→256→128→10` | 1 | 8.883 µs | 9.445 µs | Overfit **1.06×** |
+| MNIST CNN (imported ONNX) | 1 | 5.410 µs | 6.649 µs | Overfit **1.23×** |
+| `cnn.onnx` (60.9 MB) | all | 66.72 ms | 11.15 ms | **ORT 5.98×** |
+| **VGG-16** (~15.5 GFLOPs) | all | 100.70 ms | 20.67 ms | **ORT 4.87×** |
+
+**The gap is KERNEL QUALITY, not threading, and that took a 2×2 to establish.** A first pass pinned only
+ORT and read *Overfit 101.5 ms vs ORT 100.8 ms* as a dead heat — **it is not**: that cell is Overfit on all
+cores against **one** MLAS core, which is the opposite of reassuring. The full grid on VGG-16:
+
+| | ORT all cores | ORT 1 thread |
+|---|---|---|
+| **Overfit all cores** | Ov 100.70 / ORT 20.67 → **ORT 4.87×** | Ov 101.50 / ORT 100.80 → 1.01× *(not like-for-like)* |
+| **Overfit 1 worker** | Ov 629.09 / ORT 20.47 → ORT 30.7× *(contaminated, see below)* | Ov 424.70 / ORT 101.00 → **ORT 4.20×** |
+
+**Read only the diagonal.** At matched thread counts the gap is **4.87× on all cores and 4.20× on one**, so
+it is roughly constant and therefore a property of the kernels, not of the parallelism. **Both engines scale
+about equally**: Overfit 424.70 → 100.70 ms = **4.22×**, ORT 100.80 → 20.67 ms = **4.88×**. Overfit's
+parallelism is fine; its per-core convolution throughput is ~4–5× behind MLAS.
+
+**Levers proven live, canaries clean** — required, because a flat result would otherwise be indistinguishable
+from a dead toggle. `ORT_INTRA/INTER_OP_NUM_THREADS` moved ORT by **392%**; `OVERFIT_PARALLEL_WORKERS` moved
+Overfit by **525%**; and each toggle left the *other* engine within **0.2–1.0%**, which is what says the box
+held still. Neither variable was passed as a shell prefix — both went through `env=` in `subprocess.run`.
+
+**One anomaly, stated rather than smoothed:** Overfit at 1 worker measured **629.09 ms** with ORT unpinned
+against **424.70 ms** with ORT pinned — the same Overfit configuration, **48% apart**. The likely cause is
+ORT's persistent thread pool still occupying cores while the Overfit arm is timed, which hurts most when
+Overfit has a single worker to starve. It is a hypothesis, not a measurement; the 4.20× figure uses the
+cleaner (ORT-pinned) cell, and a single-thread comparison of these two engines in one process should not be
+trusted below that resolution without isolating the runs.
+
+**This confirms a weakness the project already claims rather than discovering one** — `docs/ideas.md:39`
+already names *"where .NET loses (CNN vs MLAS …)"*. What is new is the number: **~5× on a real ImageNet CNN,
+at matched threads**, against **8.29× in our favour** on a 7,840-parameter `Linear`. Both are true; only the
+second is in the README (`XC-77`).
 
 ### Recovering the llama.cpp baseline — what was found, and what stays unknown
 
