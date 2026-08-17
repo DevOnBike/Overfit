@@ -324,5 +324,6 @@
   "env": {
     "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
     "DOTNET_CLI_UI_LANGUAGE": "en"
-  }
+  },
+  "outputStyle": "asd-ste-100"
 }

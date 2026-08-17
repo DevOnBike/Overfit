@@ -16,8 +16,8 @@
          published packages — see `Directory.Build.props` for why this project is outside the solution and
          outside Central Package Management. `Scripts/check_template_pins.py` compares these against that
          property; run it after every publish. -->
-    <PackageReference Include="DevOnBike.Overfit" Version="10.0.31" />
-    <PackageReference Include="DevOnBike.Overfit.Extensions.AI" Version="10.0.31" />
+    <PackageReference Include="DevOnBike.Overfit" Version="10.1.0" />
+    <PackageReference Include="DevOnBike.Overfit.Extensions.AI" Version="10.1.0" />
     <!-- 10.9.0 (2026-08-11), matching the release train pinned in `Directory.Packages.props`. Surveyed
          before bumping: the one breaking item in that release caps `Microsoft.Extensions.AI.OpenAI`'s
          OpenAI dependency, and neither this template nor the repository references that package; the new
