@@ -6,6 +6,9 @@
 using System.Numerics;
 using System.Numerics.Tensors;
 using System.Runtime.CompilerServices;
+using DevOnBike.Overfit.Intrinsics;
+using System.Runtime.Intrinsics.X86;
+using System.Runtime.Intrinsics;
 using DevOnBike.Overfit.Runtime;
 
 namespace DevOnBike.Overfit.Kernels
@@ -371,6 +374,24 @@ namespace DevOnBike.Overfit.Kernels
         /// has nothing to tile against, and <c>Linear(784,10)</c> at batch 1 is this repository's published
         /// 237 ns / 8.3×-vs-ONNX-Runtime figure. It keeps the untouched path.</para>
         /// </summary>
+        /// <summary>
+        /// Whether the 512-bit tile is used instead of the portable <see cref="Vector{T}"/> one.
+        ///
+        /// <para><b>This exists because <see cref="Vector{T}"/> is NOT the machine's width.</b> Measured on
+        /// this box: <c>Vector&lt;float&gt;.Count == 8</c> — 256 bits — while <c>Vector512.IsHardwareAccelerated</c>
+        /// and AVX-512 support are both true. .NET caps <see cref="Vector{T}"/> at 256 bits unless
+        /// <c>DOTNET_PreferredVectorBitWidth=512</c> is set, so every kernel written against it silently runs
+        /// at half width on AVX-512 hardware. <c>Conv2DGemmKernels</c> has always sidestepped this with an
+        /// explicit <see cref="Vector512{T}"/> path; this file did not, and ran at half width until
+        /// 2026-08-17 (`XC-80`).</para>
+        ///
+        /// <para>The portable path is kept rather than replaced: it is what runs on anything without AVX-512,
+        /// and it is the reference the 512 path is tested against.</para>
+        /// </summary>
+        internal static readonly bool UseAvx512Linear =
+            CpuFeatures.HasAvx512
+            && Environment.GetEnvironmentVariable(OverfitEnvironment.LinearAvx512) != "0";
+
         private static void ForwardOutputMajorTiled(
             ReadOnlySpan<float> input,
             ReadOnlySpan<float> weightsOutputInput,
@@ -380,6 +401,20 @@ namespace DevOnBike.Overfit.Kernels
             int inputSize,
             int outputSize)
         {
+            if (UseAvx512Linear)
+            {
+                ForwardOutputMajorTiled512(
+                    input,
+                    weightsOutputInput,
+                    bias,
+                    output,
+                    batchSize,
+                    inputSize,
+                    outputSize);
+
+                return;
+            }
+
             var width = Vector<float>.Count;
 
             // Hoisted out of both loops: 64 bytes of stack reused by every tile. Allocating it per tile is a
@@ -490,6 +525,131 @@ namespace DevOnBike.Overfit.Kernels
             }
         }
 
+        /// <summary>
+        /// <see cref="ForwardOutputMajorTiled"/> at the machine's real width: sixteen lanes per vector and an
+        /// explicit fused multiply-add, instead of eight lanes and a multiply the JIT may or may not fuse.
+        ///
+        /// <para>Structurally identical to the portable version on purpose — same 4×4 tile, same clamped
+        /// bases for partial tiles, same scalar tail. Keeping the two in the same shape is what makes the
+        /// parity test meaningful: it runs whichever one this machine selects, so a divergence between them
+        /// shows up as a disagreement with the naive oracle rather than as two kernels nobody compares.</para>
+        /// </summary>
+        private static void ForwardOutputMajorTiled512(
+            ReadOnlySpan<float> input,
+            ReadOnlySpan<float> weightsOutputInput,
+            ReadOnlySpan<float> bias,
+            Span<float> output,
+            int batchSize,
+            int inputSize,
+            int outputSize)
+        {
+            const int Width = 16;
+
+            var sums = stackalloc float[OutputMajorRowTile * OutputMajorColumnTile];
+
+            fixed (float* inputBase = input,
+                   weightsBase = weightsOutputInput,
+                   biasBase = bias,
+                   outputBase = output)
+            {
+                for (var b0 = 0; b0 < batchSize; b0 += OutputMajorRowTile)
+                {
+                    var rows = Math.Min(OutputMajorRowTile, batchSize - b0);
+
+                    // Clamped to the last valid row so a partial tile reads in bounds; the duplicate lanes are
+                    // computed and then not stored.
+                    var x0 = inputBase + ((long)(b0 + Math.Min(0, rows - 1)) * inputSize);
+                    var x1 = inputBase + ((long)(b0 + Math.Min(1, rows - 1)) * inputSize);
+                    var x2 = inputBase + ((long)(b0 + Math.Min(2, rows - 1)) * inputSize);
+                    var x3 = inputBase + ((long)(b0 + Math.Min(3, rows - 1)) * inputSize);
+
+                    for (var j0 = 0; j0 < outputSize; j0 += OutputMajorColumnTile)
+                    {
+                        var columns = Math.Min(OutputMajorColumnTile, outputSize - j0);
+
+                        var w0 = weightsBase + ((long)(j0 + Math.Min(0, columns - 1)) * inputSize);
+                        var w1 = weightsBase + ((long)(j0 + Math.Min(1, columns - 1)) * inputSize);
+                        var w2 = weightsBase + ((long)(j0 + Math.Min(2, columns - 1)) * inputSize);
+                        var w3 = weightsBase + ((long)(j0 + Math.Min(3, columns - 1)) * inputSize);
+
+                        Vector512<float> a00 = default, a01 = default, a02 = default, a03 = default;
+                        Vector512<float> a10 = default, a11 = default, a12 = default, a13 = default;
+                        Vector512<float> a20 = default, a21 = default, a22 = default, a23 = default;
+                        Vector512<float> a30 = default, a31 = default, a32 = default, a33 = default;
+
+                        var i = 0;
+
+                        for (; i <= inputSize - Width; i += Width)
+                        {
+                            var r0 = Vector512.Load(x0 + i);
+                            var r1 = Vector512.Load(x1 + i);
+                            var r2 = Vector512.Load(x2 + i);
+                            var r3 = Vector512.Load(x3 + i);
+
+                            var v = Vector512.Load(w0 + i);
+                            a00 = Avx512F.FusedMultiplyAdd(r0, v, a00);
+                            a10 = Avx512F.FusedMultiplyAdd(r1, v, a10);
+                            a20 = Avx512F.FusedMultiplyAdd(r2, v, a20);
+                            a30 = Avx512F.FusedMultiplyAdd(r3, v, a30);
+
+                            v = Vector512.Load(w1 + i);
+                            a01 = Avx512F.FusedMultiplyAdd(r0, v, a01);
+                            a11 = Avx512F.FusedMultiplyAdd(r1, v, a11);
+                            a21 = Avx512F.FusedMultiplyAdd(r2, v, a21);
+                            a31 = Avx512F.FusedMultiplyAdd(r3, v, a31);
+
+                            v = Vector512.Load(w2 + i);
+                            a02 = Avx512F.FusedMultiplyAdd(r0, v, a02);
+                            a12 = Avx512F.FusedMultiplyAdd(r1, v, a12);
+                            a22 = Avx512F.FusedMultiplyAdd(r2, v, a22);
+                            a32 = Avx512F.FusedMultiplyAdd(r3, v, a32);
+
+                            v = Vector512.Load(w3 + i);
+                            a03 = Avx512F.FusedMultiplyAdd(r0, v, a03);
+                            a13 = Avx512F.FusedMultiplyAdd(r1, v, a13);
+                            a23 = Avx512F.FusedMultiplyAdd(r2, v, a23);
+                            a33 = Avx512F.FusedMultiplyAdd(r3, v, a33);
+                        }
+
+                        sums[0] = Vector512.Sum(a00);
+                        sums[1] = Vector512.Sum(a01);
+                        sums[2] = Vector512.Sum(a02);
+                        sums[3] = Vector512.Sum(a03);
+                        sums[4] = Vector512.Sum(a10);
+                        sums[5] = Vector512.Sum(a11);
+                        sums[6] = Vector512.Sum(a12);
+                        sums[7] = Vector512.Sum(a13);
+                        sums[8] = Vector512.Sum(a20);
+                        sums[9] = Vector512.Sum(a21);
+                        sums[10] = Vector512.Sum(a22);
+                        sums[11] = Vector512.Sum(a23);
+                        sums[12] = Vector512.Sum(a30);
+                        sums[13] = Vector512.Sum(a31);
+                        sums[14] = Vector512.Sum(a32);
+                        sums[15] = Vector512.Sum(a33);
+
+                        for (var r = 0; r < rows; r++)
+                        {
+                            for (var cIndex = 0; cIndex < columns; cIndex++)
+                            {
+                                var sum = sums[(r * OutputMajorColumnTile) + cIndex];
+                                var rowInput = inputBase + ((long)(b0 + r) * inputSize);
+                                var weightRow = weightsBase + ((long)(j0 + cIndex) * inputSize);
+
+                                for (var t = i; t < inputSize; t++)
+                                {
+                                    sum += rowInput[t] * weightRow[t];
+                                }
+
+                                outputBase[((long)(b0 + r) * outputSize) + j0 + cIndex] =
+                                    sum + biasBase[j0 + cIndex];
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static void ForwardOutputMajorDot(
             ReadOnlySpan<float> input,
@@ -539,6 +699,21 @@ namespace DevOnBike.Overfit.Kernels
                     output,
                     inputSize,
                     outputSize);
+
+                return;
+            }
+
+            if (UseAvx512Linear)
+            {
+                ForwardInputMajorVector4Avx512(
+                    input,
+                    weightsInputOutput,
+                    bias,
+                    output,
+                    inputSize,
+                    outputSize,
+                    columnStart,
+                    columnEnd);
 
                 return;
             }
@@ -595,6 +770,94 @@ namespace DevOnBike.Overfit.Kernels
                 }
 
                 output[j] = sum;
+            }
+        }
+
+        /// <summary>
+        /// <see cref="ForwardInputMajorVector4"/> at 512 bits: four <see cref="Vector512{T}"/> accumulators
+        /// spanning 64 output columns, fed by an explicit fused multiply-add.
+        ///
+        /// <para><b>What widening does and does not buy here.</b> This kernel streams the weight matrix — per
+        /// input element it broadcasts one scalar and loads four vectors, so arithmetic intensity is about
+        /// 0.5 FLOP/byte either way and stays bandwidth-bound. The gain is therefore not intensity but
+        /// instruction count: half as many loop iterations and 128-byte loads instead of 64. **That is a
+        /// weaker argument than the one behind the tiled kernel, so treat the number this produces as the
+        /// evidence rather than the reasoning above** (`XC-81`).</para>
+        ///
+        /// <para>No <see cref="ForwardInputMajorVector1"/> fallback: an <paramref name="outputSize"/> between
+        /// 32 and 63 simply skips the 64-column block loop and is served by the 16-wide and scalar loops,
+        /// which is strictly better than dropping to a one-vector kernel.</para>
+        /// </summary>
+        private static void ForwardInputMajorVector4Avx512(
+            ReadOnlySpan<float> input,
+            ReadOnlySpan<float> weightsInputOutput,
+            ReadOnlySpan<float> bias,
+            Span<float> output,
+            int inputSize,
+            int outputSize,
+            int columnStart,
+            int columnEnd)
+        {
+            const int Width = 16;
+            const int BlockWidth = Width * 4;
+
+            fixed (float* inputBase = input,
+                   weightsBase = weightsInputOutput,
+                   biasBase = bias,
+                   outputBase = output)
+            {
+                var j = columnStart;
+
+                for (; j <= columnEnd - BlockWidth; j += BlockWidth)
+                {
+                    var acc0 = Vector512.Load(biasBase + j);
+                    var acc1 = Vector512.Load(biasBase + j + Width);
+                    var acc2 = Vector512.Load(biasBase + j + (Width * 2));
+                    var acc3 = Vector512.Load(biasBase + j + (Width * 3));
+
+                    for (var i = 0; i < inputSize; i++)
+                    {
+                        var x = Vector512.Create(inputBase[i]);
+                        var rowBase = weightsBase + ((long)i * outputSize) + j;
+
+                        acc0 = Avx512F.FusedMultiplyAdd(x, Vector512.Load(rowBase), acc0);
+                        acc1 = Avx512F.FusedMultiplyAdd(x, Vector512.Load(rowBase + Width), acc1);
+                        acc2 = Avx512F.FusedMultiplyAdd(x, Vector512.Load(rowBase + (Width * 2)), acc2);
+                        acc3 = Avx512F.FusedMultiplyAdd(x, Vector512.Load(rowBase + (Width * 3)), acc3);
+                    }
+
+                    Vector512.Store(acc0, outputBase + j);
+                    Vector512.Store(acc1, outputBase + j + Width);
+                    Vector512.Store(acc2, outputBase + j + (Width * 2));
+                    Vector512.Store(acc3, outputBase + j + (Width * 3));
+                }
+
+                for (; j <= columnEnd - Width; j += Width)
+                {
+                    var acc = Vector512.Load(biasBase + j);
+
+                    for (var i = 0; i < inputSize; i++)
+                    {
+                        acc = Avx512F.FusedMultiplyAdd(
+                            Vector512.Create(inputBase[i]),
+                            Vector512.Load(weightsBase + ((long)i * outputSize) + j),
+                            acc);
+                    }
+
+                    Vector512.Store(acc, outputBase + j);
+                }
+
+                for (; j < columnEnd; j++)
+                {
+                    var sum = biasBase[j];
+
+                    for (var i = 0; i < inputSize; i++)
+                    {
+                        sum += inputBase[i] * weightsBase[((long)i * outputSize) + j];
+                    }
+
+                    outputBase[j] = sum;
+                }
             }
         }
 

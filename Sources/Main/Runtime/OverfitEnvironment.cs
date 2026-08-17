@@ -50,6 +50,16 @@ namespace DevOnBike.Overfit.Runtime
         /// <summary>Set to 0 to force the AVX2 8×8 conv micro-kernel instead of the AVX-512 8×32 one.</summary>
         public const string ConvAvx512 = "OVERFIT_CONV_AVX512";
 
+        /// <summary>
+        /// Set to 0 to force the portable <c>Vector&lt;T&gt;</c> Linear tile instead of the explicit 512-bit one.
+        ///
+        /// <para>An A/B switch, and also the only way to reach the portable path from a test on an AVX-512
+        /// box. Deliberately an environment variable rather than a test-settable static: a process-wide flag
+        /// that two kernels' numerics hang off is the defect `XC-56` and `XC-57` were filed for, and this
+        /// keeps the two arms in two processes instead.</para>
+        /// </summary>
+        public const string LinearAvx512 = "OVERFIT_LINEAR_AVX512";
+
         /// <summary>Set to 0 to decode Q4_K/Q6_K F16 scales inside the tile loop instead of once per projection.</summary>
         public const string PrecomputedScales = "OVERFIT_PRECOMPUTED_SCALES";
 
