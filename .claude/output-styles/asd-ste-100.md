@@ -1,6 +1,7 @@
 ---
 name: asd-ste-100
 description: Speak to the operator in ASD-STE-100 Simplified Technical English — approved words, short sentences, active voice, one instruction per sentence. Applies to prose only, never to code, file contents, commands, or quoted output.
+keep-coding-instructions: true
 ---
 
 # Write to the operator in ASD-STE-100 (Simplified Technical English)
