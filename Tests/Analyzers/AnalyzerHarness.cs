@@ -34,11 +34,20 @@ namespace DevOnBike.Overfit.Tests.Analyzers
         /// <c>Console.Out</c> property to bind against — a hand-written stand-in named <c>Console</c> would
         /// pin the test's own type name rather than the rule. Compared by file name rather than by suffix so
         /// that adding a short name cannot silently match a longer one.</para>
+        ///
+        /// <para><c>System.Runtime.Numerics.dll</c> earned its place on 2026-08-17 for OVERFIT047, whose type
+        /// predicate names <c>BigInteger</c>. Same argument: the rule resolves that type out of the
+        /// compilation by metadata name, so a stand-in called <c>BigInteger</c> would test the harness rather
+        /// than the rule. <c>StringBuilder</c>, <c>CultureInfo</c>, <c>Half</c> and
+        /// <c>AppendInterpolatedStringHandler</c> all resolve through <c>System.Runtime.dll</c>'s forwards and
+        /// need nothing added — measured the same day, since the handler-converted shape is half of what that
+        /// rule exists to catch and it could not have been tested otherwise.</para>
         /// </summary>
         private static readonly HashSet<string> Referenced = new(StringComparer.OrdinalIgnoreCase)
         {
             "System.Runtime.dll",
             "System.Console.dll",
+            "System.Runtime.Numerics.dll",
         };
 
         /// <summary>Diagnostic ids the analyzer reports for <paramref name="source"/>, in source order.</summary>

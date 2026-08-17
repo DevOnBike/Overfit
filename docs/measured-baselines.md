@@ -552,6 +552,30 @@ built-in analyzer's *name* describes its intent, not its reach. Before adopting 
 against known-defective code and count how many of the known defects it names. Two hits and zero relevant
 is a capability measurement, and it is worth as much as a timing.
 
+## Which format specifiers actually move with the culture — measured 2026-08-17 (`XC-65`)
+
+.NET 10 SDK 10.0.111, ICU, this Windows dev box. Invariant culture against **pl-PL, ar-SA, sv-SE, fi-FI**;
+a value is "moves" if any of the four differs from invariant by an ordinal comparison. This is the predicate
+`OVERFIT047` is built on, and **two of the three families are narrower than they look**:
+
+| hole type | moves | does NOT move |
+|---|---|---|
+| `double` (and `float`/`decimal`/`Half`/`BigInteger`) | none, `F2`, `N0`, `G`, `R`, `E2`, `P1` — every specifier tested | — |
+| `DateTime` / `DateTimeOffset` | none, `G`, `g`, `F`, `d`, `D`, `T` | **`o` `O` `s` `u` `R` `r`** — the BCL formats these five against `DateTimeFormatInfo.InvariantInfo` whatever provider is passed |
+| `TimeSpan` | **only `g` and `G`** (they take the fractional-second separator from the culture) | **none at all, `c`, `t`, `T`** — all the invariant constant format |
+| `int` (negative, `-1234567`) | none, `D`, `G`, `N0` | `X` |
+
+**`R` is in both columns depending on the hole's type** — round-trip means *invariant* for a date and means
+*the culture's decimal separator* for a `double`. A rule keyed on the specifier character alone gets one of
+those two wrong whichever way it is written.
+
+**What it cost to not know this.** The first build of `OVERFIT047` fired on
+`Sources/Anomalies/Monitoring/SuppressionStore.cs:58` — `$"…{suppression.Until:u}…"`, already correct — and
+that was the *only* site in the directory the rule was about to be armed at `error`. Arming it would have
+forced a pragma onto correct code, which is how a guard teaches people to stop reading it. The negative
+integral residual of the same measurement (`-1234567` differs under ar-SA/sv-SE/fi-FI, U+2212 or U+061C) is
+real and is deliberately **not** flagged: reaching it means flagging every `{count}` in the tree.
+
 ## Measurement traps already paid for
 
 - **Cross-process before/after does not work on this box.** A prefill change read +5% while the *untouched*

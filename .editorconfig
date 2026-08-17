@@ -527,6 +527,55 @@ dotnet_diagnostic.OVERFIT034.severity = error
 dotnet_diagnostic.OVERFIT033.severity = error
 dotnet_diagnostic.OVERFIT034.severity = error
 
+# ── OVERFIT047 — culture-sensitive interpolation, added 2026-08-17 ────────────────────────────────────
+#
+# The durable half of the sweep that fixed 42 sites by hand and could only pin them with an enumerated
+# test that cannot see site 43. CA1305 is NOT this rule and that is measured rather than assumed — see
+# docs/measured-baselines.md:534-553; it fires on IFormatProvider overload SELECTION, and a bare
+# `$"...{v:P0}..."` selects no overload at all.
+#
+# `warning` IS NOT AVAILABLE as an intermediate step here, which is why this goes straight from none to
+# error with nothing in between. aot-guard publishes with TreatWarningsAsErrors=true and that flows
+# through the whole graph including Sources/Main, so a warning severity anywhere with live sites fails
+# that job — and the usual escape is barred, because an id in WarningsNotAsErrors ALSO overrides a
+# directory-scoped `error` (measured 2026-07-19; it silently neutered OVERFIT001/002/009/900).
+# OVERFIT047 must therefore never enter that list. `suggestion` is not an option either: a build does not
+# print suggestions, so counting the rule at suggestion measures this file's silence rather than the code.
+#
+# MEASURED BEFORE ARMING, 2026-08-17, with the rule built and running at its default Warning (no severity
+# line yet, which is the raised state this ratchet requires): a whole-solution rebuild reports 122 sites,
+# and BOTH directories armed below are at ZERO. The rest, for the record and NOT as a backlog anyone has
+# accepted: Sources/Main 33, Sources/Cli 31, Demo 48, Tools/SemanticNavigator 7, Sources/Server 2.
+# Sources/Benchmark reports 0 only because the analyzer is not wired into Benchmarks at all
+# (Directory.Build.props:59-69), and AndroidBench reports 0 because it is not in Overfit.sln and was
+# never built. Neither zero says anything about that code.
+#
+# Getting to that zero took a correction to the rule and it is worth recording, because the first build
+# DID report a site here: Anomalies/Monitoring/SuppressionStore.cs:58 interpolates `{until:u}`. Measured
+# the same day across invariant, pl-PL, ar-SA, sv-SE and fi-FI, the five round-trip date specifiers
+# (o O s u R r) are BYTE-IDENTICAL in all five — the BCL formats them against InvariantInfo whatever
+# provider is passed — so that site was already correct and the rule was wrong. TimeSpan is the reverse:
+# no specifier at all is the invariant constant format and only :g/:G move. Both are now in the predicate
+# and both have a test. A rule armed at error on a false positive would have forced a pragma onto correct
+# code, which is how a guard teaches people to stop reading it.
+#
+# Cli, Server, Benchmark, AndroidBench and Demo stay at `none` PERMANENTLY AND BY DECISION, not as an
+# unfinished sweep: they are console output read by a human at a terminal, where the ambient culture is
+# the correct choice. Sources/Main's nine remaining directories are a separate task with its own row.
+#
+# XC-68 applies and it is correct here rather than a gap: no .editorconfig section reaches a
+# source-generated tree (severities resolve per tree off the csc command line, and generated trees are
+# added afterwards), so OVERFIT047 is inert in generated code however this glob is written. Generated
+# formatting is not this repository's text. Do not "fix" it with a [*.g.cs] section — that cannot work.
+[*.cs]
+dotnet_diagnostic.OVERFIT047.severity = none
+
+[Sources/Anomalies/**.cs]
+dotnet_diagnostic.OVERFIT047.severity = error
+
+[Sources/Main/Statistics/**.cs]
+dotnet_diagnostic.OVERFIT047.severity = error
+
 # ── Reliability rules, armed on the OTHER assemblies that parse external input ────────────────────────
 # OVERFIT022/023/025/026/027/028/029/030 were error under [Sources/Main/**.cs] only. That scoping was never
 # a decision — the Tests and Benchmarks exclusions are written down and argued, these four projects were

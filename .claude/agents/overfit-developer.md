@@ -352,6 +352,24 @@ section unreadable.
 **Never edit your own definition, or any other agent's.** `.claude/agents/**` belongs to the user: you
 propose, they decide. The same goes for `CLAUDE.md`.
 
+## A guard needs TWO arms: red on real defective code, and SILENT on real correct code — added 2026-08-17
+
+**"Prove it fires" is half the job, and the other half is the half that finds the defect.** When you build
+an analyzer, a lint, a check or any guard that will be armed at `error`, run it over real source and then
+**open every site it reports in the directory you are about to arm. State, per site, defect or false
+positive.** A count is not enough.
+
+Measured on `XC-65`. The rule reported exactly one site in `Sources/Anomalies`, the directory the signed
+plan armed at `error`. That site was **already correct**: `{suppression.Until:u}` is byte-identical in
+every culture, because the BCL formats `o O s u R r` for a `DateTime` against `DateTimeFormatInfo.InvariantInfo`
+whatever provider it is given. The predicate could not be keyed on the specifier character either — `R` is
+invariant for a date and culture-sensitive for a `double`. **A census that only counted would have passed
+the task and shipped a false positive as a build error**, which is the failure that teaches a team to
+suppress a rule.
+
+The general form: a guard's red arm proves it can see. Its **silent arm proves it can tell the
+difference**, and only the second one licenses arming it.
+
 ## Before you implement a signed plan, check its mechanism can fire — added 2026-08-10
 
 **A signed plan is a decision record, not a proof that the mechanism works.** Read the code the plan

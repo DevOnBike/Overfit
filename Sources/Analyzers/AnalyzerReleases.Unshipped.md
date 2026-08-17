@@ -52,3 +52,4 @@ OVERFIT043 | Design | Warning | Range operator (x[1..]) — a readability decisi
 OVERFIT044 | Design | Warning | Null pattern (is null / is not null) — a readability decision; use == null / != null
 OVERFIT045 | Design | Warning | Primary constructor on a class or struct — write an ordinary constructor; positional records are exempt
 OVERFIT046 | Reliability | Warning | Task discarded with '_ =' — an explicit discard silently opts out of CS4014 (an error repo-wide), so the task's exceptions are never observed
+OVERFIT047 | Reliability | Warning | Interpolated string formats a value with the ambient culture — the same build emits different bytes on different machines; wrap it in string.Create(CultureInfo.InvariantCulture, ...)

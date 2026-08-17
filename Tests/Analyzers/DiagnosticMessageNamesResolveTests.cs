@@ -70,7 +70,7 @@ namespace DevOnBike.Overfit.Tests.Analyzers
 
             Assert.True(
                 descriptors.Count >= 45,
-                $"Only {descriptors.Count} descriptors were enumerated; the rule set has 47 and rules are only ever added. " +
+                $"Only {descriptors.Count} descriptors were enumerated; the rule set has 48 and rules are only ever added. " +
                 "A shrinking denominator means the reflection walk stopped seeing analyzers, not that the rules went away.");
 
             Assert.True(

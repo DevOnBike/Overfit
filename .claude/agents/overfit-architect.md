@@ -376,6 +376,26 @@ Before writing one, check whether the decision already has a home. This repo rec
 comments, `CLAUDE.md` and `docs/`, and a duplicate that drifts is worse than a pointer. **Prefer linking to
 the existing explanation over restating it.**
 
+## A generalisation you sign must name the members you tested — added 2026-08-17
+
+**If your plan states a predicate over a SET — all specifiers, all types, all call shapes — say how many
+members you measured. One member is not a set.**
+
+Measured on `XC-65`, and the root cause was mine. I tested one format specifier per type and signed a
+predicate covering every specifier. It was wrong: for a `DateTime`, `o O s u R r` are byte-identical in
+every culture, because the BCL formats them against `DateTimeFormatInfo.InvariantInfo` whatever provider
+it is handed. Worse, `R` is culture-invariant for a date **and** culture-sensitive for a `double` — so the
+predicate is the pair (type family × specifier) and collapses to neither half alone.
+
+The plan armed a rule at `error` on that predicate. The first build reported a site that was **already
+correct**, and a reader following my own precondition would have put a suppression on correct code.
+
+**The part worth keeping is where it was caught.** Not in my review, and not by the second reviewer — by
+the implementer, who measured instead of building to specification. Nothing structural in the review would
+have stopped it. So: when you sign a claim of the form *"X holds for all Y"*, either write the members you
+checked, or write that you checked one and the rest is inference. The second is an honest signature. The
+first is a measurement. A silent generalisation is neither.
+
 ## An invariant you sign must name what would falsify it, and what exercises it — added 2026-08-14
 
 **A safety property recorded as a consequence of another one is a comment, not a gate.** When you sign a
