@@ -41,6 +41,43 @@ namespace DevOnBike.Overfit.Cli
     /// <summary>Command implementations for the <c>overfit</c> CLI.</summary>
     internal static class Commands
     {
+        /// <summary>
+        /// Says a model could not be resolved, and — when the name is option-shaped — says that instead of
+        /// advising a download that cannot work.
+        ///
+        /// <para><b>Why this is one method and not five copies.</b> The two-line "not found / pull it" pair was
+        /// pasted at five call sites, which is how the defect in it propagated: `XC-71` found
+        /// <c>overfit serve --version</c> answering <i>"Download it first: overfit pull --version"</i>, and
+        /// that same wrong advice was waiting behind the other four for any mistyped flag. A copy fixed in one
+        /// place is a defect that survives in four.</para>
+        ///
+        /// <para><b>The guard is the leading dash, not a list of known flags.</b> `--version` is now handled
+        /// before parsing, but a *typo* — `--verison` — reaches here and no allow-list would recognise it. No
+        /// model in the store or on HuggingFace begins with <c>-</c>, so the shape is the reliable signal and
+        /// it covers the flags nobody has thought of yet.</para>
+        /// </summary>
+        /// <returns>Always 1, so a caller can <c>return NotFound(model);</c> and read as a guard clause.</returns>
+        private static int NotFound(string model)
+        {
+            if (model.StartsWith('-'))
+            {
+                Console.Error.WriteLine(
+                    $"'{model}' looks like an option, not a model name — this command takes the model as its "
+                    + "first positional argument.");
+                Console.Error.WriteLine(
+                    "Run the command with --help to see the options it accepts, or `overfit --version` for the "
+                    + "build identity.");
+
+                return 1;
+            }
+
+            Console.Error.WriteLine($"Model '{model}' not found in {ModelCache.Dir}.");
+            Console.Error.WriteLine(
+                $"Download it first:  overfit pull {model}   (or pass a .gguf path directly)");
+
+            return 1;
+        }
+
         public static int Pull(string spec, string? file)
         {
             // A direct http(s) URL → download straight from it (internal artifact repo / approved mirror when
@@ -251,9 +288,7 @@ namespace DevOnBike.Overfit.Cli
             var path = ModelCache.Resolve(model);
             if (path == null)
             {
-                Console.Error.WriteLine($"Model '{model}' not found in {ModelCache.Dir}.");
-                Console.Error.WriteLine($"Download it first:  overfit pull {model}   (or pass a .gguf path directly)");
-                return 1;
+                return NotFound(model);
             }
 
             if (sessions < 1)
@@ -402,9 +437,7 @@ namespace DevOnBike.Overfit.Cli
             var path = ModelCache.Resolve(model);
             if (path == null)
             {
-                Console.Error.WriteLine($"Model '{model}' not found in {ModelCache.Dir}.");
-                Console.Error.WriteLine($"Download it first:  overfit pull {model}   (or pass a .gguf path directly)");
-                return 1;
+                return NotFound(model);
             }
 
             // Default sidecar path is what the loader auto-discovers: <model>.repack next to the GGUF.
@@ -443,9 +476,7 @@ namespace DevOnBike.Overfit.Cli
             var path = ModelCache.Resolve(model);
             if (path == null)
             {
-                Console.Error.WriteLine($"Model '{model}' not found in {ModelCache.Dir}.");
-                Console.Error.WriteLine($"Download it first:  overfit pull {model}   (or pass a .gguf path directly)");
-                return 1;
+                return NotFound(model);
             }
 
             GgufReader reader;
@@ -963,9 +994,7 @@ namespace DevOnBike.Overfit.Cli
             var path = ModelCache.Resolve(model);
             if (path == null)
             {
-                Console.Error.WriteLine($"Model '{model}' not found in {ModelCache.Dir}.");
-                Console.Error.WriteLine($"Download it first:  overfit pull {model}   (or pass a .gguf path directly)");
-                return 1;
+                return NotFound(model);
             }
 
             if (!string.IsNullOrWhiteSpace(whisperModel) && !File.Exists(whisperModel))
@@ -1418,9 +1447,7 @@ namespace DevOnBike.Overfit.Cli
             var path = ModelCache.Resolve(model);
             if (path == null)
             {
-                Console.Error.WriteLine($"Model '{model}' not found in {ModelCache.Dir}.");
-                Console.Error.WriteLine($"Download it first:  overfit pull {model}   (or pass a .gguf path directly)");
-                return 1;
+                return NotFound(model);
             }
 
             Console.WriteLine($"Loading {Path.GetFileName(path)} ...");

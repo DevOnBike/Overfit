@@ -97,12 +97,18 @@ namespace Benchmarks
                 OverfitLicense.SuppressNotice = true;
                 OverfitLicense.MessageSink = _ => { };
 
+                // Our own switch is removed before BenchmarkDotNet sees the command line. It parses args
+                // strictly, and an option it does not know is a REJECTED command line — which returns zero
+                // summaries and looks exactly like "the filter matched nothing" (measured while closing
+                // XC-47). Passing it through would turn an opt-in into a silent void run.
+                var allowPartial = TakeAllowPartial(ref args);
+
                 var summaries = BenchmarkSwitcher
                     .FromAssembly(typeof(Program).Assembly)
                     .Run(args)
                     .ToList();
 
-                return ExitCodeFor(summaries, args);
+                return ExitCodeFor(summaries, args, allowPartial);
             }
             finally
             {
@@ -164,7 +170,7 @@ namespace Benchmarks
         /// <param name="summaries">Everything <see cref="BenchmarkSwitcher.Run"/> returned.</param>
         /// <param name="args">The command line, used only to tell the three outcomes apart.</param>
         /// <returns>0 if at least one benchmark produced a measurement, otherwise <see cref="NothingRanExitCode"/>.</returns>
-        private static int ExitCodeFor(IReadOnlyList<Summary> summaries, string[] args)
+        private static int ExitCodeFor(IReadOnlyList<Summary> summaries, string[] args, bool allowPartial)
         {
             // --help / --list / --info are answered by BenchmarkDotNet with no summaries at all, and they
             // are not failures: the caller asked a question and got an answer. Checked first so the
@@ -187,9 +193,14 @@ namespace Benchmarks
                 measured += summary.Reports.Count(report => report.AllMeasurements.Count > 0);
             }
 
-            if (measured > 0)
+            if (measured > 0 && measured == selectedCases)
             {
                 return 0;
+            }
+
+            if (measured > 0)
+            {
+                return PartialExitCodeFor(summaries, selectedCases, measured, allowPartial);
             }
 
             if (selectedCases > 0)
@@ -234,6 +245,156 @@ namespace Benchmarks
                 + "BenchmarkDotNet returns the same empty result for a command line it could not parse.");
 
             return NothingRanExitCode;
+        }
+
+        /// <summary>
+        /// Exit code for "some of the selected cases were measured and some were not".
+        ///
+        /// <para><b>Why this is separate from <see cref="NothingRanExitCode"/>, and worse than it.</b>
+        /// `XC-47` fixed the all-or-nothing case: zero measurements now exits 3. `XC-48` is the same lie in
+        /// miniature — measured on 2026-08-14, <c>--runtimes net48 --job Dry</c> selected 8 cases, measured
+        /// 4, failed to build 4, and exited <b>0</b>. The summary table <i>is</i> populated, so a reader has
+        /// no reason to count its rows against what was selected, and every downstream consumer of that run
+        /// treats a half-measurement as a whole one.</para>
+        ///
+        /// <para><b>Default refuse, explicit opt-in.</b> The host cannot reliably separate a legitimate skip
+        /// (a runtime this machine does not have) from a defect (a generated project that failed to
+        /// compile) — both arrive as a report with no measurements, and only the free-text error message
+        /// differs. Rather than guess, the run fails and prints every unmeasured case with whatever reason
+        /// BenchmarkDotNet gave, so a human decides. <c>--allow-partial</c> says "I know, some of these
+        /// cannot run here" and returns 0 — after printing the same list, because an opted-in partial run
+        /// still must not look complete.</para>
+        /// </summary>
+        private const int PartlyMeasuredExitCode = 4;
+
+        /// <summary>
+        /// Reports every selected case that produced no measurement, and decides the exit code.
+        ///
+        /// <para>Printed even when <paramref name="allowPartial"/> is set: the opt-in changes the exit code,
+        /// never the visibility. A caller who suppresses the code still needs the list, because the whole
+        /// defect being fixed here is a populated table that hides what is missing from it.</para>
+        /// </summary>
+        private static int PartialExitCodeFor(
+            IReadOnlyList<Summary> summaries,
+            int selectedCases,
+            int measured,
+            bool allowPartial)
+        {
+            var writer = allowPartial ? Console.Out : Console.Error;
+
+            writer.WriteLine();
+            writer.WriteLine(
+                $"PARTIAL RUN: {measured} of {selectedCases} selected case(s) produced a measurement. "
+                + $"{selectedCases - measured} did not, and are NOT in the table above.");
+
+            foreach (var summary in summaries)
+            {
+                foreach (var benchmarkCase in summary.BenchmarksCases)
+                {
+                    var report = summary[benchmarkCase];
+
+                    if (report is not null && report.AllMeasurements.Count > 0)
+                    {
+                        continue;
+                    }
+
+                    writer.WriteLine("  - " + benchmarkCase.DisplayInfo);
+                    writer.WriteLine("      reason: " + ReasonFor(report));
+                }
+
+                foreach (var error in summary.ValidationErrors)
+                {
+                    writer.WriteLine(
+                        $"  ! validation ({(error.IsCritical ? "critical" : "non-critical")}): {error.Message}");
+                }
+            }
+
+            if (allowPartial)
+            {
+                writer.WriteLine(
+                    "--allow-partial was passed, so this run exits 0. The cases listed above were still not "
+                    + "measured; do not quote this run as covering them.");
+
+                return 0;
+            }
+
+            writer.WriteLine(
+                "This exits non-zero on purpose. A run that measured only part of what it selected is not a "
+                + "result — a missing runtime and a generated project that failed to compile look identical "
+                + "here, and only one of them is acceptable. Read the reasons above; if they are all "
+                + "expected on this machine, re-run with --allow-partial.");
+
+            return PartlyMeasuredExitCode;
+        }
+
+        /// <summary>
+        /// Whatever BenchmarkDotNet recorded about a case that produced nothing — build error first, because
+        /// that is the one that distinguishes a missing runtime from broken code, and it is free text.
+        /// </summary>
+        private static string ReasonFor(BenchmarkReport report)
+        {
+            if (report is null)
+            {
+                return "no report at all — the case was selected but never reached the toolchain.";
+            }
+
+            if (!report.BuildResult.IsBuildSuccess)
+            {
+                var message = report.BuildResult.ErrorMessage;
+
+                return string.IsNullOrWhiteSpace(message)
+                    ? "the build failed and BenchmarkDotNet recorded no message."
+                    : "build failed — " + Condense(message);
+            }
+
+            if (!report.GenerateResult.IsGenerateSuccess)
+            {
+                return "the generated project could not be created.";
+            }
+
+            return "it built and ran but produced no measurement — look for a crashed child process above.";
+        }
+
+        /// <summary>One line out of a compiler's multi-line output, so the list stays readable.</summary>
+        private static string Condense(string message)
+        {
+            var flattened = message.Replace('\r', ' ').Replace('\n', ' ').Trim();
+
+            while (flattened.Contains("  ", StringComparison.Ordinal))
+            {
+                flattened = flattened.Replace("  ", " ", StringComparison.Ordinal);
+            }
+
+            return flattened.Length <= 400 ? flattened : flattened[..400] + " …";
+        }
+
+        /// <summary>
+        /// Removes <c>--allow-partial</c> from the command line and reports whether it was there.
+        ///
+        /// <para>It must not reach BenchmarkDotNet. An unrecognised option is a rejected command line, which
+        /// returns zero summaries and is indistinguishable from a filter that matched nothing — the exact
+        /// confusion `XC-47` had to write a message around.</para>
+        /// </summary>
+        private static bool TakeAllowPartial(ref string[] args)
+        {
+            var kept = new List<string>(args.Length);
+            var present = false;
+
+            foreach (var arg in args)
+            {
+                if (string.Equals(arg, "--allow-partial", StringComparison.OrdinalIgnoreCase))
+                {
+                    present = true;
+
+                    continue;
+                }
+
+                kept.Add(arg);
+            }
+
+            args = kept.ToArray();
+
+            return present;
         }
 
         /// <summary>

@@ -647,6 +647,34 @@ var rootCommand = new RootCommand("Overfit — run local LLMs, RAG and agents in
     anomalySuppressionsCommand,
 };
 
+// `--version` is a QUESTION, and it is answered here rather than by whichever command happens to receive it.
+//
+// XC-71. The published image's ENTRYPOINT is `["/app/overfit", "serve", "--host", "0.0.0.0", "--port",
+// "8080"]`, so the first thing anyone tries on an unfamiliar container — `docker run <image> --version` —
+// arrives as `overfit serve --version`. System.CommandLine adds `--version` to the ROOT command only, so on
+// `serve` it bound to the positional `<model>` and the CLI answered:
+//
+//     Model '--version' not found in /home/app/.overfit/models.
+//     Download it first:  overfit pull --version   (or pass a .gguf path directly)
+//
+// which is worse than unhelpful — it names an action that cannot work. The image is distroless, so there is
+// no shell to fall back to either.
+//
+// Handled before parsing, and for every command rather than just `serve`: no command here takes `--version`
+// as a value, so there is nothing to disambiguate, and a rule that holds everywhere needs no exceptions.
+// It re-dispatches to the root rather than formatting its own string, so the container's answer is
+// BY CONSTRUCTION the same one `overfit --version` gives, through the path that already publishes clean
+// under Native AOT.
+//
+// Known limitation, deliberately not fixed here: that answer is `release+id.<commit>` and carries NO version
+// number, because `Directory.Build.props:15` sets `<InformationalVersion>release+id</InformationalVersion>`.
+// Changing it would change the metadata of every published package, which is a release decision and not this
+// one's to make. The OCI labels on the image do carry `.version` correctly.
+if (Array.IndexOf(args, "--version") >= 0)
+{
+    return rootCommand.Parse(["--version"]).Invoke();
+}
+
 // Safety net for anything that escapes a command's own handler. Only OverfitException is caught: every one of
 // those is a message we wrote for the user (gated repo, corrupt download, unsupported operator), so a stack trace
 // adds noise and hides the point. Anything else is a bug in Overfit and is deliberately left to crash with its

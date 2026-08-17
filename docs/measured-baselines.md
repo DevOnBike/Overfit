@@ -319,11 +319,72 @@ however much that baseline has moved.
 | the other side | version used | how stale, and how much it matters |
 |---|---|---|
 | **ONNX Runtime** (`Microsoft.ML.OnnxRuntime`, `Sources/Benchmark` only — it is in **no** Overfit code path) | **1.28.0** | 1.29.0 shipped 2026-08-12 and the pin is held deliberately, because moving it moves every published Overfit-vs-ORT ratio without a line of Overfit changing. **Measured, six clean A/B process pairs (`PB-ORT1`, 2026-08-12): the two versions do not separate.** Every steady-state ORT arm was faster on 1.29.0 (0.9848–0.9974) and it means nothing — the canaries moved the same way and `Overfit_Batch64` moved further, at 0.9825. **Resolving power stated before the verdict: median cross-process canary spread 4.26%, against an effect of 0.3–1.5%.** So the experiment is *silent* in that band, not negative, and the flattery any published ratio carries is bounded at **≤1.5% — under the noise floor.** No ratio needs restating; the version needs naming. |
-| **llama.cpp** (the `~1.13× uniform` row below) | **not recorded — this is a gap** | The build, commit and quantisation of the llama.cpp side are not written down anywhere in this file, which is the same defect the ORT row above fixes. Anyone re-running that comparison should record them; anyone citing `1.13×` should say they do not know which build it was against. |
+| **llama.cpp** (the `~1.13× uniform` decode row below) | **`3292da0` = tag `b9441`**, recovered 2026-08-17 — see the section *"Recovering the llama.cpp baseline"* below for how, and for the one thing still unknown | Not written down when the number was taken; reconstructed from the local clone's **reflog**, which is evidence about the checkout rather than about the run. **The `b10088` that appears in `ROADMAP-COMPLETED.md:819` is a DIFFERENT measurement** — that row is prefill, taken 2026-07-22, and `b10088` is dated 2026-07-22, seven weeks *after* the decode sprint, so it cannot be the decode baseline and must not be cited as one. |
 
 **The cross-process floor is intrinsic here, not background load.** Canary spread was median 3.17% on a
 loaded box and median 4.26% after a reboot to a single process — slightly *worse* clean. An effect under a
 few percent therefore needs a different experiment shape, not a quieter machine.
+
+### Recovering the llama.cpp baseline — what was found, and what stays unknown
+
+Recovered 2026-08-17. The number itself was never in doubt; **which llama.cpp it was measured against was
+simply never written down**, and every public claim resting on `~1.13×` inherited that.
+
+**What the evidence is, and what kind of evidence it is.** The clone lives at `D:\llamacpp-tmp` and its
+`git reflog` records every checkout with a date. That is a record of *what was on disk when*, not a record
+of the run — the run wrote nothing. So this is reconstruction, and it is stated as reconstruction.
+
+| when | what the reflog says | bearing on the decode number |
+|---|---|---|
+| 2026-05-19 10:16 | `clone` → `6db1304` | the state before the sprint |
+| **2026-05-31 11:37:43** | `pull --ff` → **`3292da0`**, which `git describe` resolves to **`b9441`** (authored 2026-05-31 11:21 CEST, so pulled 16 minutes old) | **the sprint that produced `12.55 → ~17 tok/s` and `~1.13×` is dated 2026-05-31** |
+| 2026-07-01 / 07-22 / 07-23 | `4fc4ec5` (`b9859`), `6d5a910` (`b10092-2`), `da296d6` (`b10103-1`) | all later than the decode sprint; the July pulls are the prefill work |
+
+**The residual uncertainty, named rather than smoothed over.** The sprint's measurements are dated to the
+day, not to the hour, so strictly the decode run used **`6db1304` or `3292da0`**. A fresh `pull` at 11:37
+on the morning of the sprint is a strong indication the intent was to measure against current `master`,
+and `3292da0` is the answer to quote — but anyone republishing the figure should say "b9441" and not
+pretend the hour was recorded.
+
+**The binary that produced the number no longer exists.** All three build directories (`build-avx2`,
+`build-bench`, `build-tbo`) were rebuilt on 2026-07-22 and their `build-info.cpp` carries
+`LLAMA_COMMIT = "6d5a910"`, `MSVC 19.44.35228.0`, `x64`. So the decode comparison cannot be re-run against
+its original binary without checking `3292da0` back out and rebuilding. *Noted in passing: `6d5a910`
+describes as `b10092-2`, so even the July prefill row's own `b10088` is a couple of commits off the binary
+that ran — close enough not to matter there, and a reminder that a build number written from memory is not
+the same artefact as one read out of the binary.* *Also worth knowing before trusting
+a build banner here: those same files carry `LLAMA_BUILD_NUMBER = 861`, which is a CMake fallback and is
+nonsense against a tree that describes as `b10103` — the commit field is trustworthy, the number is not.*
+
+**The model side IS pinned exactly, and it is the same file both engines read** ("same-file gap" in the
+ROADMAP is literal):
+
+```text
+C:\bielik\Bielik-4.5B-v3.0-Instruct-Q4_K_M.gguf
+2878886912 bytes, mtime 2026-05-30 22:44
+sha256 39fb78db7c5e1582d3ef5bded109cd98606aabd5acbb5c98601155174b6763e1
+```
+
+The mtime is the evening before the sprint, which corroborates the reflog rather than resting on it.
+
+**Still not recorded, and no artefact anywhere can supply it: the llama.cpp thread count and build flags
+for the DECODE run.** `ROADMAP-COMPLETED.md:819` records `/arch:AVX512` and 16 threads for the *prefill*
+comparison in July, and the same file notes that `llama-bench` picked 16 threads over the machine's 32 and
+beat a 32-thread run — so thread count is known to move the answer materially on this box. **`~1.13×` is
+therefore citable as "against llama.cpp `b9441` on that exact GGUF", and NOT as a thread-for-thread
+comparison.** Closing that last hole needs a re-run, not an archaeology pass.
+
+**And the figure this pins is not the one the README publishes.** Found while doing the above, and it
+matters more than the archaeology: `~1.13×` is the **Bielik-4.5B** decode figure from 2026-05-31, and it is
+what `ROADMAP.md`, `ROADMAP-COMPLETED.md`, `Sources/Main/LanguageModels/README.md` and
+`Sources/Main/LanguageModels/Runtime/README.md` all cite. `README.md` — the public one — cites **two other
+numbers**: `~1.15×` at `:461` (decode, *with the repacked-GEMV flag on*, i.e. a different configuration)
+and `~1.2×` at `:626`. Both name their baseline as *"a current AVX-512 llama.cpp build"*, and **"current"
+decays**: it was written at some point against some build and now reads as a claim about whatever a reader
+would install today. So pinning `b9441` unblocks the internal figure and leaves the **published** ones
+resting on an undated word. Nothing here is evidence that those two numbers are wrong — they are a
+different subject measured a different way — only that they cannot be sourced. **They need their own
+re-run or their own archaeology; do not paper over them by copying `b9441` across.**
 
 ---
 
@@ -460,7 +521,7 @@ with no meaning.
 |---|---|
 | Bielik decode after the CPU sprint | 12.55 → **17 tok/s** (bit-identical output) |
 | Qwen-3B with `OVERFIT_REPACK_GEMV` | **24.4 tok/s** (+30%) |
-| gap to llama.cpp | **~1.13× uniform** — this is *not* parity; always best-of-N on both sides. **Which llama.cpp build this was measured against is not recorded** — see the baseline table at the top of this file |
+| gap to llama.cpp | **~1.13× uniform** — this is *not* parity; always best-of-N on both sides. Measured 2026-05-31 against llama.cpp **`3292da0` / `b9441`** on `Bielik-4.5B-v3.0-Instruct-Q4_K_M.gguf` (sha256 `39fb78db…`), recovered 2026-08-17 from the clone's reflog — see *"Recovering the llama.cpp baseline"*. **Their thread count is still unrecorded and is known to matter on this box**, so cite the build, not a thread-for-thread comparison |
 | QLoRA fine-tuning, 3B | ~3 GB RAM |
 | Phi-4 14B Q4_K_M | ~3.8 tok/s |
 | Android (Motorola Edge 50 Fusion), 0.5B Q4_K | ~3.8 tok/s |
