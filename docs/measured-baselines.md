@@ -408,6 +408,31 @@ Overfit has a single worker to starve. It is a hypothesis, not a measurement; th
 cleaner (ORT-pinned) cell, and a single-thread comparison of these two engines in one process should not be
 trusted below that resolution without isolating the runs.
 
+**Where VGG-16's 100 ms actually goes** (`Tests/Diagnostics/ConvGemmPartProfileTests.cs`, pointed at
+`vgg16.onnx`, all workers versus `OVERFIT_PARALLEL_WORKERS=1`):
+
+| part | all workers | 1 worker | scaling | share |
+|---|---:|---:|---:|---:|
+| convolution | 57.58 ms | 574.74 ms | **9.98×** | 58.2% |
+| **fully-connected** | **36.50 ms** | **36.98 ms** | **1.01× — none** | **36.9%** |
+| pooling | 4.88 ms | 4.56 ms | — | 4.9% |
+
+Within convolution the split is **im2col 18.0% / GEMM 82.0%** (9.69 ms and 44.16 ms per run), and the GEMM
+runs at **695 GFLOP/s = 32% of the measured 2190 GFLOP/s roofline**.
+
+**Two things this refuted.** The leading hypothesis was that im2col's materialisation dominates — the
+28.9 MB expansion is real, and it is **third-order**. And the FLOP arithmetic here was wrong twice in our
+favour before it was checked: VGG-16 is **30.94 GFLOP**, not the commonly quoted 15.5, which counts MACs;
+and the denominator has to be the roofline `MachineRooflineBenchmark` actually measures, not a
+clock × FMA-width estimate. On that basis, all cores against all cores: **Overfit 307 GFLOP/s = 14% of
+roofline, ONNX Runtime 1497 GFLOP/s = 68%**.
+
+**The largest single item is not a kernel at all**: `LinearLayer[33]` (25088→4096) takes **31.34 ms with
+every worker and 31.51 ms with one**, because `LinearKernels.Forward` has no parallel branch at any size —
+confirmed in the source, not inferred. At batch 1 that layer reads **411 MB** of weights to do 0.206 GFLOP,
+so it is bandwidth-bound and runs at **13.1 GB/s** on a single core. That is `XC-79`, and it is worth more
+than everything the conv path could give.
+
 **This confirms a weakness the project already claims rather than discovering one** — `docs/ideas.md:39`
 already names *"where .NET loses (CNN vs MLAS …)"*. What is new is the number: **~5× on a real ImageNet CNN,
 at matched threads**, against **8.29× in our favour** on a 7,840-parameter `Linear`. Both are true; only the
