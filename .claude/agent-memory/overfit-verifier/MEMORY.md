@@ -1,0 +1,3 @@
+- [Verifier index](reference_verifier_index.md) — suite size/duration, the `OVERFITMEASURING` mutex trap, the `dotnet test` pipe hang, which namespaces coverlet excludes. Oracle map NOT built yet.
+- [XC-50 decode claim tests](project_xc50_decode_claim.md) — three rounds, 10-arm matrix, no victim set shrank; concurrency-test admissibility rule (schedule-invariant assertions); red-vs-hung; my 0.833-vs-1.000 branch-rate arm mistake.
+- [Suite hangs have no backstop in CI](reference_verifier_index.md) — `dotnet test` in `.github/workflows/ci.yml` passes no `--blame-hang` and the jobs carry no `timeout-minutes`; a livelock burns the 6 h default with no named test.

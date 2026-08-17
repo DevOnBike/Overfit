@@ -1,0 +1,4 @@
+- [PB-12: decode-pool published numbers, re-measured 2026-08-14](audit_pb12_decode_pool.md) — 4 figures audited at HEAD `e21e7c3`: +28%→+25% (holds), +3% Phi→−1.9% (does not), +11% Bielik cap→+3.8% (does not), 4.5×→3.3-3.6× vs uncapped TPL.
+- [Which benchmark covers which decode path (and which do not exist)](benchmark_class_map.md) — `ForDecode` has NEVER been in `Sources/Benchmark`; the tok/s claims come from `[ModelFact]` diagnostics that are skipped by default.
+- [Measurement traps confirmed on this box](traps_this_box.md) — dispatch-counter liveness probe, cross-process floor ±3-4%, run-1-is-slow, `Stopwatch.StartNew` = 40 B of scaffolding.
+- [The PB-12 audit harness and how to rebuild it](harness_pb12.md) — `.claude/pb12/` (gitignored scratch), takes the benchmark mutex, ABAB + canary + liveness probe.

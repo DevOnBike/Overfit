@@ -1,0 +1,2 @@
+- [AN-A1 occupancy is the real number](project_an_a1_occupancy.md) — the 24h log is on disk: 94% incident occupancy from 9 episodes; rate is the wrong estimand; no independent replicate exists.
+- [AN-A1 power arithmetic](reference_an_a1_power_arithmetic.md) — verified exact Poisson numbers, the sqrt-approximation the registry used, and the events-not-days invariant (3/10/32/113).
