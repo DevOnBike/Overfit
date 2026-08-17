@@ -6,6 +6,10 @@ Amended: 2026-08-17 by overfit-architect — §3's predicate was WRONG for `Date
   re-measured independently before the amendment landed. Changes: Finding 8 (new), §3 rewritten as four
   families, §5 description bullet, §7 precondition, §9 rows 20-21, §10 M1 corrected + M2b/M8/M9 added,
   D1 corrected, D7 added. **Nothing else in the plan is affected and no earlier reasoning was deleted.**
+Amended (2): 2026-08-17 by overfit-architect — `XC-72`'s sweep raised whether standard `F`/`f` at precision
+  0 should be exempted for real holes. **It is not exempted** (D8), and §7's tie-breaker was under-specified
+  in *both* dimensions and would have returned the wrong answer here. Changes: Finding 9 (new), §3 Family A
+  note, §7 tie-breaker rewritten, §9 rows 22-23, §10 M10, D8. **No predicate changed; nothing was deleted.**
 Date: 2026-08-17
 Slug: xc-65-culture-invariant-interpolation-analyzer-plan
 
@@ -166,6 +170,47 @@ and §3 now says so.
 
 **Also corrected: my M1 in §10 could not test what its second clause claimed.** See §10.
 
+**Finding 9 — AMENDMENT 2026-08-17 (2), raised by `XC-72`'s sweep. `F0` on a real hole is NOT invariant,
+and the argument that it is rests on a premise I measured false.** The proposal was: standard `F`/`f` at
+precision 0 is separator-free by construction, so it is invariant for every **non-negative** real, and the
+two `XC-72` sites reported solely on an `F0` hole hold provably non-negative values. The first clause is
+what fails. Measured this run (.NET 10.0.11 / ICU, this Windows dev box, ordinal comparison of
+`d.ToString(spec, culture)` against `CultureInfo.InvariantCulture`, cultures `pl-PL ar-SA sv-SE fi-FI tr-TR
+lt-LT`; the interpolated form `$"{d:F0}"` under `CurrentCulture` was measured separately and agrees):
+
+| `double` value, `:F0` | invariant | cultures where it differs |
+|---|---|---|
+| `1234.5678`, `0.0`, `1e9`, `1e30`, `0.4`, `double.Epsilon` | `1235`, `0`, `1000000000`, … | **none** |
+| `double.PositiveInfinity` | `Infinity` | **all six** — `∞` (`U+221E`) |
+| `double.NegativeInfinity` | `-Infinity` | all six — `-∞`, and `−∞` under sv-SE/fi-FI/lt-LT |
+| `double.NaN` | `NaN` | `ar-SA` = `ليس رقم`, `fi-FI` = `epäluku` |
+| `-1234.5678` | `-1235` | `−1235` (`U+2212`) sv-SE/fi-FI/lt-LT, `؜-1235` ar-SA |
+| `-0.0`, `-0.4` | `-0` | same four — **an arithmetically non-negative expression can still produce `-0`** |
+
+`f0`, `F00` and `F0000` behave identically to `F0` (all are precision 0). Bare `F` is *not* a candidate at
+all: it takes precision from `NumberFormatInfo.NumberDecimalDigits`, measured `2` invariant and `3` under
+`ar-SA`/`sv-SE`/`fi-FI`/`tr-TR`/`lt-LT`, so it moves on every value. `float` and `Half` match `double`;
+`decimal` and `BigInteger` have no non-finite values, so only the sign moves for them.
+
+**So the trade is not the one it was framed as.** Exempting `F0` would not cost only negatives — it would
+also miss `NaN` and `±Infinity`, which are *non-negative-or-special* and which are produced by exactly the
+arithmetic that fills these strings: a rate divided by a counter that has not ticked. `Infinity` → `∞` is
+not a cosmetic sign swap, it is a different token, and a report line is where it lands.
+
+**Why this is a different trade from D2, rather than the same one cited twice.** D2's residual is **one**
+culture datum (`NegativeSign`) on a type family that **has no non-finite values**, and the noise it buys off
+is thousands of `{count}` holes. Family A's would be **three** classes (sign, `NaN`, `±Infinity`) and buys
+off **two** sites. Both ends of the ratio are inverted; the precedent does not carry.
+
+**The durable criterion this settles, which subsumes the `0.##`/`G6` question `XC-72` also raised.**
+`SuppressionStore.cs:58` (Finding 8) was a rule defect because `DateTime` under `:u` is byte-identical for
+**every value the type can take**. `{ParameterCount / 1e6:F0}` is *not* that: it is invariant only for the
+values that site happens to produce. Likewise `{x:0.##}` and `{x:G6}` came back identical on `0.0` and on
+`1e9` purely because those values have no fractional part and no group boundary. So:
+
+> **A hit is a rule defect only when the (type family × specifier) pair is invariant for every value the
+> type can represent. Invariance for the values a particular site produces is a *pragma*, never a narrowing.**
+
 ---
 
 ## 2. What the rule sees, and how it sees a hole's type with no reference to repository code
@@ -213,6 +258,11 @@ for the measurement and for the false positive the original wording produced.**
 **Family A — fires on every format specifier, and on none.** `float`, `double`, `decimal`, `System.Half`,
 `System.Numerics.BigInteger`. Measured: no specifier, `F2`, `N0`, `G`, `R`, `E2`, `P1` all move between
 the invariant culture and each of `pl-PL`, `ar-SA`, `sv-SE`, `fi-FI`, `tr-TR`.
+
+**`F0`/`f0` was examined for exemption and rejected — see Finding 9 and D8.** It is separator-free, so it is
+identical across cultures for every *finite non-negative* value; it is not identical for `NaN`
+(`epäluku` under fi-FI), for `±Infinity` (`∞` under all six cultures tested), or for anything that renders
+with a sign, including `-0`. The rule cannot see a value's sign or finiteness, so Family A stays whole.
 
 **Family B — `System.DateTime`, `System.DateTimeOffset`: fires EXCEPT on the round-trip and
 interchange specifiers `o O s u R r`**, which the BCL formats against `DateTimeFormatInfo.InvariantInfo`
@@ -355,10 +405,27 @@ believes and the ladder needs re-deciding.
 assumes a hit is a defective *site*. The one hit in `Sources/Anomalies` —
 `Monitoring/SuppressionStore.cs:58`, `{suppression.Until:u}` — was a defective *predicate* (Finding 8), and
 the correct action was to narrow the rule, not to wrap correct code. **So the first question on any hit
-here is which of the two it is, and the tie-breaker is a measurement, not a reading**: format the hole's
-type and specifier under the invariant culture and under `pl-PL`, and compare ordinally. If the bytes are
-identical the rule is wrong. That check takes a minute and it is the only thing standing between this
-precondition and a pragma on correct code.
+here is which of the two it is, and the tie-breaker is a measurement, not a reading.**
+
+**Amended again 2026-08-17 (2): the tie-breaker as first written was under-specified in BOTH dimensions and
+returns the wrong verdict on `F0`.** It said "under the invariant culture and under `pl-PL`", with no value
+set stated. Run that way on the obvious values, `F0` comes back identical and would be declared a rule
+defect — wrongly, per Finding 9. Both halves have to be pinned:
+
+- **Cultures — invariant, `pl-PL`, `fi-FI`, `ar-SA`, minimum.** `pl-PL` alone is not enough and this is
+  measured, not cautious: `pl-PL`'s `NegativeSign` is `U+002D` and its `NaNSymbol` is `NaN`, so it is blind
+  to the two residuals that decide `F0`. `fi-FI` carries `U+2212` *and* `epäluku`; `ar-SA` carries the
+  `U+061C` prefix and `DigitSubstitution = Context`.
+- **Values — a negative, a zero, a large one, and for Family A also `NaN` and `±Infinity`.** One value is
+  never a measurement. `{x:0.##}` and `{x:G6}` are byte-identical on `0.0` and on `1e9` and move on
+  `1234.5678`: that is **value dependence**, not invariance, and calling it a rule defect would be wrong.
+- **The verdict rule:** a hit is a **rule defect** only if the bytes are identical for **every** value in
+  the set across **every** culture in the set — i.e. the pair is invariant for every value the type can
+  represent. Identical on a subset means the *site* is fine and the *rule* is right: that is a **pragma**,
+  and the pragma comment must name the value property it relies on (Finding 9's criterion).
+
+That check takes a minute and it is the only thing standing between this precondition and either a pragma on
+correct code or a narrowing that hides a real defect.
 
 ---
 
@@ -429,6 +496,8 @@ involved. Minimum shapes, each an independent test:
 | 19 | `$"{d:F2}"` with `#pragma warning disable OVERFIT047` | **none** |
 | 20 | `$"{dt:o}"`, `$"{dt:u}"`, `$"{dto:R}"`, `$"{dt:s}"` | **none** — added by the Finding 8 amendment |
 | 21 | `$"{ts}"`, `$"{ts:c}"`, `$"{ts:T}"` | **none** — added by the Finding 8 amendment |
+| 22 | `$"{d:F0}"` `double`; `$"{f:f0}"` `float`; `$"{m:F0}"` `decimal` | OVERFIT047 **each** — added by the Finding 9 amendment |
+| 23 | `$"{d:F00}"`, `$"{d:F0000}"` `double` | OVERFIT047 each — the same precision-0 shape written longhand |
 
 Rows 9, 11, 12, 13 and 15 are the ones that decide whether the rule is usable: a false positive on any of
 them condemns all 42 sites `XC-64` just fixed. **Rows 20 and 21 join that set** — row 20 is
@@ -454,6 +523,7 @@ mutation whose victim stays green is a hole in the tests, not a pass.
 | M7 | re-add `IsOnExceptionPath` | row 16 only |
 | **M8** | treat every `DateTime`/`DateTimeOffset` specifier as culture-sensitive | row 20 — the signed predicate, as a mutation |
 | **M9** | treat every `TimeSpan` specifier as culture-sensitive | row 21 |
+| **M10** | exempt Family A when the specifier is `F`/`f` followed only by `0`s | rows 22 and 23 — **added 2026-08-17 (2)** |
 
 **M1's second clause was unfalsifiable as signed, and `overfit-developer` was right to reject it.** It
 read *"…and if rows 9/11/15 also move, the exemption was working by accident"*. Those rows assert
@@ -468,6 +538,14 @@ none.** Pair every "reports less" mutation with a test that expects a diagnostic
 **M8 and M9 are the signed §3 predicate re-entering as mutations**, which is the right place for it: the
 plan was wrong, the tests now say so, and a future edit that "simplifies" the family tables back will
 redden rather than quietly restore a false positive on `SuppressionStore.cs:58`.
+
+**M10 is the same device pointed the other way, and it is the reason rows 22-23 exist even though nothing
+in the rule special-cases `F0`.** The `F0` exemption is the narrowing this plan *rejected* (D8), and it is
+attractive enough to be proposed again — it was proposed once already, by a reader looking at two sites that
+really are correct. M10 forces that edit to redden two tests instead of silently introducing a false
+negative on `NaN`, `±Infinity` and every negative real. The test's own comment must carry the Finding 9
+measurement, not a cross-reference, so whoever writes the exemption sees why it is wrong at the point of
+writing it.
 
 ---
 
@@ -519,6 +597,22 @@ Nothing runs. The rule surfaces in `dotnet build` output and in the IDE. Two ope
   (`o O s u R r`) and the constant format is exempt for `TimeSpan` (none, `c`, `t`, `T`). Rationale:
   Finding 8, measured twice by two agents independently. This decision is pinned by test rows 20/21 and
   mutations M8/M9, so it cannot be silently reverted by a later simplification.
+- **D8 (2026-08-17, amendment 2)** — **Family A is not narrowed for `F`/`f` at precision 0.** The rule
+  keeps firing on `{x:F0}`. Rationale: Finding 9 — the premise "separator-free, therefore invariant for
+  every non-negative real" is measured false; `double.PositiveInfinity` renders `∞` under all six cultures
+  tested and `NaN` renders `epäluku`/`ليس رقم`, and neither is negative. **This is deliberately not the same
+  trade as D2**: D2's residual is one culture datum on a family with no non-finite values and buys off
+  thousands of `{count}` sites; this one would be three classes of residual to buy off two sites.
+  Pinned by rows 22/23 and M10.
+  - **Consequence for `XC-72`, and it is the whole cost of this decision:** `GPT1Config.ToString()`
+    (`~{ParameterCount / 1_000_000.0:F0}M params`, `DeepLearning/GPT1Config.cs:272-273`) and
+    `PrefillProfiler.Report()` (`{rowsPerRequest:F0} tokens each`,
+    `LanguageModels/Runtime/PrefillProfiler.cs:165`) take a `#pragma warning disable OVERFIT047`. **The justification comment must
+    say "finite and non-negative", not "non-negative"** — non-negativity alone does not exclude `+Infinity`,
+    and each site must quote the line that guarantees finiteness: `PrefillProfiler.cs:161`
+    (`var requests = _requests == 0 ? 1 : _requests;`, so the divisor is never `0`) and, for `GPT1Config`,
+    that `ParameterCount` is a `long` and the divisor a non-zero literal, so no non-finite value exists.
+  - `DeepLearning` therefore does **not** reach zero without an edit; it reaches zero with one pragma.
 
 **Explicitly not decided here, and left to the developer**: the file and test class names, the exact
 message wording beyond the constraint in §5, whether the symbol cache is a static lookup or a

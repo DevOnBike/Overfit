@@ -268,8 +268,14 @@ namespace DevOnBike.Overfit.DeepLearning
             }
         }
 
+#pragma warning disable OVERFIT047 // The one flagged hole is `:F0` on ParameterCount / 1_000_000.0. `F0` emits no
+        // decimal or group separator, so the only culture-sensitive outputs it has left are the negative sign and
+        // the NaN / Infinity symbols (measured 2026-08-17: +Infinity is `∞` outside the invariant culture and NaN
+        // is `epäluku` in fi-FI). This divisor is a non-zero literal and ParameterCount is a sum of positive terms,
+        // so the value here is always FINITE AND NON-NEGATIVE and none of those three can be reached.
         public override string ToString() =>
             $"GPT[vocab={VocabSize}, ctx={ContextLength}, d={DModel}, h={NHeads}, L={NLayers}] " +
             $"~{ParameterCount / 1_000_000.0:F0}M params";
+#pragma warning restore OVERFIT047
     }
 }

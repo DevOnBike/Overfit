@@ -154,6 +154,15 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// Per-request breakdown: ms, % of prefill wall time, and calls. Also prints the prefill rate in
         /// tok/s, which is directly comparable to <c>llama-bench -p N -n 0</c>.
         /// </summary>
+#pragma warning disable OVERFIT047 // Two justifications, because two different holes are flagged here.
+        // (1) The ms / % / tok/s / call-count holes are wall-clock timings and shares of them, written to test
+        //     output (PrefillProfileTests.cs:163, ShortPrefillBreakdownTests.cs:80) for a person to read; they
+        //     differ between two runs on the same box, so nothing can match on this text.
+        // (2) The header's `{rowsPerRequest:F0}` is the ONLY hole on its line. `F0` emits no decimal or group
+        //     separator, so its only culture-sensitive outputs are the negative sign and the NaN / Infinity
+        //     symbols (measured 2026-08-17: +Infinity is `∞` outside the invariant culture, NaN is `epäluku` in
+        //     fi-FI). `requests` is clamped to at least 1 on the line above and `_rows` never goes negative, so
+        //     rowsPerRequest is always FINITE AND NON-NEGATIVE and none of the three is reachable.
         public static string Report()
         {
             var sb = new StringBuilder();
@@ -192,6 +201,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 $"  {"other",-14} : {otherMs,9:F1} ms   {otherPct,5:F1}%   (norms/residual/embed/finalnorm/RoPE)");
             return sb.ToString();
         }
+#pragma warning restore OVERFIT047
 
         private static string ComponentName(int i) => i switch
         {

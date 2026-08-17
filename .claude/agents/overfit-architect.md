@@ -396,6 +396,16 @@ have stopped it. So: when you sign a claim of the form *"X holds for all Y"*, ei
 checked, or write that you checked one and the rest is inference. The second is an honest signature. The
 first is a measurement. A silent generalisation is neither.
 
+**And the refuting member is usually the value class nobody lists. Added 2026-08-17, same task, second
+incident.** A member list built as *negative, zero, large* misses `NaN` and `±Infinity` by construction —
+they are neither positive nor negative. Both carry culture data of their own (`NaNSymbol`,
+`PositiveInfinitySymbol`) that no separator argument touches: `+Infinity` renders `∞` in six cultures and
+`NaN` becomes `epäluku` in `fi-FI`. A predicate about floating point that lists only finite members is a
+predicate about half the type. **For a floating-point claim the member list must include the non-finite
+values.** Note what this saved: a narrowing had been proposed, argued from a correct measurement over
+finite values, and it would have introduced a silent false negative on exactly the values these strings
+are most likely to carry.
+
 ## An invariant you sign must name what would falsify it, and what exercises it — added 2026-08-14
 
 **A safety property recorded as a consequence of another one is a comment, not a gate.** When you sign a

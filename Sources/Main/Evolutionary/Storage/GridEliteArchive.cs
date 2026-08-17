@@ -3,6 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Globalization;
 using DevOnBike.Overfit.Evolutionary.Abstractions;
 
 namespace DevOnBike.Overfit.Evolutionary.Storage
@@ -283,7 +284,9 @@ namespace DevOnBike.Overfit.Evolutionary.Storage
                 if (min != _descriptorMin[d])
                 {
                     throw new OverfitFormatException(
-                        $"Snapshot descriptorMin[{d}]={min} does not match archive descriptorMin[{d}]={_descriptorMin[d]}.");
+                        string.Create(
+                            CultureInfo.InvariantCulture,
+                            $"Snapshot descriptorMin[{d}]={min} does not match archive descriptorMin[{d}]={_descriptorMin[d]}."));
                 }
             }
 
@@ -293,7 +296,9 @@ namespace DevOnBike.Overfit.Evolutionary.Storage
                 if (max != _descriptorMax[d])
                 {
                     throw new OverfitFormatException(
-                        $"Snapshot descriptorMax[{d}]={max} does not match archive descriptorMax[{d}]={_descriptorMax[d]}.");
+                        string.Create(
+                            CultureInfo.InvariantCulture,
+                            $"Snapshot descriptorMax[{d}]={max} does not match archive descriptorMax[{d}]={_descriptorMax[d]}."));
                 }
             }
 

@@ -3,6 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Globalization;
 using DevOnBike.Overfit.Data.Abstractions;
 using DevOnBike.Overfit.Data.Contracts;
 using DevOnBike.Overfit.Tensors;
@@ -43,7 +44,9 @@ namespace DevOnBike.Overfit.Data.Prepare
             {
                 if (lower < 0f || lower >= upper || upper > 1f)
                 {
-                    throw new ArgumentOutOfRangeException(nameof(columnOverrides), $"Invalid percentile range ({lower}, {upper}) for column {col}.");
+                    throw new ArgumentOutOfRangeException(
+                        nameof(columnOverrides),
+                        string.Create(CultureInfo.InvariantCulture, $"Invalid percentile range ({lower}, {upper}) for column {col}."));
                 }
             }
         }

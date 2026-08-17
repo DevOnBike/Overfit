@@ -3,6 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Globalization;
 using System.Text;
 
 namespace DevOnBike.Overfit.LanguageModels.Retrieval.Evaluation
@@ -25,7 +26,7 @@ namespace DevOnBike.Overfit.LanguageModels.Retrieval.Evaluation
             }
 
             var sb = new StringBuilder();
-            sb.Append($"RAG recall@{report.TopK} was {report.RecallAtK:P1}, below the required {minRecall:P1}. Missed:");
+            sb.Append(CultureInfo.InvariantCulture, $"RAG recall@{report.TopK} was {report.RecallAtK:P1}, below the required {minRecall:P1}. Missed:");
             foreach (var c in report.Cases)
             {
                 if (!c.Hit)
@@ -50,12 +51,12 @@ namespace DevOnBike.Overfit.LanguageModels.Retrieval.Evaluation
             }
 
             var sb = new StringBuilder();
-            sb.Append($"{report.UnstableCount} paraphrase group(s) retrieved unstable sources (mean Jaccard < {report.MinJaccard:0.##}):");
+            sb.Append(CultureInfo.InvariantCulture, $"{report.UnstableCount} paraphrase group(s) retrieved unstable sources (mean Jaccard < {report.MinJaccard:0.##}):");
             foreach (var g in report.Groups)
             {
                 if (!g.IsStable)
                 {
-                    sb.Append($"\n  - {g.Name}: mean overlap {g.MeanJaccard:0.##}");
+                    sb.Append(CultureInfo.InvariantCulture, $"\n  - {g.Name}: mean overlap {g.MeanJaccard:0.##}");
                 }
             }
 
@@ -72,12 +73,12 @@ namespace DevOnBike.Overfit.LanguageModels.Retrieval.Evaluation
             }
 
             var sb = new StringBuilder();
-            sb.Append($"{report.TrapsSprung} false-premise query(ies) found a source at/above the grounded threshold {report.GroundedThreshold:0.##}:");
+            sb.Append(CultureInfo.InvariantCulture, $"{report.TrapsSprung} false-premise query(ies) found a source at/above the grounded threshold {report.GroundedThreshold:0.##}:");
             foreach (var c in report.Cases)
             {
                 if (c.Grounded)
                 {
-                    sb.Append($"\n  - \"{c.Query}\" matched {c.TopId} at {c.TopScore:0.###}");
+                    sb.Append(CultureInfo.InvariantCulture, $"\n  - \"{c.Query}\" matched {c.TopId} at {c.TopScore:0.###}");
                 }
             }
 
@@ -97,7 +98,7 @@ namespace DevOnBike.Overfit.LanguageModels.Retrieval.Evaluation
             sb.Append($"{duplicates.Count} near-duplicate document pair(s):");
             foreach (var d in duplicates)
             {
-                sb.Append($"\n  - {d.FirstId} ~ {d.SecondId} ({d.Similarity:0.###})");
+                sb.Append(CultureInfo.InvariantCulture, $"\n  - {d.FirstId} ~ {d.SecondId} ({d.Similarity:0.###})");
             }
 
             throw new RagAssertionException(sb.ToString());

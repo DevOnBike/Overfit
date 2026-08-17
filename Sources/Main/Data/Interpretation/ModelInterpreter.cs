@@ -61,7 +61,10 @@ namespace DevOnBike.Overfit.Data.Interpretation
                 var item = combined[i];
                 var pct = total > 0 ? item.Score / total * 100 : 0;
 
+#pragma warning disable OVERFIT047 // Console.WriteLine straight to the terminal of whoever ran the interpreter —
+                // a column-aligned report a person reads, not a string anything parses. Nothing captures it.
                 Console.WriteLine($"{item.Name,-25} : {pct,6:F1}% (score: {item.Score:F4})");
+#pragma warning restore OVERFIT047
             }
         }
 
@@ -79,7 +82,9 @@ namespace DevOnBike.Overfit.Data.Interpretation
                     var r = CalculatePearson(features, i, j);
                     if (MathF.Abs(r) > 0.3f)
                     {
+#pragma warning disable OVERFIT047 // Same reader as PrintFeatureImportance above: a terminal, a person, no parser.
                         Console.WriteLine($"{_featureNames[i],-20} <-> {_featureNames[j],-20} : {r * 100,6:F1}%");
+#pragma warning restore OVERFIT047
                     }
                 }
             }

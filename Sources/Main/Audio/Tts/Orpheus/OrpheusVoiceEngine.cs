@@ -163,7 +163,11 @@ namespace DevOnBike.Overfit.Audio.Tts.Orpheus
             }
 
             var genSeconds = genSw.GetElapsedTime().TotalSeconds;
+#pragma warning disable OVERFIT047 // Read by the person watching generation at a terminal, and the numbers are
+            // wall-clock seconds and a rate over them: they already differ between two runs on the same box, so
+            // nothing can match on this line and the ambient culture is the right choice for its only reader.
             Console.WriteLine($"  gen: {generatedCount} tok in {genSeconds:F1}s = {generatedCount / genSeconds:F1} tok/s (preset / inference engine)");
+#pragma warning restore OVERFIT047
             return codes;
         }
 

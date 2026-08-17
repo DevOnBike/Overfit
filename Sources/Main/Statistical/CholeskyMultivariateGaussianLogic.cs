@@ -3,6 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Globalization;
 using System.Numerics.Tensors;
 using DevOnBike.Overfit.Tensors;
 
@@ -124,7 +125,9 @@ namespace DevOnBike.Overfit.Statistical
                     if (pivot <= 0.0)
                     {
                         L.Dispose();
-                        throw new ArgumentException($"Covariance matrix is not positive-definite! Negative pivot [{i},{i}] = {pivot:G6}.", nameof(matrix));
+                        throw new ArgumentException(
+                            string.Create(CultureInfo.InvariantCulture, $"Covariance matrix is not positive-definite! Negative pivot [{i},{i}] = {pivot:G6}."),
+                            nameof(matrix));
                     }
 
                     lRowI[i] = MathF.Sqrt(pivot);

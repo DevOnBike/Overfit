@@ -3,6 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Globalization;
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.Optimizers.Abstractions;
 using DevOnBike.Overfit.Tensors;
@@ -92,7 +93,9 @@ namespace DevOnBike.Overfit.Optimizers
         {
             if (float.IsNaN(currentLoss) || float.IsInfinity(currentLoss))
             {
-                _log($">>> NUMERICAL CATASTROPHE (Loss={currentLoss}). Restoring weights to the last safe state!");
+                _log(string.Create(
+                    CultureInfo.InvariantCulture,
+                    $">>> NUMERICAL CATASTROPHE (Loss={currentLoss}). Restoring weights to the last safe state!"));
 
                 RestoreCheckpoint();
                 ReduceLR();
@@ -131,7 +134,7 @@ namespace DevOnBike.Overfit.Optimizers
             if (newLR < oldLR)
             {
                 _optimizer.LearningRate = newLR;
-                _log($">>> LR SCHEDULER: Reducing LR {oldLR:F6} → {newLR:F6}");
+                _log(string.Create(CultureInfo.InvariantCulture, $">>> LR SCHEDULER: Reducing LR {oldLR:F6} → {newLR:F6}"));
             }
 
             _badEpochs = 0;

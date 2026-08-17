@@ -118,6 +118,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         public static long Tokens => _tokens;
 
         /// <summary>Per-token breakdown: ms and % of token wall time, plus calls/token.</summary>
+#pragma warning disable OVERFIT047 // Every hole below is wall-clock ms, a share of it, or a call count. The report
+        // is written to test output (Tests/LanguageModels/Diagnostics/RepackGemvProfileTests.cs:48) or to the
+        // Android AppLog (Demo/OverfitChatApp/MainActivity.cs:774) for a person to read column by column; the
+        // timings differ between two runs on the same box, so no consumer can match on this text.
         public static string Report()
         {
             var sb = new StringBuilder();
@@ -154,6 +158,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 $"  {"other",-13} : {otherMs,9:F3} ms   {otherPct,5:F1}%   (norms/residual/embed/finalnorm)");
             return sb.ToString();
         }
+#pragma warning restore OVERFIT047
 
         private static string ComponentName(int i) => i switch
         {

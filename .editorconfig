@@ -561,7 +561,24 @@ dotnet_diagnostic.OVERFIT034.severity = error
 #
 # Cli, Server, Benchmark, AndroidBench and Demo stay at `none` PERMANENTLY AND BY DECISION, not as an
 # unfinished sweep: they are console output read by a human at a terminal, where the ambient culture is
-# the correct choice. Sources/Main's nine remaining directories are a separate task with its own row.
+# the correct choice.
+#
+# XC-72 (2026-08-17) SWEPT THE REST OF Sources/Main AND THE GLOB BELOW WIDENED FROM Statistics TO THE WHOLE
+# PROJECT. That is strictly a widening — Statistics was armed and stays armed — and it is written as one
+# section rather than fifteen because the census scope was all of Sources/Main and the whole of it measures
+# zero. 33 sites were opened and judged one at a time: 18 were wrapped invariant, 15 carry a pragma whose
+# comment names its reader or its guarantee at the site. Rebuilt with the rule raised afterwards: 0 sites.
+#
+# THE SWEEP'S OWN FINDING, because it nearly went the other way. Two sites are reported solely on a
+# `double:F0` hole, and `F0` emits no decimal or group separator — so measured against invariant/pl-PL it
+# comes back BYTE-IDENTICAL and reads as a second false positive of the SuppressionStore kind. It is not
+# one. A real is not only finite: +Infinity renders `∞` in pl-PL/ar-SA/sv-SE/fi-FI/tr-TR against the
+# invariant `Infinity`, and NaN renders `epäluku` (fi-FI) and `ليس رقم` (ar-SA) — for values that are
+# neither positive nor negative, which is exactly what a rate over a counter that has not ticked produces.
+# So the tie-breaker for "site or predicate" needs BOTH dimensions: cultures including fi-FI and ar-SA, and
+# values including NaN and ±Infinity. A hit is a RULE DEFECT only if the (type, specifier) pair is
+# invariant for every value the type can represent; invariance for the values one site happens to produce
+# is a PRAGMA that must state that guarantee — and "non-negative" is not it, "finite and non-negative" is.
 #
 # XC-68 applies and it is correct here rather than a gap: no .editorconfig section reaches a
 # source-generated tree (severities resolve per tree off the csc command line, and generated trees are
@@ -573,7 +590,7 @@ dotnet_diagnostic.OVERFIT047.severity = none
 [Sources/Anomalies/**.cs]
 dotnet_diagnostic.OVERFIT047.severity = error
 
-[Sources/Main/Statistics/**.cs]
+[Sources/Main/**.cs]
 dotnet_diagnostic.OVERFIT047.severity = error
 
 # ── Reliability rules, armed on the OTHER assemblies that parse external input ────────────────────────

@@ -3,6 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Globalization;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.DeepLearning.Abstractions;
 using DevOnBike.Overfit.Onnx.Schema;
@@ -39,7 +40,9 @@ namespace DevOnBike.Overfit.Onnx.Operators
             if (alpha != 1f || beta != 1f)
             {
                 throw new OverfitRuntimeException(
-                    $"Gemm alpha={alpha} beta={beta}: only alpha=1 beta=1 supported.");
+                    string.Create(
+                        CultureInfo.InvariantCulture,
+                        $"Gemm alpha={alpha} beta={beta}: only alpha=1 beta=1 supported."));
             }
 
             var weightTensor = initializers[node.Inputs[1]];

@@ -370,6 +370,15 @@ suppress a rule.
 The general form: a guard's red arm proves it can see. Its **silent arm proves it can tell the
 difference**, and only the second one licenses arming it.
 
+**And a fix that works by SATISFYING an exemption is not verified until the exemption's runtime effect is
+measured. Added 2026-08-17.** An analyzer exemption is usually **syntactic** — `OVERFIT047` exempts on the
+*presence* of an `IFormatProvider` parameter, not on the provider reaching the formatter. Six `XC-72` fixes
+used `sb.Append(provider, handler)`, a mechanism `XC-64`'s 42 sites never used. Had that overload not
+threaded the provider, all six would have gone **silent while staying broken**, and every arm — armed
+build, probe, full suite — would still have been green. One before-and-after print under a non-invariant
+culture settles it: `sb.Append($"…{0.5:0.##}")` gives `0,5` on `pl-PL`, `sb.Append(InvariantCulture, …)`
+gives `0.5`. Measure the behaviour, not the diagnostic's absence.
+
 ## Before you implement a signed plan, check its mechanism can fire — added 2026-08-10
 
 **A signed plan is a decision record, not a proof that the mechanism works.** Read the code the plan

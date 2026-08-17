@@ -3,6 +3,8 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Globalization;
+
 namespace DevOnBike.Overfit.Training
 {
     public readonly struct TrainingStepResult
@@ -41,7 +43,7 @@ namespace DevOnBike.Overfit.Training
 
         public override string ToString()
         {
-            return $"Loss={Loss:0.000000}, BatchSize={BatchSize}";
+            return string.Create(CultureInfo.InvariantCulture, $"Loss={Loss:0.000000}, BatchSize={BatchSize}");
         }
     }
 }

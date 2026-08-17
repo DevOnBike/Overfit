@@ -3,6 +3,8 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Globalization;
+
 namespace DevOnBike.Overfit.Training
 {
     public sealed class TrainingEngine : IDisposable
@@ -101,7 +103,9 @@ namespace DevOnBike.Overfit.Training
                 if (!float.IsFinite(values[i]))
                 {
                     throw new ArgumentException(
-                        $"{argumentName} contains non-finite value at index {i}: {values[i]}",
+                        string.Create(
+                            CultureInfo.InvariantCulture,
+                            $"{argumentName} contains non-finite value at index {i}: {values[i]}"),
                         argumentName);
                 }
             }

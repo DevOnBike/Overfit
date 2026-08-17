@@ -135,6 +135,9 @@ namespace DevOnBike.Overfit.Onnx
         /// GEMM reached 132 GFLOP/s single-threaded on a late-layer shape while production conv averaged
         /// 19.7 GFLOP/s across all layers — a 6.7× spread that only a per-layer view can locate.</para>
         /// </summary>
+#pragma warning disable OVERFIT047 // Wall-clock ms per node, written to test output
+        // (Tests/Diagnostics/ConvGemmPartProfileTests.cs:108) for a person to read down the column. The timings
+        // differ between two runs on the same machine, so nothing downstream can match on this text.
         public string PerNodeProfileReport()
         {
             if (_nodeTicks == null)
@@ -159,6 +162,7 @@ namespace DevOnBike.Overfit.Onnx
 
             return sb.ToString();
         }
+#pragma warning restore OVERFIT047
 
         /// <summary>Clears the per-node accumulators (call before the measured segment).</summary>
         public void ResetNodeProfile()
@@ -171,6 +175,9 @@ namespace DevOnBike.Overfit.Onnx
         /// Per-operator totals, heaviest first: total ms, share of the measured wall time, and node count.
         /// Grouped by module type, because "which operator" is the actionable unit — not which of 40 nodes.
         /// </summary>
+#pragma warning disable OVERFIT047 // Wall-clock ms per operator and its share. Same class as
+        // PerNodeProfileReport above: a person compares the columns, and the timings differ between two runs on
+        // the same machine, so no consumer can match on this text.
         public string NodeProfileReport()
         {
             if (_nodeTicks == null)
@@ -247,6 +254,7 @@ namespace DevOnBike.Overfit.Onnx
 
             return sb.ToString();
         }
+#pragma warning restore OVERFIT047
 
         /// <summary>
         /// Sets all modules to evaluation mode (uses running stats for BatchNorm, etc.).

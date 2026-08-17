@@ -72,8 +72,13 @@ namespace DevOnBike.Overfit.Kernels
             var total = _im2colTicks + _gemmTicks;
             var share = total == 0 ? 1.0 : total;
 
+#pragma warning disable OVERFIT047 // Wall-clock milliseconds and their share. The only consumer in this repository
+            // is Tests/Diagnostics/ConvGemmPartProfileTests.cs:90, which writes it to test output for a person to
+            // read; the numbers differ between two runs on the same machine, so nothing downstream can match on
+            // them and there is no determinism to protect.
             return $"im2col {_im2colTicks * toMs,8:F2} ms {100.0 * _im2colTicks / share,5:F1}%   "
                 + $"gemm {_gemmTicks * toMs,8:F2} ms {100.0 * _gemmTicks / share,5:F1}%";
+#pragma warning restore OVERFIT047
         }
 
         public static void Forward(

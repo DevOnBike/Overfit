@@ -3,6 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Globalization;
 using DevOnBike.Overfit.Audio.Tts.Snac;
 using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Whisper;
@@ -135,9 +136,11 @@ namespace DevOnBike.Overfit.Audio.Tts.Orpheus
             if (segments.Count != transcripts.Count)
             {
                 throw new OverfitFormatException(
-                    $"Found {segments.Count} spoken segments but {transcripts.Count} transcript lines. Read every "
-                    + $"line in order with a clear (~1 s) pause between, or tune minSilenceSeconds ({minSilenceSeconds}s) "
-                    + $"/ silenceThreshold ({silenceThreshold}).");
+                    string.Create(
+                        CultureInfo.InvariantCulture,
+                        $"Found {segments.Count} spoken segments but {transcripts.Count} transcript lines. Read every "
+                        + $"line in order with a clear (~1 s) pause between, or tune minSilenceSeconds ({minSilenceSeconds}s) "
+                        + $"/ silenceThreshold ({silenceThreshold})."));
             }
 
             var examples = new List<OrpheusTrainingExample>(segments.Count);
