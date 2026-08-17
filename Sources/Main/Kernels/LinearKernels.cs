@@ -113,6 +113,23 @@ namespace DevOnBike.Overfit.Kernels
                 return;
             }
 
+            // Narrow output plus more than one row: tile the batch against the outputs instead of running one
+            // dot per output per row (`XC-80`). Gated on batchSize > 1 because a single row has nothing to
+            // tile against, which keeps the published `Linear(784,10)` batch-1 figure on its original path.
+            if (batchSize > 1 && outputSize < InputMajorVectorizedOutputThreshold)
+            {
+                ForwardOutputMajorTiled(
+                    input,
+                    weightsOutputInput,
+                    bias,
+                    output,
+                    batchSize,
+                    inputSize,
+                    outputSize);
+
+                return;
+            }
+
             for (var b = 0; b < batchSize; b++)
             {
                 var inSlice = input.Slice(b * inputSize, inputSize);
@@ -326,6 +343,150 @@ namespace DevOnBike.Overfit.Kernels
                 Output = output;
                 InputSize = inputSize;
                 OutputSize = outputSize;
+            }
+        }
+
+        /// <summary>Rows of the batch held in one register tile — see <see cref="ForwardOutputMajorTiled"/>.</summary>
+        private const int OutputMajorRowTile = 4;
+
+        /// <summary>Outputs held in one register tile, alongside <see cref="OutputMajorRowTile"/> rows.</summary>
+        private const int OutputMajorColumnTile = 4;
+
+        /// <summary>
+        /// Batched narrow-output inference: a <see cref="OutputMajorRowTile"/>×<see cref="OutputMajorColumnTile"/>
+        /// register tile over (batch rows × outputs), so each input element and each weight element is loaded
+        /// once per tile instead of once per (row, output) pair.
+        ///
+        /// <para><b>Why this exists (`XC-80`).</b> The per-row path below calls <c>TensorPrimitives.Dot</c>
+        /// once per output, and every one of those re-reads the whole input vector as well as its own weight
+        /// row. On <c>Linear(784→10)</c> that is 15,680 FLOP against ~62 KB of L1 traffic — <b>0.25
+        /// FLOP/byte</b> — which is why cost per row was FLAT from batch 1 to batch 256 while ONNX Runtime
+        /// fell from 1,919 to 93 ns per row. The batch bought us nothing because nothing was being reused.</para>
+        ///
+        /// <para><b>Intensity is <c>MR·NR / (2(MR+NR))</c></b>: 1.00 FLOP/byte at 4×4 against 0.25 today. 4×8
+        /// would give 1.33 but needs 32 vector accumulators — the entire AVX-512 register file — so it would
+        /// spill. 4×4 needs 16, the same count the conv micro-kernel carries.</para>
+        ///
+        /// <para><b>Batch 1 never comes here</b>, and that is deliberate rather than incidental: a single row
+        /// has nothing to tile against, and <c>Linear(784,10)</c> at batch 1 is this repository's published
+        /// 237 ns / 8.3×-vs-ONNX-Runtime figure. It keeps the untouched path.</para>
+        /// </summary>
+        private static void ForwardOutputMajorTiled(
+            ReadOnlySpan<float> input,
+            ReadOnlySpan<float> weightsOutputInput,
+            ReadOnlySpan<float> bias,
+            Span<float> output,
+            int batchSize,
+            int inputSize,
+            int outputSize)
+        {
+            var width = Vector<float>.Count;
+
+            // Hoisted out of both loops: 64 bytes of stack reused by every tile. Allocating it per tile is a
+            // stack overflow waiting for a large batch, and CA2014 says so.
+            var sums = stackalloc float[OutputMajorRowTile * OutputMajorColumnTile];
+
+            for (var b0 = 0; b0 < batchSize; b0 += OutputMajorRowTile)
+            {
+                var rows = Math.Min(OutputMajorRowTile, batchSize - b0);
+
+                // Clamped to the last valid row/column so a partial tile still reads IN BOUNDS and the inner
+                // loop stays branch-free; the padding lanes compute a duplicate result that is simply not
+                // stored. Same device as MicroKernel8x32Avx512 — a separate edge kernel would be a second
+                // implementation of the same contraction.
+                var r0 = (b0 + Math.Min(0, rows - 1)) * inputSize;
+                var r1 = (b0 + Math.Min(1, rows - 1)) * inputSize;
+                var r2 = (b0 + Math.Min(2, rows - 1)) * inputSize;
+                var r3 = (b0 + Math.Min(3, rows - 1)) * inputSize;
+
+                for (var j0 = 0; j0 < outputSize; j0 += OutputMajorColumnTile)
+                {
+                    var columns = Math.Min(OutputMajorColumnTile, outputSize - j0);
+
+                    var w0 = (j0 + Math.Min(0, columns - 1)) * inputSize;
+                    var w1 = (j0 + Math.Min(1, columns - 1)) * inputSize;
+                    var w2 = (j0 + Math.Min(2, columns - 1)) * inputSize;
+                    var w3 = (j0 + Math.Min(3, columns - 1)) * inputSize;
+
+                    // Sixteen accumulators as NAMED LOCALS, not an array: an array lives in memory and this
+                    // is a register tile or it is nothing.
+                    Vector<float> a00 = default, a01 = default, a02 = default, a03 = default;
+                    Vector<float> a10 = default, a11 = default, a12 = default, a13 = default;
+                    Vector<float> a20 = default, a21 = default, a22 = default, a23 = default;
+                    Vector<float> a30 = default, a31 = default, a32 = default, a33 = default;
+
+                    var i = 0;
+
+                    // The contraction. Per step: four input vectors and four weight vectors feed sixteen
+                    // FMAs — 1.00 FLOP/byte, against 0.25 for the dot-per-output path.
+                    for (; i <= inputSize - width; i += width)
+                    {
+                        var x0 = new Vector<float>(input.Slice(r0 + i, width));
+                        var x1 = new Vector<float>(input.Slice(r1 + i, width));
+                        var x2 = new Vector<float>(input.Slice(r2 + i, width));
+                        var x3 = new Vector<float>(input.Slice(r3 + i, width));
+
+                        var v = new Vector<float>(weightsOutputInput.Slice(w0 + i, width));
+                        a00 += x0 * v;
+                        a10 += x1 * v;
+                        a20 += x2 * v;
+                        a30 += x3 * v;
+
+                        v = new Vector<float>(weightsOutputInput.Slice(w1 + i, width));
+                        a01 += x0 * v;
+                        a11 += x1 * v;
+                        a21 += x2 * v;
+                        a31 += x3 * v;
+
+                        v = new Vector<float>(weightsOutputInput.Slice(w2 + i, width));
+                        a02 += x0 * v;
+                        a12 += x1 * v;
+                        a22 += x2 * v;
+                        a32 += x3 * v;
+
+                        v = new Vector<float>(weightsOutputInput.Slice(w3 + i, width));
+                        a03 += x0 * v;
+                        a13 += x1 * v;
+                        a23 += x2 * v;
+                        a33 += x3 * v;
+                    }
+
+                    // Horizontal reduction into the hoisted stack slots; the padding lanes of a partial
+                    // tile are reduced too and then simply skipped below.
+                    sums[0] = Vector.Sum(a00);
+                    sums[1] = Vector.Sum(a01);
+                    sums[2] = Vector.Sum(a02);
+                    sums[3] = Vector.Sum(a03);
+                    sums[4] = Vector.Sum(a10);
+                    sums[5] = Vector.Sum(a11);
+                    sums[6] = Vector.Sum(a12);
+                    sums[7] = Vector.Sum(a13);
+                    sums[8] = Vector.Sum(a20);
+                    sums[9] = Vector.Sum(a21);
+                    sums[10] = Vector.Sum(a22);
+                    sums[11] = Vector.Sum(a23);
+                    sums[12] = Vector.Sum(a30);
+                    sums[13] = Vector.Sum(a31);
+                    sums[14] = Vector.Sum(a32);
+                    sums[15] = Vector.Sum(a33);
+
+                    for (var r = 0; r < rows; r++)
+                    {
+                        for (var cIndex = 0; cIndex < columns; cIndex++)
+                        {
+                            var sum = sums[(r * OutputMajorColumnTile) + cIndex];
+
+                            // Scalar tail, when inputSize is not a whole number of vectors.
+                            for (var t = i; t < inputSize; t++)
+                            {
+                                sum += input[((b0 + r) * inputSize) + t]
+                                       * weightsOutputInput[((j0 + cIndex) * inputSize) + t];
+                            }
+
+                            output[((b0 + r) * outputSize) + j0 + cIndex] = sum + bias[j0 + cIndex];
+                        }
+                    }
+                }
             }
         }
 

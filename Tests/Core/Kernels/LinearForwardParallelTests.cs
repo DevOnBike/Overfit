@@ -46,6 +46,19 @@ namespace DevOnBike.Overfit.Tests.Core.Kernels
         [InlineData(512, 1024, 1)]
         // Batched with a non-block-aligned width: worker ranges land mid-row AND mid-block.
         [InlineData(1024, 517, 8)]
+        // NARROW output plus a batch: the XC-80 register tile over (rows x outputs). The published
+        // Linear(784,10) shape, batched, is the case that class exists for.
+        [InlineData(784, 10, 4)]
+        [InlineData(784, 10, 16)]
+        // Partial tiles in BOTH directions at once — 3 rows and 7 outputs against a 4x4 tile, so the clamped
+        // padding lanes are exercised on the row axis and the column axis in the same call.
+        [InlineData(784, 7, 3)]
+        [InlineData(300, 5, 6)]
+        // Input length that is not a whole number of vectors, so the scalar tail runs inside a tiled call.
+        [InlineData(101, 6, 5)]
+        // Batch 1 with a narrow output must NOT take the tiled path; this pins that the gate still lets the
+        // original kernel serve it.
+        [InlineData(784, 10, 1)]
         public void Forward_MatchesANaiveReference_OnBothSidesOfTheParallelThreshold(
             int inputSize,
             int outputSize,

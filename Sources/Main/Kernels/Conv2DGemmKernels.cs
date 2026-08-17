@@ -51,11 +51,26 @@ namespace DevOnBike.Overfit.Kernels
         /// parallel region (where per-thread accumulation and Interlocked would distort what is being measured).
         /// The pack is the prime suspect: it reads <c>B[kk·n + n0]</c> with stride <c>n</c> — 200 KB apart on
         /// VGG's early layers — one scalar element at a time with a bounds branch each, and across a whole GEMM
-        /// it moves the entire im2col matrix once more.</para>
+        /// it moves the entire im2col matrix once more. <b>MEASURED 2026-08-17 and REFUTED: the micro-kernel
+        /// costs ~38 ms against the pack's ~11.5 ms on VGG-16.</b> The suspicion above is kept as the record
+        /// of what was believed before the ablation could run.</para>
+        ///
+        /// <para><b>Honoured by BOTH GEMM workers since 2026-08-17, and it was honoured by neither on an
+        /// AVX-512 box before that.</b> The checks existed only in <see cref="GemmNPanelWorker"/>, the AVX2
+        /// path, while every machine with AVX-512 runs <see cref="GemmNPanelWorker512"/> and ignored them —
+        /// so <c>ConvGemm_PackVersusMicroKernel_Split</c> printed three numbers that were pure run-to-run
+        /// noise, and printed them in a table that looks like a result. Measured on VGG-16 before the fix:
+        /// baseline 84.90 ms, "pack only" 86.50 ms (i.e. removing the arithmetic made it SLOWER) and
+        /// "micro only" 81.68 ms. A diagnostic whose arms cannot move is worse than no diagnostic, because
+        /// somebody acts on it.</para>
         /// </summary>
         internal static bool AblatePackB;
 
-        /// <summary>Measurement-only: skip the micro-kernel, leaving only the pack. Wrong results by construction.</summary>
+        /// <summary>
+        /// Measurement-only: skip the micro-kernel, leaving only the pack. Wrong results by construction.
+        ///
+        /// <para>See <see cref="AblatePackB"/> for why this is checked in both workers rather than one.</para>
+        /// </summary>
         internal static bool AblateMicroKernel;
 
         /// <summary>Clears the part accumulators (call before the measured segment).</summary>
@@ -339,15 +354,26 @@ namespace DevOnBike.Overfit.Kernels
                 var n0 = np * Nr512;
                 var nrEff = Math.Min(Nr512, n - n0);
 
-                for (var kk = 0; kk < k; kk++)
+                // Both ablation switches are checked HERE as well as in the AVX2 worker. They used to exist
+                // only there, which made the pack-versus-micro-kernel diagnostic inert on every AVX-512
+                // machine — see AblatePackB.
+                if (!AblatePackB)
                 {
-                    var srcBase = (kk * n) + n0;
-                    var dstBase = kk * Nr512;
-
-                    for (var j = 0; j < Nr512; j++)
+                    for (var kk = 0; kk < k; kk++)
                     {
-                        packB[dstBase + j] = j < nrEff ? c.B[srcBase + j] : 0f;
+                        var srcBase = (kk * n) + n0;
+                        var dstBase = kk * Nr512;
+
+                        for (var j = 0; j < Nr512; j++)
+                        {
+                            packB[dstBase + j] = j < nrEff ? c.B[srcBase + j] : 0f;
+                        }
                     }
+                }
+
+                if (AblateMicroKernel)
+                {
+                    continue;
                 }
 
                 fixed (float* pPackB = packB)
