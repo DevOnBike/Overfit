@@ -6,8 +6,17 @@
 .vs/
 .idea/
 **/*.user
-coverage/
-TestResults/
+# Every one of these is build or agent output, and each pattern is anchored the way Docker actually reads it:
+# a leading-slash-free pattern like `TestResults/` still matches only at the context ROOT, so `Tests/TestResults`
+# was shipped in full — 994 MB of it on 2026-08-15, inside a 1.17 GB context (XC-62).
+**/coverage/
+**/TestResults/
+**/BenchmarkDotNet.Artifacts/
+artifacts/
+# .claude/ is agent memory, transcripts and scratch — 98.8 MB measured, 74% of the whole context, and it is
+# rewritten constantly. The build stage is `COPY . .`, so it also invalidated that layer's cache on every run
+# even when no source had changed. Nothing in the image comes from it.
+.claude/
 # Exclude docs from the image context EXCEPT openapi.yaml, which Server.csproj embeds at compile time
 # (GET /openapi.yaml + Swagger UI serve it from the self-contained binary). Without the negation the AOT
 # publish fails: CS1566 "Could not find /src/docs/openapi.yaml".

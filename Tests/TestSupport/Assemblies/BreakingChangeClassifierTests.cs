@@ -725,39 +725,94 @@ namespace DevOnBike.Overfit.Tests.TestSupport.Assemblies
         [Fact]
         public void AnUnrecognisedChangeFailsClosed()
         {
-            // There is no way to synthesise "a facet no rule knows about" from source, because every facet the
-            // reader can write is covered. What CAN be pinned is that the fallback exists and is not additive:
-            // AC-UNCLASSIFIED is declared at the breaking level, so a future facet cannot be silently waved
-            // through. This asserts the policy, and says so rather than pretending to exercise it.
-            var comparison = Compare("""
+            // The fallback is driven at the classifier's own seam rather than through compiled source, and that
+            // is a property of metadata rather than a shortcut: every facet a reader can write arrives coupled
+            // to one an existing rule already reads, so a rule claims the pair first. The nearest real
+            // candidate is pinned by DefaultImplementationRemoved_IsClaimedByAnExistingRule below — when that
+            // test goes red, this construction has stopped being hypothetical and this one should follow it.
+            //
+            // `default-impl` moving ALONE is what "a facet no rule names" means here: the only rule reading
+            // HasDefaultImplementation fires on false -> true, so true -> false reaches no rule at all. In real
+            // metadata `abstract` flips with it, which is exactly why the pair below cannot be compiled.
+            var before = InterfaceMethod(hasDefaultImplementation: true);
+            var after = InterfaceMethod(hasDefaultImplementation: false);
+
+            // If these ever compare equal the difference would not exist and the test would pass vacuously.
+            Assert.NotEqual(before.Descriptor, after.Descriptor);
+
+            using var facts = AssemblyFacts.FromImage(
+                TinyAssemblyCompiler.Compile("""
+                    namespace Sample
+                    {
+                        public interface IStore
+                        {
+                            int Read();
+                        }
+                    }
+                    """),
+                "TinyAssembly.dll");
+
+            var changes = BreakingChangeClassifier.Classify(
+                facts,
+                facts,
+                new[] { new ApiDifference(DifferenceKind.Changed, before, after) });
+
+            var change = Assert.Single(changes);
+
+            Assert.Equal("AC-UNCLASSIFIED", change.RuleId);
+
+            // The guarantee the name promises, and the only one that matters: a facet no rule understands is
+            // reported at the breaking level, never assumed additive and waved through.
+            Assert.Equal(ChangeLevel.BinaryBreaking, change.Level);
+
+            // Both descriptors travel with the finding — with no rule to name what moved, the reader's only
+            // next step is diffing them.
+            Assert.Contains(before.Descriptor, change.Message, StringComparison.Ordinal);
+            Assert.Contains(after.Descriptor, change.Message, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void DefaultImplementationRemoved_IsClaimedByAnExistingRule()
+        {
+            // Load-bearing for the test above rather than a rule test of its own: it is the nearest change a
+            // reader CAN write to the unclassified facet, and it asserts that a rule still claims it. Removing
+            // the body flips `abstract` in the same edit, and AC-VIRTUAL-MADE-ABSTRACT reads that.
+            var change = Single("""
                 namespace Sample
                 {
-                    public class Store
+                    public interface IStore
                     {
-                        public int Read() { return 1; }
+                        int Read() { return 1; }
                     }
                 }
-                """, """
-                namespace Sample
-                {
-                    public class Store
-                    {
-                        public int Read() { return 1; }
-                    }
-                }
-                """);
+                """, "int Read() { return 1; }", "int Read();", ChangeLevel.BinaryBreaking);
 
-            Assert.Empty(comparison.Changes);
-
-            // Every classified change is either explicitly safe or explicitly not; nothing is "unknown".
-            // BOUND: one iteration per level in the enum.
-            foreach (var level in Enum.GetValues<ChangeLevel>())
-            {
-                Assert.Equal(level, level);
-            }
+            Assert.Equal("AC-VIRTUAL-MADE-ABSTRACT", change.RuleId);
         }
 
         // --------------------------------------------------------------------------------------------- helpers
+
+        /// <summary>
+        /// One interface method, differing between the two calls in <c>default-impl</c> and nothing else.
+        ///
+        /// <para>Deliberately not compiled. A real interface method carries <c>abstract</c> in lockstep with the
+        /// absence of a body, so this exact pair cannot come out of metadata — which is the point: it is the
+        /// shape of a facet the classifier does not yet have a rule for, and the only way to reach the
+        /// fail-closed fallback on purpose.</para>
+        /// </summary>
+        private static ApiMember InterfaceMethod(bool hasDefaultImplementation)
+        {
+            return new ApiMember
+            {
+                DeclaringType = "Sample.IStore",
+                Kind = ApiMemberKind.Method,
+                Name = "Read",
+                Signature = "() : System.Int32",
+                Accessibility = "Public",
+                IsVirtual = true,
+                HasDefaultImplementation = hasDefaultImplementation,
+            };
+        }
 
         private static AssemblyComparison Compare(string left, string right)
         {
