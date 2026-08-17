@@ -1,15 +1,87 @@
 name: nuget.org
 
+# XC-61. Until 2026-08-17 this workflow depended on NOTHING: `workflow_dispatch` went straight to
+# restore → build → test → pack → push, so every guard this repository owns could be green, red or never
+# run and the push proceeded identically. That is not hypothetical here — XC-40 records 42 public types
+# leaving the package while the CHANGELOG described seven, caught by hand eight days later, with 10.0.31
+# already live.
+#
+# Two gates now stand in front of the push, and they answer different questions:
+#
+#   1. `gate` — did CI / Tests actually pass ON THIS COMMIT? GitHub Actions `needs:` cannot cross
+#      workflows, so this asks the API instead. Note it requires a run to EXIST: "no run found" fails,
+#      because the whole point of this row is that "not red" is not "checked".
+#   2. `api-compat` (a step inside publish, where the build already is) — does the built surface break the
+#      last published package? Scripts/api_compat_check.py answers that in three states, and its exit 2
+#      means NO COMPARISON HAPPENED. Exit 2 can never be overridden here; treating it as a pass would
+#      reinstate exactly the gap this workflow is being fixed for.
+
 on:
   workflow_dispatch:
     inputs:
       version:
         description: 'SemVer to publish (e.g. 1.2.3 or 1.2.3-beta.4). Leave empty to use the <Version> from .csproj'
         required: false
+      allow_breaking:
+        description: 'Publish even though the API comparator reports a BREAK. Only with the break recorded in CHANGELOG.md and the version bumped per the policy at the top of it. Never bypasses "not checked".'
+        type: boolean
+        required: false
+        default: false
 
 jobs:
-  publish:
+  # ── Gate 1: the guards must have passed on THIS exact commit ─────────────────────────────────────────
+  # Deliberately a separate job with `needs:` below rather than a step, so a red or missing CI run costs
+  # nothing: no restore, no build, no test, no pack.
+  gate:
+    name: Guards green on this commit
     runs-on: ubuntu-latest
+
+    permissions:
+      actions: read
+      contents: read
+
+    steps:
+    - name: Require a successful "CI / Tests" run on this commit
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        set -euo pipefail
+
+        # ci.yml's own job graph already chains aot-guard and analyzer-guard behind build-and-test with
+        # `needs:`, so a run whose CONCLUSION is success means all three passed. Asking for the workflow
+        # run is therefore one question, not three.
+        QUERY="repos/${{ github.repository }}/actions/workflows/ci.yml/runs?head_sha=${{ github.sha }}&status=completed&per_page=1"
+
+        gh api "$QUERY" > runs.json
+
+        COUNT=$(jq '.workflow_runs | length' runs.json)
+
+        # Absence is the state that hides. ci.yml triggers on push/pull_request to `main` only, so a
+        # dispatch from a branch CI has never seen lands here — and that is the correct answer, not an
+        # inconvenience: nothing has verified that commit.
+        if [ "$COUNT" -eq 0 ]; then
+          echo "::error::No COMPLETED 'CI / Tests' run exists for commit ${{ github.sha }}. Nothing has verified this commit, so it must not be published. Push it to main (or run CI on it) and wait for the run to finish."
+          exit 1
+        fi
+
+        CONCLUSION=$(jq -r '.workflow_runs[0].conclusion' runs.json)
+        URL=$(jq -r '.workflow_runs[0].html_url' runs.json)
+
+        echo "latest completed CI / Tests run for this commit: $CONCLUSION — $URL"
+
+        # The LATEST completed run, not "any run that ever went green": a success followed by a failure on
+        # the same SHA (a re-run, a flake investigated and confirmed) must not be publishable.
+        if [ "$CONCLUSION" != "success" ]; then
+          echo "::error::CI / Tests concluded '$CONCLUSION' on commit ${{ github.sha }} — $URL"
+          exit 1
+        fi
+
+  publish:
+    needs: gate
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
 
     steps:
     - uses: actions/checkout@v4
@@ -43,6 +115,49 @@ jobs:
 
     - name: Test
       run: dotnet test ./Tests/Tests.csproj -c Release --no-build --verbosity normal
+
+    # ── Gate 2: does this build break the last published package? ────────────────────────────────────
+    # Runs here rather than in its own job because the comparison needs the built candidate at
+    # Sources/Main/bin/Release/net10.0/DevOnBike.Overfit.dll, which the Build step above has just produced
+    # — a separate job would rebuild the whole thing to ask one question.
+    #
+    # Read the exit codes off the script's own docstring, not off "did it go red":
+    #   0  unchanged or additive          -> publish
+    #   1  BREAKING, or the test failed for another reason
+    #   2  the baseline could not be fetched/extracted, or the gate SKIPPED -> NO comparison was made
+    #
+    # Exit 2 is the one that matters most and it is never overridable. The gate TEST skips when
+    # OVERFIT_API_BASELINE is unset — a skip reports as neither pass nor fail — so a publish path that read
+    # "not red" as "checked" would be blind in exactly the way this workflow was blind before.
+    - name: API compatibility gate against the last published package
+      env:
+        ALLOW_BREAKING: ${{ inputs.allow_breaking }}
+      run: |
+        set +e
+        python3 Scripts/api_compat_check.py --no-build
+        STATUS=$?
+        set -e
+
+        if [ "$STATUS" -eq 0 ]; then
+          echo "API compatibility: no break against the last published package."
+          exit 0
+        fi
+
+        if [ "$STATUS" -eq 2 ]; then
+          echo "::error::api_compat_check.py exited 2 — NO COMPARISON WAS MADE (baseline unavailable, or the gate test skipped). This is not a pass and cannot be overridden. Fix the baseline fetch and dispatch again."
+          exit 1
+        fi
+
+        if [ "$ALLOW_BREAKING" = "true" ]; then
+          # Exit 1 is documented as "breaking, OR the test failed for any other reason", so this override is
+          # only sound once a human has READ the output above. It is recorded as a warning so the run's
+          # summary says a break was published deliberately rather than slipping through.
+          echo "::warning::PUBLISHING A BREAKING API CHANGE on purpose (allow_breaking=true). CHANGELOG.md must record it, and the version must be bumped per the policy at the top of that file — MAJOR tracks the .NET target here, so a public break is a MINOR bump."
+          exit 0
+        fi
+
+        echo "::error::api_compat_check.py exited 1 — the built surface BREAKS the last published package (or the gate test failed for another reason; read the output above). Record the break in CHANGELOG.md, bump the version per its policy, and re-dispatch with allow_breaking=true if the break is intended."
+        exit 1
 
     - name: Pack
       run: |
