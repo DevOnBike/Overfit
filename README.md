@@ -462,7 +462,7 @@ Honest positioning:
 - On **prefill** the gap is now ~1.8× against an AVX-512 llama.cpp build and **~1.15× against their AVX2 build** — i.e. on machines without AVX-512 we are close to parity. Measured on one box (Ryzen 9 9950X3D) with one model; treat it as a data point, not a general claim. Our Q4_K matmul measured *faster* than llama.cpp's at equal instruction set and thread count (1.70 vs 1.56 TFLOP/s on their own test shape).
 - PyTorch CPU is faster for large-scale training.
 - ONNX Runtime is mature and fast if native dependencies are acceptable — and **on large convolutional
-  models it is 2.9x to 4.8x faster than us**, which is the honest reading of the table below. Our output on
+  models it is 2.8x to 4.5x faster than us**, which is the honest reading of the table below. Our output on
   those models is numerically identical to theirs (cosine 1.000000, same argmax); the gap is speed alone.
 - XGBoost's C++ kernel is still ~1.5× faster for raw batch tree scoring; Overfit wins decisively on in-process online (per-request) latency where the Python/native marshalling tax dominates.
 - Overfit's axis is pure-managed .NET, in-process deployment, Native AOT,
@@ -472,23 +472,23 @@ Honest positioning:
 
 A single "faster than ONNX Runtime" number is misleading in both directions, so here is the whole curve.
 Same box, ONNX Runtime 1.29.0, re-measured 2026-08-18 with the IDE shut down. The two large-CNN rows
-include four changes from `XC-78` — a conv work-split, parallel pooling, a dense row-split, and folding
-the convolution patch gather into the GEMM's own pack — which took ~26% off the 60.9 MB CNN and ~28% off
-VGG-16 between them:
+include five changes from `XC-78` — a conv work-split, parallel pooling, a dense row-split, folding the
+convolution patch gather into the GEMM's own pack, and repacking the convolution kernels MR-major at load
+— which together took roughly a third off both:
 
 | model | Overfit | ONNX Runtime | who wins |
 |---|---:|---:|---|
 | `Linear(784→10)` — 7,840 params | **231 ns** | 1,880 ns | Overfit **8.1×** |
 | MLP `784→256→128→10` — ~235k params | **6.71 µs** | 8.73 µs | Overfit **1.3×** |
 | MNIST CNN (imported ONNX) | **5.36 µs** | 6.62 µs | Overfit **1.24×** |
-| a 60.9 MB CNN | 46.9 ms | **9.8 ms** | ONNX Runtime **4.8×** |
-| VGG-16 — 30.9 GFLOP/inference | 55.5 ms | **18.9 ms** | ONNX Runtime **2.9×** |
+| a 60.9 MB CNN | 41.9 ms | **9.3 ms** | ONNX Runtime **4.5×** |
+| VGG-16 — 30.9 GFLOP/inference | 50.7 ms | **18.3 ms** | ONNX Runtime **2.8×** |
 
 **What the two ends actually measure.** On a 7,840-parameter `Linear` the arithmetic takes a few hundred
 nanoseconds, so the result is dominated by ONNX Runtime's ~1.6 µs of per-call dispatch — that 8.2× is a real
 property you feel on small models called at high rates, and it is mostly a measure of **call overhead**. On
 VGG-16 the arithmetic dominates and the result measures **kernel quality**, where Microsoft's MLAS is
-about 3× ahead of us.
+about 2.8× ahead of us.
 
 **Every row is a like-for-like thread count, and that was checked rather than assumed.** The three small
 rows run ONNX Runtime pinned to one thread, so they are only honest if Overfit is single-threaded there too.

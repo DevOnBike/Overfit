@@ -99,6 +99,7 @@ namespace DevOnBike.Overfit.Kernels
         public static void Forward(
             ReadOnlySpan<float> input,   // [batch, inChannels, H, W]
             ReadOnlySpan<float> kernels, // [outChannels, inChannels, k, k] == [outChannels, K]
+            ReadOnlySpan<float> packedKernels, // MR-major repack of `kernels`, or empty to build one here
             Span<float> output,          // [batch, outChannels, outH, outW]
             int batchSize,
             int inChannels,
@@ -141,6 +142,7 @@ namespace DevOnBike.Overfit.Kernels
 
                     GemmFusedIm2Col(
                         kernels,
+                        packedKernels,
                         input.Slice(b * inputPlane, inputPlane),
                         output.Slice(b * outputPlane, outputPlane),
                         m,
@@ -371,6 +373,67 @@ namespace DevOnBike.Overfit.Kernels
         }
 
         /// <summary>
+        /// Set <c>OVERFIT_CONV_PACK_A=1</c> to repack the kernel matrix into MR-major micro-panels before
+        /// the sweep, so the eight A values a k-step needs are contiguous.
+        ///
+        /// <para><b>Read from BLIS, whose kernel contract states it outright</b>
+        /// (<c>docs/KernelsHowTo.md</c>): the micropanel of A is <i>"stored by columns with leading
+        /// dimension PACKMR"</i>, so the MR values consumed per k-step sit side by side. This kernel does
+        /// the opposite — <c>rows[r] = a + (m0 + r) * k</c>, then <c>rows[r][kk]</c> — so one k-step reads
+        /// eight floats from eight addresses <b>k * 4 bytes apart, which is 18 KB at VGG-16's K = 4608</b>.
+        /// Same bytes, eight streams instead of one.</para>
+        ///
+        /// <para><b>Why this is a better bet here than it was for BLIS.</b> BLIS packs A on every call
+        /// because it is a general GEMM and A is caller data. In inference A is the convolution's own
+        /// weights, which never change — so the pack can happen once at model load and never again. That
+        /// also explains the negative already recorded here for BLIS-style blocking-plus-packing: <b>it
+        /// paid the packing cost per call</b>. This switch still packs per call, deliberately, because a
+        /// per-call pack is the cheap way to find out whether the layout is worth moving at all; if it
+        /// pays, the pack belongs at load time and this cost comes back too.</para>
+        ///
+        /// <para><b>What would refute it:</b> if the packed layout does not raise the single-threaded rate,
+        /// then A's access pattern is not the limit and this whole line of reasoning is wrong.</para>
+        /// </summary>
+        internal static readonly bool UsePackedA =
+            Environment.GetEnvironmentVariable(OverfitEnvironment.ConvPackA) == "1";
+
+        /// <summary>
+        /// Contraction length per K-block, or 0 to contract the whole of K in one pass (the original).
+        ///
+        /// <para><b>The hypothesis, taken from MLAS.</b> <c>MlasSgemmOperation</c> blocks BOTH dimensions —
+        /// <c>MLAS_SGEMM_STRIDEN = MLAS_SGEMM_STRIDEK = 128</c> — so its packed B panel is a constant
+        /// 128 x 128 floats = <b>64 KB</b> whatever K is, and the A slice it sweeps is <c>M x 128</c>.
+        /// Both sit in L2 together. This kernel contracts the whole of K in one pass, so its packed panel
+        /// is <c>K x 32</c> — <b>589 KB at VGG-16's K = 4608</b> — and the A it sweeps is the full
+        /// <c>M x K</c>, 9.4 MB, which is L3 rather than L2.</para>
+        ///
+        /// <para><b>The cost, which is why this is a switch and not a constant.</b> Contracting the whole
+        /// of K keeps the C tile in registers from start to finish, so C is written exactly once. Blocking
+        /// K forces C to be read back and re-accumulated once per block: at VGG-16's conv6 that turns
+        /// 3.2 MB of C traffic into about 115 MB. Whether the L1/L2 residency is worth that is a
+        /// measurement, not an argument.</para>
+        ///
+        /// <para><b>Do not read the earlier negative as covering this.</b> A BLIS-style K-blocked AND
+        /// A-packed variant was measured here and regressed (vgg 140 -> 189 ms), and its recorded reason
+        /// was that <i>most im2col K values are at most a few hundred, so a single K-block means no
+        /// blocking benefit</i>. <b>That premise is false for VGG-16</b>, whose K runs 576 to 4608 — at
+        /// Kc = 128 the late layers get 36 blocks, not one. The earlier result refutes the pair, not this.</para>
+        /// </summary>
+        internal static readonly int ConvKBlock = ResolveConvKBlock();
+
+        private static int ResolveConvKBlock()
+        {
+            var raw = Environment.GetEnvironmentVariable(OverfitEnvironment.ConvKBlock);
+
+            if (!int.TryParse(raw, out var parsed) || parsed <= 0)
+            {
+                return 0;
+            }
+
+            return parsed;
+        }
+
+        /// <summary>
         /// Set <c>OVERFIT_CONV_FUSED_IM2COL=0</c> to build the column matrix first, as before the fusion.
         /// </summary>
         internal static readonly bool UseFusedIm2Col =
@@ -398,6 +461,7 @@ namespace DevOnBike.Overfit.Kernels
         /// </summary>
         private static unsafe void GemmFusedIm2Col(
             ReadOnlySpan<float> kernels,
+            ReadOnlySpan<float> packedKernels,
             ReadOnlySpan<float> input,
             Span<float> output,
             int m,
@@ -413,10 +477,30 @@ namespace DevOnBike.Overfit.Kernels
             var nPanels = (n + Nr512 - 1) / Nr512;
             var mBlocks = ResolveMBlocks(m, nPanels);
 
-            fixed (float* pa = kernels, pin = input, pc = output)
+            // Padded to whole MR row blocks so the last block needs no special case; the padding rows
+            // contribute zeros and are discarded at the store, exactly as the clamped rows were.
+            var rowBlocksTotal = (m + Mr - 1) / Mr;
+
+            // A caller that owns the weights repacks them once and hands the result in; that is the
+            // whole point, because a convolution's A matrix never changes between inferences. Packing
+            // here is only the fallback for callers with nowhere to keep it, and it is measurably a
+            // loss on layers with small N — see UsePackedA.
+            var suppliedPack = UsePackedA && packedKernels.Length >= rowBlocksTotal * Mr * k;
+            var packedLength = UsePackedA && !suppliedPack ? checked(rowBlocksTotal * Mr * k) : 1;
+
+            using var packedABuf = new PooledBuffer<float>(packedLength, clearMemory: false);
+
+            if (UsePackedA && !suppliedPack)
+            {
+                PackKernelsMrMajor(kernels, packedABuf.Span, m, k, rowBlocksTotal);
+            }
+
+            var packedSource = suppliedPack ? packedKernels : (ReadOnlySpan<float>)packedABuf.Span;
+
+            fixed (float* pa = kernels, pin = input, pc = output, pPackedA = packedSource)
             {
                 var ctx = new FusedGemmCtx(
-                    pa,
+                    UsePackedA ? pPackedA : pa,
                     pin,
                     pc,
                     m,
@@ -453,7 +537,9 @@ namespace DevOnBike.Overfit.Kernels
             var inputPlane = inputH * inputW;
             var window = kernelSize * kernelSize;
 
-            using var packBuf = new PooledBuffer<float>(checked(k * Nr512), clearMemory: false);
+            var packRows = ConvKBlock > 0 ? Math.Min(ConvKBlock, k) : k;
+
+            using var packBuf = new PooledBuffer<float>(checked(packRows * Nr512), clearMemory: false);
             var packB = packBuf.Span;
 
             // Input row and column origins for this panel's 32 output positions, hoisted out of the K loop.
@@ -486,6 +572,21 @@ namespace DevOnBike.Overfit.Kernels
 
                     rowOrigin[j] = (oy * stride) - padding;
                     colOrigin[j] = ((position - (oy * outW)) * stride) - padding;
+                }
+
+                if (ConvKBlock > 0)
+                {
+                    GatherAndSweepKBlocked(
+                        in c,
+                        packB,
+                        rowOrigin,
+                        colOrigin,
+                        n0,
+                        nrEff,
+                        rowBlockStart,
+                        rowBlockEnd);
+
+                    continue;
                 }
 
                 if (!AblatePackB)
@@ -532,9 +633,367 @@ namespace DevOnBike.Overfit.Kernels
                         var m0 = rb * Mr;
                         var mrEff = Math.Min(Mr, m - m0);
 
+                        if (UsePackedA)
+                        {
+                            MicroKernel8x32Avx512PackedA(
+                                c.A + ((long)rb * Mr * k), mrEff, k, pPackB, c.C, n, n0, m0, nrEff);
+
+                            continue;
+                        }
+
                         MicroKernel8x32Avx512(c.A, m0, mrEff, k, pPackB, c.C, n, n0, nrEff);
                     }
                 }
+            }
+        }
+
+        /// <summary>
+        /// One N-panel swept in K-blocks: gather a <c>Kc x 32</c> B block, sweep this worker's M rows
+        /// against it, then move to the next block and accumulate. See <see cref="ConvKBlock"/>.
+        /// </summary>
+        private static unsafe void GatherAndSweepKBlocked(
+            ref readonly FusedGemmCtx c,
+            Span<float> packB,
+            int* rowOrigin,
+            int* colOrigin,
+            int n0,
+            int nrEff,
+            int rowBlockStart,
+            int rowBlockEnd)
+        {
+            var k = c.K;
+            var n = c.N;
+            var m = c.M;
+            var inputW = c.InputW;
+            var inputH = c.InputH;
+            var kernelSize = c.KernelSize;
+            var inputPlane = inputH * inputW;
+            var window = kernelSize * kernelSize;
+            var kc = ConvKBlock;
+
+            fixed (float* pPackB = packB)
+            {
+                // BOUND: kb advances by kc >= 1 each pass, so at most ceil(k / kc) passes.
+                for (var kb = 0; kb < k; kb += kc)
+                {
+                    var kcEff = Math.Min(kc, k - kb);
+
+                    for (var kk = 0; kk < kcEff; kk++)
+                    {
+                        var kRow = kb + kk;
+                        var kx = kRow % kernelSize;
+                        var ky = (kRow / kernelSize) % kernelSize;
+                        var channelBase = (kRow / window) * inputPlane;
+                        var dstBase = kk * Nr512;
+
+                        for (var j = 0; j < nrEff; j++)
+                        {
+                            var iy = rowOrigin[j] + ky;
+                            var ix = colOrigin[j] + kx;
+
+                            packB[dstBase + j] =
+                                (uint)iy < (uint)inputH && (uint)ix < (uint)inputW
+                                    ? c.Input[channelBase + (iy * inputW) + ix]
+                                    : 0f;
+                        }
+
+                        for (var j = nrEff; j < Nr512; j++)
+                        {
+                            packB[dstBase + j] = 0f;
+                        }
+                    }
+
+                    for (var rb = rowBlockStart; rb < rowBlockEnd; rb++)
+                    {
+                        var m0 = rb * Mr;
+                        var mrEff = Math.Min(Mr, m - m0);
+
+                        MicroKernel8x32Avx512Accumulating(
+                            c.A, m0, mrEff, k, kb, kcEff, pPackB, c.C, n, n0, nrEff, kb > 0);
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// The 8x32 micro-kernel over a K SLICE, seeding its accumulators from C rather than from zero when
+        /// this is not the first slice. Kept separate from <see cref="MicroKernel8x32Avx512"/> so the
+        /// full-K path measured before this experiment is not perturbed by it.
+        /// </summary>
+        private static unsafe void MicroKernel8x32Avx512Accumulating(
+            float* a,
+            int m0,
+            int mrEff,
+            int kStride,
+            int kStart,
+            int kCount,
+            float* packB,
+            float* c,
+            int n,
+            int n0,
+            int nrEff,
+            bool accumulate)
+        {
+            var rows = stackalloc float*[Mr];
+
+            for (var r = 0; r < Mr; r++)
+            {
+                rows[r] = a + ((long)(m0 + Math.Min(r, mrEff - 1)) * kStride) + kStart;
+            }
+
+            var tile = stackalloc float[Nr512];
+
+            Vector512<float> c00 = default, c01 = default, c10 = default, c11 = default;
+            Vector512<float> c20 = default, c21 = default, c30 = default, c31 = default;
+            Vector512<float> c40 = default, c41 = default, c50 = default, c51 = default;
+            Vector512<float> c60 = default, c61 = default, c70 = default, c71 = default;
+
+            if (accumulate)
+            {
+                LoadTile(c, n, n0, m0, 0, mrEff, nrEff, tile, ref c00, ref c01);
+                LoadTile(c, n, n0, m0, 1, mrEff, nrEff, tile, ref c10, ref c11);
+                LoadTile(c, n, n0, m0, 2, mrEff, nrEff, tile, ref c20, ref c21);
+                LoadTile(c, n, n0, m0, 3, mrEff, nrEff, tile, ref c30, ref c31);
+                LoadTile(c, n, n0, m0, 4, mrEff, nrEff, tile, ref c40, ref c41);
+                LoadTile(c, n, n0, m0, 5, mrEff, nrEff, tile, ref c50, ref c51);
+                LoadTile(c, n, n0, m0, 6, mrEff, nrEff, tile, ref c60, ref c61);
+                LoadTile(c, n, n0, m0, 7, mrEff, nrEff, tile, ref c70, ref c71);
+            }
+
+            for (var kk = 0; kk < kCount; kk++)
+            {
+                var b0 = Vector512.Load(packB + (kk * Nr512));
+                var b1 = Vector512.Load(packB + (kk * Nr512) + 16);
+
+                var a0 = Vector512.Create(rows[0][kk]);
+                c00 = Avx512F.FusedMultiplyAdd(a0, b0, c00);
+                c01 = Avx512F.FusedMultiplyAdd(a0, b1, c01);
+
+                var a1 = Vector512.Create(rows[1][kk]);
+                c10 = Avx512F.FusedMultiplyAdd(a1, b0, c10);
+                c11 = Avx512F.FusedMultiplyAdd(a1, b1, c11);
+
+                var a2 = Vector512.Create(rows[2][kk]);
+                c20 = Avx512F.FusedMultiplyAdd(a2, b0, c20);
+                c21 = Avx512F.FusedMultiplyAdd(a2, b1, c21);
+
+                var a3 = Vector512.Create(rows[3][kk]);
+                c30 = Avx512F.FusedMultiplyAdd(a3, b0, c30);
+                c31 = Avx512F.FusedMultiplyAdd(a3, b1, c31);
+
+                var a4 = Vector512.Create(rows[4][kk]);
+                c40 = Avx512F.FusedMultiplyAdd(a4, b0, c40);
+                c41 = Avx512F.FusedMultiplyAdd(a4, b1, c41);
+
+                var a5 = Vector512.Create(rows[5][kk]);
+                c50 = Avx512F.FusedMultiplyAdd(a5, b0, c50);
+                c51 = Avx512F.FusedMultiplyAdd(a5, b1, c51);
+
+                var a6 = Vector512.Create(rows[6][kk]);
+                c60 = Avx512F.FusedMultiplyAdd(a6, b0, c60);
+                c61 = Avx512F.FusedMultiplyAdd(a6, b1, c61);
+
+                var a7 = Vector512.Create(rows[7][kk]);
+                c70 = Avx512F.FusedMultiplyAdd(a7, b0, c70);
+                c71 = Avx512F.FusedMultiplyAdd(a7, b1, c71);
+            }
+
+            StoreTile(c, n, n0, m0, 0, mrEff, nrEff, c00, c01, tile);
+            StoreTile(c, n, n0, m0, 1, mrEff, nrEff, c10, c11, tile);
+            StoreTile(c, n, n0, m0, 2, mrEff, nrEff, c20, c21, tile);
+            StoreTile(c, n, n0, m0, 3, mrEff, nrEff, c30, c31, tile);
+            StoreTile(c, n, n0, m0, 4, mrEff, nrEff, c40, c41, tile);
+            StoreTile(c, n, n0, m0, 5, mrEff, nrEff, c50, c51, tile);
+            StoreTile(c, n, n0, m0, 6, mrEff, nrEff, c60, c61, tile);
+            StoreTile(c, n, n0, m0, 7, mrEff, nrEff, c70, c71, tile);
+        }
+
+        /// <summary>Seeds one row of the register tile from C, for a K-block after the first.</summary>
+        private static unsafe void LoadTile(
+            float* c, int n, int n0, int m0, int row, int mrEff, int nrEff, float* scratch,
+            ref Vector512<float> lo, ref Vector512<float> hi)
+        {
+            if (row >= mrEff)
+            {
+                return;
+            }
+
+            var src = c + ((long)(m0 + row) * n) + n0;
+
+            if (nrEff == Nr512)
+            {
+                lo = Vector512.Load(src);
+                hi = Vector512.Load(src + 16);
+                return;
+            }
+
+            // Lanes past nrEff are never stored, but they must not be NaN on the way through the FMA chain.
+            for (var j = 0; j < Nr512; j++)
+            {
+                scratch[j] = j < nrEff ? src[j] : 0f;
+            }
+
+            lo = Vector512.Load(scratch);
+            hi = Vector512.Load(scratch + 16);
+        }
+
+        /// <summary>
+        /// Floats needed to hold the MR-major repack of an <c>[M, K]</c> kernel matrix. M is rounded
+        /// up to a whole micro-panel, so the last row block needs no special case.
+        /// </summary>
+        internal static int PackedKernelLength(int m, int k)
+        {
+            return checked(((m + Mr - 1) / Mr) * Mr * k);
+        }
+
+        /// <summary>The repack, for a caller that keeps the result across inferences.</summary>
+        internal static void PackKernels(ReadOnlySpan<float> kernels, Span<float> packed, int m, int k)
+        {
+            PackKernelsMrMajor(kernels, packed, m, k, (m + Mr - 1) / Mr);
+        }
+
+        /// <summary>
+        /// Rewrites the kernel matrix from <c>[M, K]</c> row-major into MR-major micro-panels,
+        /// <c>[M/MR][K][MR]</c>, so the MR values one k-step needs are contiguous. Rows past M are zero,
+        /// which the store discards. See <see cref="UsePackedA"/>.
+        /// </summary>
+        private static unsafe void PackKernelsMrMajor(
+            ReadOnlySpan<float> kernels,
+            Span<float> packed,
+            int m,
+            int k,
+            int rowBlocksTotal)
+        {
+            fixed (float* src = kernels, dst = packed)
+            {
+                var ctx = new PackACtx(src, dst, m, k);
+
+                OverfitParallel.For(0, rowBlocksTotal, 1, &PackKernelsRowBlockWorker, &ctx);
+            }
+        }
+
+        private static unsafe void PackKernelsRowBlockWorker(int blockStart, int blockEnd, void* ctxPtr)
+        {
+            ref readonly var ctx = ref Unsafe.AsRef<PackACtx>(ctxPtr);
+
+            var m = ctx.M;
+            var k = ctx.K;
+
+            for (var rb = blockStart; rb < blockEnd; rb++)
+            {
+                var blockBase = ctx.Packed + ((long)rb * Mr * k);
+
+                for (var r = 0; r < Mr; r++)
+                {
+                    var row = (rb * Mr) + r;
+
+                    // Read the source row sequentially and write with a 32-byte stride: one of the two has
+                    // to be strided, and a strided write is the cheaper half.
+                    if (row >= m)
+                    {
+                        for (var kk = 0; kk < k; kk++)
+                        {
+                            blockBase[((long)kk * Mr) + r] = 0f;
+                        }
+
+                        continue;
+                    }
+
+                    var srcRow = ctx.Source + ((long)row * k);
+
+                    for (var kk = 0; kk < k; kk++)
+                    {
+                        blockBase[((long)kk * Mr) + r] = srcRow[kk];
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// The 8x32 micro-kernel reading A from an MR-major packed block, so the eight values a k-step
+        /// needs are one contiguous 32-byte group rather than eight addresses <c>k * 4</c> bytes apart.
+        /// </summary>
+        internal static unsafe void MicroKernel8x32Avx512PackedA(
+            float* packedA,
+            int mrEff,
+            int k,
+            float* packB,
+            float* c,
+            int n,
+            int n0,
+            int m0,
+            int nrEff)
+        {
+            var tile = stackalloc float[Nr512];
+
+            Vector512<float> c00 = default, c01 = default, c10 = default, c11 = default;
+            Vector512<float> c20 = default, c21 = default, c30 = default, c31 = default;
+            Vector512<float> c40 = default, c41 = default, c50 = default, c51 = default;
+            Vector512<float> c60 = default, c61 = default, c70 = default, c71 = default;
+
+            for (var kk = 0; kk < k; kk++)
+            {
+                var b0 = Vector512.Load(packB + (kk * Nr512));
+                var b1 = Vector512.Load(packB + (kk * Nr512) + 16);
+                var aSlot = packedA + ((long)kk * Mr);
+
+                var a0 = Vector512.Create(aSlot[0]);
+                c00 = Avx512F.FusedMultiplyAdd(a0, b0, c00);
+                c01 = Avx512F.FusedMultiplyAdd(a0, b1, c01);
+
+                var a1 = Vector512.Create(aSlot[1]);
+                c10 = Avx512F.FusedMultiplyAdd(a1, b0, c10);
+                c11 = Avx512F.FusedMultiplyAdd(a1, b1, c11);
+
+                var a2 = Vector512.Create(aSlot[2]);
+                c20 = Avx512F.FusedMultiplyAdd(a2, b0, c20);
+                c21 = Avx512F.FusedMultiplyAdd(a2, b1, c21);
+
+                var a3 = Vector512.Create(aSlot[3]);
+                c30 = Avx512F.FusedMultiplyAdd(a3, b0, c30);
+                c31 = Avx512F.FusedMultiplyAdd(a3, b1, c31);
+
+                var a4 = Vector512.Create(aSlot[4]);
+                c40 = Avx512F.FusedMultiplyAdd(a4, b0, c40);
+                c41 = Avx512F.FusedMultiplyAdd(a4, b1, c41);
+
+                var a5 = Vector512.Create(aSlot[5]);
+                c50 = Avx512F.FusedMultiplyAdd(a5, b0, c50);
+                c51 = Avx512F.FusedMultiplyAdd(a5, b1, c51);
+
+                var a6 = Vector512.Create(aSlot[6]);
+                c60 = Avx512F.FusedMultiplyAdd(a6, b0, c60);
+                c61 = Avx512F.FusedMultiplyAdd(a6, b1, c61);
+
+                var a7 = Vector512.Create(aSlot[7]);
+                c70 = Avx512F.FusedMultiplyAdd(a7, b0, c70);
+                c71 = Avx512F.FusedMultiplyAdd(a7, b1, c71);
+            }
+
+            StoreTile(c, n, n0, m0, 0, mrEff, nrEff, c00, c01, tile);
+            StoreTile(c, n, n0, m0, 1, mrEff, nrEff, c10, c11, tile);
+            StoreTile(c, n, n0, m0, 2, mrEff, nrEff, c20, c21, tile);
+            StoreTile(c, n, n0, m0, 3, mrEff, nrEff, c30, c31, tile);
+            StoreTile(c, n, n0, m0, 4, mrEff, nrEff, c40, c41, tile);
+            StoreTile(c, n, n0, m0, 5, mrEff, nrEff, c50, c51, tile);
+            StoreTile(c, n, n0, m0, 6, mrEff, nrEff, c60, c61, tile);
+            StoreTile(c, n, n0, m0, 7, mrEff, nrEff, c70, c71, tile);
+        }
+
+        /// <summary>Source, destination and shape for the MR-major kernel repack.</summary>
+        private readonly unsafe struct PackACtx
+        {
+            public readonly float* Source;
+            public readonly float* Packed;
+            public readonly int M;
+            public readonly int K;
+
+            public PackACtx(float* source, float* packed, int m, int k)
+            {
+                Source = source;
+                Packed = packed;
+                M = m;
+                K = k;
             }
         }
 

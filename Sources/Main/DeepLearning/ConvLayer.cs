@@ -10,6 +10,8 @@ using DevOnBike.Overfit.Maths;
 using DevOnBike.Overfit.Parameters;
 using DevOnBike.Overfit.Tensors;
 
+using DevOnBike.Overfit.Tensors.Core;
+
 namespace DevOnBike.Overfit.DeepLearning
 {
     public sealed class ConvLayer : IModule, IInferenceShapeProvider
@@ -24,6 +26,13 @@ namespace DevOnBike.Overfit.DeepLearning
         private readonly int _inputSize;
         private readonly int _outputSize;
         private readonly int _kernelSizePerOutput;
+
+        /// <summary>
+        /// The kernel matrix repacked into MR-major micro-panels for the conv GEMM, built once when the
+        /// layer enters inference mode. Null in training mode and on hardware that does not take the
+        /// packed path. See <see cref="PrepareInference"/>.
+        /// </summary>
+        private TensorStorage<float>? _kernelsPacked;
         private readonly int _padding;
         private readonly int _stride;
 
@@ -146,6 +155,10 @@ namespace DevOnBike.Overfit.DeepLearning
         public void Train()
         {
             IsTraining = true;
+
+            // The packed kernels are an inference-mode artefact and go stale the moment a training
+            // step touches the weights. Releasing them here also returns the second copy's memory.
+            ReleasePackedKernels();
         }
 
         public void Eval()
@@ -154,9 +167,50 @@ namespace DevOnBike.Overfit.DeepLearning
             PrepareInference();
         }
 
+        /// <summary>
+        /// Builds the MR-major repack of the kernel matrix, once, for the conv GEMM to sweep.
+        ///
+        /// <para><b>Why the pack belongs here and not in the kernel.</b> The GEMM's micro-kernel needs the
+        /// MR values of one k-step side by side; read from the <c>[M, K]</c> matrix they are <c>K * 4</c>
+        /// bytes apart, which is 18 KB on VGG-16's deepest layers. Packing fixes that, and <b>a
+        /// convolution's A matrix is its own weights, so it never changes between inferences</b> — the
+        /// pack is a load-time cost, not a per-call one. Measured with the pack done per call it was worth
+        /// 4.1% on VGG-16 <i>net of paying for it every time</i>, and the per-layer split showed the whole
+        /// of that cost landing on the layers with small N (conv13 lost 16.7% while conv6 gained 11.4%).
+        /// Done here, those layers keep the gain and pay nothing.</para>
+        ///
+        /// <para><b>It costs a second copy of the kernel weights</b> — 58.8 MB across VGG-16's convolution
+        /// stack — held only while the layer is in inference mode. <see cref="Train"/> releases it. That
+        /// is a deliberate trade and it is the same shape as the one `XC-82` objects to for the dense
+        /// layer; the difference is that this copy is on the hot path and measured to pay.</para>
+        /// </summary>
         public void PrepareInference()
         {
-            // Direct inference convolution uses Kernels.DataView directly â€” no cache needed.
+            if (_kernelsPacked != null || !UsesPackedKernels())
+            {
+                return;
+            }
+
+            var packed = new TensorStorage<float>(
+                Conv2DGemmKernels.PackedKernelLength(_outC, _kernelSizePerOutput),
+                clearMemory: false);
+
+            Conv2DGemmKernels.PackKernels(
+                Kernels.DataReadOnlySpan, packed.AsSpan(), _outC, _kernelSizePerOutput);
+
+            _kernelsPacked = packed;
+        }
+
+        /// <summary>
+        /// Whether this layer's shape reaches the packed conv-GEMM path. Mirrors the branch in
+        /// <c>Conv2DKernels</c>: the single-channel 3x3 case keeps its own vectorised kernel and never
+        /// touches the GEMM, so packing for it would allocate a copy nothing reads.
+        /// </summary>
+        private bool UsesPackedKernels()
+        {
+            return Conv2DGemmKernels.UsePackedA
+                && Conv2DGemmKernels.IsSupported
+                && !(_inC == 1 && _k == 3);
         }
 
         /// <summary>
@@ -185,7 +239,15 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public void InvalidateParameterCaches()
         {
-            // No cached transformed weights.
+            // The MR-major repack is derived from the kernel weights, so it is exactly the cache this
+            // method exists to drop. Rebuilt on the next PrepareInference.
+            ReleasePackedKernels();
+        }
+
+        private void ReleasePackedKernels()
+        {
+            _kernelsPacked?.Dispose();
+            _kernelsPacked = null;
         }
 
         public AutogradNode Forward(ComputationGraph? graph, AutogradNode input)
@@ -292,13 +354,20 @@ namespace DevOnBike.Overfit.DeepLearning
             Load(br);
         }
 
+        /// <summary>The packed kernels if this layer has them, otherwise empty.</summary>
+        private ReadOnlySpan<float> PackedKernelSpan()
+        {
+            return _kernelsPacked == null ? default : _kernelsPacked.AsReadOnlySpan();
+        }
+
         public void ForwardInference(ReadOnlySpan<float> input, Span<float> output)
         {
             if (_padding == 0 && _stride == 1)
             {
                 Conv2DKernels.ForwardValidNchw(
                     input, Kernels.DataReadOnlySpan, output,
-                    _inC, _outC, _h, _w, _k);
+                    _inC, _outC, _h, _w, _k,
+                    PackedKernelSpan());
             }
 
             if (_padding != 0 || _stride != 1)
@@ -306,7 +375,8 @@ namespace DevOnBike.Overfit.DeepLearning
                 Conv2DKernels.ForwardNchw(
                     input, Kernels.DataReadOnlySpan, output,
                     batchSize: 1, _inC, _outC, _h, _w, _k,
-                    _padding, _stride);
+                    _padding, _stride,
+                    PackedKernelSpan());
             }
 
             if (Bias != null)
@@ -326,6 +396,7 @@ namespace DevOnBike.Overfit.DeepLearning
             _biasNode?.Dispose();
             Kernels.Dispose();
             Bias?.Dispose();
+            _kernelsPacked?.Dispose();
         }
 
         private static void ApplyBiasNchw(Span<float> output, ReadOnlySpan<float> bias, int outC, int outH, int outW)

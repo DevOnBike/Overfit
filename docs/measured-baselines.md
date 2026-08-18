@@ -369,6 +369,160 @@ deliberately skipped — `PB-ORT1` measured the first at 61% within-version spre
 and found the second unable to resolve anything (BDN raises `MinIterationTime`; one iteration is 1.07 ms
 against a 100 ms target).
 
+### CORRECTION: the roofline denominator was the 256-bit one (2026-08-18)
+
+Every "percent of roofline" figure written in this file before this note divided a 512-bit kernel's rate by
+**2190 GFLOP/s**, which is not this machine's AVX-512 ceiling. Those figures were uniformly about **2.35x
+too generous**.
+
+**The correct numbers, derived from the benchmark's own work unit rather than from a remembered total.**
+`MachineRooflineBenchmark.FmaChains512` issues **12 FMAs per iteration over 2,000,000 iterations**, each one
+512-bit and so 32 FLOP: **768 MFLOP per worker**. At the measured times:
+
+| arm | time | throughput |
+|---|---:|---:|
+| 1 worker | 2.139 ms | **359 GFLOP/s** |
+| 32 workers, 32x the work | 4.785 ms | **5136 GFLOP/s** |
+
+The 14.30x ratio between them is unaffected, and every conclusion drawn from that ratio still stands - it
+was always a ratio of two measurements of the same thing. What was wrong was the absolute denominator.
+
+**How it happened, because the shape is worth recognising.** The 2190 figure was carried forward from an
+earlier note rather than recomputed, and nothing downstream could contradict it: a percentage of a wrong
+ceiling still looks like a percentage. It surfaced only when `GemmMicroKernelShapeBenchmark` reported the
+8x32 tile at **340 GFLOP/s** on a single core - which would have been 222% of the 153 GFLOP/s single-core
+figure this file was quoting. **An impossible percentage is the only thing that can catch a wrong
+denominator**, so a rate that exceeds its own ceiling deserves more attention than a rate that merely
+disappoints.
+
+**Restated on the correct basis:** the conv stack after today's work runs at 786 GFLOP/s = **15.3%** of
+5136, ONNX Runtime's whole-model rate is 30.94 GFLOP in 18.9 ms = 1637 GFLOP/s = **32%**, and the 8x32
+micro-kernel with L1-resident operands reaches 340 GFLOP/s = **95% of single-core peak**.
+
+**That last figure changes what the remaining gap is about: the micro-kernel is at hardware peak when its
+operands are in L1, so it is not the arithmetic that is slow.**
+
+### Packing the conv kernels MR-major, once at load (2026-08-18, `XC-78`)
+
+The largest conv win after the patch-gather fusion, and it came out of reading BLIS rather than out of
+measuring anything first.
+
+**The contract BLIS states outright** (`docs/KernelsHowTo.md`): the micropanel of A is *"stored by columns
+with leading dimension PACKMR"*, so the MR values one k-step consumes sit side by side. Our micro-kernel did
+the opposite - `rows[r] = a + (m0 + r) * k`, then `rows[r][kk]` - so a single k-step read eight floats from
+eight addresses `k * 4` bytes apart, which is **18 KB at VGG-16's K = 4608**. Same bytes, eight streams
+instead of one. It is the same defect class as the dense layer's 16 KB stride found earlier the same day.
+
+**Why this bet is better here than it was for BLIS, and why the old negative does not cover it.** BLIS packs
+A on every call because it is a general GEMM and A is caller data. **In inference A is the convolution's own
+weights, which never change** - so the pack is a load-time cost, not a per-call one. That single difference
+in premises is the whole result, and it also explains the negative already recorded here for BLIS-style
+blocking-plus-packing: **that experiment paid the packing cost every call.**
+
+**Measured in two stages, deliberately, because the second is only worth building if the first pays.**
+
+*Stage one - pack per call*, paying for the pack on every inference: VGG-16 **-4.1%**, the 60.9 MB CNN
+**-4.5%**, against an ONNX Runtime canary of 1.6-2.1%. Resolved, but modest.
+
+*The per-layer split then said exactly where that cost was landing*, all cores, GFLOP/s:
+
+| layer | N | unpacked | packed per call | packed at load |
+|---|---:|---:|---:|---:|
+| conv6 | 3136 | 761.5 | 848.4 | **877.0** |
+| conv7 | 3136 | 765.3 | 850.7 | **887.0** |
+| conv9 | 784 | 803.9 | 828.8 | **939.5** |
+| conv10 | 784 | 814.9 | 836.9 | **954.2** |
+| conv11 | 196 | 471.2 | **445.5** | **520.2** |
+| conv12 | 196 | 478.6 | **423.4** | **535.8** |
+| conv13 | 196 | 505.9 | **421.2** | **531.6** |
+
+The whole of the pack's cost fell on the layers with small N, where the packed matrix serves only 7 panels
+instead of 98 - conv13 **lost 16.7%** while conv6 gained 11.4%. That is what said the pack belonged at load
+time rather than in the kernel, and it is also **how the load-time wiring was proved live**: had it silently
+fallen back to per-call packing, those layers would still be losing. They are not; they now beat the
+unpacked baseline.
+
+*Stage two - pack once, when the layer enters inference mode.* Whole conv stack **43.86 -> 39.04 ms
+(-11.0%)**, 699.7 -> **786 GFLOP/s = 15.3% of the 5136 GFLOP/s all-core AVX-512 roofline**.
+
+**End to end, ABAB in one box state** (`OVERFIT_CONV_PACK_A` 0 against 1):
+
+| model | packed off | packed at load | change | ONNX Runtime canary |
+|---|---:|---:|---:|---:|
+| VGG-16 | 55.37 / 55.37 ms | **50.74 / 50.68 ms** | **-8.4%** | 18.17-18.37 ms (1.1%) |
+| CNN, 60.9 MB | 46.45 / 46.90 ms | **41.89 / 42.00 ms** | **-10.1%** | 9.14-9.55 ms (4.5%) |
+
+Against ONNX Runtime: VGG-16 **3.03x -> 2.77x**, the 60.9 MB CNN
+**5.01x -> 4.49x**. Parity unchanged in every arm.
+
+**The unpacked VGG arm repeated to 55.37 and 55.37 - the same figure to the hundredth of a millisecond** -
+so the 8.4% is not a drift artefact.
+
+**The two stages agree with the arithmetic that predicted them.** Per-call packing gave -4.1% on VGG-16;
+moving the pack to load time gave 8.4%, close to double. That is what had to happen if the pack
+cost roughly equalled the gain, which is what the per-layer table showed.
+
+**What it costs.** A second copy of the kernel weights - 58.8 MB across VGG-16's convolution stack - held
+only while the layer is in inference mode. `Train()` releases it, `InvalidateParameterCaches()` drops it
+because it is derived from the weights, and `Dispose()` frees it. This is the same shape as the duplication
+`XC-82` objects to for the dense layer; the difference is that this copy is on the hot path and measured to
+pay 8.4%.
+
+**Not done.** The AVX2 path is unchanged, and the single-channel 3x3 convolution never reaches the GEMM, so
+it is deliberately not packed - packing it would allocate a copy nothing reads.
+
+### K-blocking the conv GEMM: implemented, measured, NOT shipped (2026-08-18, `XC-78`)
+
+A negative result, and the most useful kind: the hypothesis came from reading a competitor's source, it was
+specific, it was cheap to test, and it is wrong for these shapes.
+
+**What MLAS does that we do not.** `MlasSgemmOperation` (`onnxruntime/core/mlas/lib/sgemm.cpp`) blocks BOTH
+dimensions - `MLAS_SGEMM_STRIDEN = MLAS_SGEMM_STRIDEK = 128` - so its packed B panel is a constant
+`128 x 128` floats = **64 KB** whatever K is, and the A slice it sweeps is `M x 128`. Both sit in L2
+together, and the inner B slice is L1-sized. Our kernel contracts the whole of K in one pass, so its packed
+panel is `K x 32` - **589 KB at VGG-16's K = 4608** - and the A it sweeps is the full `M x K`, 9.4 MB, which
+is L3 rather than L2.
+
+**Why it was worth testing despite an earlier negative.** A BLIS-style K-blocked AND A-packed variant was
+measured here before and regressed (vgg 140 -> 189 ms). Its recorded reason was that *most im2col K values
+are at most a few hundred, so a single K-block means no blocking benefit*. **That premise is false for
+VGG-16**, whose K runs 576 to 4608 - at Kc = 128 the late layers get 36 blocks, not one. The old result
+refutes the pair; it does not cover K-blocking alone.
+
+**The measurement.** `LargeCnnComparisonBenchmark` on VGG-16, `OVERFIT_CONV_KBLOCK` swept, with an unblocked
+run at each end of the sweep so drift is visible:
+
+| Kc | Overfit | against unblocked | ONNX Runtime canary |
+|---|---:|---:|---:|
+| off (first) | 56.18 ms | - | 19.86 ms |
+| 64 | 59.09 ms | **+5.2%** | 19.48 ms |
+| 128 | 56.60 ms | +0.8% | 19.52 ms |
+| 256 | 55.34 ms | -1.4% | 19.45 ms |
+| 512 | 55.75 ms | -0.7% | 19.47 ms |
+| 1024 | **54.95 ms** | **-2.1%** | 19.52 ms |
+| off (last) | 56.12 ms | - | 19.49 ms |
+
+**The verdict is "not resolved", not "a small win".** The best result is -2.1% and the ONNX Runtime canary
+moved 2.1% across the same runs, so the effect is the size of the instrument's own error. The two unblocked
+runs bracket the sweep and agree to 0.1%, so the box was still - it is the between-configuration spread that
+is the problem, not drift.
+
+**What the shape of the curve says.** The gain rises monotonically toward larger Kc and the best value is
+the one closest to no blocking at all, while small blocks are clearly worse (Kc = 64 is +5.2%). That is the
+C re-accumulation cost dominating the L1/L2 benefit: contracting the whole of K keeps the C tile in
+registers from start to finish, so C is written exactly once, while blocking forces a read-modify-write per
+block - at VGG-16's conv6, 3.2 MB of C traffic becomes about 115 MB. For M of 256 to 512 against K of 576 to
+4608, **full-K accumulation in registers is already the right trade**, and MLAS's constants are tuned for a
+different M/K balance than an im2col convolution presents.
+
+**It is kept, default off, behind `OVERFIT_CONV_KBLOCK`.** The switch is the cheap way for someone on
+different silicon - a different L2, a different L3 topology - to re-run this in one command rather than
+re-deriving it. **The default suite runs Kc = 0, so the blocked path is not exercised by CI**; it was
+verified by running the whole suite green at Kc = 64, 128, 256, 1024 and 5000 (5000 exceeds every K here, so
+the result must not and does not depend on the split), and by **four mutations, all four caught at Kc = 128
+and all four correctly NOT caught at Kc = 0** - which is what proves the mutations reach the new path and
+leave the default one alone.
+
 ### The patch gather folded into the GEMM's own pack (2026-08-18, `XC-78`)
 
 The largest single change of the day, and the one the per-layer diagnostic pointed at last rather than first.
@@ -612,7 +766,8 @@ by the all-core roofline understates one thread by the core count while correcti
 clock is a guess. `MachineRooflineBenchmark.PeakFmaFloat512` now takes `OVERFIT_ROOFLINE_WORKERS`; the same
 kernel and panels at 1 worker take 2.139 ms and at 32 workers 4.785 ms for 32x the work, so this box's
 all-core FMA throughput is **14.30x its single-core throughput** - clock drop and SMT already inside that
-number. Against the recorded 2190 GFLOP/s all-core roofline, the single-core ceiling is **153 GFLOP/s**.
+number. **CORRECTED 2026-08-18, see the correction note: the ceiling is 5136 GFLOP/s all-core and
+359 GFLOP/s single-core**, not the 2190 / 153 this section originally carried.
 
 Ten runs, `OVERFIT_CNN_ONNX` on `vgg16.onnx`, one arm at `OVERFIT_PARALLEL_WORKERS=1`:
 
@@ -783,7 +938,8 @@ trusted below that resolution without isolating the runs.
 | pooling | 4.88 ms | 4.56 ms | — | 4.9% |
 
 Within convolution the split is **im2col 18.0% / GEMM 82.0%** (9.69 ms and 44.16 ms per run), and the GEMM
-runs at **695 GFLOP/s = 32% of the measured 2190 GFLOP/s roofline**.
+runs at **695 GFLOP/s = 13.5% of the measured 5136 GFLOP/s roofline** (this line originally said 32%
+against a 2190 GFLOP/s figure; see the correction note).
 
 **Two things this refuted.** The leading hypothesis was that im2col's materialisation dominates — the
 28.9 MB expansion is real, and it is **third-order**. And the FLOP arithmetic here was wrong twice in our

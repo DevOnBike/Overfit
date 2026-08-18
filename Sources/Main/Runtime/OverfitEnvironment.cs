@@ -56,6 +56,12 @@ namespace DevOnBike.Overfit.Runtime
         /// <summary>Set to 0 to build the conv column matrix first, as before the im2col fusion.</summary>
         public const string ConvFusedIm2Col = "OVERFIT_CONV_FUSED_IM2COL";
 
+        /// <summary>Contraction length per conv-GEMM K-block; unset or 0 contracts the whole of K.</summary>
+        public const string ConvKBlock = "OVERFIT_CONV_KBLOCK";
+
+        /// <summary>Set to 1 to repack conv kernels into MR-major micro-panels before the GEMM sweep.</summary>
+        public const string ConvPackA = "OVERFIT_CONV_PACK_A";
+
         /// <summary>Set to 0 to run pool=2 inference on one thread, as before the channel split.</summary>
         public const string ParallelPool = "OVERFIT_PARALLEL_POOL";
 

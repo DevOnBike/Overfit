@@ -29,7 +29,8 @@ namespace DevOnBike.Overfit.Kernels
             int outChannels,
             int inputH,
             int inputW,
-            int kernelSize)
+            int kernelSize,
+            ReadOnlySpan<float> packedKernels = default)
         {
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(inChannels);
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(outChannels);
@@ -78,7 +79,8 @@ namespace DevOnBike.Overfit.Kernels
             if (Conv2DGemmKernels.IsSupported && !(inChannels == 1 && kernelSize == 3))
             {
                 Conv2DGemmKernels.Forward(
-                    input, kernels, output, batchSize, inChannels, outChannels, inputH, inputW, kernelSize, 0, 1);
+                    input, kernels, packedKernels, output, batchSize, inChannels, outChannels, inputH,
+                    inputW, kernelSize, 0, 1);
                 return;
             }
 
@@ -303,7 +305,8 @@ namespace DevOnBike.Overfit.Kernels
             int inputW,
             int kernelSize,
             int padding,
-            int stride)
+            int stride,
+            ReadOnlySpan<float> packedKernels = default)
         {
             // im2col + register-blocked GEMM closes most of the gap to a native conv on real-sized models;
             // it subsumes every stride/padding via the patch gather. Falls back to the direct-conv SIMD workers
@@ -311,7 +314,8 @@ namespace DevOnBike.Overfit.Kernels
             if (Conv2DGemmKernels.IsSupported)
             {
                 Conv2DGemmKernels.Forward(
-                    input, kernels, output, batchSize, inChannels, outChannels, inputH, inputW, kernelSize, padding, stride);
+                    input, kernels, packedKernels, output, batchSize, inChannels, outChannels, inputH,
+                    inputW, kernelSize, padding, stride);
                 return;
             }
 
