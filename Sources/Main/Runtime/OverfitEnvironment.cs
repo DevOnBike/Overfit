@@ -53,6 +53,9 @@ namespace DevOnBike.Overfit.Runtime
         /// <summary>Set to 0 to dispatch the conv GEMM one work item per N-panel, as before the M-split.</summary>
         public const string ConvMSplit = "OVERFIT_CONV_M_SPLIT";
 
+        /// <summary>Set to 0 to build the conv column matrix first, as before the im2col fusion.</summary>
+        public const string ConvFusedIm2Col = "OVERFIT_CONV_FUSED_IM2COL";
+
         /// <summary>Set to 0 to run pool=2 inference on one thread, as before the channel split.</summary>
         public const string ParallelPool = "OVERFIT_PARALLEL_POOL";
 

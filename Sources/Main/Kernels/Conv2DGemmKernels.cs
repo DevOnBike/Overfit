@@ -130,6 +130,40 @@ namespace DevOnBike.Overfit.Kernels
                 return;
             }
 
+            // Fused: the patch gather happens inside the GEMM's own B pack, so the k*n column matrix is
+            // never built. On VGG-16's conv2 that matrix alone is 115.6 MB of scratch, written once and
+            // read once, for arithmetic that could have read the 3.2 MB input directly.
+            if (UseFusedIm2Col && UseAvx512Conv)
+            {
+                for (var b = 0; b < batchSize; b++)
+                {
+                    var tf = ProfileParts ? Stopwatch.GetTimestamp() : 0L;
+
+                    GemmFusedIm2Col(
+                        kernels,
+                        input.Slice(b * inputPlane, inputPlane),
+                        output.Slice(b * outputPlane, outputPlane),
+                        m,
+                        n,
+                        k,
+                        inputH,
+                        inputW,
+                        kernelSize,
+                        padding,
+                        stride,
+                        outW);
+
+                    if (ProfileParts)
+                    {
+                        // There is no separate gather to time any more. The split reports 0% im2col here,
+                        // and that is the point rather than a broken instrument.
+                        _gemmTicks += Stopwatch.GetTimestamp() - tf;
+                    }
+                }
+
+                return;
+            }
+
             using var colsBuf = new PooledBuffer<float>(checked(k * n), clearMemory: false);
             var cols = colsBuf.Span;
 
@@ -333,6 +367,222 @@ namespace DevOnBike.Overfit.Kernels
                 }
 
                 OverfitParallel.For(0, nPanels, 1, &GemmNPanelWorker, &ctx);
+            }
+        }
+
+        /// <summary>
+        /// Set <c>OVERFIT_CONV_FUSED_IM2COL=0</c> to build the column matrix first, as before the fusion.
+        /// </summary>
+        internal static readonly bool UseFusedIm2Col =
+            Environment.GetEnvironmentVariable(OverfitEnvironment.ConvFusedIm2Col) != "0";
+
+        /// <summary>
+        /// The conv GEMM with the patch gather folded into its own B pack, so no column matrix exists.
+        ///
+        /// <para><b>What this removes.</b> The unfused path materialises a <c>K x N</c> float matrix, then
+        /// each worker copies a 32-column slice of it into <c>packB</c>. On VGG-16's conv2 that matrix is
+        /// <b>115.6 MB</b>, written once and read once, to hold values that could have been read from the
+        /// 3.2 MB input. Measured before the change, the gather was <b>19.8% of convolution time</b>.</para>
+        ///
+        /// <para><b>The same idea as MLAS, taken one level finer.</b> ONNX Runtime's
+        /// <c>MlasConvExpandThenGemmSegmented</c> expands a <c>CountK x CountN</c> block into a column
+        /// buffer and GEMMs that, so it never holds the whole matrix either. Here the destination is the
+        /// micro-kernel's own packed panel, so there is no intermediate buffer at all — a panel is
+        /// <c>K x 32</c> floats, 589 KB at VGG's largest K, which sits inside this core's 1 MB L2.</para>
+        ///
+        /// <para><b>The cost, so it is not sold as free.</b> The unfused pack reads 32 contiguous floats;
+        /// this one computes an input address per element. The row and column bases are hoisted per panel
+        /// — 32 divisions for the whole panel rather than one per element — leaving two adds and two
+        /// bounds checks in the inner loop. Whether that is cheaper than moving the matrix twice is a
+        /// measurement, not an argument, and <c>OVERFIT_CONV_FUSED_IM2COL=0</c> is how it is taken.</para>
+        /// </summary>
+        private static unsafe void GemmFusedIm2Col(
+            ReadOnlySpan<float> kernels,
+            ReadOnlySpan<float> input,
+            Span<float> output,
+            int m,
+            int n,
+            int k,
+            int inputH,
+            int inputW,
+            int kernelSize,
+            int padding,
+            int stride,
+            int outW)
+        {
+            var nPanels = (n + Nr512 - 1) / Nr512;
+            var mBlocks = ResolveMBlocks(m, nPanels);
+
+            fixed (float* pa = kernels, pin = input, pc = output)
+            {
+                var ctx = new FusedGemmCtx(
+                    pa,
+                    pin,
+                    pc,
+                    m,
+                    n,
+                    k,
+                    mBlocks,
+                    inputH,
+                    inputW,
+                    kernelSize,
+                    padding,
+                    stride,
+                    outW);
+
+                OverfitParallel.For(0, nPanels * mBlocks, 1, &GemmFusedPanelWorker512, &ctx);
+            }
+        }
+
+        private static unsafe void GemmFusedPanelWorker512(int itemStart, int itemEnd, void* ctxPtr)
+        {
+            ref readonly var c = ref Unsafe.AsRef<FusedGemmCtx>(ctxPtr);
+
+            var k = c.K;
+            var n = c.N;
+            var m = c.M;
+            var mBlocks = c.MBlocks;
+            var rowBlocks = (m + Mr - 1) / Mr;
+
+            var inputW = c.InputW;
+            var inputH = c.InputH;
+            var kernelSize = c.KernelSize;
+            var padding = c.Padding;
+            var stride = c.Stride;
+            var outW = c.OutW;
+            var inputPlane = inputH * inputW;
+            var window = kernelSize * kernelSize;
+
+            using var packBuf = new PooledBuffer<float>(checked(k * Nr512), clearMemory: false);
+            var packB = packBuf.Span;
+
+            // Input row and column origins for this panel's 32 output positions, hoisted out of the K loop.
+            // Computing them per element would put a division on every one of K*32 gathers.
+#pragma warning disable OVERFIT026 // BOUND: exactly Nr512 (32) ints each = 128 B per array, fixed at compile time.
+            var rowOrigin = stackalloc int[Nr512];
+            var colOrigin = stackalloc int[Nr512];
+#pragma warning restore OVERFIT026
+
+            for (var item = itemStart; item < itemEnd; item++)
+            {
+                var np = item / mBlocks;
+                var mb = item - (np * mBlocks);
+
+                var rowBlockStart = (int)((long)rowBlocks * mb / mBlocks);
+                var rowBlockEnd = (int)((long)rowBlocks * (mb + 1) / mBlocks);
+
+                if (rowBlockStart >= rowBlockEnd)
+                {
+                    continue;
+                }
+
+                var n0 = np * Nr512;
+                var nrEff = Math.Min(Nr512, n - n0);
+
+                for (var j = 0; j < nrEff; j++)
+                {
+                    var position = n0 + j;
+                    var oy = position / outW;
+
+                    rowOrigin[j] = (oy * stride) - padding;
+                    colOrigin[j] = ((position - (oy * outW)) * stride) - padding;
+                }
+
+                if (!AblatePackB)
+                {
+                    for (var kk = 0; kk < k; kk++)
+                    {
+                        var kx = kk % kernelSize;
+                        var ky = (kk / kernelSize) % kernelSize;
+                        var channelBase = (kk / window) * inputPlane;
+                        var dstBase = kk * Nr512;
+
+                        for (var j = 0; j < nrEff; j++)
+                        {
+                            var iy = rowOrigin[j] + ky;
+                            var ix = colOrigin[j] + kx;
+
+                            packB[dstBase + j] =
+                                (uint)iy < (uint)inputH && (uint)ix < (uint)inputW
+                                    ? c.Input[channelBase + (iy * inputW) + ix]
+                                    : 0f;
+                        }
+
+                        // Lanes past nrEff are never stored — StoreTile writes exactly nrEff columns — so
+                        // this fill is not load-bearing, and a mutation that writes 1f here leaves the whole
+                        // suite green. It stays because uninitialised pool memory can hold NaN, and feeding
+                        // NaN through the FMA chain costs on some parts even when the lane is discarded. It
+                        // is now outside the gather loop rather than a branch on every one of K*32 elements.
+                        for (var j = nrEff; j < Nr512; j++)
+                        {
+                            packB[dstBase + j] = 0f;
+                        }
+                    }
+                }
+
+                if (AblateMicroKernel)
+                {
+                    continue;
+                }
+
+                fixed (float* pPackB = packB)
+                {
+                    for (var rb = rowBlockStart; rb < rowBlockEnd; rb++)
+                    {
+                        var m0 = rb * Mr;
+                        var mrEff = Math.Min(Mr, m - m0);
+
+                        MicroKernel8x32Avx512(c.A, m0, mrEff, k, pPackB, c.C, n, n0, nrEff);
+                    }
+                }
+            }
+        }
+
+        /// <summary>Pointers, shape and convolution geometry for one fused GEMM.</summary>
+        private readonly unsafe struct FusedGemmCtx
+        {
+            public readonly float* A;
+            public readonly float* Input;
+            public readonly float* C;
+            public readonly int M;
+            public readonly int N;
+            public readonly int K;
+            public readonly int MBlocks;
+            public readonly int InputH;
+            public readonly int InputW;
+            public readonly int KernelSize;
+            public readonly int Padding;
+            public readonly int Stride;
+            public readonly int OutW;
+
+            public FusedGemmCtx(
+                float* a,
+                float* input,
+                float* c,
+                int m,
+                int n,
+                int k,
+                int mBlocks,
+                int inputH,
+                int inputW,
+                int kernelSize,
+                int padding,
+                int stride,
+                int outW)
+            {
+                A = a;
+                Input = input;
+                C = c;
+                M = m;
+                N = n;
+                K = k;
+                MBlocks = mBlocks;
+                InputH = inputH;
+                InputW = inputW;
+                KernelSize = kernelSize;
+                Padding = padding;
+                Stride = stride;
+                OutW = outW;
             }
         }
 

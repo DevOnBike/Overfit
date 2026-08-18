@@ -369,6 +369,53 @@ deliberately skipped — `PB-ORT1` measured the first at 61% within-version spre
 and found the second unable to resolve anything (BDN raises `MinIterationTime`; one iteration is 1.07 ms
 against a 100 ms target).
 
+### The patch gather folded into the GEMM's own pack (2026-08-18, `XC-78`)
+
+The largest single change of the day, and the one the per-layer diagnostic pointed at last rather than first.
+
+**What it removes.** The unfused path builds a `K x N` float column matrix, then every worker copies a
+32-column slice of it into its packed panel. On VGG-16's conv2 that matrix is **115.6 MB**, written once and
+read once, to hold values that could have been read straight out of the 3.2 MB input. Measured before the
+change, the gather alone was **19.8% of convolution time** - and the copy out of it is part of the other
+80.2%.
+
+**The design is MLAS's, taken one level finer.** ONNX Runtime's `MlasConvExpandThenGemmSegmented`
+(`onnxruntime/core/mlas/lib/convolve.cpp`) expands a `CountK x CountN` block into a column buffer and GEMMs
+that block, so it never holds the whole matrix either; its `StrideN` / `StrideK` adapt to keep that buffer a
+constant size. Here the destination is the micro-kernel's **own packed panel**, so there is no intermediate
+buffer at all. A panel is `K x 32` floats - 589 KB at VGG's largest K, inside this core's 1 MB L2.
+
+**The cost, so it is not sold as free.** The unfused pack reads 32 contiguous floats. The fused one computes
+an input address per element. Row and column origins are hoisted per panel - 32 divisions for the whole
+panel rather than one per element - leaving two adds and two bounds checks in the inner loop.
+
+**Measured, ABAB in one box state** (`OVERFIT_CONV_FUSED_IM2COL=0` against default):
+
+| model | unfused | fused | change | ORT canary |
+|---|---:|---:|---:|---:|
+| VGG-16 | 64.33 / 64.28 ms | **55.49 / 55.54 ms** | **-13.7%** | 18.62-19.10 ms (2.6%) |
+| CNN, 60.9 MB | 55.48 / 55.23 ms | **46.87 / 46.99 ms** | **-15.2%** | 9.76-9.84 ms (0.8%) |
+
+Against ONNX Runtime: VGG-16 **3.41x -> 2.93x**, the 60.9 MB CNN **5.65x -> 4.79x**. Parity unchanged in
+every arm: cosine 1.000000, max absolute difference 2.682e-7 and 6.706e-8, same argmax.
+
+**It also removes the scratch buffer**, which the timing does not show. The unfused path rents `k * n` floats
+per convolution - 115.6 MB at VGG's conv2 - and the fused path rents `k * 32` per worker instead. That is a
+peak-resident-memory result as much as a speed one, and this project's low-end-hardware position is about
+peak.
+
+**Coverage: six mutations, five caught, and the sixth is explained rather than patched.** Dropping `ky`,
+dropping `kx`, dropping the padding from the row origin, striding channels by `kernelSize` instead of by the
+`kernelSize^2` window, and swapping `kx` with `ky` all redden the suite. **Writing 1f instead of 0f into the
+lanes past `nrEff` does not** - and that is not a coverage gap: `StoreTile` writes exactly `nrEff` columns,
+so those lanes never reach the output. The fill stays anyway, because uninitialised pool memory can hold NaN
+and feeding NaN through an FMA chain costs on some parts even when the lane is discarded; it was moved out
+of the gather loop, where it had been a branch on every one of `K * 32` elements.
+
+**Not done.** The AVX2 path still builds the column matrix - porting the fusion there without measuring it
+on AVX2 hardware is the mistake this task already records once. The 1x1 stride-1 fast path is untouched,
+because it never materialised a column matrix in the first place.
+
 ### A batch-1 dense layer was reading its weights with a 16 KB stride (2026-08-18, `XC-78`)
 
 VGG-16's `Linear(25088 -> 4096)` costs **9.99 ms of a 72.15 ms inference, 14%**. At batch 1 it performs
