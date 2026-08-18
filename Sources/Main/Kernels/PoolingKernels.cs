@@ -7,6 +7,7 @@ using System.Numerics.Tensors;
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.X86;
 using DevOnBike.Overfit.Intrinsics;
+using DevOnBike.Overfit.Runtime;
 using DevOnBike.Overfit.Tensors;
 
 namespace DevOnBike.Overfit.Kernels
@@ -301,7 +302,32 @@ namespace DevOnBike.Overfit.Kernels
         ///   - eliminates all branching in the hot path
         ///   - pairMax is stackalloc'd (104 bytes for inputW=26) — zero heap alloc
         /// </summary>
-        private static void MaxPool2DForwardSingleBatchPool2NoIndex(
+        /// <summary>
+        /// Elements in the input tensor below which pooling stays on one thread.
+        ///
+        /// <para>Fixed dispatch cost for <see cref="OverfitParallel"/> is ~0.22 ms measured, and pooling is
+        /// pure streaming, so a small tensor pays the dispatch and gains nothing. 262,144 floats is 1 MB, at
+        /// which the serial pass costs roughly a millisecond here — several times the dispatch. The MNIST
+        /// CNN sits far below this and keeps the old path exactly; VGG-16's pooling sits far above it.</para>
+        /// </summary>
+        private static readonly int ParallelPoolElements =
+            Environment.GetEnvironmentVariable(OverfitEnvironment.ParallelPool) == "0"
+                ? int.MaxValue
+                : 262_144;
+
+        /// <summary>
+        /// Pool=2 stride=2 inference, split across workers by channel.
+        ///
+        /// <para><b>Why this is parallel now (`XC-78`, 2026-08-18).</b> On VGG-16 the five pooling nodes cost
+        /// <b>5.40 ms of a 79.48 ms inference — 6.8%</b> — and the first of them moved 16.06 MB in 2.86 ms,
+        /// which is <b>5.6 GB/s where the ReLU node beside it on the same tensor reached 62.7 GB/s</b>.
+        /// Pooling ran on one core while the rest of the model used the machine. Channels are independent,
+        /// so this was a decomposition that was missing, not a kernel that was slow.</para>
+        ///
+        /// <para>Each worker owns its row scratch. One shared buffer across workers is a data race that
+        /// produces plausible wrong pixels rather than a crash, which is the worse of the two failures.</para>
+        /// </summary>
+        private static unsafe void MaxPool2DForwardSingleBatchPool2NoIndex(
             ReadOnlySpan<float> input,
             Span<float> output,
             int channels,
@@ -310,6 +336,37 @@ namespace DevOnBike.Overfit.Kernels
             int outH,
             int outW)
         {
+            var elements = (long)channels * inputH * inputW;
+
+            fixed (float* pin = input, pout = output)
+            {
+                var ctx = new Pool2Ctx(pin, pout, channels, inputH, inputW, outH, outW);
+
+                if (elements < ParallelPoolElements)
+                {
+                    Pool2ChannelRange(0, channels, &ctx);
+                    return;
+                }
+
+                OverfitParallel.For(0, channels, 1, &Pool2ChannelWorker, &ctx);
+            }
+        }
+
+        private static unsafe void Pool2ChannelWorker(int channelStart, int channelEnd, void* ctxPtr)
+        {
+            Pool2ChannelRange(channelStart, channelEnd, (Pool2Ctx*)ctxPtr);
+        }
+
+        private static unsafe void Pool2ChannelRange(int channelStart, int channelEnd, Pool2Ctx* ctxPtr)
+        {
+            ref readonly var ctx = ref *ctxPtr;
+
+            var inputW = ctx.InputW;
+            var outH = ctx.OutH;
+            var outW = ctx.OutW;
+            var inputPlane = ctx.InputH * inputW;
+            var outputPlane = outH * outW;
+
             using var pooledPairMax = inputW <= 128 ? default : new PooledBuffer<float>(inputW, clearMemory: false);
 #pragma warning disable OVERFIT026 // BOUND: guarded at inputW <= 128 floats = 512 B, exactly the OVERFIT025 budget; wider inputs take the pooled branch on the line above.
             var pairMax = inputW <= 128
@@ -317,28 +374,60 @@ namespace DevOnBike.Overfit.Kernels
                 : pooledPairMax.Span;
 #pragma warning restore OVERFIT026
 
-            for (var c = 0; c < channels; c++)
+            for (var c = channelStart; c < channelEnd; c++)
             {
-                var inputChannelBase = c * inputH * inputW;
-                var outputChannelBase = c * outH * outW;
+                var inputChannelBase = c * inputPlane;
+                var outputChannelBase = c * outputPlane;
 
                 for (var oh = 0; oh < outH; oh++)
                 {
-                    var row0 = input.Slice(inputChannelBase + oh * 2 * inputW, inputW);
-                    var row1 = input.Slice(inputChannelBase + (oh * 2 + 1) * inputW, inputW);
+                    var row0 = new ReadOnlySpan<float>(ctx.Input + inputChannelBase + (oh * 2 * inputW), inputW);
+                    var row1 = new ReadOnlySpan<float>(ctx.Input + inputChannelBase + ((oh * 2 + 1) * inputW), inputW);
 
                     // Vertical max: for each column, keep the larger of the two rows.
                     TensorPrimitives.Max(row0, row1, pairMax);
 
                     // Horizontal max: collapse adjacent pairs → output pixels.
-                    var outRowBase = outputChannelBase + oh * outW;
+                    var outRow = ctx.Output + outputChannelBase + (oh * outW);
+
                     for (var ow = 0; ow < outW; ow++)
                     {
                         var a = pairMax[ow * 2];
-                        var b = pairMax[ow * 2 + 1];
-                        output[outRowBase + ow] = a > b ? a : b;
+                        var b = pairMax[(ow * 2) + 1];
+
+                        outRow[ow] = a > b ? a : b;
                     }
                 }
+            }
+        }
+
+        /// <summary>Pointers and shape for one pool=2 tensor, passed to workers by address.</summary>
+        private readonly unsafe struct Pool2Ctx
+        {
+            public readonly float* Input;
+            public readonly float* Output;
+            public readonly int Channels;
+            public readonly int InputH;
+            public readonly int InputW;
+            public readonly int OutH;
+            public readonly int OutW;
+
+            public Pool2Ctx(
+                float* input,
+                float* output,
+                int channels,
+                int inputH,
+                int inputW,
+                int outH,
+                int outW)
+            {
+                Input = input;
+                Output = output;
+                Channels = channels;
+                InputH = inputH;
+                InputW = inputW;
+                OutH = outH;
+                OutW = outW;
             }
         }
 

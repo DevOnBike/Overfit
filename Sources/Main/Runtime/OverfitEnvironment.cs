@@ -53,6 +53,12 @@ namespace DevOnBike.Overfit.Runtime
         /// <summary>Set to 0 to dispatch the conv GEMM one work item per N-panel, as before the M-split.</summary>
         public const string ConvMSplit = "OVERFIT_CONV_M_SPLIT";
 
+        /// <summary>Set to 0 to run pool=2 inference on one thread, as before the channel split.</summary>
+        public const string ParallelPool = "OVERFIT_PARALLEL_POOL";
+
+        /// <summary>Set to 0 to split a large batch-1 dense layer by output column, as before the row split.</summary>
+        public const string LinearRowSplit = "OVERFIT_LINEAR_ROW_SPLIT";
+
         /// <summary>
         /// Set to 0 to force the portable <c>Vector&lt;T&gt;</c> Linear tile instead of the explicit 512-bit one.
         ///

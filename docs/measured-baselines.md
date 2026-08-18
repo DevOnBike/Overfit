@@ -369,6 +369,134 @@ deliberately skipped — `PB-ORT1` measured the first at 61% within-version spre
 and found the second unable to resolve anything (BDN raises `MinIterationTime`; one iteration is 1.07 ms
 against a 100 ms target).
 
+### A batch-1 dense layer was reading its weights with a 16 KB stride (2026-08-18, `XC-78`)
+
+VGG-16's `Linear(25088 -> 4096)` costs **9.99 ms of a 72.15 ms inference, 14%**. At batch 1 it performs
+205 MFLOP and reads **392 MiB of weights**, so its unit is GB/s and not GFLOP/s: 9.99 ms is **41.1 GB/s**
+against this box's **measured 90.8 GB/s** read ceiling (`MachineRooflineBenchmark.ReadBandwidth`).
+
+**The decisive line is `LinearKernels.cs`, in the column worker's inner loop:**
+
+    var rowBase = weightsBase + ((long)i * outputSize) + j;
+
+The parallel dispatch gives each worker a range of output COLUMNS, so every worker walks every input row.
+It reads 64 contiguous floats (256 B), then skips `outputSize * 4` = **16 KB** to the next row, 25,088
+times. With 4 KB pages every one of those reads lands on a different page, so the hardware prefetcher has
+nothing to follow.
+
+**Premise stated before measuring**: the limit is the access pattern, not the bandwidth; **what would refute
+it** is a row split - contiguous slabs - failing to raise the achieved GB/s.
+
+**The result settles it, and one arm settles it by itself.** `LinearGemvRowSplitBenchmark`, both arms on
+`OverfitParallel` so the decomposition is the only lever:
+
+| arm | ms | GB/s | % of the 90.8 GB/s ceiling |
+|---|---:|---:|---:|
+| column split, 32 workers (today) | 8.756 | 47.7 | 53% |
+| **row split, single thread** | 7.657 | 52.1 | 57% |
+| **row split, 32 workers** | **5.895** | **69.3** | **76%** |
+
+**One core reading sequentially beats thirty-two reading with a 16 KB stride.** No bandwidth explanation
+survives that.
+
+**Why the row split is not free.** Register accumulators require fixing a column block and looping rows,
+which is exactly the strided pattern. Reading sequentially requires fixing a row and sweeping all columns,
+which puts the accumulator in memory. It fits: 4096 floats is 16 KiB against this core's 48 KiB L1d.
+
+**The threshold was measured, and the obvious mechanism was wrong.** The guess was L3 residency. The row
+split already wins at 96 MiB while this part's L3 is 128 MiB - and that 128 MiB is not one pool, being split
+across two CCDs. Weight bytes against ratio, batch 1, all against 4096 outputs:
+
+| weights | ColumnSplit | RowSplit | winner |
+|---:|---:|---:|---|
+| 64 MiB | 509 us | 576 us | column, 1.14x |
+| 72 MiB | 594 us | 652 us | column, 1.10x |
+| 80 MiB | 643 us | 740 us | column, 1.16x |
+| 88 MiB | 767 us | 731 us | row, 1.05x - inside the error bars |
+| **96 MiB** | 898 us | **775 us** | **row, 1.15x - clearly separated** |
+| 192 MiB | 2,953 us | **2,073 us** | row, 1.43x |
+| 392 MiB | 8,756 us | **5,895 us** | row, 1.49x |
+
+The gate is **96 MiB**, the first unambiguous win, so nothing measured to prefer the column split is moved
+off it.
+
+**A unit error nearly shipped here, and a test caught it.** The threshold constant is written
+`n * 1024 * 1024`, i.e. MiB, while the crossover ladder had been written down in decimal MB. 100,663,296
+bytes is **100.7 MB and 96 MiB** - both correct - and comparing the first against the second is not. The
+policy test asserted that `6144x4096` selects the row split, it did not, and the mismatch was the unit.
+**A number is not checked until it is checked in the unit its consumer uses.**
+
+**End to end, ABAB in one box state** (`OVERFIT_LINEAR_ROW_SPLIT=0` against default), VGG-16:
+
+| arm | run 1 | run 2 | mean |
+|---|---:|---:|---:|
+| column split | 66.82 ms | 66.36 ms | 66.59 ms |
+| row split | 64.57 ms | 63.92 ms | **64.25 ms (-3.5%)** |
+
+ONNX Runtime canary across the four runs: 18.79-19.12 ms, a 1.8% spread. The whole-model gain (2.34 ms) is
+smaller than the isolated benchmark would predict (~3.3 ms) and the canary spread is 1.2 ms, so read it as
+"about 2-3 ms" rather than as a precise figure.
+
+**Coverage.** `Tests/Core/Kernels/LinearRowSplitTests` calls the sweep directly at five small shapes - firing
+the gate would need a 96 MiB fixture, which does not belong in a fast suite - plus a written-every-output
+sentinel, plus the policy asserted at the seven byte counts above. **Six mutations, six caught.** Worth one
+contrast with the conv work-split elsewhere in this file: there, dropping the M-block START bound was NOT
+caught, because those workers recompute each other's rows and store identical values. Here the same mutation
+IS caught, because each worker owns a separate partial buffer and overlapping ranges therefore double-count.
+**The same mutation is silent in one decomposition and loud in the other, and which it is depends on whether
+the workers share a destination.**
+
+**Two limits, deliberate.** Gated on `batchSize == 1`: with a batch the partials cost
+`workers * batch * outputSize` floats, and the bigger win there is reading the weights once for all rows,
+which is a GEMM and a different change. Gated on AVX-512 because the sweep is written at 512 bits; AVX2
+hardware keeps the column split until someone measures it there.
+
+### Pooling was single-threaded, and it cost 6.8% of VGG-16 (2026-08-18, `XC-78`)
+
+Found by reading the per-layer profile the conv diagnostic produced, not by looking for it. VGG-16's five
+pooling nodes cost **5.31 ms of a 79.48 ms inference**, and the first of them moved 16.06 MB in 2.86 ms.
+
+**The comparison that made it obvious is inside the same profile.** That is **5.6 GB/s**, while the ReLU node
+immediately beside it, on the same tensor and the same kind of pure streaming work, reached **62.7 GB/s** -
+eleven times faster on 1.6x more data. A rate that far from its neighbour is a structural difference, not a
+tuning gap.
+
+**The cause, read from the code rather than guessed.** `PoolingKernels.MaxPool2DForwardSingleBatchPool2NoIndex`
+looped over channels serially. Channels are independent, so the machine was idle for that whole span. The
+horizontal pair collapse inside it is also scalar, and its comment calls that negligible because `outW` is
+13 - **a number calibrated on MNIST.** VGG's first pool has `outW = 112` and 64 channels, which is 802,816
+scalar iterations rather than 13. That second lever is left alone for now; the first was enough.
+
+**Result.** Split across workers by channel, with a serial path kept below 262,144 elements because the
+dispatch costs ~0.22 ms:
+
+| node | before | after |
+|---|---:|---:|
+| pool 1 | 2.86 ms | 0.44 ms |
+| pool 2 | 1.38 ms | 0.26 ms |
+| pool 3 | 0.64 ms | 0.17 ms |
+| pool 4 | 0.34 ms | 0.13 ms |
+| pool 5 | 0.09 ms | 0.09 ms |
+| **total** | **5.31 ms** | **1.09 ms (4.9x)** |
+
+The fifth node is unchanged at 0.09 ms because its 25,088 elements sit below the threshold - which is the
+threshold's own canary, and the MNIST CNN keeps the old path for the same reason.
+
+**End to end, ABAB in one box state**, `OVERFIT_PARALLEL_POOL=0` against default:
+
+| model | pooling off | pooling on | change | ONNX Runtime canary |
+|---|---:|---:|---:|---:|
+| VGG-16 | 71.17 / 70.60 ms | **66.94 / 65.84 ms** | **-6.3%** | 18.84-19.11 ms (1.4%) |
+| CNN, 60.9 MB | 59.86 / 60.27 ms | **55.51 / 55.18 ms** | **-7.9%** | 9.75-9.81 ms (0.6%) |
+
+**The ABAB was not optional here - a single A/B had already produced a wrong reading.** The first attempt
+compared a pooling-on run against the previous sitting's pooling-off number, and showed VGG improving while
+the 60.9 MB CNN's *ratio* got worse. ONNX Runtime had moved 24% between the two sittings on an untouched
+binary, so both arms of that comparison came from different machines in every sense that matters. **What
+moved between the sittings is still not identified**, and it is worth recording that the three small-model
+benchmarks stayed inside 1.3% across the same gap: whatever it is, it reaches the large-CNN benchmark and
+not the small ones.
+
 ### The conv work-split that came out of that diagnostic (2026-08-18, `XC-78`)
 
 The diagnostic below said the concentrated loss was work decomposition, not the micro-kernel. This is the

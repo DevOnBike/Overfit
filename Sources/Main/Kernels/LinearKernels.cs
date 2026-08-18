@@ -10,6 +10,7 @@ using DevOnBike.Overfit.Intrinsics;
 using System.Runtime.Intrinsics.X86;
 using System.Runtime.Intrinsics;
 using DevOnBike.Overfit.Runtime;
+using DevOnBike.Overfit.Tensors;
 
 namespace DevOnBike.Overfit.Kernels
 {
@@ -100,6 +101,19 @@ namespace DevOnBike.Overfit.Kernels
             // batch correctly qualifies on the traffic it actually generates rather than being judged on one
             // row's worth (`XC-79`).
             var parallelWork = (long)batchSize * inputSize * outputSize * sizeof(float);
+
+            if (ShouldSplitByRow(batchSize, inputSize, outputSize))
+            {
+                ForwardRowsParallel(
+                    input,
+                    weightsInputOutput,
+                    bias,
+                    output,
+                    inputSize,
+                    outputSize);
+
+                return;
+            }
 
             if (outputSize >= InputMajorVectorizedOutputThreshold
                 && parallelWork >= ForwardParallelWeightBytes)
@@ -208,6 +222,42 @@ namespace DevOnBike.Overfit.Kernels
         internal const long ForwardParallelWeightBytes = 8L * 1024 * 1024;
 
         /// <summary>
+        /// Weight bytes above which a batch-1 layer is split by INPUT ROW rather than by output column.
+        ///
+        /// <para><b>The defect this fixes.</b> The column split gives each worker a range of output
+        /// columns and every worker walks every input row, so it reads 64 contiguous floats (256 B) and
+        /// then skips <c>outputSize * 4</c> bytes — 16 KB on VGG-16's fc6 — 25,088 times. Every one of
+        /// those reads lands on a different 4 KB page, so the hardware prefetcher has nothing to follow.
+        /// Splitting by input row instead gives each worker one contiguous slab; the accumulator moves out
+        /// of registers into a buffer of <c>outputSize</c> floats, which stays in L1 for the whole sweep.</para>
+        ///
+        /// <para><b>Measured on `Linear(25088 -> 4096)`, 392 MiB of weights</b>
+        /// (<c>LinearGemvRowSplitBenchmark</c>): column split 8,756 us = 47.7 GB/s, row split
+        /// <b>5,895 us = 69.3 GB/s</b> against this box's measured 90.8 GB/s read ceiling. <b>The
+        /// SINGLE-THREADED row split (7,657 us) beats the 32-worker column split</b>, which is the result
+        /// that settles the mechanism: one core reading sequentially outruns thirty-two reading with a
+        /// 16 KB stride.</para>
+        ///
+        /// <para><b>The threshold is where the crossover was measured, not where a cache size sits.</b> The
+        /// obvious guess was L3 residency, and it is wrong here: the row split already wins at 96 MiB
+        /// while this part's L3 is 128 MiB — and that 128 MiB is not one pool, being split across two CCDs.
+        /// Measured, weight bytes against ratio: 64 MiB column by 1.14x, 72 MiB column by 1.10x, 80 MiB
+        /// column by 1.16x, 88 MiB row by 1.05x but inside the error bars, <b>96 MiB row by 1.15x and
+        /// clearly separated</b>, 192 MiB row by 1.43x, 392 MiB row by 1.49x. 96 MiB is the first
+        /// unambiguous win, so nothing measured to prefer the column split is moved off it. <b>The unit
+        /// matters and it was got wrong once here</b>: 100,663,296 bytes is 100.7 MB decimal AND 96 MiB,
+        /// both correct, and comparing one against a threshold written as <c>n * 1024 * 1024</c> is not.
+        /// The policy test caught it. Everything above is MiB, matching the constant.</para>
+        ///
+        /// <para><b>Two limits, both deliberate.</b> Gated on <c>batchSize == 1</c>: with a batch the
+        /// partial accumulators would cost <c>workers * batch * outputSize</c> floats, and the bigger win
+        /// there is reading the weights once for all rows, which is a GEMM and a different change. Gated
+        /// on AVX-512 because the sweep is written at 512 bits; AVX2 hardware keeps the column split until
+        /// someone measures this there.</para>
+        /// </summary>
+        internal const long ForwardRowSplitWeightBytes = 96L * 1024 * 1024;
+
+        /// <summary>
         /// One inference row, with the output columns split across workers.
         ///
         /// <para>Splitting on <b>columns</b> rather than on the batch is what makes this safe without any
@@ -244,6 +294,170 @@ namespace DevOnBike.Overfit.Kernels
         /// <c>ForwardCost_ByBatchSize</c> in
         /// <c>Tests/Diagnostics/LinearForwardParallelThresholdDiagnostics.cs</c>.</para>
         /// </summary>
+        /// <summary>
+        /// Whether this shape takes the row split. Extracted so the policy can be tested at the points it
+        /// was measured at, rather than only through a benchmark that takes minutes to run.
+        /// </summary>
+        /// <summary>Set <c>OVERFIT_LINEAR_ROW_SPLIT=0</c> to keep the column split, for an A/B.</summary>
+        internal static readonly bool RowSplitEnabled =
+            Environment.GetEnvironmentVariable(OverfitEnvironment.LinearRowSplit) != "0";
+
+        internal static bool ShouldSplitByRow(int batchSize, int inputSize, int outputSize)
+        {
+            if (batchSize != 1 || !UseAvx512Linear || !RowSplitEnabled)
+            {
+                return false;
+            }
+
+            if (outputSize < InputMajorVectorizedOutputThreshold)
+            {
+                return false;
+            }
+
+            return (long)inputSize * outputSize * sizeof(float) >= ForwardRowSplitWeightBytes;
+        }
+
+        /// <summary>
+        /// Splits a batch-1 layer across workers by input row, so each worker reads one contiguous slab of
+        /// the weight matrix instead of striding it. See <see cref="ForwardRowSplitWeightBytes"/>.
+        /// </summary>
+        internal static void ForwardRowsParallel(
+            ReadOnlySpan<float> input,
+            ReadOnlySpan<float> weightsInputOutput,
+            ReadOnlySpan<float> bias,
+            Span<float> output,
+            int inputSize,
+            int outputSize)
+        {
+            var workers = Math.Min(OverfitParallel.MaxDegreeOfParallelism, inputSize);
+
+            // Zeroed, because each worker accumulates into its own slice. The clear is workers * outputSize
+            // floats — 512 KB on VGG-16's fc6, about 6 us against a 5.9 ms sweep.
+            using var partialsBuffer = new PooledBuffer<float>(workers * outputSize, clearMemory: true);
+
+            fixed (float* inputBase = input,
+                   weightsBase = weightsInputOutput,
+                   biasBase = bias,
+                   outputBase = output,
+                   partialsBase = partialsBuffer.Span)
+            {
+                var context = new ForwardRowContext(
+                    inputBase,
+                    weightsBase,
+                    partialsBase,
+                    inputSize,
+                    outputSize,
+                    workers);
+
+                OverfitParallel.For(0, workers, 1, &ForwardRowRangeWorker, &context);
+
+                for (var j = 0; j < outputSize; j++)
+                {
+                    var sum = biasBase[j];
+
+                    for (var w = 0; w < workers; w++)
+                    {
+                        sum += partialsBase[((long)w * outputSize) + j];
+                    }
+
+                    outputBase[j] = sum;
+                }
+            }
+        }
+
+        private static void ForwardRowRangeWorker(int workerStart, int workerEnd, void* contextPtr)
+        {
+            ref readonly var context = ref Unsafe.AsRef<ForwardRowContext>(contextPtr);
+
+            for (var w = workerStart; w < workerEnd; w++)
+            {
+                var rowStart = (int)((long)context.InputSize * w / context.Workers);
+                var rowEnd = (int)((long)context.InputSize * (w + 1) / context.Workers);
+
+                AccumulateRowsAvx512(
+                    context.Input,
+                    context.Weights,
+                    context.Partials + ((long)w * context.OutputSize),
+                    rowStart,
+                    rowEnd,
+                    context.OutputSize);
+            }
+        }
+
+        /// <summary>
+        /// Sweeps whole weight rows into an accumulator that stays in L1, so the weight stream is
+        /// sequential. The accumulator is <c>outputSize</c> floats — 16 KB at 4096 outputs, against this
+        /// core's 48 KB L1d.
+        /// </summary>
+        private static void AccumulateRowsAvx512(
+            float* input,
+            float* weights,
+            float* accumulator,
+            int rowStart,
+            int rowEnd,
+            int outputSize)
+        {
+            const int Width = 16;
+            const int BlockWidth = Width * 4;
+
+            for (var i = rowStart; i < rowEnd; i++)
+            {
+                var x = Vector512.Create(input[i]);
+                var row = weights + ((long)i * outputSize);
+                var j = 0;
+
+                for (; j <= outputSize - BlockWidth; j += BlockWidth)
+                {
+                    var a0 = Vector512.Load(accumulator + j);
+                    var a1 = Vector512.Load(accumulator + j + Width);
+                    var a2 = Vector512.Load(accumulator + j + (Width * 2));
+                    var a3 = Vector512.Load(accumulator + j + (Width * 3));
+
+                    a0 = Avx512F.FusedMultiplyAdd(x, Vector512.Load(row + j), a0);
+                    a1 = Avx512F.FusedMultiplyAdd(x, Vector512.Load(row + j + Width), a1);
+                    a2 = Avx512F.FusedMultiplyAdd(x, Vector512.Load(row + j + (Width * 2)), a2);
+                    a3 = Avx512F.FusedMultiplyAdd(x, Vector512.Load(row + j + (Width * 3)), a3);
+
+                    Vector512.Store(a0, accumulator + j);
+                    Vector512.Store(a1, accumulator + j + Width);
+                    Vector512.Store(a2, accumulator + j + (Width * 2));
+                    Vector512.Store(a3, accumulator + j + (Width * 3));
+                }
+
+                for (; j < outputSize; j++)
+                {
+                    accumulator[j] += input[i] * row[j];
+                }
+            }
+        }
+
+        /// <summary>Pointers and shape for one row-split sweep — see <see cref="ForwardRowsParallel"/>.</summary>
+        private readonly struct ForwardRowContext
+        {
+            public readonly float* Input;
+            public readonly float* Weights;
+            public readonly float* Partials;
+            public readonly int InputSize;
+            public readonly int OutputSize;
+            public readonly int Workers;
+
+            public ForwardRowContext(
+                float* input,
+                float* weights,
+                float* partials,
+                int inputSize,
+                int outputSize,
+                int workers)
+            {
+                Input = input;
+                Weights = weights;
+                Partials = partials;
+                InputSize = inputSize;
+                OutputSize = outputSize;
+                Workers = workers;
+            }
+        }
+
         private static void ForwardColumnsParallel(
             ReadOnlySpan<float> input,
             ReadOnlySpan<float> weightsInputOutput,
