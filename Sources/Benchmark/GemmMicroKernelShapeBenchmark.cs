@@ -47,7 +47,9 @@ namespace Benchmarks
         /// <summary>Times the tile is swept, to give BenchmarkDotNet a multi-millisecond subject.</summary>
         public const int Sweeps = 2000;
 
-        private const int MaxRows = 8;
+        // 12, because the 12x32 shape below needs twelve A rows. MLAS and BLIS both hold 24
+        // accumulators on AVX-512; this buffer has to be able to feed that.
+        private const int MaxRows = 12;
         private const int MaxCols = 48;
 
         private float[] _a = null!;
@@ -69,6 +71,8 @@ namespace Benchmarks
                 nameof(Avx2_4x24) => (4, 24),
                 nameof(Avx512_8x16) => (8, 16),
                 nameof(Avx512_8x32) => (8, 32),
+                nameof(Avx512_8x32_SpanAccumulators) => (8, 32),
+                nameof(Avx512_12x32) => (12, 32),
                 nameof(Avx512_6x48) => (6, 48),
                 _ => (0, 0),
             };
@@ -365,6 +369,196 @@ namespace Benchmarks
                     a61.Store(c + 208);
                     a70.Store(c + 224);
                     a71.Store(c + 240);
+                }
+            }
+
+            Sink = _c[0];
+        }
+
+        /// <summary>
+        /// AVX-512, <b>12 rows x two 512-bit vectors: 24 accumulators</b> — the shape both MLAS and BLIS
+        /// converge on, and eight more than this project's current kernel holds.
+        ///
+        /// <para><b>Read from the two libraries rather than reasoned about.</b> MLAS's
+        /// <c>FgemmKernelAvx512FCommon.inc</c> declares <c>zmm4-zmm27</c> as its block accumulators — 12
+        /// rows by two vectors — and BLIS's SKX configuration uses <c>MR=32, NR=12</c>, the same 24 with
+        /// the roles swapped. Our 8x32 holds 16, leaving 13 of the 32 zmm registers unused.</para>
+        ///
+        /// <para><b>The arithmetic that makes it worth pricing.</b> Per k-step this shape issues 2 B loads
+        /// (128 B) plus 12 A broadcasts (48 B) for 24 FMAs: <b>4.36 FLOP per byte fetched, against 3.20
+        /// for 8x32</b> — 36% more arithmetic per operand. That is the direction every measurement in
+        /// `XC-78` points: the kernel reaches 95% of single-core peak with L1-resident operands and a
+        /// fraction of that in production, so what is short is operand delivery, not FMA throughput.</para>
+        /// </summary>
+        [Benchmark]
+        public unsafe void Avx512_12x32()
+        {
+            if (!Avx512F.IsSupported)
+            {
+                return;
+            }
+
+            fixed (float* a = _a, b = _b, c = _c)
+            {
+                for (var s = 0; s < Sweeps; s++)
+                {
+                    Vector512<float> a00 = default, a01 = default;
+                    Vector512<float> a10 = default, a11 = default;
+                    Vector512<float> a20 = default, a21 = default;
+                    Vector512<float> a30 = default, a31 = default;
+                    Vector512<float> a40 = default, a41 = default;
+                    Vector512<float> a50 = default, a51 = default;
+                    Vector512<float> a60 = default, a61 = default;
+                    Vector512<float> a70 = default, a71 = default;
+                    Vector512<float> a80 = default, a81 = default;
+                    Vector512<float> a90 = default, a91 = default;
+                    Vector512<float> a100 = default, a101 = default;
+                    Vector512<float> a110 = default, a111 = default;
+
+                    for (var k = 0; k < K; k++)
+                    {
+                        var b0 = Vector512.Load(b + (k * 32));
+                        var b1 = Vector512.Load(b + (k * 32) + 16);
+                        var ak = a + k;
+
+                        var r0 = Vector512.Create(ak[0 * K]);
+                        a00 = Avx512F.FusedMultiplyAdd(r0, b0, a00);
+                        a01 = Avx512F.FusedMultiplyAdd(r0, b1, a01);
+                        var r1 = Vector512.Create(ak[1 * K]);
+                        a10 = Avx512F.FusedMultiplyAdd(r1, b0, a10);
+                        a11 = Avx512F.FusedMultiplyAdd(r1, b1, a11);
+                        var r2 = Vector512.Create(ak[2 * K]);
+                        a20 = Avx512F.FusedMultiplyAdd(r2, b0, a20);
+                        a21 = Avx512F.FusedMultiplyAdd(r2, b1, a21);
+                        var r3 = Vector512.Create(ak[3 * K]);
+                        a30 = Avx512F.FusedMultiplyAdd(r3, b0, a30);
+                        a31 = Avx512F.FusedMultiplyAdd(r3, b1, a31);
+                        var r4 = Vector512.Create(ak[4 * K]);
+                        a40 = Avx512F.FusedMultiplyAdd(r4, b0, a40);
+                        a41 = Avx512F.FusedMultiplyAdd(r4, b1, a41);
+                        var r5 = Vector512.Create(ak[5 * K]);
+                        a50 = Avx512F.FusedMultiplyAdd(r5, b0, a50);
+                        a51 = Avx512F.FusedMultiplyAdd(r5, b1, a51);
+                        var r6 = Vector512.Create(ak[6 * K]);
+                        a60 = Avx512F.FusedMultiplyAdd(r6, b0, a60);
+                        a61 = Avx512F.FusedMultiplyAdd(r6, b1, a61);
+                        var r7 = Vector512.Create(ak[7 * K]);
+                        a70 = Avx512F.FusedMultiplyAdd(r7, b0, a70);
+                        a71 = Avx512F.FusedMultiplyAdd(r7, b1, a71);
+                        var r8 = Vector512.Create(ak[8 * K]);
+                        a80 = Avx512F.FusedMultiplyAdd(r8, b0, a80);
+                        a81 = Avx512F.FusedMultiplyAdd(r8, b1, a81);
+                        var r9 = Vector512.Create(ak[9 * K]);
+                        a90 = Avx512F.FusedMultiplyAdd(r9, b0, a90);
+                        a91 = Avx512F.FusedMultiplyAdd(r9, b1, a91);
+                        var r10 = Vector512.Create(ak[10 * K]);
+                        a100 = Avx512F.FusedMultiplyAdd(r10, b0, a100);
+                        a101 = Avx512F.FusedMultiplyAdd(r10, b1, a101);
+                        var r11 = Vector512.Create(ak[11 * K]);
+                        a110 = Avx512F.FusedMultiplyAdd(r11, b0, a110);
+                        a111 = Avx512F.FusedMultiplyAdd(r11, b1, a111);
+                    }
+
+                    a00.Store(c + 0);
+                    a01.Store(c + 16);
+                    a10.Store(c + 32);
+                    a11.Store(c + 48);
+                    a20.Store(c + 64);
+                    a21.Store(c + 80);
+                    a30.Store(c + 96);
+                    a31.Store(c + 112);
+                    a40.Store(c + 128);
+                    a41.Store(c + 144);
+                    a50.Store(c + 160);
+                    a51.Store(c + 176);
+                    a60.Store(c + 192);
+                    a61.Store(c + 208);
+                    a70.Store(c + 224);
+                    a71.Store(c + 240);
+                    a80.Store(c + 256);
+                    a81.Store(c + 272);
+                    a90.Store(c + 288);
+                    a91.Store(c + 304);
+                    a100.Store(c + 320);
+                    a101.Store(c + 336);
+                    a110.Store(c + 352);
+                    a111.Store(c + 368);
+                }
+            }
+
+            Sink = _c[0];
+        }
+
+        /// <summary>
+        /// The 8x32 shape again, with the sixteen accumulators held in a <c>stackalloc</c> span instead of
+        /// named locals. <b>Everything else is identical</b> — same loads, same broadcasts, same FMAs, same
+        /// order, same panels.
+        ///
+        /// <para><b>What this prices, and why it is not about this benchmark.</b> This file's own remarks
+        /// already state the rule — <i>accumulators are named locals, never a <c>stackalloc</c> span, because
+        /// a span forces an L1 round-trip per accumulator per iteration</i> — and record that breaking it once
+        /// cost a 2.8x error in an earlier roofline. <b>`Q4KGemvKernel.GemmTiled512` breaks it</b>: five
+        /// <c>stackalloc</c> spans of <c>Vector512</c> serve as its accumulators. That kernel is the
+        /// quantised prefill path, which is compute-bound rather than bandwidth-bound, so it is where the
+        /// pattern would hurt.</para>
+        ///
+        /// <para><b>This arm answers the cheap question first.</b> Reimplementing Q4_K's accumulation to
+        /// compare layouts is a day's work; pricing the layout itself against an already-measured shape is
+        /// one arm. <b>If the span costs nothing here the JIT promotes it and the hypothesis dies; if it
+        /// costs what the register spill cost the conv kernel, the prefill path is worth the day.</b></para>
+        /// </summary>
+        [Benchmark]
+        public unsafe void Avx512_8x32_SpanAccumulators()
+        {
+            if (!Avx512F.IsSupported)
+            {
+                return;
+            }
+
+            Span<Vector512<float>> acc = stackalloc Vector512<float>[16];
+
+            fixed (float* a = _a, b = _b, c = _c)
+            {
+                for (var s = 0; s < Sweeps; s++)
+                {
+                    acc.Clear();
+
+                    for (var k = 0; k < K; k++)
+                    {
+                        var b0 = Vector512.Load(b + (k * 32));
+                        var b1 = Vector512.Load(b + (k * 32) + 16);
+                        var ak = a + k;
+
+                        var r0 = Vector512.Create(ak[0 * K]);
+                        acc[0] = Avx512F.FusedMultiplyAdd(r0, b0, acc[0]);
+                        acc[1] = Avx512F.FusedMultiplyAdd(r0, b1, acc[1]);
+                        var r1 = Vector512.Create(ak[1 * K]);
+                        acc[2] = Avx512F.FusedMultiplyAdd(r1, b0, acc[2]);
+                        acc[3] = Avx512F.FusedMultiplyAdd(r1, b1, acc[3]);
+                        var r2 = Vector512.Create(ak[2 * K]);
+                        acc[4] = Avx512F.FusedMultiplyAdd(r2, b0, acc[4]);
+                        acc[5] = Avx512F.FusedMultiplyAdd(r2, b1, acc[5]);
+                        var r3 = Vector512.Create(ak[3 * K]);
+                        acc[6] = Avx512F.FusedMultiplyAdd(r3, b0, acc[6]);
+                        acc[7] = Avx512F.FusedMultiplyAdd(r3, b1, acc[7]);
+                        var r4 = Vector512.Create(ak[4 * K]);
+                        acc[8] = Avx512F.FusedMultiplyAdd(r4, b0, acc[8]);
+                        acc[9] = Avx512F.FusedMultiplyAdd(r4, b1, acc[9]);
+                        var r5 = Vector512.Create(ak[5 * K]);
+                        acc[10] = Avx512F.FusedMultiplyAdd(r5, b0, acc[10]);
+                        acc[11] = Avx512F.FusedMultiplyAdd(r5, b1, acc[11]);
+                        var r6 = Vector512.Create(ak[6 * K]);
+                        acc[12] = Avx512F.FusedMultiplyAdd(r6, b0, acc[12]);
+                        acc[13] = Avx512F.FusedMultiplyAdd(r6, b1, acc[13]);
+                        var r7 = Vector512.Create(ak[7 * K]);
+                        acc[14] = Avx512F.FusedMultiplyAdd(r7, b0, acc[14]);
+                        acc[15] = Avx512F.FusedMultiplyAdd(r7, b1, acc[15]);
+                    }
+
+                    for (var i = 0; i < 16; i++)
+                    {
+                        acc[i].Store(c + (i * 16));
+                    }
                 }
             }
 

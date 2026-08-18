@@ -462,7 +462,7 @@ Honest positioning:
 - On **prefill** the gap is now ~1.8× against an AVX-512 llama.cpp build and **~1.15× against their AVX2 build** — i.e. on machines without AVX-512 we are close to parity. Measured on one box (Ryzen 9 9950X3D) with one model; treat it as a data point, not a general claim. Our Q4_K matmul measured *faster* than llama.cpp's at equal instruction set and thread count (1.70 vs 1.56 TFLOP/s on their own test shape).
 - PyTorch CPU is faster for large-scale training.
 - ONNX Runtime is mature and fast if native dependencies are acceptable — and **on large convolutional
-  models it is 2.8x to 4.5x faster than us**, which is the honest reading of the table below. Our output on
+  models it is 1.8x to 2.5x faster than us**, which is the honest reading of the table below. Our output on
   those models is numerically identical to theirs (cosine 1.000000, same argmax); the gap is speed alone.
 - XGBoost's C++ kernel is still ~1.5× faster for raw batch tree scoring; Overfit wins decisively on in-process online (per-request) latency where the Python/native marshalling tax dominates.
 - Overfit's axis is pure-managed .NET, in-process deployment, Native AOT,
@@ -481,8 +481,8 @@ convolution patch gather into the GEMM's own pack, and repacking the convolution
 | `Linear(784→10)` — 7,840 params | **231 ns** | 1,880 ns | Overfit **8.1×** |
 | MLP `784→256→128→10` — ~235k params | **6.71 µs** | 8.73 µs | Overfit **1.3×** |
 | MNIST CNN (imported ONNX) | **5.36 µs** | 6.62 µs | Overfit **1.24×** |
-| a 60.9 MB CNN | 41.9 ms | **9.3 ms** | ONNX Runtime **4.5×** |
-| VGG-16 — 30.9 GFLOP/inference | 50.7 ms | **18.3 ms** | ONNX Runtime **2.8×** |
+| a 60.9 MB CNN | 24.1 ms | **9.8 ms** | ONNX Runtime **2.5×** |
+| VGG-16 — 30.9 GFLOP/inference | 33.4 ms | **19.1 ms** | ONNX Runtime **1.8×** |
 
 **What the two ends actually measure.** On a 7,840-parameter `Linear` the arithmetic takes a few hundred
 nanoseconds, so the result is dominated by ONNX Runtime's ~1.6 µs of per-call dispatch — that 8.2× is a real

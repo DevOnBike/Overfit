@@ -3,6 +3,8 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Runtime.Intrinsics;
+using System.Runtime.Intrinsics.X86;
 using BenchmarkDotNet.Attributes;
 using Benchmarks.Helpers;
 using DevOnBike.Overfit.Kernels;
@@ -148,6 +150,94 @@ namespace Benchmarks
             }
         }
 
+        /// <summary>
+        /// L1i — byte-for-byte the same work as <see cref="L1_FullK"/>, with the FMA sequence written
+        /// inline instead of called.
+        ///
+        /// <para><b>The one lever.</b> Same buffers, same addresses, same 1,600 iterations, same k = 4608,
+        /// same MR-major A layout, same contiguous B. The only difference is whether the accumulator loop
+        /// lives in its own method or in this one.</para>
+        ///
+        /// <para><b>Why it is worth an arm.</b> `GemmMicroKernelShapeBenchmark` measures this shape at
+        /// <b>340 GFLOP/s</b> with the sequence inlined, while every rung of this ladder that CALLS the
+        /// production kernel sits near <b>97</b>. That was first read as an L1-versus-L2 residency cliff -
+        /// wrongly, because the shape benchmark's own buffers total 552 KB and are therefore not
+        /// L1-resident either. <b>Residency is not what separates the two benchmarks; the call is.</b></para>
+        ///
+        /// <para><b>The hypothesis this tests.</b> Sixteen <c>Vector512</c> accumulators need sixteen zmm
+        /// registers. Inside a real method, with parameters, a <c>stackalloc</c> and eight store calls also
+        /// live, the JIT may not keep them there - and spilling sixteen registers per k-step would cost
+        /// about what is missing. <b>If this arm matches L1 the hypothesis is dead; if it reaches 340 the
+        /// register allocator is the whole remaining gap.</b></para>
+        /// </summary>
+        [Benchmark]
+        public void L1i_FullKInlined()
+        {
+            fixed (float* a = _packedA.AsSpan(), b = _packedB.AsSpan(), c = _outputTile.AsSpan())
+            {
+                for (var i = 0; i < RowBlocks * Panels; i++)
+                {
+                    Vector512<float> c00 = default, c01 = default;
+                    Vector512<float> c10 = default, c11 = default;
+                    Vector512<float> c20 = default, c21 = default;
+                    Vector512<float> c30 = default, c31 = default;
+                    Vector512<float> c40 = default, c41 = default;
+                    Vector512<float> c50 = default, c51 = default;
+                    Vector512<float> c60 = default, c61 = default;
+                    Vector512<float> c70 = default, c71 = default;
+
+                    for (var kk = 0; kk < K; kk++)
+                    {
+                        var b0 = Vector512.Load(b + (kk * Nr));
+                        var b1 = Vector512.Load(b + (kk * Nr) + 16);
+                        var aSlot = a + ((long)kk * Mr);
+
+                        var r0 = Vector512.Create(aSlot[0]);
+                        c00 = Avx512F.FusedMultiplyAdd(r0, b0, c00);
+                        c01 = Avx512F.FusedMultiplyAdd(r0, b1, c01);
+                        var r1 = Vector512.Create(aSlot[1]);
+                        c10 = Avx512F.FusedMultiplyAdd(r1, b0, c10);
+                        c11 = Avx512F.FusedMultiplyAdd(r1, b1, c11);
+                        var r2 = Vector512.Create(aSlot[2]);
+                        c20 = Avx512F.FusedMultiplyAdd(r2, b0, c20);
+                        c21 = Avx512F.FusedMultiplyAdd(r2, b1, c21);
+                        var r3 = Vector512.Create(aSlot[3]);
+                        c30 = Avx512F.FusedMultiplyAdd(r3, b0, c30);
+                        c31 = Avx512F.FusedMultiplyAdd(r3, b1, c31);
+                        var r4 = Vector512.Create(aSlot[4]);
+                        c40 = Avx512F.FusedMultiplyAdd(r4, b0, c40);
+                        c41 = Avx512F.FusedMultiplyAdd(r4, b1, c41);
+                        var r5 = Vector512.Create(aSlot[5]);
+                        c50 = Avx512F.FusedMultiplyAdd(r5, b0, c50);
+                        c51 = Avx512F.FusedMultiplyAdd(r5, b1, c51);
+                        var r6 = Vector512.Create(aSlot[6]);
+                        c60 = Avx512F.FusedMultiplyAdd(r6, b0, c60);
+                        c61 = Avx512F.FusedMultiplyAdd(r6, b1, c61);
+                        var r7 = Vector512.Create(aSlot[7]);
+                        c70 = Avx512F.FusedMultiplyAdd(r7, b0, c70);
+                        c71 = Avx512F.FusedMultiplyAdd(r7, b1, c71);
+                    }
+
+                    c00.Store(c + 0);
+                    c01.Store(c + 16);
+                    c10.Store(c + 32);
+                    c11.Store(c + 48);
+                    c20.Store(c + 64);
+                    c21.Store(c + 80);
+                    c30.Store(c + 96);
+                    c31.Store(c + 112);
+                    c40.Store(c + 128);
+                    c41.Store(c + 144);
+                    c50.Store(c + 160);
+                    c51.Store(c + 176);
+                    c60.Store(c + 192);
+                    c61.Store(c + 208);
+                    c70.Store(c + 224);
+                    c71.Store(c + 240);
+                }
+            }
+        }
+
         /// <summary>L1 — one pass over the whole of K. Adds: a 589 KB B panel, so operands come from L2.</summary>
         [Benchmark(Baseline = true)]
         public void L1_FullK()
@@ -238,6 +328,49 @@ namespace Benchmarks
                 padding: 1,
                 stride: 1,
                 packedKernels: _convPackedKernels.AsReadOnlySpan());
+        }
+
+        /// <summary>
+        /// L5a — production with the patch gather ablated, so what is left is the micro-kernel sweep plus
+        /// everything the wrapper does around it: per-panel origins, the packed-buffer rent, the item-to-
+        /// (panel, block) mapping and the dispatch.
+        ///
+        /// <para><b>Produces wrong output by construction.</b> It measures cost, never correctness. Read
+        /// L5 minus L5a as the gather, and L5a minus L4 as the rest of the wrapper - both as upper bounds,
+        /// because removing one side also frees the other's cache pressure.</para>
+        /// </summary>
+        [Benchmark]
+        public void L5a_ProductionNoGather()
+        {
+            Conv2DGemmKernels.AblatePackB = true;
+
+            try
+            {
+                L5_Production();
+            }
+            finally
+            {
+                Conv2DGemmKernels.AblatePackB = false;
+            }
+        }
+
+        /// <summary>
+        /// L5b — production with the micro-kernel ablated, so what is left is the gather and the wrapper.
+        /// Wrong output by construction, same as L5a.
+        /// </summary>
+        [Benchmark]
+        public void L5b_ProductionGatherOnly()
+        {
+            Conv2DGemmKernels.AblateMicroKernel = true;
+
+            try
+            {
+                L5_Production();
+            }
+            finally
+            {
+                Conv2DGemmKernels.AblateMicroKernel = false;
+            }
         }
 
         [GlobalCleanup]

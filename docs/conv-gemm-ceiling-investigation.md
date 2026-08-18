@@ -204,6 +204,121 @@ selected on demand.
 to 0.3% once pinned, which is enough to attribute the wrapper cost - and the arms that are not reproducible
 are the synthetic ones, not the one that measures the real code.
 
+### Attribution of the production wrapper, and a third broken arm
+
+With affinity pinned, two ablation rungs were added to the ladder: production with the gather removed, and
+production with the micro-kernel removed.
+
+**One of the two is trustworthy and one is not.**
+
+*Trustworthy:* the gather-only rung is stable to **0.1%** across runs and its time is **about 6% of
+production**. It runs no FMAs, so nothing about it depends on operand values. **The patch gather is not
+where the wrapper's cost is.**
+
+*Not trustworthy:* the no-gather rung reads 65.2 and 66.3 GFLOP/s, which looks stable and is not usable.
+Ablating the gather leaves the packed panel holding **uninitialised pool memory**, and denormals or NaNs in
+an FMA chain are slow on this class of part. That arm may be measuring a denormal penalty rather than a
+wrapper cost. **An ablation that removes the code producing a value must also define what that value is**,
+or it measures whatever the allocator left behind.
+
+So the split is: gather about 6%, micro-kernel sweep the rest, and **the wrapper beyond the gather is not
+separable with the ablation as it stands.**
+
+### The micro-kernel tile shape: refuted for issue rate, untested for traffic
+
+MLAS and BLIS both hold **24 accumulators** on AVX-512 — MLAS's `FgemmKernelAvx512FCommon.inc` declares
+`zmm4-zmm27`, BLIS's SKX configuration uses `MR=32, NR=12`. Ours holds 16, leaving 13 of the 32 zmm
+registers unused. Per k-step that is 2 B loads plus 12 A broadcasts for 24 FMAs — **4.36 FLOP per byte
+fetched against 3.20** for our 8x32.
+
+A 12x32 arm was added to `GemmMicroKernelShapeBenchmark` and measured, pinned, twice:
+
+| shape | accumulators | TFLOP/s |
+|---|---:|---:|
+| Avx512_8x32 (current) | 16 | 0.34 |
+| Avx512_6x48 | 18 | 0.34 |
+| **Avx512_12x32** (the MLAS/BLIS shape) | **24** | **0.34** |
+
+**Identical, to 0.2% across runs.** Sixteen accumulators already saturate the FMA units; more buy nothing.
+
+**But this benchmark cannot answer the question the wider tile was proposed for, and says so itself**: its
+docstring records that the panels are "sized to sit in L1 so the result reflects instruction issue, not
+memory bandwidth". A wider tile pays by fetching fewer bytes per FLOP, and this benchmark removes byte
+fetching as a constraint by construction.
+
+> **A shape that is neutral at the issue-rate limit may still pay at the traffic limit.** The refutation is
+> real and it is narrow: tile shape is closed as an *issue-rate* question and untouched as a *traffic* one.
+> Answering the second means testing 12x32 in the production kernel, not in L1.
+
+**Pinning fixed this instrument too**: two runs agree to 0.2% on every arm, where the ladder unpinned
+disagreed with itself by up to 64%.
+
+### The measured 8.4% never reached a default build, and a null result is what caught it
+
+`UsePackedA` shipped reading `Environment.GetEnvironmentVariable(...) == "1"` while the four other
+convolution switches read `!= "0"`. **So the MR-major packing was opt-in**, the 8.4% it measures was
+unreachable without setting a variable, and `README.md` was publishing a VGG-16 figure the library did not
+produce as built.
+
+**How it surfaced.** A prefetch sweep came back perfectly flat - 55.31, 55.22, 55.53, 55.58 ms across
+distances of off, 4, 8 and 16. The prefetching micro-kernel is selected by
+`if (UsePackedA && ConvPrefetchDistance > 0)`, so with packing off **the code under test never executed
+once**. The sweep measured nothing and looked like a clean null.
+
+**The tell was the baseline, not the flatness.** 55.3 ms is the unpacked number; the packed path measures
+50.7. A flat sweep whose baseline does not match the configuration you believe you are in is a dead lever,
+not a null result.
+
+> **A flat result is the signature of a disconnected lever at least as often as of a real null.** This
+> project already records the same failure from 2026-08-17, where `AblatePackB` existed only in the AVX2
+> worker while the box ran AVX-512 and the diagnostic printed three numbers of pure noise. **Twice now, and
+> both times the fix is the same: prove the lever moves something before believing that it does not.**
+
+The default is corrected to `!= "0"`, matching the other four, and the re-run carries a deliberately absurd
+prefetch distance as a liveness canary - prefetching far past the panel has to cost something if the path
+executes at all.
+
+### What is left from the sources
+
+**Software prefetch, and it is the one technique read from MLAS that is still untested here.**
+`FgemmKernelAvx512FCommon.inc` issues `prefetcht0` against the B panel at a tuned offset, two per block, on
+every inner iteration. .NET exposes `Sse.Prefetch0`, so this is portable. Given that the kernel reaches 95%
+of peak with L1-resident operands and a fraction of that in production, hiding operand latency is exactly
+the lever the measurements point at.
+
+### THE ANSWER: the micro-kernel was spilling its accumulators
+
+Everything above searched the memory hierarchy. The gap was in the generated code.
+
+A rung was added to the ladder that inlines the micro-kernel's FMA sequence into the benchmark method -
+**same buffers, same addresses, same 1,600 iterations, same k, same layouts, the call the only difference**:
+
+| arm | run 1 | run 2 | GFLOP/s | of the 359 single-core peak |
+|---|---:|---:|---:|---:|
+| inlined | 11.31 ms | 11.25 ms | **335** | **93%** |
+| calling the production kernel | 39.19 ms | 38.87 ms | 97 | 27% |
+
+**3.46x from removing the call**, both arms stable to 0.8%. Sixteen `Vector512` accumulators need sixteen
+zmm registers; in a method carrying nine parameters, a `stackalloc` and eight store calls, the register
+allocator does not keep them there.
+
+**Shipped as a full-tile body** holding nothing but the accumulators, with the general kernel routing
+`mrEff == 8 && nrEff == 32` to it. Measured end to end: **VGG-16 50.96 -> 37.88 ms (-25.7%)** and the
+**60.9 MB CNN 41.95 -> 26.75 ms (-36.2%)**, parity unchanged, ORT canary steady. Against ONNX Runtime:
+**2.77x -> 2.00x** and **4.49x -> 2.72x**.
+
+> **When several independent hypotheses about one subsystem all measure null, suspect their shared premise.**
+> Cache blocking, prefetch, tile shape and working-set capacity were each measured and each moved nothing -
+> not because each was individually wrong, but because all four shared the assumption that the gap was in
+> operand delivery. **Four nulls in a row is itself a measurement, and it was pointing at the premise.**
+
+**A fourth broken instrument surfaced on the way, and it is the worst of the four.** The mutation that routes
+partial tiles through the full-tile body stores outside the valid region and **kills the test host**. No
+`[FAIL]` line is printed, so a harness that greps for `[FAIL]` reads a dead process as a clean pass and
+reports ESCAPED. It did, twice. **The canary cannot catch it, because the unmutated baseline "escapes"
+identically.** A mutation harness must require proof that the suite *ran* - a summary line and a plausible
+test count - not merely the absence of failures.
+
 ## Where things actually stand
 
 Restated on the corrected ceiling, single core:
@@ -240,6 +355,84 @@ worth guessing at a cause. Without that, no attribution from it is worth acting 
    already exist to split it.
 3. Only after those: tile shape. `GemmMicroKernelShapeBenchmark` prices shapes without writing them, and it
    already says the 8x32 and 6x48 shapes both reach 340 GFLOP/s while AVX2 shapes reach 130-180.
+
+## The same defect elsewhere: the pattern priced, the target named
+
+The register-spill finding is a pattern, not an incident, so the obvious question is where else it lives.
+
+**This repository already documented the rule and then broke it.** `GemmMicroKernelShapeBenchmark`'s remarks
+say accumulators must be named locals and never a `stackalloc` span, "because a span forces an L1 round-trip
+per accumulator per iteration", and record that breaking it once cost a 2.8x error in an earlier roofline.
+**`Q4KGemvKernel.GemmTiled512` declares five `stackalloc` spans of `Vector512` as its accumulators.**
+
+**The pattern was priced before proposing any work on the kernel**, because pricing a layout against an
+already-measured shape is one benchmark arm while reimplementing Q4_K's accumulation is a day. Same 8x32
+tile, same loads, broadcasts, FMAs and order; only where the sixteen accumulators live changes. Pinned, two
+runs:
+
+| accumulators | run 1 | run 2 | TFLOP/s |
+|---|---:|---:|---:|
+| named locals | 6.953 ms | 6.949 ms | **0.34** |
+| `stackalloc` span | 21.562 ms | 17.263 ms | 0.11 / 0.14 |
+
+**2.5x to 3.1x.** The named-local arm is stable to 0.06%; the span arm is itself bimodal, but even its
+faster reading is 2.48x.
+
+**What that does and does not license.** It establishes the pattern's price on this box. It does **not**
+establish what share of `GemmTiled512`'s time is in that accumulation loop rather than in dequantisation,
+scale handling and shuffles - a kernel can use a slow pattern somewhere that does not matter. Filed as
+`XC-84` with that measurement required first.
+
+**And decode is explicitly not a candidate.** The repository measures decode GEMV at 82% of this box's DRAM
+read ceiling, so it is bandwidth-bound and register residency cannot help it. The candidate is prefill,
+which is compute-bound.
+
+## Re-running the nulls against the fixed kernel — and what that cost
+
+Four hypotheses measured null earlier, all against a kernel running at 27% of single-core peak. With the
+full-tile body at 93%, they deserved a re-run. **The re-run was not the cheap "just run it again" it looked
+like, and it produced two findings before any benchmark started.**
+
+**The prefetch and K-blocked paths were separate methods that had NOT been fixed.** Only the full-tile body
+lost its `stackalloc` and its store helper; `MicroKernel8x32Avx512PackedAPrefetch` and
+`MicroKernel8x32Avx512Accumulating` still carried both. Re-running as planned would have compared a fixed
+kernel against unfixed ones and refuted them for the wrong reason.
+
+**K-blocking turned out to be silently BROKEN, by the packing default being corrected.** Turning
+`OVERFIT_CONV_PACK_A` on pointed `ctx.A` at the MR-major packed matrix while the accumulating kernel still
+read A row-major. It had been green earlier that day only because packing was accidentally opt-in. The
+correctness sweep caught it — 14 tests red at Kc=256 — **only because the sweep was run with the switch set**.
+Production was never affected, the path being default-off, but **incorrect code behind a switch is worse
+than no code**: whoever sets it gets silent wrong answers. The path, its kernel, `LoadTile` and the
+environment name were deleted; the measurement stays here.
+
+> **A default-off path is not covered by "the suite is green".** Every switch has to be exercised, or it
+> rots into a trap.
+
+**Prefetch, re-measured against the fixed kernel, is not null — it is 40% WORSE**, and the number says why:
+
+| distance | VGG-16 | ONNX Runtime canary |
+|---|---:|---:|
+| off | **35.79 / 37.53 ms** | 18.07 / 18.29 ms |
+| 4 | 51.32 ms | 18.26 ms |
+| 8 | 51.09 ms | 18.41 ms |
+| 16 | 51.20 ms | 18.36 ms |
+| 4096 (liveness canary) | 52.97 ms | 18.51 ms |
+
+**51 ms is exactly the pre-fix figure** (50.7-51.1). The prefetching variant was generated from the full-tile
+body, so it has the same sixteen accumulators and no `stackalloc` — and it lands back at the spilling
+kernel's speed. **Three prefetch instructions with their address arithmetic push it back over the register
+limit.**
+
+> **The full-tile body sits exactly at the register cliff.** Anything added to it costs about 40%. That is a
+> constraint on every future change to this kernel, and it is worth more than the prefetch result itself.
+
+Prefetch is now refuted twice — null against the spilling kernel, harmful against the fixed one — and both
+times for the same underlying reason. Its two methods and the environment name are removed.
+
+**A sixth intermittent test also surfaced**: `NeuralNetwork_TrainsOnXORProblem` failed once in a pair of
+full-suite runs minutes apart. Same signature as `XC-83` — a convergence threshold over unseeded
+initialisation. Two instances make it a family, and the fix is to seed, not to move thresholds.
 
 ## The general lessons, separated from the subject
 

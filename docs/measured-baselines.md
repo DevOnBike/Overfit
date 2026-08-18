@@ -369,6 +369,131 @@ deliberately skipped — `PB-ORT1` measured the first at 61% within-version spre
 and found the second unable to resolve anything (BDN raises `MinIterationTime`; one iteration is 1.07 ms
 against a 100 ms target).
 
+### Fixing the fallback kernels, and what a broken off-arm was hiding (2026-08-18, `XC-78`)
+
+The full-tile split had been applied only to the packed AVX-512 kernel. Two other bodies remained.
+
+**One of them needed nothing, and reading it saved half the work.** The AVX2 path already has the split:
+`GemmNPanelWorker` chooses between `MicroKernel8x8` and `MicroKernelTail` on `mrEff == Mr`. **The AVX2
+kernel was written correctly and the AVX-512 kernel, added later, lost the pattern.**
+
+**The other one matters for a reason that is not performance.** `MicroKernel8x32Avx512` is reached only with
+`OVERFIT_CONV_PACK_A=0` or `OVERFIT_CONV_FUSED_IM2COL=0` - the A/B switches themselves. Production never
+takes it. But left unfixed, `PACK_A=0` measures *"no packing AND a spilling kernel"*.
+
+> **A switch whose off-arm is broken makes its own measurement dishonest.** It is the same trap the prefetch
+> experiment fell into hours earlier, in the opposite direction.
+
+**Measured on VGG-16, all cores:**
+
+| configuration | before the fix | after |
+|---|---:|---:|
+| default | 33.20 ms | 33.42 ms |
+| `OVERFIT_CONV_PACK_A=0` | **54.95 ms** | **39.13 ms** (-28.8%) |
+| `OVERFIT_CONV_FUSED_IM2COL=0` | - | 49.72 ms |
+| AVX2 (`OVERFIT_CONV_AVX512=0`) | 74.06 ms | unchanged, already split |
+
+**And that changes a published number.** With a broken off-arm the packing switch would have claimed -39%.
+With both arms sound it is **39.13 -> 33.42 ms = -14.6%** — while the original measurement of the same
+change, taken when *neither* arm had the full-tile body, said **-8.4%**. **The packing is worth nearly twice
+what its own measurement reported**, because the spill was masking it on both sides.
+
+> **A ratio between two arms is only as good as the worse arm.** Fixing an unrelated defect can move a
+> number you already published, in either direction.
+
+**Coverage.** Three mutations, all three caught under `OVERFIT_CONV_PACK_A=0` — the only configuration that
+reaches this kernel. Two by wrong values, one by killing the test host. `ConvGemmMSplitTests`, which calls
+`Gemm` directly, is what catches them.
+
+### The partial-tile body, and an estimate that was wrong by twenty times (2026-08-18, `XC-78`)
+
+The full-tile fast path left partial tiles - fewer than eight rows, or fewer than thirty-two columns - on the
+general kernel, which still carries a `stackalloc` and a store helper and therefore still spills.
+
+**The estimate said not to bother. It was wrong, and the error is the point.** Weighing partial tiles by
+their OUTPUT - the last panel of VGG's conv11-13 produces 4 columns of 32 - gave 1.8% of those layers' work
+and **0.55% of the model**. But **a partial tile runs the full K sweep**: 4,608 k-steps, exactly as many as a
+full one. Only the store is shorter. Weighed by COST it is one tile in seven, **14.3%**.
+
+> **Weigh an edge case by what it costs, not by what it produces.** A tile that emits an eighth of the
+> columns still does all of the arithmetic.
+
+**Measured**, both engines all cores, two runs each:
+
+| model | before | after | change | ONNX Runtime canary |
+|---|---:|---:|---:|---:|
+| VGG-16 | 37.88 ms | **33.60 / 33.22 ms** | **-11.8%** | 18.90-19.27 ms |
+| CNN, 60.9 MB | 26.75 ms | **24.11 / 24.16 ms** | **-9.8%** | 9.74-9.81 ms |
+
+Against ONNX Runtime: VGG-16 **2.00x -> 1.75x**, the 60.9 MB CNN **2.72x -> 2.47x**. Parity
+unchanged. Even 11.8% is more than the corrected 2.2% arithmetic predicts, so part of the gain is dispatch
+overhead the estimate did not model at all.
+
+**Three bodies, not one method with branches**, because the full-tile body sits at the register limit -
+three prefetch instructions added to it measured 40% slower. Even the extra live parameters an edge case
+needs are not free, so the selection happens at the call site. The partial body takes its scratch from the
+caller, allocated once per worker: a `stackalloc` inside it would reintroduce exactly the frame this is
+avoiding.
+
+**Coverage.** Four mutations on the body, three caught (two by killing the test host on an out-of-bounds
+store, one by wrong values). The fourth - routing full tiles to the partial body - escapes, **correctly**:
+that body computes the same values, only more slowly, so it is an alternative rather than a defect. Routing
+partial tiles to the full body is caught. **The first version of this change routed everything to the partial
+body and the escaped mutation is what exposed it.**
+
+### The conv micro-kernel was spilling its accumulators, and it cost 3.46x (2026-08-18, `XC-78`)
+
+**The largest single finding of the investigation, and it is not in the memory hierarchy at all.**
+
+**How it was isolated.** A rung was added to the cost ladder that inlines the micro-kernel's FMA sequence
+into the benchmark method: same buffers, same addresses, same 1,600 iterations, same k = 4608, same MR-major
+A layout, same contiguous B. **The only difference is whether the accumulator loop lives in its own method.**
+Pinned, two runs each:
+
+| arm | run 1 | run 2 | GFLOP/s | of the 359 GFLOP/s single-core peak |
+|---|---:|---:|---:|---:|
+| inlined | 11.31 ms | 11.25 ms | **335** | **93%** |
+| calling the production kernel | 39.19 ms | 38.87 ms | 97 | 27% |
+
+**3.46x, from removing the call alone**, both arms stable to 0.8%.
+
+**Why.** Sixteen `Vector512` accumulators need sixteen zmm registers. In a method that also carries nine
+parameters, a `stackalloc` scratch tile and eight `StoreTile` calls, the register allocator does not keep
+them there. The fix is a full-tile body holding nothing but the accumulators, with the general kernel
+routing `mrEff == 8 && nrEff == 32` to it and keeping the edge-case machinery for everything else.
+
+**This is why every memory hypothesis measured null.** Cache blocking, software prefetch, tile shape and
+working-set capacity were each tested here and each moved nothing — **because none of them touches register
+allocation**. Most of a day of memory-hierarchy hypotheses was spent on a problem in the generated code.
+
+> **When several independent hypotheses about one subsystem all measure null, the shared premise is the
+> suspect.** Here the shared premise was "the gap is in operand delivery", and it was wrong.
+
+**Measured end to end**, both engines all cores:
+
+| model | before | after | change | ONNX Runtime canary |
+|---|---:|---:|---:|---:|
+| VGG-16 | 50.96 ms | **37.83 / 37.92 ms** | **-25.7%** | 18.94-18.98 ms |
+| CNN, 60.9 MB | 41.95 ms | **27.11 / 26.40 ms** | **-36.2%** | 9.79-9.88 ms |
+
+Against ONNX Runtime: VGG-16 **2.77x -> 2.00x**, the 60.9 MB CNN **4.49x -> 2.72x**. Parity unchanged
+in every arm.
+
+**Coverage, and it exposed a gap plus a broken harness.** Three mutations were applied. Two produce wrong
+values and are caught. The third — routing partial tiles through the full-tile body, which then stores eight
+rows of thirty-two columns outside the valid region — **was reported as ESCAPED twice, and that was the
+harness lying**: the out-of-bounds store kills the test host, so no `[FAIL]` line is ever printed, and a
+harness that looks only for `[FAIL]` reads a dead process as a clean pass. **The canary cannot catch this,
+because the unmutated baseline "escapes" in exactly the same way.** The harness now requires proof that the
+suite ran — a summary line and a plausible test count — and reports `NO RUN` or `PARTIAL RUN` otherwise. With
+that in place the third mutation reports "only 141 tests passed".
+
+**And no test produced a partial tile at all**, so both the fast path's guard and the general path's edge
+handling were unexercised. `Tests/Core/Kernels/ConvPartialTileTests` now covers five shapes chosen against
+the micro-tile — output channels not a multiple of 8, output positions not a multiple of 32, and both — each
+against a direct convolution written in the test, with a guard band that catches a store running past the
+output.
+
 ### CORRECTION: the roofline denominator was the 256-bit one (2026-08-18)
 
 Every "percent of roofline" figure written in this file before this note divided a 512-bit kernel's rate by
