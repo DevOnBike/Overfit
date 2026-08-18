@@ -369,6 +369,85 @@ deliberately skipped — `PB-ORT1` measured the first at 61% within-version spre
 and found the second unable to resolve anything (BDN raises `MinIterationTime`; one iteration is 1.07 ms
 against a 100 ms target).
 
+### The batch "gain" was per-dispatch overhead, and one worker proved it (2026-08-18, `XC-78`)
+
+The section below measured about 3x less time per image at batch 4 on an occupancy-starved shape, and
+recorded that **the mechanism was not established** because the implementation processes images
+independently. It is established now, and it removes the result.
+
+**The question was posed backwards.** At Hw=14 a single image takes 2.429 ms and four take 3.103 ms in
+total. That is not "batching is fast" — it is **"one image is slow"**. In absolute terms batch 1 runs at
+381 GFLOP/s and batch 4 at 1192.
+
+**A worker-count sweep answers it outright**, per image:
+
+| workers | batch 1 | 2 | 4 | 8 |
+|---|---:|---:|---:|---:|
+| **1** | 6.729 ms | 6.735 | 6.669 | 6.774 |
+| 8 | 3.980 | 1.139 | 1.150 | 1.157 |
+| 32 | 2.409 | 1.786 | 0.791 | 0.807 |
+
+**At one worker batching does nothing at all** — 6.729 against 6.774 across an eightfold batch, inside a 0.3%
+error. The entire effect lives in the parallel layer: not in arithmetic, not in cache, not in the algorithm.
+
+> **Batching amortises nothing here; it dilutes a per-dispatch cost.** At one worker there are 6.7 ms of work
+> to hide it in and nothing to gain. At thirty-two there are 0.8 ms of work per image and the overhead
+> dominates. **The lever is the dispatch cost, not the batch.**
+
+**What was NOT separated, and it matters for anyone acting on this.** At 32 workers batch 2 measures 3.572 ms
+and batch 4 measures **3.162 ms** — less time for twice the work, which is internally inconsistent, so those
+two points are not usable. Three candidates remain unseparated: the fixed `OverfitParallel.For` cost
+(~0.22 ms measured elsewhere), scheduling quantisation of 35 work items across 32 workers, and
+BenchmarkDotNet's own per-iteration overhead on sub-millisecond calls. **The one-worker row is what carries
+the conclusion**, because it is long enough per call for all three to be negligible.
+
+**Consequence for the roadmap: batched graph inference is not worth building.** The measured gain is an
+artefact of an overhead a correct implementation would still pay per image. What the numbers do point at is
+reducing the per-dispatch cost, or dispatching once for several panels rather than once per convolution —
+neither of which needs a batch API.
+
+### Batched convolution: measured before building, and the answer is "not yet" (2026-08-18, `XC-78`)
+
+**It is a capability, not a tuning knob.** `OnnxGraphModel.RunInference` throws unless
+`input.Length == _inputSize`, and every intermediate buffer is sized for one image. Supporting a batch means
+resizing those buffers, propagating a batch size through every node, and roughly 12.8 MB per extra image for
+VGG-16's largest activation.
+
+**And the usual justification does not survive arithmetic here.** "Batching raises arithmetic intensity
+because the weights are reused" is false for this loop order: A is read once per N-panel and there are
+`N / 32` panels, so a batch of B gives B times the panels and **B times the A traffic, exactly
+proportional**. Nothing is amortised. That claim was made in an earlier proposal in this repository and it
+was wrong.
+
+**Measured on the path that already accepts a batch** (`Conv2DKernels.ForwardNchw`), per image:
+
+| shape | batch 1 | 2 | 4 | 8 |
+|---|---:|---:|---:|---:|
+| Hw=28, N=784, 25 panels | 1.482 ms | 1.480 | 1.562 | 1.556 |
+| Hw=14, N=196, 7 panels | 2.429 ms | 1.763 | **0.776** | 0.797 |
+
+**Flat where the shape is well conditioned; about 3x per image where panels are scarce, saturating at
+batch 4.** On VGG-16 the second case is conv11-13, about 16% of the model, so the ceiling on this whole
+direction is around 10% — at batch 4 or more, for throughput workloads only.
+
+**The mechanism for the Hw=14 gain is NOT established, and that is a reason to wait.** The implementation
+processes batch items independently — one `GemmFusedIm2Col` call each, its own dispatch, its own gathered
+panels — so on the face of it a batch should change nothing. It changes a lot. Until that is explained, the
+gain cannot be assumed to survive a real batched implementation.
+
+**The first version of this measurement was worthless, and the reason generalises.** At batch 1 and Hw=28 it
+reported **5.929 ms**; with more warmup the same call measures **1.482 ms**. The distribution was bimodal
+with modes at roughly 6.5 ms and 21 ms — a 3.2x split, the signature of tier-0 code still being sampled.
+**The project's shared benchmark config uses five warmup iterations with one invocation each**, which is not
+enough for calls of this length. Pinning affinity did not help, because this was never a placement problem.
+
+> **Check the warmup before believing a long-running benchmark.** Five iterations at one invocation each is
+> five calls; a method that needs more than that to tier up will be measured cold, and the tell is a bimodal
+> distribution whose modes differ by roughly the tier-0 penalty.
+
+**Recommendation: do not build batched graph inference on this evidence.** The payoff is bounded at about
+10% of one model, confined to one layer shape, and its mechanism is unexplained.
+
 ### Fixing the fallback kernels, and what a broken off-arm was hiding (2026-08-18, `XC-78`)
 
 The full-tile split had been applied only to the packed AVX-512 kernel. Two other bodies remained.
