@@ -154,9 +154,23 @@ namespace DevOnBike.Overfit.Onnx
             for (var i = 0; i < _nodes.Length; i++)
             {
                 var node = _nodes[i];
+                var ms = _nodeTicks[i] * toMs / runs;
+
+                // Convolutions get their achieved rate as well as their cost. A per-layer millisecond column
+                // ranks the layers; a per-layer GFLOP/s column says whether the slow ones are slow because
+                // they are big or because the kernel runs badly on their shape, and those call for opposite
+                // work. Everything else prints an empty rate rather than a misleading zero.
+                var rate = string.Empty;
+
+                if (node.Module is ConvLayer conv && ms > 0)
+                {
+                    var flops = 2.0 * conv.InferenceOutputSize * conv.KernelElementsPerOutput;
+                    rate = $"  K={conv.KernelElementsPerOutput,5}  {flops / (ms * 1e6),7:F1} GFLOP/s";
+                }
+
                 sb.AppendLine(
 #pragma warning disable RS0030 // AOT-safe: type name in a profiling report line.
-                    $"  [{i,2}] {node.Module.GetType().Name,-26} out={node.OutputSize,9}  {_nodeTicks[i] * toMs / runs,8:F2} ms");
+                    $"  [{i,2}] {node.Module.GetType().Name,-26} out={node.OutputSize,9}  {ms,8:F2} ms{rate}");
 #pragma warning restore RS0030
             }
 

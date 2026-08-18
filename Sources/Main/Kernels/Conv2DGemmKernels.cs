@@ -320,19 +320,69 @@ namespace DevOnBike.Overfit.Kernels
         {
             var nr = UseAvx512Conv ? Nr512 : Nr;
             var nPanels = (n + nr - 1) / nr;
+            var mBlocks = UseAvx512Conv ? ResolveMBlocks(m, nPanels) : 1;
 
             fixed (float* pa = a, pb = b, pc = c)
             {
-                var ctx = new GemmCtx(pa, pb, pc, m, n, k);
+                var ctx = new GemmCtx(pa, pb, pc, m, n, k, mBlocks);
 
                 if (UseAvx512Conv)
                 {
-                    OverfitParallel.For(0, nPanels, 1, &GemmNPanelWorker512, &ctx);
+                    OverfitParallel.For(0, nPanels * mBlocks, 1, &GemmNPanelWorker512, &ctx);
                     return;
                 }
 
                 OverfitParallel.For(0, nPanels, 1, &GemmNPanelWorker, &ctx);
             }
+        }
+
+        /// <summary>Set <c>OVERFIT_CONV_M_SPLIT=0</c> to dispatch one work item per N-panel, as before.</summary>
+        internal static readonly bool MSplitEnabled =
+            Environment.GetEnvironmentVariable(OverfitEnvironment.ConvMSplit) != "0";
+
+        /// <summary>
+        /// How many ways to split the M sweep, so a GEMM with few N-panels can still fill the machine.
+        ///
+        /// <para><b>Measured on VGG-16, 2026-08-18 (XC-78).</b> Work is dispatched one N-panel per item and
+        /// an AVX-512 panel is 32 columns wide, so VGG's last three convolutions — <c>N = 196</c> — produce
+        /// <b>seven</b> work items. Seven cannot occupy 32 workers whatever the micro-kernel does, and the
+        /// seventh panel is 4 columns wide against the others' 32, so even those seven are imbalanced. Those
+        /// layers measured <b>2.84x scaling against this machine's own 14.30x ceiling, i.e. 20% efficiency,
+        /// while the well-shaped layers reached 7.3x</b> — and they are 20% of all-core convolution time.</para>
+        ///
+        /// <para><b>The split costs a duplicated B pack</b>, once per M-block rather than once per panel, so
+        /// it is a trade and not a free win. It is therefore applied only where there are fewer panels than
+        /// workers, and never widens the domain past the number of <c>Mr</c> row blocks that exist.</para>
+        /// </summary>
+        private static int ResolveMBlocks(int m, int nPanels)
+        {
+            if (!MSplitEnabled)
+            {
+                return 1;
+            }
+
+            var workers = OverfitParallel.MaxDegreeOfParallelism;
+
+            // MEASURED 2026-08-18: the shortfall has to be large before the duplicated pack pays for
+            // itself. VGG's conv8-10 produce 25 panels against 32 workers, and splitting them cost 3-5%
+            // (668.8 -> 633.7 GFLOP/s on conv8) because the extra B pack outweighed a occupancy already at
+            // 78%. Its conv11-13 produce 7, and splitting them paid 1.79x (228 -> 405 GFLOP/s). Requiring
+            // fewer than half the workers to be reachable keeps the second case and drops the first.
+            if (nPanels * 2 > workers || nPanels <= 0)
+            {
+                return 1;
+            }
+
+            var rowBlocks = (m + Mr - 1) / Mr;
+
+            if (rowBlocks <= 1)
+            {
+                return 1;
+            }
+
+            var wanted = (workers + nPanels - 1) / nPanels;
+
+            return Math.Min(rowBlocks, wanted);
         }
 
         /// <summary>
@@ -345,12 +395,27 @@ namespace DevOnBike.Overfit.Kernels
             var k = c.K;
             var n = c.N;
             var m = c.M;
+            var mBlocks = c.MBlocks;
+            var rowBlocks = (m + Mr - 1) / Mr;
 
             using var packBuf = new PooledBuffer<float>(checked(k * Nr512), clearMemory: false);
             var packB = packBuf.Span;
 
-            for (var np = npStart; np < npEnd; np++)
+            for (var item = npStart; item < npEnd; item++)
             {
+                // One item is one (N-panel, M-block) pair. At MBlocks == 1 the row range below is the whole
+                // of M, so the dispatch is byte-for-byte the original loop wherever the split does not apply.
+                var np = item / mBlocks;
+                var mb = item - (np * mBlocks);
+
+                var rowBlockStart = (int)((long)rowBlocks * mb / mBlocks);
+                var rowBlockEnd = (int)((long)rowBlocks * (mb + 1) / mBlocks);
+
+                if (rowBlockStart >= rowBlockEnd)
+                {
+                    continue;
+                }
+
                 var n0 = np * Nr512;
                 var nrEff = Math.Min(Nr512, n - n0);
 
@@ -378,8 +443,9 @@ namespace DevOnBike.Overfit.Kernels
 
                 fixed (float* pPackB = packB)
                 {
-                    for (var m0 = 0; m0 < m; m0 += Mr)
+                    for (var rb = rowBlockStart; rb < rowBlockEnd; rb++)
                     {
+                        var m0 = rb * Mr;
                         var mrEff = Math.Min(Mr, m - m0);
 
                         MicroKernel8x32Avx512(c.A, m0, mrEff, k, pPackB, c.C, n, n0, nrEff);
@@ -492,7 +558,11 @@ namespace DevOnBike.Overfit.Kernels
             public readonly int N;
             public readonly int K;
 
-            public GemmCtx(float* a, float* b, float* c, int m, int n, int k)
+            /// <summary>How many ways the M sweep is split, so one N-panel can occupy more than one
+            /// worker. 1 reproduces the original one-item-per-panel dispatch exactly.</summary>
+            public readonly int MBlocks;
+
+            public GemmCtx(float* a, float* b, float* c, int m, int n, int k, int mBlocks)
             {
                 A = a;
                 B = b;
@@ -500,6 +570,7 @@ namespace DevOnBike.Overfit.Kernels
                 M = m;
                 N = n;
                 K = k;
+                MBlocks = mBlocks;
             }
         }
 

@@ -174,7 +174,19 @@ namespace Benchmarks
         [GlobalSetup]
         public void Setup()
         {
-            _workers = Environment.ProcessorCount;
+            // OVERFIT_ROOFLINE_WORKERS overrides the worker count, so the SINGLE-CORE ceiling can be measured
+            // with the same kernel, the same panels and the same process shape as the all-core one.
+            //
+            // It exists because a per-thread claim needs a per-thread denominator. Dividing a one-thread
+            // result by the all-core ceiling understates it by the core count; correcting for that with a
+            // datasheet boost clock is a guess, and this project does not put guessed numbers under measured
+            // ones. Two runs of this benchmark give the ratio directly, and the ratio is what says how much of
+            // an imperfect parallel speed-up is the silicon clocking down rather than the code.
+            var requested = Environment.GetEnvironmentVariable("OVERFIT_ROOFLINE_WORKERS");
+
+            _workers = int.TryParse(requested, out var parsed) && parsed > 0
+                ? Math.Min(parsed, Environment.ProcessorCount)
+                : Environment.ProcessorCount;
 
             _a = new float[FloatCount];
             _b = new float[FloatCount];

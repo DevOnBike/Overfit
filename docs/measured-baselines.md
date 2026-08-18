@@ -369,6 +369,196 @@ deliberately skipped — `PB-ORT1` measured the first at 61% within-version spre
 and found the second unable to resolve anything (BDN raises `MinIterationTime`; one iteration is 1.07 ms
 against a 100 ms target).
 
+### The conv work-split that came out of that diagnostic (2026-08-18, `XC-78`)
+
+The diagnostic below said the concentrated loss was work decomposition, not the micro-kernel. This is the
+change it pointed at, and its measurement.
+
+**What it does.** `Conv2DGemmKernels.Gemm` dispatched one work item per N-panel. It now dispatches one item
+per (N-panel, M-block) pair, so a GEMM with fewer panels than workers can still fill the machine. Guarded by
+`OVERFIT_CONV_M_SPLIT` (default on; set to `0` for the A/B) and applied only on the AVX-512 path.
+
+**The gate is measured, and the first version of it was too generous.** Splitting costs a duplicated B pack,
+once per M-block instead of once per panel, so it has to be earned. Splitting wherever `nPanels < workers`
+helped conv11-13 by 1.79x but cost conv8-10 **3-5%** (668.8 -> 633.7 GFLOP/s): those have 25 panels against
+32 workers, occupancy already at 78%, and the extra pack outweighed the gain. Requiring `nPanels * 2 <=
+workers` keeps the win and drops the loss - conv8-10 then measured within 1.0% of the unsplit arm, which
+doubles as the canary for that run.
+
+**Result on the target layers** (VGG-16 conv11-13, N=196, seven panels):
+
+| arm | conv11 | conv12 | conv13 | rate |
+|---|---:|---:|---:|---|
+| split off | 4.18 ms | 4.33 ms | 4.10 ms | 213.5-225.6 GFLOP/s |
+| split on | 2.35 ms | 2.26 ms | 2.32 ms | **392.8-409.2 GFLOP/s** |
+
+**Result end to end**, `LargeCnnComparisonBenchmark`, both engines on all cores:
+
+| model | split off | split on | change | ONNX Runtime canary |
+|---|---:|---:|---:|---:|
+| VGG-16 | 79.01 ms | **73.50 ms** | **-7.0%** | 21.31 -> 21.29 ms (0.1%) |
+| CNN, 60.9 MB | 67.70 ms | **63.14 ms** | **-6.7%** | 12.89 -> 12.93 ms (0.3%) |
+
+The ONNX Runtime side of the same process moved 0.1% and 0.3%, so the box was still and the lever was
+isolated. Parity is unchanged in both arms: cosine 1.000000, max absolute difference 3.204e-7 (VGG-16) and
+6.706e-8 (60.9 MB CNN), same argmax. Against ONNX Runtime the VGG-16 gap goes from 3.72x to **3.45x**.
+
+**Coverage, because a green suite proved nothing here twice on the same day.**
+`Tests/Core/Kernels/ConvGemmMSplitTests` checks `Gemm` against a naive triple loop at five shapes chosen
+against the *decomposition* rather than against convolution, plus a sentinel test for writes past the result
+and one for elements never written. Four defect mutations and one control: **three caught, the control
+correctly not caught** (forcing a different but valid split must not change the output). **The fourth escape
+is a finding rather than a gap.** Dropping the M-block's START bound - so every block begins at row 0 - is
+not caught, because the workers then recompute each other's rows and store identical values to identical
+addresses: the answer stays right and only the cost multiplies. **A lost start bound presents as a slowdown,
+never as a wrong answer**, so the benchmark is its detector and the suite never will be.
+
+**The tolerance in that test is a derived bound, not a chosen constant.** The first version asserted a
+relative 1e-4 against `|expected|` and failed at one element out of 100,352: kernel 0.0021735937 against
+reference 0.0021725819. A dot product of signed values cancels, so the final value is not the size of the
+arithmetic that produced it - that result came out of partial sums near 2.7, where 1.0e-6 is ordinary
+rounding. The test now carries the textbook bound `|error| <= K * u * sum|a_i * b_i|` with `u = 2^-24`,
+accumulated per element and doubled for headroom. The defects it exists for miss by whole result magnitudes,
+not by last bits.
+
+**Not addressed, and both are named in the diagnostic below**: the 1.6x single-thread gap against the
+isolated micro-kernel, and conv1 (K=27, 1568 panels, 20% efficiency from a different cause, 1.49 ms). **The
+AVX2 path is deliberately unchanged** - porting the split there without measuring it on AVX2 hardware would
+be exactly the port-a-measured-null mistake this task already recorded once.
+
+### VGG-16 convolution, per layer, against a MEASURED ceiling (2026-08-18, `XC-78`)
+
+`XC-78` was filed on the reading *"parallelism is fine (conv scales 9.98x); the gap is inside a single
+thread"*, and prescribed reproducing the isolated micro-kernel number and adding surrounding costs back one
+at a time. **The per-layer profile refutes that reading before any of that work starts.**
+
+**The denominator was measured, not estimated.** A per-thread claim needs a per-thread ceiling, and dividing
+by the all-core roofline understates one thread by the core count while correcting with a datasheet boost
+clock is a guess. `MachineRooflineBenchmark.PeakFmaFloat512` now takes `OVERFIT_ROOFLINE_WORKERS`; the same
+kernel and panels at 1 worker take 2.139 ms and at 32 workers 4.785 ms for 32x the work, so this box's
+all-core FMA throughput is **14.30x its single-core throughput** - clock drop and SMT already inside that
+number. Against the recorded 2190 GFLOP/s all-core roofline, the single-core ceiling is **153 GFLOP/s**.
+
+Ten runs, `OVERFIT_CNN_ONNX` on `vgg16.onnx`, one arm at `OVERFIT_PARALLEL_WORKERS=1`:
+
+| layer | N | panels | 1 core | all cores | speed-up | % of the 14.30x ceiling |
+|---|---:|---:|---:|---:|---:|---:|
+| conv1 | 50176 | 1568 | 39.0 | 114.1 | 2.93x | **20%** |
+| conv2 | 50176 | 1568 | 58.2 | 428.7 | 7.36x | 51% |
+| conv3 | 12544 | 392 | 74.3 | 522.6 | 7.03x | 49% |
+| conv4 | 12544 | 392 | 73.9 | 592.0 | 8.01x | 56% |
+| conv5 | 3136 | 98 | 85.0 | 600.6 | 7.06x | 49% |
+| conv6 | 3136 | 98 | 87.1 | 632.5 | 7.26x | 51% |
+| conv7 | 3136 | 98 | 87.9 | 644.6 | 7.33x | 51% |
+| conv8 | 784 | 25 | 93.8 | 640.1 | 6.82x | 48% |
+| conv9 | 784 | 25 | 92.7 | 674.0 | 7.27x | 51% |
+| conv10 | 784 | 25 | 92.5 | 695.5 | 7.52x | 53% |
+| conv11 | 196 | **7** | 80.2 | 227.7 | 2.84x | **20%** |
+| conv12 | 196 | **7** | 78.7 | 225.5 | 2.87x | **20%** |
+| conv13 | 196 | **7** | 82.4 | 234.1 | 2.84x | **20%** |
+
+Rates are GFLOP/s. Whole conv stack: **383.12 ms at one core (80.1 GFLOP/s), 60.33 ms at all cores
+(508.5 GFLOP/s), a 6.35x speed-up = 44% of the machine's own 14.30x.**
+
+**Finding 1 - parallelism is NOT fine, and it is the larger of the two losses.** 6.35x against an available
+14.30x. The row's 9.98x came from a single-thread baseline of 574.74 ms; the same measurement today gives
+**383.12 ms**, i.e. single-threaded conv is 1.5x faster than when that row was written and **the scaling
+figure built on the old baseline does not survive**. What changed between the two runs was not identified
+here - see the caveat at the end.
+
+**Finding 2 - the single-thread gap is real but smaller than recorded.** The best-shaped layers reach
+**92.5 GFLOP/s = 60% of the 153 GFLOP/s single-core ceiling**, while the micro-kernel measured in isolation
+reaches 132-148 = **86-97%**. That is a **1.6x** gap from surrounding costs, not the 2.6x the row records -
+because the 2.6x was computed from a whole-stack average dragged down by conv1 and conv2.
+
+**Finding 3 - the concentrated loss has an exact structural cause, and it is not the kernel.**
+`Conv2DGemmKernels.Gemm` splits work over N-panels: `nPanels = (n + nr - 1) / nr` with `nr = 32` on AVX-512,
+then `OverfitParallel.For(0, nPanels, 1, ...)`. conv11-13 have **N = 196, so nPanels = 7**. Seven work items
+cannot occupy 32 workers whatever the kernel does, and the seventh panel is 4 columns wide against the
+others' 32, so even those seven are imbalanced. Measured 2.84x, structural ceiling 7x. **These three layers
+are 12.05 ms = 20% of all-core conv time**; at conv9's 7.27x they would cost 4.72 ms, so the recoverable
+amount is **7.33 ms, 12% of conv and ~7% of the whole model**. The lever is decomposition - split over M as
+well as N when N is small (M is 512 in these layers) - not a micro-kernel rewrite.
+
+conv1 is also at 20% but costs 1.49 ms all-core, and its cause is different (K=27, 1568 panels, so not a
+decomposition shortage). Low priority.
+
+**What this retires.** Do not start the ladder experiment the row prescribes, and do not re-run Winograd on
+the 512-channel layers yet: both target the 1.6x single-thread gap while a 1.9x parallel gap and a
+structural 20%-efficiency block sit above them in the budget.
+
+**Instruments added, so this is repeatable.** `OnnxGraphModel.PerNodeProfileReport()` now prints `K` and
+achieved GFLOP/s for every `ConvLayer` (a millisecond column ranks layers; a GFLOP/s column says whether a
+slow layer is slow because it is big or because the kernel runs badly on its shape, and those call for
+opposite work). `ConvLayer.KernelElementsPerOutput` is internal and exists only to feed it.
+`MachineRooflineBenchmark` takes `OVERFIT_ROOFLINE_WORKERS`.
+
+**Caveats, and one of them is unresolved.** The 574.74 -> 383.12 ms single-thread change between 2026-08-17
+and 2026-08-18 is **not explained**; both are "production single-threaded conv on VGG-16" and I did not
+identify what moved. Treat the 1.5x as an open question, not as a win. Also not measured: any thread count
+between 1 and all, batch sizes above 1, and whether the same shape collapse appears on other models. Raw
+output in `artifacts/xc78/`.
+
+### The published Overfit-vs-ONNX-Runtime size curve (2026-08-18, `XC-77`)
+
+The figures the README publishes under *"How that ONNX Runtime ratio scales"*. Re-measured after the
+`LinearKernels` work of `XC-79`/`XC-80`/`XC-81` made the earlier table stale, and with Rider shut down
+mid-session, so the two rounds are not on an identical box state - the canary below is what makes them
+comparable.
+
+| model | Overfit | ONNX Runtime 1.29.0 | ratio | threads |
+|---|---:|---:|---|---|
+| `Linear(784x10)`, 7,840 params | 225.6 ns | 1,855.3 ns | Overfit **8.22x** | ORT pinned 1; Overfit serial by policy |
+| MLP `784-256-128-10`, ~235k | 6,721 ns | 8,777 ns | Overfit **1.31x** | 1 vs 1, proven below |
+| MNIST CNN (imported ONNX) | 5,290 ns | 6,616 ns | Overfit **1.25x** | 1 vs 1, proven below |
+| CNN, 60.9 MB | 63.14 ms | 12.93 ms | ORT **4.89x** | all cores both, with the `XC-78` split (67.70 ms without) |
+| VGG-16, 30.94 GFLOP | 73.50 ms | 21.29 ms | ORT **3.45x** | all cores both, with the `XC-78` split (79.01 ms without) |
+
+**The thread question was settled by a second arm, not by an argument.** Three of these benchmarks construct
+their `SessionOptions` with `IntraOpNumThreads = 1, InterOpNumThreads = 1`, so the comparison is only
+like-for-like if Overfit is also single-threaded at that size - and *"only the diagonal of a thread-count
+grid is like-for-like"* is a trap this repository has already fallen into once. Re-running each with
+`OVERFIT_PARALLEL_WORKERS=1`:
+
+| model | default | 1 worker | Overfit moved | ORT canary moved |
+|---|---:|---:|---:|---:|
+| `Linear(784x10)` | 225.6 ns | 189.5 ns | **-16.0%** | +0.9% |
+| MLP | 6,782 ns | 6,721 ns | -0.9% | +0.7% |
+| MNIST CNN | 5,290 ns | 5,351 ns | +1.2% | -0.7% |
+
+The MLP and the MNIST CNN never reach a parallel path, so those two rows are one thread against one thread
+and are publishable as they stand. **This retires the restriction the `XC-77` row carried** - that no
+single-thread CNN number should be published - for the MNIST row specifically, by measurement rather than by
+assertion.
+
+**`Linear` is the exception and it moves the wrong way.** Forcing one worker made Overfit 16% *faster*
+(225.6 -> 189.5 ns), which would raise the published ratio from 8.22x to 9.88x. The ORT canary moved 0.9%, so
+the box was still and the effect is real. **The README publishes the slower default-configuration number**,
+because that is what a consumer gets without setting an environment variable. *Why* the idle worker pool
+costs 36 ns on a 226 ns inference is not established here, and is worth a row of its own.
+
+**The near-parity rows are noisier than the gap they describe, and the noise is one-sided.** Across two
+process repeats of the MLP benchmark: Overfit 6,782 -> 6,753 ns (**0.4%**), ONNX Runtime 8,777 -> 9,421 ns
+(**7.3%**), ML.NET 7,596 -> 9,804 ns (**29.1%**). A box-wide drift would have moved all three; only the two
+native-backed engines moved. The published 1.31x is therefore taken from the repeat where the **opponent**
+was fastest, which is the conservative direction. Anything between 1.2x and 1.3x here should be read as
+"about even", not as a ranking.
+
+**Both large CNNs are numerically identical to ONNX Runtime**, checked in the benchmark's own `GlobalSetup`
+rather than asserted: cosine 1.000000, max absolute difference **6.706e-8** (60.9 MB CNN) and **3.204e-7**
+(VGG-16), same argmax (993 and 577). The gap is speed, not accuracy.
+
+**Provenance.** `Benchmarks.SingleInferenceBenchmark`, `Benchmarks.MLNetSingleInferenceBenchmark`,
+`Benchmarks.ImportedOnnxMnistCnnBenchmark`, `Benchmarks.LargeCnnComparisonBenchmark` (the last one twice,
+via `OVERFIT_CNN_ONNX` pointed at the 60.9 MB `cnn.onnx` then at `vgg16.onnx`, both under the model fixture
+directory). Raw BenchmarkDotNet output in `artifacts/xc77/`. Environment variables passed through `env=` in
+`subprocess.run`, never as a shell prefix. Rider was running during round 1 and killed before round 2, which
+is why round 2 is not a valid best-of-N partner for round 1 on absolute times - the MLP repeat above is the
+only cross-round comparison drawn, and it is drawn to bound noise, not to pick a winner.
+
+**What was NOT measured.** ResNet-50 (the exported model exists but the importer does not yet handle it),
+any batch size above 1, and any thread count between 1 and all cores for the two large CNNs.
+
 ### CNN inference vs ONNX Runtime — where .NET loses, quantified (2026-08-17)
 
 Same box and provenance as the block above; `Microsoft.ML.OnnxRuntime` **1.29.0**. Models from

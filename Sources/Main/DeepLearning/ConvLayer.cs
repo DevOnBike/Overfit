@@ -100,6 +100,23 @@ namespace DevOnBike.Overfit.DeepLearning
         }
 
         /// <summary>
+        /// Multiply-accumulate inputs per output element: <c>inChannels * kernelSize * kernelSize</c>, which is
+        /// the im2col contraction length K for this layer.
+        ///
+        /// <para>Exposed so a profiler can turn a per-node millisecond figure into an achieved GFLOP/s figure
+        /// (<c>2 * InferenceOutputSize * this / seconds</c>). A ratio against another engine says who is faster;
+        /// a fraction of the machine roofline says whether headroom exists, and only the second one decides
+        /// whether work is worth starting. Internal because it is a shape detail, not a contract.</para>
+        /// </summary>
+        internal int KernelElementsPerOutput
+        {
+            get
+            {
+                return _kernelSizePerOutput;
+            }
+        }
+
+        /// <summary>
         /// Optional per-channel bias. Null for layers without bias (e.g., Conv before BN).
         /// Populated by <see cref="LoadParameters(ReadOnlySpan{float}, ReadOnlySpan{float})"/>.
         /// </summary>
