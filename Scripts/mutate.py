@@ -96,3 +96,30 @@ def verdict(output, expected_tests, label):
         return f"{label}: *** ESCAPED *** ({ran} tests ran and none noticed)"
 
     return f"{label}: CAUGHT by {failures[:3]}"
+
+
+def kill_tree(pid):
+    """Kills a process and every descendant.
+
+    **`subprocess.run(timeout=...)` kills only the direct child.** A `dotnet test` that times out leaves
+    `testhost.exe` and `DevOnBike.Overfit.Tests.exe` alive, and this repository's build guard refuses to
+    build while one of them holds `Global\DevOnBike.Overfit.MachineMeasurement`. On 2026-08-19 that turned
+    one hung run into an afternoon: every subsequent run blocked on a mutex held by an orphan from the
+    previous timeout, which read as "the code hangs" rather than "the harness leaks processes".
+    """
+    import subprocess
+
+    subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"],
+                   capture_output=True, text=True, timeout=60)
+
+
+def kill_test_hosts():
+    """Kills every test host on the machine, orphan or not, so the measurement mutex is free."""
+    import subprocess
+
+    script = ("Get-CimInstance Win32_Process | "
+              "Where-Object { $_.Name -match 'Overfit.Tests|testhost|vstest' } | "
+              "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }")
+
+    subprocess.run(["powershell", "-NoProfile", "-Command", script],
+                   capture_output=True, text=True, timeout=120)

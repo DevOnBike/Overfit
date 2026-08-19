@@ -369,6 +369,90 @@ deliberately skipped — `PB-ORT1` measured the first at 61% within-version spre
 and found the second unable to resolve anything (BDN raises `MinIterationTime`; one iteration is 1.07 ms
 against a 100 ms target).
 
+### CORRECTION: `chunksPerWorker > 1` overlaps chunks, and that voids the region-major measurement (2026-08-19)
+
+**A conclusion recorded earlier today was wrong and is withdrawn.** Three cold test runs ended at 176, 188
+and 222 of 2748 tests, each reporting "Passed!", and that was attributed to the committed dispatcher change
+with a recommendation to revert the commit. **The commit was not the cause.** Moving one test file aside
+gives **2738 passed, 0 failed, 32 seconds** — green and fast.
+
+**The cause is `OverfitParallelChunkGridTests` itself, and it is the messenger rather than the defect.** It
+calls `For(..., chunksPerWorker)` **explicitly** with 2, 3, 4 and 8, so lowering the *default* to 1 did not
+touch it. At those values it reports overlapping work — one run recorded **"0 index(es) never ran and 629 ran
+more than once"** at length 4096 with three chunks per worker — and it takes the test host down often enough
+to end whole suite runs part-way.
+
+> **So `chunksPerWorker > 1` is broken in the dispatcher**, and the coverage test written to guard the grid
+> layout is what found it. Nothing in the product passes a value above 1: the default is 1 and the
+> convolution fan-out passes `ChunkFactor`, which is also 1. **Exposure is nil, and the defect is real.**
+
+#### What this voids
+
+**The region-major measurement (-2.9% on the 60.9 MB CNN, -2.1% on VGG-16) was taken at four chunks per
+worker — i.e. with a dispatcher that overlaps chunks.** Six ABAB passes all favoured it, and overlapping work
+should be *slower* rather than faster, so the direction is not obviously an artefact. But the arm was running
+a different computation from the one it was compared against, and **a measurement of code that does the wrong
+work is not a measurement.** It has to be repeated after the overlap is fixed.
+
+#### The three instrument failures of this session, in order
+
+They are recorded together because each one made the next harder to see.
+
+1. **A mutation harness restored source with `shutil.copy2`'s preserved timestamp.** MSBuild saw the object
+   as newer than the source and skipped the rebuild, so runs after the restore executed the *mutated*
+   library. 100 tests failed against byte-identical source; a file-by-file bisection against `HEAD` was what
+   finally showed it. Fixed in `Scripts/mutate.py`.
+2. **`subprocess.run(timeout=...)` kills the direct child only.** A timed-out `dotnet test` leaves
+   `testhost.exe` and `DevOnBike.Overfit.Tests.exe` alive holding
+   `Global\DevOnBike.Overfit.MachineMeasurement`, and the build guard then refuses every later build. Each
+   timeout poisoned the next run, which read as "the code hangs". Fixed with `kill_tree` / `kill_test_hosts`.
+3. **Overlapping test runs.** Two `dotnet test` processes do not produce two results; they take one
+   machine-exclusive mutex and produce none. Several arms reported HUNG or NO SUMMARY purely because a
+   previous background run was still alive. This one was self-inflicted, diagnosed mid-session, and then
+   repeated three more times.
+
+**The common shape: none of the three announces itself.** A skipped build, an orphaned process and a
+colliding run all present as "the code is broken", and all three pointed at the same innocent commit.
+
+### The full work-stealing protocol: attempted, abandoned, and what it cost (2026-08-19)
+
+`XC-95`'s region-major layout is an approximation — it holds locality only while workers happen to finish in
+step. The full design gives each worker a **home region** with its own claim counter, drained before it
+steals from any other. It was implemented behind `OVERFIT_PARALLEL_STEAL` and **abandoned without a usable
+measurement**.
+
+**Two distinct concurrency defects were found and fixed, and it still did not run.**
+
+**1. The mode flag's lifetime.** The dispatch set `_stealingDispatch = true` and cleared it on the way out. A
+dispatch can leave tokens unconsumed — the caller may drain every region before a slow worker has woken — so
+a late worker wakes with the flag already cleared and takes the **single-counter path with the stealing
+dispatch's state still in place**: `_nextChunk` is zero and `_chunkCount` is not, so it re-executes chunk
+zero and signals a countdown that has already reached zero. The fix is to write the flag for **every**
+dispatch under the lock and never clear it, so a late worker always describes the dispatch it is joining.
+
+**2. The caller was the greedy drainer.** In the old protocol the calling thread runs exactly one chunk and
+waits, leaving the rest to the pool. The new one had it drain every region — and it starts before any worker
+has been woken, with the semaphore's wake latency as a head start. On dispatches whose chunks are
+microseconds long, which is most of the test suite, **the caller finishes the whole range alone and the
+fan-out runs single-threaded**. Correct, roughly sixteen times too slow, and indistinguishable from a hang
+from outside: the suite went past a four-minute-per-arm timeout. The fix is for the caller to drain its own
+region, then wait with a timeout and steal only if the pool has not finished — which also keeps a wake that
+never happens from blocking forever.
+
+**Both were fixed and the coverage test still did not complete.** A third failure remains unfound.
+
+> **Stopped rather than iterated.** This is a tuned primitive with recorded incidents of its own — a leaked
+> semaphore token that stopped the pool sleeping at all, and a claim protocol whose comments explain why the
+> decode pool needed a different one. Debugging a concurrency defect in it through a ten-minute feedback loop
+> by patching and re-running is how the next incident gets written, not avoided. **Reverted to the committed
+> state.**
+
+**What survives, and it is not nothing.** The two defects above are real properties of the design, not of the
+implementation, and any future attempt inherits them: the mode flag must be per dispatch and never cleared,
+and the caller must not be the primary drainer. The region-major layout that ships is the measured part of
+this idea (**-2.9% on the CNN, -2.1% on VGG-16**), and pool use is 69.4% — so **most of the idle time this
+protocol was meant to recover is still there.**
+
 ### Region-major chunks: -2.9% on the CNN, -2.1% on VGG-16, and the first version of this measurement was wrong (2026-08-19)
 
 `XC-95` wanted a worker pinned to a contiguous region. The cheap approximation keeps the claim protocol and

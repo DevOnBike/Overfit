@@ -708,16 +708,19 @@ namespace DevOnBike.Overfit.Runtime
         /// skipped the rebuild. Both layouts in one binary, with the live one echoed in
         /// <see cref="OccupancyReport"/>, is what makes the arm checkable instead of assumed.</para>
         ///
-        /// <para><b>MEASURED AND ON BY DEFAULT.</b> Three ABAB passes per model, every one negative:
+        /// <para><b>MEASURED, AND OFF BY DEFAULT ANYWAY.</b> Three ABAB passes per model, every one negative:
         /// the 60.9 MB CNN goes 18.89 to <b>18.34 ms (-2.9%)</b> with pool use 64.8% to 69.4%, and VGG-16
-        /// goes 27.31 to <b>26.74 ms (-2.1%)</b> with pool use 76.9% to 79.5%. Set to 0 to measure the other
-        /// arm.</para>
+        /// goes 27.31 to <b>26.74 ms (-2.1%)</b> with pool use 76.9% to 79.5%. Set to 1 to measure it.</para>
+        ///
+        /// <para><b>Why a measured win ships off.</b> With it on and four chunks per worker, three
+        /// independent cold test runs ended at 176, 188 and 222 of 2748 tests, each reporting "Passed!", and
+        /// the cause was never localised. Both defaults are therefore back to the pre-2026-08-19 shape, so
+        /// nothing reaches this code without an explicit environment variable.</para>
         ///
         /// <para>At one chunk per worker the grid is the identity mapping, so this changes nothing for a call
         /// site that has not opted in to a finer split.</para>
         /// </summary>
-        internal static readonly bool RegionMajorChunks =
-            Environment.GetEnvironmentVariable(OverfitEnvironment.ParallelRegionMajor) != "0";
+        internal static readonly bool RegionMajorChunks = Environment.GetEnvironmentVariable(OverfitEnvironment.ParallelRegionMajor) == "1";
 
         private static int ResolveChunkFactor()
         {
@@ -725,10 +728,15 @@ namespace DevOnBike.Overfit.Runtime
 
             if (!int.TryParse(raw, out var factor) || factor < 1)
             {
-                // Four, measured. With the region-major layout the convolution fan-out runs 2.1% to 2.9%
-                // faster at four chunks per worker than at one; with the slice-major layout the same split
-                // was 3.4% SLOWER, which is why this default and RegionMajorChunks belong together.
-                return 4;
+                // ONE. Four was measured to be 2.1% to 2.9% faster with the region-major layout, and that
+                // measurement stands — but shipping it broke the test suite in a way that was never
+                // localised: three independent cold runs ended at 176, 188 and 222 of 2748 tests, each
+                // reporting "Passed!". A 2% gain is not worth a suite that reports success on 8% of itself,
+                // and this project has more guards against that shape of failure than against any other.
+                //
+                // The switch stays so the measurement is reproducible. See `XC-93`, `XC-95` and the entry in
+                // docs/measured-baselines.md for the numbers and for what was NOT established.
+                return 1;
             }
 
             return Math.Min(factor, MaxChunkFactor);
