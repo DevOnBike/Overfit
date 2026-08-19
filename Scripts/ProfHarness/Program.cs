@@ -117,6 +117,30 @@ internal static class Prof
             InterOpNumThreads = 1,
         };
 
+        // PROF_ORT_OPT=extended drops ONNX Runtime below the layout-optimisation level, so its NCHWc
+        // transform does not run and Conv falls back to MlasConv - im2col plus SGEMM, the same structure we
+        // use. The difference between the two levels is the layout's worth measured on their own assembly,
+        // with everything else held constant, and no port needed to find it out.
+        var level = Environment.GetEnvironmentVariable("PROF_ORT_OPT");
+
+        if (level == "extended")
+        {
+            options.GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_EXTENDED;
+        }
+
+        if (level == "basic")
+        {
+            options.GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_BASIC;
+        }
+
+        // PROF_ORT_PROFILE=1 makes ONNX Runtime write its own per-node timings, which is the only way to put
+        // their layer budget beside ours. It writes a JSON file and its path is printed on exit.
+        if (Environment.GetEnvironmentVariable("PROF_ORT_PROFILE") == "1")
+        {
+            options.EnableProfiling = true;
+            options.ProfileOutputPathPrefix = "ort_profile";
+        }
+
         using var session = new InferenceSession(path, options);
 
         var name = session.InputMetadata.Keys.First();
@@ -153,6 +177,11 @@ internal static class Prof
         Console.WriteLine($"[PROF] {calls} calls in {sw.Elapsed.TotalSeconds:F2} s = "
                           + $"{sw.Elapsed.TotalMilliseconds / calls:F3} ms/call");
         Console.WriteLine($"[PROF] checksum {last:E3}");
+
+        if (Environment.GetEnvironmentVariable("PROF_ORT_PROFILE") == "1")
+        {
+            Console.WriteLine($"[PROF] ort profile: {session.EndProfiling()}");
+        }
 
         return 0;
     }

@@ -369,6 +369,211 @@ deliberately skipped — `PB-ORT1` measured the first at 61% within-version spre
 and found the second unable to resolve anything (BDN raises `MinIterationTime`; one iteration is 1.07 ms
 against a 100 ms target).
 
+### `XC-91`: the NCHWc probe wins where the shape says it should and loses everywhere else (2026-08-19)
+
+`NchwcConvProbeBenchmark` implements the direct convolution over 16-float channel blocks and races it
+against the shipped im2col path on two real VGG-16 layers, both **3.70 GFLOP**. Blocked input and filter are
+prepared in setup, so **no reorder cost is charged and the cache is warm** — every advantage is given to the
+candidate. Correctness is asserted against `ConvLayer` before either number is read; both kernels agree to a
+relative 1.5e-6, which is fp32 reassociation.
+
+#### The kernel shape mattered more than the layout did
+
+| kernel | loads per FMA | single core | GFLOP/s | % of 359 |
+|---|---:|---:|---:|---:|
+| im2col + GEMM (shipped) | - | **12.44 ms** | 296 | **83%** |
+| NCHWc, 1 block x 8 positions | 1.125 | 22.4 | 165 | 46% |
+| NCHWc, 4 blocks x 4 positions | **0.5** | **14.55** | 252 | 70% |
+
+The first shape loads one weight vector and issues eight broadcasts per `(input channel, kernel position)`,
+which saturates the load ports. Inverting the ratio — four output-channel blocks driven by one broadcast —
+was worth **1.54x** on the candidate and the arithmetic predicted it. Sixteen accumulators is the budget the
+im2col micro-kernel already holds in registers on this JIT, so it was chosen as a shape known to fit.
+
+#### At 16 threads, on two shapes, the verdict splits
+
+| layer | N/K | im2col | NCHWc parallel | result |
+|---|---:|---:|---:|---|
+| **conv1_2** — K=576, N=50176 | **87** | 1.529-1.550 ms | **1.148-1.168 ms** | **NCHWc 1.34x faster** |
+| **conv3_2** — K=2304, N=3136 | **1.36** | 1.170-1.193 ms | 1.343-1.363 ms | im2col 1.15x faster |
+
+Four repetitions per shape, spread under 1.5%, and the direction reproduced in a second sitting. `conv3_2`
+was re-measured after the shape became a parameter, as the control on whether parameterising cost anything;
+it reproduced.
+
+> **The mechanism is clean and it is the ratio `N/K`.** NCHWc's saving is the im2col matrix it never builds,
+> and that matrix costs `K x N`. At `N/K = 87` it is 115 MB and avoiding it wins; at `N/K = 1.36` there is
+> little to avoid, and the managed kernel's lower arithmetic density loses. **A single-shape probe would have
+> produced a confident verdict that did not cover the case** — the first run measured only `conv3_2`,
+> concluded NCHWc loses, and was wrong about the layers where it matters.
+
+#### What a hybrid would be worth, and why it is still not recommended
+
+VGG-16's high-`N/K` convolutions are conv1_1, conv1_2, conv2_1 and conv2_2 — **43.80 ms of the 124.21 ms
+single-core convolution budget, 35%**. At the measured 1.34x that is ~1.6 ms of the 27.30 ms model at 16
+cores, taking VGG-16 to ~25.7 ms and the ratio to ONNX Runtime from 1.66x to **~1.56x**.
+
+**That is roughly 6%, and it needs nearly the whole port**: the blocked kernel, blocked **pooling** (a MaxPool
+sits between conv1_2 and conv2_1, so an unblocked pool would force a reorder round trip mid-stack), the
+reorder itself, and layout propagation through the importer. ONNX Runtime gets 1.51x from the same layout
+because their assembly wins on the compute-dense layers too; ours does not, so the hybrid only ever covers
+the early stack. **Recommendation: do not build it.** The probe cost one benchmark file and settled it.
+
+#### Two instrument failures worth keeping
+
+**The first run reported 60.02 ms for an arm that measures 12.48 ms warm** — a warmup artefact that would
+have made the candidate look 2.29x faster than the baseline. It was caught by reconciling against a
+standalone run of the same layer, which is why the benchmark now times both arms inside its own setup as
+well: three independent instruments agreeing is what makes the reading usable.
+
+**`Scripts/machine.py` flagged Windows Defender (`MsMpEng`) during two of these runs**, at 1.05 and 6.50
+core-seconds, while the total foreign share was only 2.18-2.32%. The named-scanner probe fired where the
+share probe would have passed the window — which is the reason there are two probes.
+
+### Sizing the NCHWc port: the layout is worth 1.51x, the rest of their advantage is 1.53x (2026-08-19)
+
+**The split was measured, not argued, and it cost one afternoon rather than a port.** ONNX Runtime ships both
+structures. At `ORT_ENABLE_ALL` its NCHWc graph transform runs and `Conv` goes through `MlasNchwcConv` over
+a blocked channel layout. At `ORT_ENABLE_EXTENDED` the transform does not run and `Conv` falls back to
+`MlasConv` - **im2col plus SGEMM, the same structure Overfit uses**. Same assembly, same threads, same box,
+same process. The difference between their two arms is the layout's worth with everything else held still.
+
+| path | convolution |
+|---|---:|
+| ONNX Runtime, NCHWc | **7.65 ms** |
+| ONNX Runtime, im2col + GEMM | **11.57 ms** |
+| Overfit, im2col + GEMM | **17.74 ms** |
+
+- **Layout: 1.51x** (their im2col to their NCHWc)
+- **Everything else: 1.53x** (our im2col to their im2col — hand-written AVX-512 against managed C#)
+- **Product 2.32x, against the 2.29x measured directly.** The decomposition closes.
+
+**Capability checked before the result was read**: the NCHWc arm carries `ReorderInput`/`ReorderOutput`
+nodes and the fallback arm carries none. An arm that had silently stayed on NCHWc would have reported the
+layout as worthless, which is the answer that stops the work.
+
+Whole-model wall moved 16.52 to 20.49 ms (+24.1%) between the two arms; dense, pooling and flatten were
+unchanged, so the lever was isolated to convolution. Their fallback op is `FusedConv`, i.e. bias and
+activation fused into the convolution even on the im2col path — the same change `XC-86` made here today.
+
+#### What the ceiling would be worth
+
+At the full 1.51x, convolution goes 17.74 to 11.75 ms and VGG-16 goes **27.30 to 21.31 ms**, taking the
+ratio to ONNX Runtime from 1.66x to **1.29x**. That is the ceiling and it assumes a managed NCHWc kernel
+captures as much of the layout benefit as their assembly does.
+
+#### What the port contains, counted from their source
+
+| piece | MLAS | needed for a VGG-class model |
+|---|---|---|
+| orchestration | `snchwc.cpp`, **2040 lines** | most of it |
+| activation reorder in/out | `reorder.cpp` | yes |
+| **filter** reorder `OIHW -> OIHWBiBo` | `reorder.cpp`, load-time | yes |
+| general blocked kernel | `MlasConvNchwcFloatKernel` | **yes** |
+| first-layer kernel (unblocked input) | `MlasConvNchwFloatKernel` | **yes** — VGG's 3-channel input |
+| depthwise kernel | `MlasConvDepthwiseFloatKernel` | no |
+| pointwise 1x1 kernel | `MlasConvPointwiseFloatKernel` | no for VGG, yes for ResNet |
+| pooling over the blocked layout | `SpoolKernelAvx512F.asm` | **yes** — otherwise reorders per layer |
+| assembly | `SconvKernelAvx512F.asm` 25 KB + `SconvKernelCommon.inc` 29 KB | to be re-derived in `Vector512` |
+
+Block size is **16 floats** for AVX-512 (`platform.cpp`). VGG-16 is entirely 3x3 stride 1, so it needs
+**two** of their four kernels, not four.
+
+#### The dominant risk, and this repository has the evidence for it
+
+A direct convolution over blocked channels holds an output tile live across the whole kernel window, so it
+wants **more** simultaneously-live vector registers than the im2col micro-kernel does. **The largest single
+win on this branch — 3.46x — came from stopping the existing micro-kernel spilling its 16 accumulators**,
+and it spilled because the method also carried nine parameters, a `stackalloc` and eight store calls. The
+NCHWc kernel is a harder register-allocation problem than the one the JIT has already failed once.
+
+**So the 1.51x is a ceiling whose realisation in managed code is genuinely uncertain**, and the uncertainty
+is concentrated in the one mechanism that has been most expensive here.
+
+#### Recommendation: a bounded probe, not the port
+
+Prototype **only the NCHWc micro-kernel**, for one VGG layer shape, as a benchmark arm against the current
+im2col path on the same layer — pre-blocked data prepared in setup, no reorders, no graph changes, no
+importer work. If it does not beat the im2col path in isolation, the port is dead and the probe cost a
+fraction of it. This is the same shape as the cost ladder that settled the register question, and the same
+discipline that killed the N-block and the shared expansion before they reached the product.
+
+### ONNX Runtime's own per-node budget: the whole remaining gap is convolution (2026-08-19)
+
+ONNX Runtime has a per-node profiler (`SessionOptions.EnableProfiling`), wired into `Scripts/ProfHarness`
+behind `PROF_ORT_PROFILE=1`. It is the only source that can say whether their advantage is spread across the
+model or concentrated. Three runs at 16 cores, agreeing within 1%: totals 16.62 / 16.54 / 16.45 ms.
+
+| operator | Overfit | ONNX Runtime | ratio |
+|---|---:|---:|---:|
+| **Conv (13 nodes)** | **17.74 ms** | **7.76 ms** | **2.29x** |
+| Dense (3 nodes) | 8.58 | 8.18 | **1.05x** |
+| MaxPool (5) | 0.93 | 0.43 | 2.16x |
+| AveragePool | 0.05 | 0.03 | - |
+| Relu (15) | **0.00** (fused) | **0.00** (fused) | - |
+| ReorderOutput | - | 0.03 | - |
+| **TOTAL** | **27.30** | **16.45** | **1.66x** |
+
+**`fc1`: ours 6.97 ms, theirs 6.815 ms — 1.02x.** Two independent engines hit the same wall on the same
+411 MB of fp32 weights, which corroborates the `XC-87` negative from outside our own code. **The dense stack
+as a whole is at parity.**
+
+> **Of the 10.85 ms difference, 9.98 ms is convolution — 92%.** Everything else in VGG-16 is level or too
+> small to matter. This retires the whole-model ratio as a planning number: there is one problem left, not
+> five.
+
+**And their convolution is structurally different, confirmed in their source rather than inferred.**
+`snchwc.cpp` implements `MlasNchwcConv` over an **NCHWc blocked channel layout** with a direct convolution
+kernel — `MlasConvNchwcFloatKernel`, backed by `SconvKernelAvx512F.asm`. **They never build an im2col matrix
+at all.** The `ReorderOutput` node in their profile is the NCHWc-to-NCHW conversion at the end, and it costs
+0.03 ms. Their kernel flags include `MLAS_CONV_KERNEL_FLAG_BIAS_ADDITION` and
+`MLAS_CONV_KERNEL_FLAG_RELU_ACTIVATION`, so bias and activation are fused into the convolution — the same
+change made here today, arrived at independently.
+
+**Their per-node spread is also much flatter than ours**: their heaviest convolution is 0.875 ms and their
+lightest 0.33 ms, where ours run 2.47 ms down to 0.83 ms.
+
+**Measurement conditions, stated because the guard objected.** All three runs were flagged by
+`Scripts/machine.py` at 5.99-6.44% foreign CPU against a then-5% ceiling. The load was the desktop's constant
+background — Parsec, the compositor, Task Manager and the agent — not an event, and the three readings agree
+within 1%. The ceiling was **re-derived from five samples rather than moved to let these three pass**; see
+the module docstring.
+
+### fc1 is already at its memory ceiling, and the 2.4 ms estimate came from the wrong ceiling (2026-08-19)
+
+VGG-16's `fc1` is `25088 -> 4096` at batch 1: **411 MB of fp32 weights read per inference**, 6.97 ms in the
+model and **25.5% of the whole 27.30 ms budget** - larger than any convolution. It also scales worst of
+anything in the model. `LinearGemvAccumulatorBenchmark` runs it at its real shape.
+
+**The premise, stated before the run**: `AccumulateRowsAvx512` loads four accumulator vectors and stores four
+back **for every input row**, so four weight loads carry eight extra memory operations. They hit L1 and are
+individually cheap, but they occupy load and store ports. **What would refute it**: a stream arm with the
+same workers over the same 411 MB and no accumulator at all.
+
+| arm | ms | GB/s | vs current |
+|---|---:|---:|---:|
+| **current kernel** | **5.587** | **73.6** | - |
+| stream ceiling (read only, no accumulator, no FMA) | 6.106 | **67.3** | **+9.3%** |
+| accumulator held across 2 input rows | 5.703 | 72.1 | +2.1% |
+| across 4 rows | 6.029 | 68.2 | +7.9% |
+| across 8 rows | 6.376 | 64.5 | +14.1% |
+
+**Refuted, and by the arm that was written to refute it.** The shipped kernel is **faster than a loop that
+reads the same bytes and does no arithmetic at all**. The accumulator traffic is hidden behind the memory
+wait, and every blocked variant is worse - narrower inner loop, more register pressure, no benefit to trade
+it against.
+
+> **The 2.4 ms estimate was wrong, and the mistake has a name.** It divided 411 MB by **90.8 GB/s measured
+> with a different loop**. The ceiling for *this* access pattern is 67-74 GB/s and the kernel sits at 73.6.
+> That is this repository's own rule broken again: **check the number is in the mechanism's unit.**
+
+**What is left on this layer is not tuning.** 411 MB at fp32 is the traffic, and the only lever that changes
+it is reading fewer bytes - quantised weights. That changes numerics and is a product decision, not a kernel
+one. Nothing in the current shape is available.
+
+**Isolated it runs 5.587 ms against 6.97 ms in the model**, a 25% difference not accounted for; the in-model
+figure follows the whole convolution stack, so cache state differs. Not investigated.
+
 ### The vectorised im2col gather: -23.8% on a single core, and 2.00x against ONNX Runtime becomes 1.41x (2026-08-19)
 
 At `stride == 1` and a fixed `(ky, kx)`, consecutive output positions read consecutive input addresses. The
