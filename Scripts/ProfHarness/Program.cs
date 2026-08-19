@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Linq;
 using DevOnBike.Overfit.Inference;
 using DevOnBike.Overfit.Onnx;
+using DevOnBike.Overfit.Runtime;
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
 
@@ -68,6 +69,15 @@ internal static class Prof
             return RunOnnxRuntime(path, input, seconds);
         }
 
+        // PROF_ENGINE=pool measures OverfitParallel itself on a perfectly balanced, cache-resident,
+        // register-only workload. Convolution scales 7.08x across 16 cores where ONNX Runtime's scales
+        // 12.12x; this separates "the pool cannot fan out" from "the convolution's work decomposition is
+        // wrong", and those call for opposite work.
+        if (Environment.GetEnvironmentVariable("PROF_ENGINE") == "pool")
+        {
+            return RunPoolScaling(seconds);
+        }
+
         using var model = OnnxGraphImporter.Load(path, InputSize, OutputSize);
         model.Eval();
         using var engine = InferenceEngine.FromBackend(new OnnxGraphInferenceBackend(model));
@@ -79,6 +89,7 @@ internal static class Prof
         Console.WriteLine($"[PROF] ProcessorCount={Environment.ProcessorCount}");
         OnnxGraphModel.ProfileNodes = Environment.GetEnvironmentVariable("PROF_NODES") == "1";
         model.ResetNodeProfile();
+        OverfitParallel.ResetOccupancy();
         Console.WriteLine("[PROF] warmup done, steady state starts now");
         Console.Out.Flush();
 
@@ -91,6 +102,8 @@ internal static class Prof
                           + $"{sw.Elapsed.TotalMilliseconds / calls:F3} ms/call");
         Console.WriteLine($"[PROF] checksum {output[0]:E3}");
         if (OnnxGraphModel.ProfileNodes) { Console.WriteLine(model.PerNodeProfileReport()); }
+
+        Console.WriteLine($"[PROF] parallel: {OverfitParallel.OccupancyReport()}");
         return 0;
     }
 
@@ -184,5 +197,82 @@ internal static class Prof
         }
 
         return 0;
+    }
+
+    /// <summary>
+    /// OverfitParallel on work that is perfectly balanced, register-resident and touches no memory: each
+    /// item runs an independent FMA chain. Anything short of the machine's 14.30x here is the pool, not the
+    /// workload.
+    /// </summary>
+    private static unsafe int RunPoolScaling(double seconds)
+    {
+        const int Items = 4096;
+
+        Console.WriteLine($"[PROF] ProcessorCount={Environment.ProcessorCount}");
+
+        var sink = new double[Items];
+
+        fixed (double* pSink = sink)
+        {
+            var context = new PoolContext(pSink);
+
+            for (var i = 0; i < 20; i++)
+            {
+                OverfitParallel.For(0, Items, 1, &PoolWorker, &context);
+            }
+
+            Console.WriteLine("[PROF] warmup done, steady state starts now");
+            Console.Out.Flush();
+
+            var clock = Stopwatch.StartNew();
+            var calls = 0;
+
+            while (clock.Elapsed.TotalSeconds < seconds)
+            {
+                OverfitParallel.For(0, Items, 1, &PoolWorker, &context);
+                calls++;
+            }
+
+            clock.Stop();
+
+            Console.WriteLine($"[PROF] {calls} calls in {clock.Elapsed.TotalSeconds:F2} s = "
+                              + $"{clock.Elapsed.TotalMilliseconds / calls:F3} ms/call");
+            Console.WriteLine($"[PROF] checksum {sink[0]:E3}");
+        }
+
+        return 0;
+    }
+
+    private static unsafe void PoolWorker(int start, int end, void* contextPtr)
+    {
+        ref readonly var context = ref System.Runtime.CompilerServices.Unsafe.AsRef<PoolContext>(contextPtr);
+
+        for (var item = start; item < end; item++)
+        {
+            var a = 1.0000001;
+            var b = 1.0000002;
+            var c = 1.0000003;
+            var d = 1.0000004;
+
+            for (var i = 0; i < 4000; i++)
+            {
+                a = (a * 1.0000001) + 0.5;
+                b = (b * 1.0000002) + 0.5;
+                c = (c * 1.0000003) + 0.5;
+                d = (d * 1.0000004) + 0.5;
+            }
+
+            context.Sink[item] = a + b + c + d;
+        }
+    }
+
+    private readonly unsafe struct PoolContext
+    {
+        public readonly double* Sink;
+
+        public PoolContext(double* sink)
+        {
+            Sink = sink;
+        }
     }
 }

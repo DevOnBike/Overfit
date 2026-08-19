@@ -103,6 +103,36 @@ namespace DevOnBike.Overfit.Runtime
         /// </summary>
         public const string ConvVectorGather = "OVERFIT_CONV_VECTOR_GATHER";
 
+        /// <summary>
+        /// Set to 1 to record what each parallel fan-out cost: occupancy, straggler ratio and join overhead.
+        ///
+        /// <para>It exists because a hardware profiler cannot see this. Counters key on cycles not in halt,
+        /// and a parked worker produces no samples — so the one quantity that separates "the split is
+        /// uneven" from "the hand-off is slow" is invisible to uProf by construction.</para>
+        /// </summary>
+        public const string ParallelOccupancy = "OVERFIT_PARALLEL_OCCUPANCY";
+
+        /// <summary>
+        /// Chunks per worker in a parallel fan-out. 1 is the historical behaviour and the default; higher
+        /// values give the dynamic claim counter something to rebalance across uneven work.
+        ///
+        /// <para>Capped at 8 by the dispatcher, which sizes its chunk table from that bound.</para>
+        /// </summary>
+        public const string ParallelChunkFactor = "OVERFIT_PARALLEL_CHUNK_FACTOR";
+
+        /// <summary>
+        /// Set to 1 to lay parallel chunks out region-major, so a worker's successive chunks continue its own
+        /// region instead of starting another one. Only has an effect above one chunk per worker.
+        /// </summary>
+        public const string ParallelRegionMajor = "OVERFIT_PARALLEL_REGION_MAJOR";
+
+        /// <summary>
+        /// Set to 0 to hand parallel chunks out from one global counter instead of giving each worker a home
+        /// region to drain before it steals from another.
+        /// </summary>
+        public const string ParallelSteal = "OVERFIT_PARALLEL_STEAL";
+
+
         /// <summary>Set to 0 to split a large batch-1 dense layer by output column, as before the row split.</summary>
         public const string LinearRowSplit = "OVERFIT_LINEAR_ROW_SPLIT";
 

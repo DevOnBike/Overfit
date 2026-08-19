@@ -369,6 +369,306 @@ deliberately skipped — `PB-ORT1` measured the first at 61% within-version spre
 and found the second unable to resolve anything (BDN raises `MinIterationTime`; one iteration is 1.07 ms
 against a 100 ms target).
 
+### Region-major chunks: -2.9% on the CNN, -2.1% on VGG-16, and the first version of this measurement was wrong (2026-08-19)
+
+`XC-95` wanted a worker pinned to a contiguous region. The cheap approximation keeps the claim protocol and
+changes only the index-to-range mapping: chunk `i` becomes region `i % regions`, sub-chunk `i / regions`, so
+the worker that took index `k` takes `k + regions` next — the continuation of its own region rather than the
+start of somebody else's. Behind `OVERFIT_PARALLEL_REGION_MAJOR`, on by default, with four chunks per worker
+(`OVERFIT_PARALLEL_CHUNK_FACTOR`, also measured).
+
+| model | current default | region-major x4 | change | pool use |
+|---|---:|---:|---:|---|
+| CNN, 60.9 MB | 18.89 ms | **18.34 ms** | **-2.9%** | 64.8% -> **69.4%** |
+| VGG-16 | 27.31 ms | **26.74 ms** | **-2.1%** | 76.9% -> **79.5%** |
+
+Three ABAB passes per model, **all six negative** (-2.0, -2.6, -4.2 and -2.1, -1.8, -2.2). Suite 2748/0 in
+every arm of both switches. Headline on the shipping default: **VGG-16 27.12 ms against ONNX Runtime's 19.03
+(1.42x)** and the **60.9 MB CNN 18.63 against 9.74 (1.91x)**, parity unchanged in all four runs.
+
+**The layout and the split only work together.** With slice-major, four chunks per worker is **3.4% slower**;
+with region-major it is 2.9% faster. Either alone loses, which is why the two defaults were flipped together.
+
+#### The first version of this measurement said the opposite, and the cause was my own harness
+
+It reported region-major as neutral at two and four chunks and **worse at eight**, and that was recorded as a
+negative. It was an artefact.
+
+**`shutil.copy2` preserves the modification time.** A mutation harness copied the source, edited it, built and
+tested — then restored the copy, which put the file's timestamp *back* to before the build. MSBuild compares
+those timestamps, decides the output is current, and **does not rebuild**. Every run after that restore
+executed the **mutated** library against correct source.
+
+Measured while diagnosing it: the restore moved the timestamp **backwards by 113.5 seconds**, and the next
+full suite reported **100 failures** — with source byte-identical to a green commit. It took a file-by-file
+substitution of `HEAD` versions to establish that the source was never the problem. The failing assertions
+read `Expected: 0.698840261, Actual: 0`, which is exactly what "each chunk is one element short" produces.
+
+**Two things came out of that.** `Scripts/mutate.py` now owns the pattern and re-stamps the file on restore,
+with the incident in its docstring; and this measurement was redone as a **runtime switch rather than a code
+swap**, with the live layout echoed into `OccupancyReport` and asserted by the harness before any reading is
+used. Both arms in one binary cannot be built stale.
+
+> **The general lesson is not about `copy2`.** A build that silently does not happen produces a measurement
+> of the wrong code that looks exactly like a measurement of the right code — the same shape as the stale
+> `ProfHarness` binary that voided a sweep earlier the same day. **Echo the thing being switched, and refuse
+> the reading when the echo disagrees.**
+
+### The finer-split cost IS locality, and it is the first confirmed mechanism in this thread (2026-08-19)
+
+The premise was stated before the run, and the arithmetic did **not** support it: the packed kernel matrix is
+read once per panel whatever the split, and a worker's input working set fits L2 in both arms (917 KB at one
+chunk per worker, 229 KB at eight). The measurement was run against that reasoning rather than to confirm it.
+
+AMD uProf `data_access`, 30 s per arm, our module only, **per thousand instructions**:
+
+| where the data came from | factor 1 | factor 8 | change |
+|---|---:|---:|---:|
+| **this core's L2** (nearest) | 6.853 | 6.461 | **-5.7%** |
+| same-CCX L3 | 1.724 | 2.418 | **+40.3%** |
+| **another CCD's cache** | 0.244 | 0.396 | **+62.1%** |
+| **DRAM** (farthest) | 0.283 | 0.481 | **+70.0%** |
+| L1 data-cache accesses | 403.8 | 411.6 | +1.9% |
+| retired instructions | 553601 | 561751 | +1.5% |
+| **CPI** | **0.3928** | **0.4351** | **+10.8%** |
+| L2 DTLB misses | 0.132 | 0.190 | +43.6% |
+
+> **Supply moves outward through the hierarchy monotonically with distance**, and the near level is the only
+> one that falls. Instruction count and L1 access count are flat, so this is the same work executing more
+> slowly: **CPI rises 10.8%**, which is the +6-7% of worker time `XC-94` measured and could not attribute.
+
+**Two limits on this reading, both material.** Wall times under the profiler are **inverted** — 26.27 ms at
+factor 1 against 23.64 at factor 8, the opposite of the un-profiled 18.9 against 19.7 — because the ~35%
+profiling overhead is not uniform across the arms. **Only the per-instruction ratios from this run are
+usable; its timings are not.** `Scripts/machine.py` also flagged `TiWorker` (Windows Update) at 1.05 of 1313
+core-seconds; the ratios are robust to a load that small, but it was there.
+
+#### What it means for the 35% idle pool
+
+`XC-92` measured a straggler ratio of 1.28x at one chunk per worker: work is unevenly spread and a fifth of
+the pool waits at the barrier. **Rebalancing it costs cache locality**, and the two are in direct tension —
+contiguous chunks give locality and imbalance, fine chunks give balance and lose locality. That is why every
+finer split measured worse, and it is a property of the work rather than of any one implementation.
+
+**The resolution is the one work-stealing schedulers use, and our claim counter is the wrong shape for it.**
+`_nextChunk` hands out chunks in global order, so an early-finishing worker takes the chunk adjacent to
+someone else's region rather than a continuation of its own. A locality-preserving variant gives each worker
+a contiguous region, has it claim sub-chunks **inside its own region first**, and steals from another region
+only when its own is exhausted. That keeps the contiguity the cache wants and still drains the tail.
+
+**This is a design, not a measurement.** It has not been built or measured, and the two attempts before it
+both lost.
+
+### The per-chunk buffer was not the cost, and the code that assumed it was is reverted (2026-08-19)
+
+`XC-93` left one attribution unverified: the convolution worker rents a panel buffer of up to 590 KB per
+invocation, so a finer split pays it again per chunk. **The arithmetic never supported it** — an
+`ArrayPool` rent measures ~9 ns here, and the observed cost was **~16 us per extra chunk**, three orders of
+magnitude apart. `XC-94` built the per-thread replacement as the test.
+
+| panel buffer | factor 1 -> 8: worker time | wall clock |
+|---|---:|---:|
+| rented per work item | +7.4% | +4.4% |
+| **held per thread** | **+6.1%** | **+3.8%** |
+
+**The buffer accounts for 1.3 points of a 7.4-point cost.** At one chunk per worker — where the product
+actually runs — the two arms are **18.91 against 18.81 ms**, inside the noise. So the change delivers
+nothing at the default and does not explain the finer-split cost either.
+
+**It also broke a real contract.** `ResNetBlock_DAG_InferenceAllocatesZeroBytes` failed in the full suite
+while passing in isolation: a thread-held array grows when a larger layer arrives, and in a mixed workload
+that growth lands inside a measured window. The zero-allocation guarantee is a product property, not a
+detail, and the test was right.
+
+**Reverted.** The measurement stays here; the code does not, because keeping an arm that buys nothing and
+can break a contract when switched on is a liability rather than an option.
+
+**Still not identified: what the remaining ~6% per-chunk cost is.** It is inside the worker (worker time
+rises, dispatch wall falls), it is not the buffer, and the worker's other per-invocation work — the pin, one
+`stackalloc` of 128 bytes, reading the context — is far too small. The next candidate is locality rather
+than overhead: with eight times more chunks, a worker's chunk spans fewer consecutive panels and consecutive
+chunks land on different cores, so the packed kernel matrix is re-read from L3 instead of staying in one
+core's L2. **That is a hypothesis and it has not been measured.**
+
+### Finer chunking makes workers busier and the model slower (2026-08-19)
+
+`OverfitParallel.For` gained an opt-in `chunksPerWorker`, and the convolution fan-out asks for it. Both arms
+green at 1, 2, 4 and 8 (suite 2738/0 each).
+
+| CNN, 16 cores | wall | mean chunks | pool use |
+|---|---:|---:|---:|
+| 1 chunk per worker | **18.95 / 18.82 ms** | 14.4 | 64.9 / 64.5% |
+| 2 | 19.31 ms (+1.9%) | 22.6 | 65.3% |
+| 4 | 19.41 ms (+2.4%) | 35.8 | **68.5%** |
+| 8 | 19.73 ms (+4.1%) | 56.8 | **70.9%** |
+
+VGG-16 shows the same shape more weakly: pool use 76.4% to 80.8%, wall 27.33 to 27.49 ms.
+
+> **Workers get busier and the model gets slower**, monotonically in both. The extra busy time is not
+> productive: `GemmFusedPanelWorker512` rents a `PooledBuffer` of up to 590 KB **per invocation**, so a 4x
+> finer split pays that rent four times and the occupancy metric counts it as work. **This was written into
+> `XC-93` as the risk before the measurement ran**, which is the only reason it was recognised rather than
+> re-derived.
+
+**So the straggler is real and rebalancing is not the fix.** 35% of the pool's time is idle at one chunk per
+worker; finer chunks convert that idle time into overhead at slightly worse than parity. The per-chunk cost
+has to fall before a finer split can pay, which means **per-worker scratch instead of per-chunk** — a
+`[ThreadStatic]` buffer, which needs no worker id and so avoids the coupling described below.
+
+#### The switch had to become per-call-site, and memory corruption is why
+
+Applying the factor to every fan-out turned **100 tests red**. The first cause was a
+`SemaphoreFullException`: the start semaphore's maximum count was the worker count, and a wider release
+exceeds it. Fixing that left **two** failures, and they were the important ones.
+
+**`TensorMath.LayerNorm`'s backward sizes its partial buffers `WorkerCount x C`, dispatches over `numRows`,
+and picks its slot with `chunkIdx = chunkStart / perChunk`.** More chunks than workers makes that index run
+past the buffer — and it is a pinned write, so the result is a corrupted heap, not a wrong number. One arm
+of the sweep took the test host down mid-run, and **that arm first reported GREEN with 1575 of 2738 tests**,
+because the absence of a `[FAIL]` line read as a pass. The count check that turns a short run back into a
+failure is now in the harness.
+
+**The dispatcher cannot detect this.** It holds a function pointer; nothing in the signature says whether a
+body treats its chunk as a worker slot. So the caller declares it, and the default stays where every
+existing body was written against.
+
+#### Two of the three occupancy metrics only hold at one chunk per worker
+
+Measured at four chunks per worker, `occupancy` read **26.6%** and `overhead` **44.7%** for a dispatch whose
+`pool use` had **improved** from 64.6% to 68.3%. `occupancy` divides by the chunk count; `overhead`
+subtracts the single longest chunk, which stops being the critical path once chunks are small. **`pool use`
+is the one to read**, and the report now says so.
+
+#### An instrument failure that cost a whole sweep
+
+The first sweep showed `mean chunks 14.4` at every factor — the switch appeared dead. It was not: **only
+`Main.csproj` had been rebuilt, and `ProfHarness` keeps its own copy of the library in its output
+directory.** Rebuilding the library is not enough when the consumer copies it. The factor is now echoed into
+the report and the harness refuses a reading whose echoed factor does not match what was asked.
+
+### Worker occupancy: 65% of the pool's time at 16 cores, and it explains almost the whole scaling gap (2026-08-19)
+
+**Written because a hardware profiler cannot answer this.** AMD uProf's counters key on
+`CYCLES_NOT_IN_HALT`, and **a worker parked waiting for work produces no samples at all**. uProf did settle
+what it could — our code's CPI is **0.4413 at one core and 0.4205 at sixteen**, identical, so nothing about
+the executed instructions degrades with thread count, and memory is not the limiter. It could not see the
+part that was missing.
+
+`OverfitParallel.MeasureOccupancy` (`OVERFIT_PARALLEL_OCCUPANCY=1`) times every chunk against its dispatch.
+It is off by default and checked before any timestamp; **measured cost with it on: 18.97 / 18.78 ms against
+18.87 / 18.87 off**, i.e. inside the noise.
+
+| cores | ms/call | **pool use** | occupancy | straggler | overhead |
+|---:|---:|---:|---:|---:|---:|
+| 2 | 66.83 | 96.8% | 96.8% | 1.03x | 0.4% |
+| 4 | 36.70 | 93.9% | 93.9% | 1.06x | 0.6% |
+| 8 | 22.35 | 86.7% | 88.1% | 1.11x | 1.7% |
+| **16** | **18.88** | **65.0%** | 71.5% | **1.28x** | **7.9%** |
+
+**At 16 cores only 65% of the pool's time is executing.** The three metrics are deliberately separate
+because they have opposite fixes, and a single "efficiency" number would merge them:
+
+| cause | share | mechanism |
+|---|---|---|
+| **straggler 1.28x** | ~21% | `chunkCount = min(workers, totalWork)` — **exactly one chunk per worker**, so the claim counter has nothing left to hand out and everyone waits for the slowest |
+| **overhead 7.9%** | ~8% | 69 us per dispatch over 9010 dispatches, against 5.51 us measured for the dispatch alone: the rest is waking 15 workers through one semaphore |
+| **pool underfill 6.5%** | ~6% | mean chunks 14.4 of 16 — small-N layers produce 7 chunks and leave nine workers idle |
+
+> **`pool use` had to be added after the first reading, and the reason is worth keeping.** `occupancy`
+> divides by the chunks a dispatch created, so a layer that produces 7 chunks on a 16-worker pool scores as
+> a full house. It reads 71.5% where the honest figure is 65.0%. **A metric that cannot see idle workers is
+> the wrong metric for a question about idle workers.**
+
+**At 100% pool use, 18.88 ms becomes 12.27 ms — scaling 10.84x against ONNX Runtime's 12.12x.** Worker
+occupancy therefore accounts for almost the entire scaling gap; only 1.12x is left unexplained.
+
+**The indicated fix is to create more chunks than workers.** The claim counter (`_nextChunk`) already exists
+and workers already claim dynamically — with one chunk each there is simply nothing to balance. This is a
+change to the central dispatch primitive, which decode and attention also use, so it belongs behind a switch
+with both arms measured rather than in a convolution-shaped patch.
+
+### The convolution gap is 1.71x scaling and 1.31x per-core work, and the pool is not at fault (2026-08-19)
+
+**This correction matters more than the numbers, because it reverses a conclusion recorded the same
+morning.** That conclusion — "scaling is not the problem, our scaling matches theirs" — came from
+**whole-model** figures. VGG-16's whole model is 32% dense layers that neither engine can scale, because
+they are memory-bound; averaging them in hides what convolution is doing. ONNX Runtime's per-node profiler
+at 1 and 16 cores separates it.
+
+| | Overfit | ONNX Runtime | ratio |
+|---|---:|---:|---:|
+| convolution, 1 core | 125.34 ms | 95.68 ms | **1.31x** |
+| convolution, 16 cores | 17.70 ms | 7.89 ms | **2.24x** |
+| **convolution scaling** | **7.08x** | **12.12x** | |
+
+`1.31 x 1.71 = 2.24` — the decomposition closes. **Scaling is the larger of the two factors**, and it is the
+one that was written off this morning.
+
+> **It also retires the caveat that protected the old conclusion.** The 14.30x figure is a pure-FMA ratio
+> with no memory traffic, so "convolution touches memory, therefore 14.30x does not apply to it" was a
+> reasonable objection. **ONNX Runtime reaches 12.12x — 85% of it — on the same box and the same layers.**
+> The ceiling is real for convolution.
+
+#### Per layer, one sitting, both arms
+
+| layer | K | 1 core | 16 cores | scaling |
+|---|---:|---:|---:|---:|
+| conv1_1 | 27 | 2.32 ms | 1.06 ms | **2.19x** |
+| conv1_2 | 576 | 18.29 | 2.50 | 7.32x |
+| conv2_1 | 576 | 7.87 | 1.21 | 6.50x |
+| conv2_2 | 1152 | 15.61 | 1.77 | **8.82x** (best) |
+| conv3_x | 2304 | 13.87 | 1.65 | 8.41x |
+| conv4_x | 4608 | 13.70 | 1.74 | 7.87x |
+| conv5_x | 4608 | 4.32 | 0.84 | **5.14x** |
+| MaxPool | - | 2.47 | 0.37 | 6.68x down to 2.56x |
+| fc1 | - | 8.90 | 7.06 | 1.26x (memory-bound, expected) |
+
+**No layer exceeds 8.82x**, so this is systematic rather than a few bad shapes. The first layer (2.19x) and
+the three 14x14 layers (~5.0x) are worse still, but fixing only those would leave most of the loss.
+
+#### The pool is exonerated, by measurement
+
+`OverfitParallel` on perfectly balanced, register-resident, memory-free work:
+
+| cores | ms | scaling |
+|---:|---:|---:|
+| 1 | 18.02 | 1.00x |
+| 4 | 4.54 | 3.97x |
+| 8 | 2.30 | 7.84x |
+| **16** | **1.22** | **14.82x** |
+
+**14.82x, above the 14.30x reference** — that workload is scalar rather than 512-bit, so it costs less
+all-core clock. The fan-out mechanism is not the problem; the convolution's **work decomposition** is.
+
+**Not identified: what caps convolution at ~7-8.8x.** Item count is not it — conv1_2 has 1568 balanced work
+items for 16 workers and still reaches only 7.32x. One observation to start from: the same conv3_2 layer
+scales **10.5x measured in isolation** (`NchwcConvProbeBenchmark`) against **8.41x inside the model**, which
+points at state carried between layers rather than at the kernel. **This is where AMD uProf finally earns
+its place** — per-core stalls and cache-miss attribution at 1 core against 16.
+
+#### What it is worth
+
+At ONNX Runtime's 12.12x, our convolution would be `125.34 / 12.12 = 10.34 ms` instead of 17.70 — **7.36 ms**.
+
+| model | now | with their scaling | ratio to ONNX Runtime |
+|---|---:|---:|---:|
+| VGG-16 | 27.42 ms | **~20.1 ms** | 1.66x -> **~1.22x** |
+| CNN, 60.9 MB | 18.73 ms | **~11.4 ms** | 1.92x -> **~1.19x** |
+
+#### And the two models are the same convolution stack
+
+The first per-layer profile of the 60.9 MB CNN shows it is **VGG-16's convolutional stack** — identical
+layer shapes and K values — with a global average pool and a 1000-way classifier instead of the dense stack.
+
+| | convolution | pooling | dense | total |
+|---|---:|---:|---:|---:|
+| CNN, 60.9 MB | **17.70 ms (94.5%)** | 0.98 | 0.05 | 18.73 |
+| VGG-16 | 17.70 | 0.92 | 8.69 | 27.42 |
+
+That is why the CNN's ratio (1.92x) is **worse** than VGG-16's (1.66x) despite being the smaller model: VGG's
+dense stack is at parity with ONNX Runtime and dilutes the convolution gap. **The CNN is the cleaner
+instrument for convolution work**, and the two models do not need separate treatment.
+
 ### `XC-91`: the NCHWc probe wins where the shape says it should and loses everywhere else (2026-08-19)
 
 `NchwcConvProbeBenchmark` implements the direct convolution over 16-float channel blocks and races it

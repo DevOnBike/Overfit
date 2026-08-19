@@ -481,8 +481,8 @@ convolution patch gather into the GEMM's own pack, and repacking the convolution
 | `Linear(784→10)` — 7,840 params | **231 ns** | 1,880 ns | Overfit **8.1×** |
 | MLP `784→256→128→10` — ~235k params | **6.71 µs** | 8.73 µs | Overfit **1.3×** |
 | MNIST CNN (imported ONNX) | **5.36 µs** | 6.62 µs | Overfit **1.24×** |
-| a 60.9 MB CNN | 18.6 ms | **9.7 ms** | ONNX Runtime **1.92×** |
-| VGG-16 — 30.9 GFLOP/inference | 28.9 ms | **19.0 ms** | ONNX Runtime **1.51×** |
+| a 60.9 MB CNN | 18.6 ms | **9.7 ms** | ONNX Runtime **1.91×** |
+| VGG-16 — 30.9 GFLOP/inference | 27.1 ms | **19.0 ms** | ONNX Runtime **1.42×** |
 
 **What the two ends actually measure.** On a 7,840-parameter `Linear` the arithmetic takes a few hundred
 nanoseconds, so the result is dominated by ONNX Runtime's ~1.6 µs of per-call dispatch — that 8.2× is a real

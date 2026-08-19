@@ -279,6 +279,94 @@ namespace DevOnBike.Overfit.Runtime
         // sides.
         private static PaddedCounter _nextChunk;
 
+        /// <summary>
+        /// Set <c>OVERFIT_PARALLEL_STEAL=0</c> to hand every chunk out from one global counter again.
+        ///
+        /// <para><b>What the global counter costs.</b> It gives a worker that finishes early the chunk the
+        /// counter has reached, which is the start of somebody else's region. Measured 2026-08-19 with uProf
+        /// at eight chunks per worker: supply from this core's L2 fell 5.7% while same-CCX L3 rose 40.3%,
+        /// another CCD's cache 62.1% and DRAM 70.0%, instruction count flat, CPI +10.8%. Region-major
+        /// indexing recovered part of that (-2.9% on the 60.9 MB CNN) by making chunk <c>k + regions</c> the
+        /// continuation of <c>k</c>'s region — but only while workers happen to finish in step, which is an
+        /// approximation with nothing holding it up.</para>
+        ///
+        /// <para><b>What this does instead.</b> Each worker takes a <b>home region</b> on wake and claims
+        /// sub-chunks from its own region's counter until that region is empty, only then walking the other
+        /// regions. Locality is held by construction rather than by luck, and the tail is still drained.</para>
+        ///
+        /// <para><b>Why it is safe even if no worker wakes at all.</b> The calling thread drains too, and a
+        /// drainer does not stop until every region reports empty. So correctness never depends on the
+        /// semaphore waking anybody — the worst case is a slow dispatch, not a lost chunk or a hang. That
+        /// property is what makes this change to the token model acceptable: the pool's token accounting has
+        /// leaked before, and the note on <see cref="DecodeWorkerLoop"/> records what that cost.</para>
+        /// </summary>
+        internal static readonly bool StealChunks =
+            Environment.GetEnvironmentVariable(OverfitEnvironment.ParallelSteal) != "0";
+
+        /// <summary>Per-region claim counters, padded because every core hammers its own.</summary>
+        private static PaddedCounter[] _regionClaims = [];
+
+        /// <summary>Hands out home regions, one per waking drainer.</summary>
+        private static PaddedCounter _nextRegion;
+
+        /// <summary>Regions in the dispatch being drained. Written under <see cref="_gate"/>.</summary>
+        private static int _regionCount;
+
+        /// <summary>Sub-chunks per region. Written under <see cref="_gate"/>.</summary>
+        private static int _regionSubChunks;
+
+        /// <summary>Whether the dispatch in flight uses the stealing protocol. Written under <see cref="_gate"/>.</summary>
+        private static bool _stealingDispatch;
+
+        /// <summary>
+        /// Runs chunks until every region is empty: the home region first, then the others in order.
+        ///
+        /// <para>Claims are interlocked, so a sub-chunk is executed exactly once however many drainers walk
+        /// the same region. A drainer that finds everything claimed simply returns; the worker that claimed
+        /// them is what signals for them.</para>
+        /// </summary>
+        private static void DrainRegions()
+        {
+            var regions = _regionCount;
+            var subChunks = _regionSubChunks;
+
+            if (regions <= 0 || subChunks <= 0)
+            {
+                return;
+            }
+
+            var home = (Interlocked.Increment(ref _nextRegion.Value) - 1) % regions;
+
+            if (home < 0)
+            {
+                home = 0;
+            }
+
+            // BOUND: regions * subChunks, both fixed for the dispatch and both written under _gate before any
+            // worker is woken. Every iteration either executes a chunk or moves to the next region.
+            for (var offset = 0; offset < regions; offset++)
+            {
+                var region = home + offset;
+
+                if (region >= regions)
+                {
+                    region -= regions;
+                }
+
+                for (var taken = 0; taken < subChunks; taken++)
+                {
+                    var sub = Interlocked.Increment(ref _regionClaims[region].Value) - 1;
+
+                    if (sub >= subChunks)
+                    {
+                        break;
+                    }
+
+                    ExecuteChunk((region * subChunks) + sub);
+                }
+            }
+        }
+
         // ── Decode spin-pool (default ON; OVERFIT_DECODE_POOL=0 opts out) ──────────
         // A SEPARATE pool of _decodePoolSize threads (== DecodeMaxWorkers) that SPIN on
         // _decodeGen instead of parking, so the ~180 tiny FFN/attention dispatches per
@@ -435,9 +523,16 @@ namespace DevOnBike.Overfit.Runtime
                 ThreadPool.SetMinThreads(MaxDegreeOfParallelism, minCompletionPortThreads);
             }
 
-            _startSemaphore = new SemaphoreSlim(0, _workerCount);
+            // Max count is the widest release a fan-out can make, which is chunkCount - 1 and chunkCount
+            // is now up to _workerCount * MaxChunkFactor. It was _workerCount until 2026-08-19, and raising
+            // ChunkFactor above 1 without this threw SemaphoreFullException on the first dispatch — 100 tests
+            // red, which is the whole reason the factor ships defaulting to 1.
+            _startSemaphore = new SemaphoreSlim(0, (int)Math.Min((long)_workerCount * MaxChunkFactor, int.MaxValue));
             _completion = new CountdownEvent(0);
-            _chunks = new ChunkState[_workerCount];
+            // Sized for the widest split the factor allows, not for the worker count: a fan-out may now
+            // create several chunks per worker so the claim counter has something to rebalance.
+            _chunks = new ChunkState[(long)_workerCount * MaxChunkFactor];
+            _regionClaims = new PaddedCounter[_workerCount];
 
             for (var i = 0; i < _workerCount; i++)
             {
@@ -508,6 +603,214 @@ namespace DevOnBike.Overfit.Runtime
         }
 
         /// <summary>
+        /// Records, per fan-out, how much of the reserved worker time was actually spent executing.
+        ///
+        /// <para><b>Why a hardware profiler cannot answer this.</b> AMD uProf's counters key on
+        /// <c>CYCLES_NOT_IN_HALT</c>, and <b>a worker parked waiting for work produces no samples at all</b>.
+        /// Measured 2026-08-19 on the 60.9 MB CNN, our code's CPI is 0.4413 at one core and 0.4205 at
+        /// sixteen — <b>identical</b>, so nothing about the executed instructions degrades with thread count.
+        /// Yet convolution scales 7.08x where ONNX Runtime's scales 12.12x. The missing time is either halted
+        /// cores or synchronisation, and the profiler can see only the second.</para>
+        ///
+        /// <para>Off by default and checked before any timestamp is taken, so the dispatch path is unchanged
+        /// when it is off.</para>
+        /// </summary>
+        public static bool MeasureOccupancy =
+            Environment.GetEnvironmentVariable(OverfitEnvironment.ParallelOccupancy) == "1";
+
+        private static long _occupancyWallTicks;
+        private static long _occupancyBusyTicks;
+        private static long _occupancyWorstTicks;
+        private static long _occupancyReservedTicks;
+        private static long _occupancyDispatches;
+        private static long _occupancyChunks;
+
+        /// <summary>
+        /// Adds one fan-out to the totals. Called with <see cref="_gate"/> held, which is also what makes the
+        /// plain increments safe — every dispatch on the main pool is serialised by it.
+        /// </summary>
+        private static void RecordOccupancy(int chunkCount, long wallTicks)
+        {
+            long busy = 0;
+            long worst = 0;
+
+            for (var i = 0; i < chunkCount; i++)
+            {
+                var ticks = _chunks[i].BusyTicks;
+                busy += ticks;
+
+                if (ticks > worst)
+                {
+                    worst = ticks;
+                }
+            }
+
+            _occupancyWallTicks += wallTicks;
+            _occupancyBusyTicks += busy;
+            _occupancyWorstTicks += worst;
+            _occupancyReservedTicks += (long)chunkCount * wallTicks;
+            _occupancyChunks += chunkCount;
+            _occupancyDispatches++;
+        }
+
+        /// <summary>
+        /// The chunks-per-worker a call site gets when it asks for the tuned value rather than naming one.
+        /// <b>1 reproduces the behaviour every version before 2026-08-19 had</b>, and it is the default for
+        /// every call site that does not opt in.
+        ///
+        /// <para><b>What it is for.</b> The pool already claims dynamically — <see cref="WorkerLoop"/> takes
+        /// one chunk, runs it and comes back for another — but with exactly one chunk per worker there is
+        /// nothing left to come back for. Measured 2026-08-19 on the 60.9 MB CNN at 16 cores: <b>pool use
+        /// 65.0%</b>, with a <b>straggler ratio of 1.28x</b>, so a fifth of the reserved worker time is spent
+        /// at the barrier waiting for whichever chunk drew the slow core. Finer chunks give the claim counter
+        /// something to rebalance.</para>
+        ///
+        /// <para><b>Two ways this can cost rather than pay</b>, both to be checked in the measurement rather
+        /// than argued away: every claim is an interlocked increment on one counter, so more chunks means
+        /// more traffic on <see cref="_nextChunk"/>; and a caller that rents a scratch buffer per invocation
+        /// — the convolution worker rents up to 590 KB — pays that rent once per chunk, not once per
+        /// dispatch.</para>
+        ///
+        /// <para><b>It is opt-in PER CALL SITE, and that is not caution — a global switch corrupts memory.</b>
+        /// Applying it to every fan-out turned 100 tests red, and the two that survived the first fix showed
+        /// why: a body may derive a slot index from its chunk ordinal and size its scratch by the worker
+        /// count. <c>TensorMath.LayerNorm</c>'s backward does exactly that — partial buffers of
+        /// <c>WorkerCount x C</c>, dispatched over <c>numRows</c>, with
+        /// <c>chunkIdx = chunkStart / perChunk</c>. More chunks than workers makes that index run past the
+        /// buffer, and it is a pinned write, so the failure is a corrupted heap rather than a wrong number.
+        /// One arm of the sweep took the test host down mid-run.</para>
+        ///
+        /// <para><b>The dispatcher cannot detect this.</b> It sees a function pointer; nothing in the
+        /// signature says whether the body treats its chunk as a worker slot. So the caller declares it, and
+        /// the default stays at the value every existing body was written against.</para>
+        /// </summary>
+        public static readonly int ChunkFactor = ResolveChunkFactor();
+
+        /// <summary>Upper bound on <see cref="ChunkFactor"/>, which sizes <see cref="_chunks"/>.</summary>
+        private const int MaxChunkFactor = 8;
+
+        /// <summary>
+        /// Set <c>OVERFIT_PARALLEL_REGION_MAJOR=1</c> to lay the chunks out as a <c>regions x subChunks</c>
+        /// grid — chunk <c>i</c> is region <c>i % regions</c>, sub-chunk <c>i / regions</c> — instead of as
+        /// the <c>i</c>th consecutive slice.
+        ///
+        /// <para><b>What it is trying to buy.</b> Claims are handed out in index order, so with plain
+        /// slicing a worker's successive chunks land wherever the counter has reached, which is a different
+        /// part of the range each time. Measured 2026-08-19 with uProf at eight chunks per worker: supply
+        /// from this core's L2 fell 5.7% while same-CCX L3 rose 40.3%, another CCD's cache 62.1% and DRAM
+        /// 70.0%, with the instruction count flat — the same work, further from the core, CPI +10.8%. The
+        /// grid is meant to make chunk <c>k + regions</c> the continuation of the region that produced chunk
+        /// <c>k</c>.</para>
+        ///
+        /// <para><b>It is a switch rather than a code swap, and that is not tidiness.</b> The first attempt
+        /// swapped the loop, rebuilt, and measured — and the measurement was worthless, because a mutation
+        /// harness had restored a source file with <c>shutil.copy2</c>'s preserved timestamp and MSBuild
+        /// skipped the rebuild. Both layouts in one binary, with the live one echoed in
+        /// <see cref="OccupancyReport"/>, is what makes the arm checkable instead of assumed.</para>
+        ///
+        /// <para><b>MEASURED AND ON BY DEFAULT.</b> Three ABAB passes per model, every one negative:
+        /// the 60.9 MB CNN goes 18.89 to <b>18.34 ms (-2.9%)</b> with pool use 64.8% to 69.4%, and VGG-16
+        /// goes 27.31 to <b>26.74 ms (-2.1%)</b> with pool use 76.9% to 79.5%. Set to 0 to measure the other
+        /// arm.</para>
+        ///
+        /// <para>At one chunk per worker the grid is the identity mapping, so this changes nothing for a call
+        /// site that has not opted in to a finer split.</para>
+        /// </summary>
+        internal static readonly bool RegionMajorChunks =
+            Environment.GetEnvironmentVariable(OverfitEnvironment.ParallelRegionMajor) != "0";
+
+        private static int ResolveChunkFactor()
+        {
+            var raw = Environment.GetEnvironmentVariable(OverfitEnvironment.ParallelChunkFactor);
+
+            if (!int.TryParse(raw, out var factor) || factor < 1)
+            {
+                // Four, measured. With the region-major layout the convolution fan-out runs 2.1% to 2.9%
+                // faster at four chunks per worker than at one; with the slice-major layout the same split
+                // was 3.4% SLOWER, which is why this default and RegionMajorChunks belong together.
+                return 4;
+            }
+
+            return Math.Min(factor, MaxChunkFactor);
+        }
+
+        /// <summary>Clears the occupancy totals.</summary>
+        public static void ResetOccupancy()
+        {
+            lock (_gate)
+            {
+                _occupancyWallTicks = 0;
+                _occupancyBusyTicks = 0;
+                _occupancyWorstTicks = 0;
+                _occupancyReservedTicks = 0;
+                _occupancyChunks = 0;
+                _occupancyDispatches = 0;
+            }
+        }
+
+#pragma warning disable OVERFIT047 // Wall-clock milliseconds and ratios derived from them, for a person to
+        // read. The numbers differ between two runs on the same machine, so nothing downstream can match on
+        // this text, and the method is called once at the end of a measurement rather than per dispatch.
+        /// <summary>
+        /// What the fan-outs cost, in the three quantities that separate the three possible causes.
+        ///
+        /// <list type="bullet">
+        ///   <item><description><b>occupancy</b> — executing time over reserved worker time. Low means
+        ///   workers were reserved and not working, whatever the reason.</description></item>
+        ///   <item><description><b>straggler</b> — the slowest chunk over the average chunk, per dispatch. A
+        ///   value of 2.0 means half the reserved worker time was spent waiting at the barrier for one
+        ///   chunk, and the fix is the work split.</description></item>
+        ///   <item><description><b>overhead</b> — dispatch wall time that is not the slowest chunk. This is
+        ///   wake-up, hand-off and join, and it is the part no rebalancing can remove.</description></item>
+        ///   <item><description><b>pool use</b> — executing time over the whole pool's time. <b>This is the
+        ///   only one of the four that stays meaningful when a fan-out creates more chunks than there are
+        ///   workers</b>: occupancy divides by the chunk count and collapses, and overhead subtracts the
+        ///   single longest chunk, which stops being the critical path once chunks are small. Measured
+        ///   2026-08-19 at four chunks per worker, occupancy read 26.6% and overhead 44.7% for a dispatch
+        ///   whose pool use had IMPROVED from 64.6% to 68.3%. Read pool use; read the other three only at
+        ///   one chunk per worker. It differs from occupancy exactly when a dispatch creates fewer chunks than there
+        ///   are workers, and that difference is the work the split never offered to anybody.</description></item>
+        /// </list>
+        ///
+        /// <para>The three are independent: a balanced split with slow wake-up shows high straggler-free
+        /// overhead, while an imbalanced one shows the reverse. Reporting a single "efficiency" number would
+        /// merge two causes that call for opposite work.</para>
+        /// </summary>
+        public static string OccupancyReport()
+        {
+            lock (_gate)
+            {
+                if (_occupancyDispatches == 0)
+                {
+                    return MeasureOccupancy
+                        ? "(no fan-out recorded — every call took the inline fast path)"
+                        : $"(occupancy not measured — set {OverfitEnvironment.ParallelOccupancy}=1)";
+                }
+
+                var toMs = 1000.0 / Stopwatch.Frequency;
+                var occupancy = (double)_occupancyBusyTicks / _occupancyReservedTicks;
+
+                // Against the WHOLE pool rather than against the chunks a dispatch happened to create.
+                // Occupancy alone understates the loss: a layer that produces 7 chunks on a 16-worker pool
+                // reserves 7 and leaves 9 idle, and dividing by 7 scores that as a full house. Measured on
+                // the 60.9 MB CNN at 16 workers, mean chunks is 14.4 — so some dispatches do not fill the
+                // pool, and only this ratio shows it.
+                var poolUse = (double)_occupancyBusyTicks / (_workerCount * (double)_occupancyWallTicks);
+                var meanChunks = (double)_occupancyChunks / _occupancyDispatches;
+                var straggler = (double)_occupancyWorstTicks * meanChunks / _occupancyBusyTicks;
+                var overhead = (double)(_occupancyWallTicks - _occupancyWorstTicks) / _occupancyWallTicks;
+
+                return $"layout {(RegionMajorChunks ? "region-major" : "slice-major")}, "
+                    + $"factor {ChunkFactor}, workers {_workerCount}, "
+                    + $"dispatches {_occupancyDispatches}, mean chunks {meanChunks:F1}, "
+                    + $"wall {_occupancyWallTicks * toMs:F1} ms, busy {_occupancyBusyTicks * toMs:F1} ms | "
+                    + $"pool use {100 * poolUse:F1}%, occupancy {100 * occupancy:F1}%, "
+                    + $"straggler {straggler:F2}x, overhead {100 * overhead:F1}%";
+            }
+        }
+#pragma warning restore OVERFIT047
+
+        /// <summary>
         /// Executes <paramref name="body"/> over chunks of
         /// <c>[rangeStart, rangeEnd)</c> across the worker pool. Equivalent to
         /// the grained overload with <c>minItemsPerWorker = 1</c>.
@@ -545,8 +848,9 @@ namespace DevOnBike.Overfit.Runtime
             int rangeEnd,
             int minItemsPerWorker,
             delegate*<int, int, void*, void> body,
-            void* context)
-            => For(rangeStart, rangeEnd, minItemsPerWorker, _workerCount, body, context);
+            void* context,
+            int chunksPerWorker = 1)
+            => For(rangeStart, rangeEnd, minItemsPerWorker, _workerCount, body, context, chunksPerWorker);
 
         /// <summary>
         /// Grained <c>For(rangeStart, rangeEnd, minItemsPerWorker, body, context)</c> with an
@@ -556,13 +860,16 @@ namespace DevOnBike.Overfit.Runtime
         /// the optimum is a handful of workers (see <see cref="DecodeMaxWorkers"/>).
         /// Prefill / training keep the full pool by passing <see cref="WorkerCount"/>.
         /// </summary>
+        // chunksPerWorker: how many chunks this fan-out may create per worker. Leave at 1 unless the body
+        // is safe with more chunks than there are workers — see ChunkFactor for what "safe" excludes.
         public static void For(
             int rangeStart,
             int rangeEnd,
             int minItemsPerWorker,
             int maxWorkers,
             delegate*<int, int, void*, void> body,
-            void* context)
+            void* context,
+            int chunksPerWorker = 1)
         {
             if (body == null)
             {
@@ -603,8 +910,18 @@ namespace DevOnBike.Overfit.Runtime
             }
 
             var cap = maxWorkers < 1 ? 1 : Math.Min(maxWorkers, _workerCount);
-            var chunkCount = Math.Min(cap, totalWork);
+
+            // More chunks than workers only when this call site asked for them, bounded by the work itself
+            // and by the chunk table. Release(chunkCount - 1) still matches the number of worker chunks
+            // exactly, and a worker that finishes one waits again and takes the next — the protocol always
+            // supported that, it was only ever handed one chunk each.
+            var perWorker = chunksPerWorker < 1 ? 1 : Math.Min(chunksPerWorker, MaxChunkFactor);
+            var chunkCount = Math.Min(Math.Min(cap * perWorker, totalWork), _chunks.Length);
             var perChunk = (totalWork + chunkCount - 1) / chunkCount;
+
+            // Taken before the lock on purpose: a dispatch that waits for another one is really waiting, and
+            // hiding that would make a serialisation problem look like a fast dispatch.
+            var dispatchStarted = MeasureOccupancy ? Stopwatch.GetTimestamp() : 0L;
 
             lock (_gate)
             {
@@ -612,13 +929,121 @@ namespace DevOnBike.Overfit.Runtime
                 _chunkCount = chunkCount;
                 _completion.Reset(chunkCount);
 
+                // Plain slicing: chunk i is the (i)th consecutive slice.
+                //
+                // `XC-95` replaced this with a region-major grid — chunk i as region (i % regions),
+                // sub-chunk (i / regions) — on the theory that workers finish in roughly the order they
+                // started, so the one that took index k would take k + regions next and continue its own
+                // region. **Measured 2026-08-19 and reverted**: on the 60.9 MB CNN it was neutral at two and
+                // four chunks per worker and WORSE at eight (+6.5% against the slice-major +4.1%). The
+                // approximation is what failed — with sixteen workers claiming dynamically, one that runs 5%
+                // slow falls a whole position behind and starts taking somebody else's region, so nothing
+                // stays contiguous. Locality needs a worker PINNED to a region, which is a change to the
+                // claim protocol rather than to this loop.
+                if (StealChunks && perWorker > 1 && cap > 1)
+                {
+                    var stealRegions = Math.Min(cap, chunkCount);
+                    var stealSubs = Math.Max(1, chunkCount / stealRegions);
+
+                    chunkCount = stealRegions * stealSubs;
+                    _chunkCount = chunkCount;
+                    _completion.Reset(chunkCount);
+
+                    _regionCount = stealRegions;
+                    _regionSubChunks = stealSubs;
+                    _stealingDispatch = true;
+                    _nextRegion.Value = 0;
+
+                    for (var r = 0; r < stealRegions; r++)
+                    {
+                        _regionClaims[r].Value = 0;
+                    }
+
+                    // Chunk index (region * subChunks + sub), so one region's chunks are contiguous indices
+                    // AND contiguous work. The region-major layout above interleaves the indices instead,
+                    // which is what it needs when claims come from one counter.
+                    var stealRegionWork = (totalWork + stealRegions - 1) / stealRegions;
+                    var stealSubWork = (stealRegionWork + stealSubs - 1) / stealSubs;
+
+                    for (var r = 0; r < stealRegions; r++)
+                    {
+                        var regionStart = (long)rangeStart + ((long)r * stealRegionWork);
+                        var regionEnd = Math.Min(regionStart + stealRegionWork, rangeEnd);
+
+                        for (var s = 0; s < stealSubs; s++)
+                        {
+                            var start = Math.Min(regionStart + ((long)s * stealSubWork), regionEnd);
+                            var index = (r * stealSubs) + s;
+
+                            _chunks[index].Start = (int)start;
+                            _chunks[index].End = (int)Math.Min(start + stealSubWork, regionEnd);
+                            _chunks[index].Body = body;
+                            _chunks[index].Context = context;
+                            _chunks[index].Error = null;
+                        }
+                    }
+
+                    // One token per DRAINER, not per chunk: a woken worker drains its region and then the
+                    // others, so it needs one wake however many chunks it runs.
+                    var drainers = Math.Min(stealRegions, _workerCount) - 1;
+
+                    if (drainers > 0)
+                    {
+                        _startSemaphore.Release(drainers);
+                    }
+
+                    DrainRegions();
+                    _completion.Wait();
+
+                    if (MeasureOccupancy)
+                    {
+                        RecordOccupancy(chunkCount, Stopwatch.GetTimestamp() - dispatchStarted);
+                    }
+
+                    for (var i = 0; i < chunkCount; i++)
+                    {
+                        _chunks[i].Error?.Throw();
+                    }
+
+                    _stealingDispatch = false;
+
+                    return;
+                }
+
+                // The chunk count is rounded to an exact regions x subChunks grid for the region-major
+                // layout. Without that, a count that is not a multiple of the region count leaves some
+                // regions without their last sub-chunk and part of the range is never executed — silently,
+                // because every chunk still signals and the dispatch still completes. Caught by
+                // OverfitParallelChunkGridTests before it ever ran.
+                var regions = RegionMajorChunks ? Math.Min(cap, chunkCount) : chunkCount;
+                var subChunks = Math.Max(1, chunkCount / regions);
+
+                if (RegionMajorChunks)
+                {
+                    chunkCount = regions * subChunks;
+                    _chunkCount = chunkCount;
+                    _completion.Reset(chunkCount);
+                }
+
+                var regionWork = (totalWork + regions - 1) / regions;
+                var subWork = (regionWork + subChunks - 1) / subChunks;
+
                 for (var i = 0; i < chunkCount; i++)
                 {
-                    var chunkStart = rangeStart + i * perChunk;
-                    var chunkEnd = (int)Math.Min((long)chunkStart + perChunk, rangeEnd);
+                    var chunkStart = (long)rangeStart + ((long)i * perChunk);
+                    var chunkEnd = Math.Min(chunkStart + perChunk, rangeEnd);
 
-                    _chunks[i].Start = chunkStart;
-                    _chunks[i].End = chunkEnd;
+                    if (RegionMajorChunks)
+                    {
+                        var regionStart = (long)rangeStart + ((long)(i % regions) * regionWork);
+                        var regionEnd = Math.Min(regionStart + regionWork, rangeEnd);
+
+                        chunkStart = Math.Min(regionStart + ((long)(i / regions) * subWork), regionEnd);
+                        chunkEnd = Math.Min(chunkStart + subWork, regionEnd);
+                    }
+
+                    _chunks[i].Start = (int)chunkStart;
+                    _chunks[i].End = (int)chunkEnd;
                     _chunks[i].Body = body;
                     _chunks[i].Context = context;
                     _chunks[i].Error = null;
@@ -637,6 +1062,11 @@ namespace DevOnBike.Overfit.Runtime
                 ExecuteChunk(chunkCount - 1);
 
                 _completion.Wait();
+
+                if (MeasureOccupancy)
+                {
+                    RecordOccupancy(chunkCount, Stopwatch.GetTimestamp() - dispatchStarted);
+                }
 
                 // Propagate the first captured exception with its original
                 // stack trace. Additional captured exceptions are dropped —
@@ -908,6 +1338,11 @@ namespace DevOnBike.Overfit.Runtime
         /// </summary>
         private static void ExecuteChunk(int index)
         {
+            // Read once into a local: the flag is checked before the timestamp so the happy path is a
+            // predictable, never-taken branch rather than a clock read.
+            var measured = MeasureOccupancy;
+            var started = measured ? Stopwatch.GetTimestamp() : 0L;
+
             try
             {
                 _chunks[index].Body(
@@ -922,6 +1357,12 @@ namespace DevOnBike.Overfit.Runtime
             }
             finally
             {
+                if (measured)
+                {
+                    // Before Signal(), so the caller reading it after Wait() sees the write.
+                    _chunks[index].BusyTicks = Stopwatch.GetTimestamp() - started;
+                }
+
                 _completion.Signal();
             }
         }
@@ -938,6 +1379,13 @@ namespace DevOnBike.Overfit.Runtime
 #pragma warning restore OVERFIT023
             {
                 _startSemaphore.Wait();
+
+                if (_stealingDispatch)
+                {
+                    DrainRegions();
+
+                    continue;
+                }
 
                 // Claim a unique chunk index. Interlocked.Increment is a
                 // full fence — pairs with the semaphore release so the
@@ -992,8 +1440,12 @@ namespace DevOnBike.Overfit.Runtime
             public delegate*<int, int, void*, void> Body;        // 8
             public ExceptionDispatchInfo? Error;                 // 8
 
-            // 32 bytes used; pad to 64-byte cache line.
-            private readonly long _pad1;
+            // Written by the worker before it signals completion, so the release fence of Signal() is what
+            // publishes it to the caller. Only touched when MeasureOccupancy is on; it takes one of the
+            // padding slots rather than growing the struct, so the 64-byte line is preserved either way.
+            public long BusyTicks;                               // 8
+
+            // 40 bytes used; pad to 64-byte cache line.
             private readonly long _pad2;
             private readonly long _pad3;
             private readonly long _pad4;

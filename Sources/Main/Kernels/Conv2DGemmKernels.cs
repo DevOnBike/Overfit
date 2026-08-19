@@ -533,7 +533,12 @@ namespace DevOnBike.Overfit.Kernels
                     stride,
                     outW);
 
-                OverfitParallel.For(0, nPanels * mBlocks, 1, &GemmFusedPanelWorker512, &ctx);
+                // Opts in to a finer split. Its body claims nothing by chunk ordinal — every work item is
+                // derived from the item index and rents its own scratch — so more chunks than workers is
+                // safe here in a way it is not for a body that treats its chunk as a worker slot.
+                OverfitParallel.For(
+                    0, nPanels * mBlocks, 1, OverfitParallel.MaxDegreeOfParallelism,
+                    &GemmFusedPanelWorker512, &ctx, OverfitParallel.ChunkFactor);
             }
         }
 
@@ -975,6 +980,12 @@ namespace DevOnBike.Overfit.Kernels
             var group = ConvNBlock;
             var blockWidth = Nr512 * group;
 
+            // Rented per invocation. `XC-94` replaced this with a per-thread buffer and MEASURED the
+            // replacement to be worth nothing: at one chunk per worker the two arms are 18.91 against
+            // 18.81 ms, and at eight the per-thread arm still pays +6.1% worker time against the pooled
+            // arm's +7.4% — so the rent was 1.3 points of a 7.4-point cost and not the mechanism. It also
+            // broke `ResNetBlock_DAG_InferenceAllocatesZeroBytes`, because a thread-held array grows when a
+            // larger layer arrives and that growth lands inside a measured window.
             using var packBuf = new PooledBuffer<float>(checked(k * blockWidth), clearMemory: false);
             var packB = packBuf.Span;
 

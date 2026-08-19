@@ -72,7 +72,8 @@ LOUD_SECONDS = 1.0
 #: machine (16 workers measured at 31.22 ms against 31.55 for 32), so core-seconds are counted per core.
 PHYSICAL_CORES = 16
 
-#: Processes whose presence condemns a window regardless of how little CPU they show.
+#: Processes whose presence condemns a window regardless of how little CPU they show, because their cost is
+#: not proportional to their CPU time: a scan or an update also thrashes L3 and the disk.
 LOUD_PROCESSES = {
     "MsMpEng",               # Defender scan engine
     "MpCmdRun",              # Defender command-line scan
@@ -88,6 +89,60 @@ LOUD_PROCESSES = {
     "OneDrive",
     "backgroundTaskHost",
 }
+
+#: Ordinary desktop software that competes for cores without being a scanner.
+#:
+#: These are **named and reported** whenever they cost more than :data:`DESKTOP_SECONDS`, and they condemn a
+#: window only above :data:`DESKTOP_LOUD_SECONDS`. The two-tier treatment is deliberate and measured: on this
+#: desktop, Parsec, the compositor and Task Manager together account for most of a 6% background, so putting
+#: them in :data:`LOUD_PROCESSES` would condemn every window ever measured and the guard would be useless.
+#: Naming them costs nothing and tells a reader which of their own windows to close.
+#:
+#: **Task Manager is on this list because it is easy to leave open and it is not free** — measured at
+#: 0.77 to 5.89 core-seconds across the windows recorded on 2026-08-19, i.e. up to a quarter of the whole
+#: foreign background. It samples every process on a timer, which is the same work this module does.
+DESKTOP_PROCESSES = {
+    "Taskmgr",               # samples every process on a timer; measured up to 5.89 core-s in one window
+    "parsecd",               # remote desktop: encodes a video stream of whatever the run is drawing
+    "dwm",                   # the compositor, which wakes for that stream — REPORT ONLY, see below
+    "chrome",
+    "msedge",
+    "msedgewebview2",
+    "firefox",
+    "brave",
+    "opera",
+    "Discord",
+    "Slack",
+    "Teams",
+    "ms-teams",
+    "Spotify",
+    "steam",
+    "steamwebhelper",
+    "EpicGamesLauncher",
+    "obs64",
+    "Docker Desktop",
+    "com.docker.backend",
+    "vmmem",                 # WSL / Hyper-V guest memory process
+    "vmmemWSL",
+    "Code",                  # VS Code and its language servers
+    "devenv",                # Visual Studio
+    "rider64",
+    "jetbrains-toolbox",
+    "Everything",
+    "Dropbox",
+    "GoogleDriveFS",
+    "RadeonSoftware",
+    "NVIDIA Share",
+    "nvcontainer",
+    "explorer",
+}
+
+#: Core-seconds from a desktop application above which it is named in the report.
+DESKTOP_SECONDS = 0.5
+
+#: Core-seconds from a single desktop application that condemn a window on their own. Set well above the
+#: measured background of the always-present ones so it fires on something that started, not on the desktop.
+DESKTOP_LOUD_SECONDS = 8.0
 
 #: Names belonging to the measurement itself, excluded from the foreign total.
 MEASUREMENT_PROCESSES = {
@@ -134,13 +189,14 @@ def snapshot():
 class Verdict:
     """What the machine was doing while the window was open."""
 
-    def __init__(self, quiet, share, foreign_seconds, available, offenders, named):
+    def __init__(self, quiet, share, foreign_seconds, available, offenders, named, desktop):
         self.quiet = quiet
         self.share = share
         self.foreign_seconds = foreign_seconds
         self.available = available
         self.offenders = offenders
         self.named = named
+        self.desktop = desktop
 
     def report(self, label):
         state = "QUIET" if self.quiet else "*** CONTAMINATED ***"
@@ -150,6 +206,11 @@ class Verdict:
 
         for name, seconds in self.named:
             print(f"  [machine]   scanner/updater active: {name} used {seconds:.2f} core-s")
+
+        for name, seconds in self.desktop:
+            closable = name not in ("dwm", "explorer")
+            verdict = " — CLOSE IT" if seconds >= DESKTOP_LOUD_SECONDS and closable else ""
+            print(f"  [machine]   desktop app: {name} used {seconds:.2f} core-s{verdict}")
 
         if not self.quiet:
             for seconds, name, pid in self.offenders[:5]:
@@ -180,7 +241,25 @@ def judge(before, after, wall_seconds, cores=PHYSICAL_CORES):
     named = [(name, seconds) for seconds, name, _ in foreign
              if name in LOUD_PROCESSES and seconds >= LOUD_SECONDS]
 
-    return Verdict(share <= QUIET_CEILING and not named, share, total, available, foreign, named)
+    # Merged by name: a browser is a dozen processes and a dozen rows would bury the one that matters.
+    totals = {}
+
+    for seconds, name, _ in foreign:
+        if name in DESKTOP_PROCESSES:
+            totals[name] = totals.get(name, 0.0) + seconds
+
+    desktop = sorted(((name, seconds) for name, seconds in totals.items() if seconds >= DESKTOP_SECONDS),
+                     key=lambda pair: -pair[1])
+
+    # The compositor and the shell cannot be closed by anyone, so condemning a window on them is advice
+    # nobody can act on. They are still named, because knowing they were busy explains a slow reading.
+    UNCLOSABLE = {"dwm", "explorer"}
+
+    shouting = [name for name, seconds in desktop
+                if seconds >= DESKTOP_LOUD_SECONDS and name not in UNCLOSABLE]
+    quiet = share <= QUIET_CEILING and not named and not shouting
+
+    return Verdict(quiet, share, total, available, foreign, named, desktop)
 
 
 class quiet_guard:
