@@ -300,8 +300,18 @@ namespace DevOnBike.Overfit.Runtime
         /// property is what makes this change to the token model acceptable: the pool's token accounting has
         /// leaked before, and the note on <see cref="DecodeWorkerLoop"/> records what that cost.</para>
         /// </summary>
-        internal static readonly bool StealChunks =
-            Environment.GetEnvironmentVariable(OverfitEnvironment.ParallelSteal) != "0";
+        // OFF, and it must stay off. `XC-97`: the branch below is the abandoned work-stealing protocol, and
+        // any `chunksPerWorker` above 1 enters it and executes OVERLAPPING chunks, then signals the countdown
+        // past zero — a background-thread throw that ends the process without printing a failure. Whole suite
+        // runs finished at 176, 188 and 222 of 2748 tests, each reporting "Passed!", and it took a
+        // purpose-built stress harness to see it: `Scripts/DispatchStress` reproduces it in under twenty
+        // dispatches at two chunks per worker and is clean at one.
+        //
+        // It shipped switched ON because it was committed with the rest of the day's work while known to be
+        // unfinished. The code stays for now — the two design defects it demonstrated are documented on it
+        // and are worth more written down than re-derived — but nothing may switch it on until they are
+        // fixed and `Scripts/DispatchStress` is clean at every factor.
+        internal static readonly bool StealChunks = Environment.GetEnvironmentVariable(OverfitEnvironment.ParallelSteal) == "1";
 
         /// <summary>Per-region claim counters, padded because every core hammers its own.</summary>
         private static PaddedCounter[] _regionClaims = [];
@@ -319,6 +329,23 @@ namespace DevOnBike.Overfit.Runtime
         private static bool _stealingDispatch;
 
         /// <summary>
+        /// Bumped once per stealing dispatch, so a drainer can tell whether the shape it captured still
+        /// describes the work it is claiming.
+        ///
+        /// <para><b>This is the defect the generation exists for.</b> A drainer reads <c>_regionCount</c> and
+        /// <c>_regionSubChunks</c> once on entry, but <c>_regionClaims</c> is shared and reset by the next
+        /// dispatch. A worker slow enough to straddle two dispatches then mixes the OLD shape with the NEW
+        /// counters: it computes <c>region * oldSubChunks + sub</c> where the dispatcher wrote
+        /// <c>region * newSubChunks + sub</c>, and executes a chunk nobody assigned it — a duplicate, and
+        /// with a large enough difference an index outside the descriptors entirely.
+        ///
+        /// <para>Reproduced by <c>Scripts/DispatchStress</c> in under four dispatches at two chunks per
+        /// worker. The decode pool solved the same problem the same way (<c>_decodeGen</c>) and its comments
+        /// say why a counted semaphore was not enough.</para>
+        /// </summary>
+        private static long _stealGeneration;
+
+        /// <summary>
         /// Runs chunks until every region is empty: the home region first, then the others in order.
         ///
         /// <para>Claims are interlocked, so a sub-chunk is executed exactly once however many drainers walk
@@ -327,10 +354,13 @@ namespace DevOnBike.Overfit.Runtime
         /// </summary>
         private static void DrainRegions()
         {
+            // Generation FIRST, shape second. Read the other way round, a drainer could capture the previous
+            // dispatch's shape and this dispatch's generation and believe they belong together.
+            var generation = Volatile.Read(ref _stealGeneration);
             var regions = _regionCount;
             var subChunks = _regionSubChunks;
 
-            if (regions <= 0 || subChunks <= 0)
+            if (regions <= 0 || subChunks <= 0 || Volatile.Read(ref _stealGeneration) != generation)
             {
                 return;
             }
@@ -342,8 +372,8 @@ namespace DevOnBike.Overfit.Runtime
                 home = 0;
             }
 
-            // BOUND: regions * subChunks, both fixed for the dispatch and both written under _gate before any
-            // worker is woken. Every iteration either executes a chunk or moves to the next region.
+            // BOUND: regions * subChunks, both fixed for this generation. Every iteration either executes a
+            // chunk, finds the region empty, or finds the generation moved and stops.
             for (var offset = 0; offset < regions; offset++)
             {
                 var region = home + offset;
@@ -355,6 +385,14 @@ namespace DevOnBike.Overfit.Runtime
 
                 for (var taken = 0; taken < subChunks; taken++)
                 {
+                    // Re-checked before every claim, not once per drainer: the next dispatch can begin at any
+                    // point in this loop, and a claim made after it began is a claim on somebody else's
+                    // counters with this drainer's stale shape.
+                    if (Volatile.Read(ref _stealGeneration) != generation)
+                    {
+                        return;
+                    }
+
                     var sub = Interlocked.Increment(ref _regionClaims[region].Value) - 1;
 
                     if (sub >= subChunks)
@@ -736,6 +774,17 @@ namespace DevOnBike.Overfit.Runtime
                 //
                 // The switch stays so the measurement is reproducible. See `XC-93`, `XC-95` and the entry in
                 // docs/measured-baselines.md for the numbers and for what was NOT established.
+                // ONE, because four does not pay in the configuration that ships.
+                //
+                // Four IS faster, and the measurement stands: three ABAB passes per model, all negative, the
+                // 60.9 MB CNN 18.72 to 18.20 ms (-2.8%) and VGG-16 27.63 to 26.70 ms (-3.4%). **But that was
+                // measured with the pool pinned to the 16 PHYSICAL cores.** At the shipping pool size —
+                // Environment.ProcessorCount, which is 32 logical — the same comparison is +0.0% on the CNN
+                // and -1.0% on VGG-16, i.e. nothing.
+                //
+                // So this waits for the pool size. SMT is already measured to be worth nothing here (16
+                // workers 31.22 ms against 32 workers 31.55 ms), and sizing the pool to physical cores would
+                // both take that ~1% and unlock this ~3%. The two belong in one change with one measurement.
                 return 1;
             }
 
@@ -966,6 +1015,13 @@ namespace DevOnBike.Overfit.Runtime
                     {
                         _regionClaims[r].Value = 0;
                     }
+
+                    // Bumped LAST, after the shape and the counters are published and before any worker is
+                    // woken. The first version bumped it FIRST, and the comment claiming that was safe was
+                    // exactly backwards: a drainer could read the new generation and the OLD shape, pass its
+                    // own consistency check, and then index with the old formula into the new counters. That
+                    // is the same defect the generation was added to close, moved one line earlier.
+                    Interlocked.Increment(ref _stealGeneration);
 
                     // Chunk index (region * subChunks + sub), so one region's chunks are contiguous indices
                     // AND contiguous work. The region-major layout above interleaves the indices instead,

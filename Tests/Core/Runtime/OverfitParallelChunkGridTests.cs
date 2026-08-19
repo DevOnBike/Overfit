@@ -62,17 +62,11 @@ namespace DevOnBike.Overfit.Tests.Core.Runtime
         [InlineData(100_000)]
         public unsafe void EveryIndexRunsExactlyOnce(int length)
         {
-            // ONE ONLY, and that is a finding rather than a limitation.
-            //
-            // At 2, 3, 4 and 8 this test reports overlapping work — one run recorded "0 index(es) never ran
-            // and 629 ran more than once" at length 4096 with three chunks per worker — and it takes the
-            // test host down often enough to end whole suite runs at 176, 188 or 222 of 2748 tests, each
-            // reporting "Passed!". **So `chunksPerWorker > 1` is broken in the dispatcher**, and this test is
-            // what found it. Nothing in the product passes a value above 1, so the exposure is nil.
-            //
-            // The higher values stay out until the defect is fixed: a suite that cannot finish is worse than
-            // a gap in coverage, and the gap is recorded in `XC-97` rather than left to be rediscovered.
-            foreach (var chunksPerWorker in new[] { 1 })
+            // The full range again. These values were restricted to 1 for part of 2026-08-19 because
+            // anything above it entered the abandoned work-stealing branch and took the test host down —
+            // whole suite runs ended at 176, 188 or 222 of 2748, each reporting "Passed!". The branch is off
+            // (`XC-97`), `Scripts/DispatchStress` is clean at every factor, and this test is what found it.
+            foreach (var chunksPerWorker in new[] { 1, 2, 3, 4, 8 })
             {
                 var counts = new int[length];
 

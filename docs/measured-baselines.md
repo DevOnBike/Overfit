@@ -369,6 +369,120 @@ deliberately skipped — `PB-ORT1` measured the first at 61% within-version spre
 and found the second unable to resolve anything (BDN raises `MinIterationTime`; one iteration is 1.07 ms
 against a 100 ms target).
 
+### `XC-96` second attempt: two more defects found, still not closed, and the design that would close it (2026-08-19)
+
+The work-stealing branch was re-opened with `Scripts/DispatchStress` as the instrument — a per-index ledger
+over thousands of dispatches a second, instead of a thirty-second suite that dies without printing a failure.
+It reproduced the defect **in under four dispatches**, which is the whole point of building it.
+
+**Defect three: the drainer captures the shape once, and the counters are reset under it.** A drainer reads
+`_regionCount` and `_regionSubChunks` on entry, but `_regionClaims` is shared and zeroed by the next
+dispatch. A worker slow enough to straddle two dispatches mixes the **old shape with the new counters** and
+computes `region * oldSubChunks + sub` where the dispatcher wrote `region * newSubChunks + sub` — a chunk
+nobody assigned it. Guarded with a generation counter, re-checked before every claim.
+
+**Defect four: the generation was published FIRST, which is backwards.** Bumping it before writing the shape
+lets a drainer read the new generation and the old shape, pass its own consistency check, and index with the
+stale formula — the same defect moved one line earlier. The generation must be published **last**, after the
+shape and the counters.
+
+**Both fixed, and it still fails.** The failure moved from dispatch 3 to 5 to 12, which is the signature of a
+race that needs a different design rather than another guard.
+
+> **The remaining window cannot be closed by checking.** A drainer passes the generation check and can then be
+> preempted for arbitrarily long before its `Interlocked.Increment`, by which time the counters have been
+> reset. Any check-then-act pair has this window.
+>
+> **The design that closes it is already in this file.** The decode pool packs the generation and the next
+> index into ONE 64-bit word and claims with compare-and-swap (`DecodeChunkClaim`), so a claim from a stale
+> generation fails atomically rather than being validated separately. Its own comments explain why a counted
+> semaphore was not enough for the same problem. **A per-region packed CAS claim is what the stealing
+> protocol needs**, and it is a proven shape here rather than a new invention.
+
+**Stopped and left off by default.** Shipping default verified after the work: `DispatchStress` clean at
+22,500 dispatches, suite 2748/0. Four design defects are now written down against this idea — mode-flag
+lifetime, caller greed, shape-versus-counter staleness, and generation publication order — which is worth
+more than a fourth failed patch.
+
+### `XC-98` refuted: the pool size buys nothing, and cutting it without pinning costs (2026-08-19)
+
+The task was filed on one reading — **16 workers 31.22 ms against 32 workers 31.55 ms** — concluding that
+SMT is worth nothing here and the pool should be sized to physical cores. **That reading had affinity
+applied**, and separating the two arms reverses it.
+
+| configuration | CNN, 60.9 MB | VGG-16 |
+|---|---:|---:|
+| 32 logical (shipping) | 18.63 ms | 27.56 ms |
+| **16 workers, NOT pinned** | 19.23 **(+3.2%)** | 28.08 **(+1.9%)** |
+| 16 workers, pinned one per core | 18.68 (+0.2%) | 27.37 (-0.7%) |
+| 16 not pinned + region-major x4 | 18.46 (-0.9%) | 26.93 (-2.3%) |
+| **16 pinned + region-major x4** | **18.23 (-2.2%)** | **26.67 (-3.2%)** |
+
+> **Cutting the pool to physical-core count without pinning is worse than leaving it alone** — the scheduler
+> puts two workers on one core and leaves others idle. **The size alone buys nothing** (+0.2% / -0.7%). What
+> pays is the **region-major layout**, and the smaller pool only helps it show.
+
+**So the premise was wrong and the task closes as a negative.** The measurement that produced it was not
+wrong — it was read as being about the worker count when it was about worker *placement*, and those need
+different code: the count is one line in `ResolveWorkerCount`, the placement is per-thread affinity, which is
+`SetThreadAffinityMask` on Windows and `sched_setaffinity` on Linux, in a library whose whole identity is
+portable pure C#.
+
+**What is still on the table, and it is small.** The best configuration reachable without any affinity code
+is **pool at physical-core count plus region-major x4**: **-0.9% on the CNN and -2.3% on VGG-16**. The CNN
+figure sits inside this box's run-to-run band, so it is one solid result and one that is not. It also needs
+portable physical-core detection, which `Environment.ProcessorCount` does not give and which cannot be
+assumed to be half the logical count — this repository already has a big.LITTLE note saying exactly that.
+
+**Recommendation: do not build it for 1-2%.** The remaining gap to ONNX Runtime is 1.43x on VGG-16 and 1.94x
+on the CNN, of which convolution is 92%, and inside that scaling is the larger factor. A percent of pool
+placement is not where that is.
+
+### `XC-97` closed, and the region-major gain turns out to need a pool sized to physical cores (2026-08-19)
+
+**The defect was mine and it was committed.** `OverfitParallel` shipped with `StealChunks` **on**, so any
+`chunksPerWorker` above 1 entered the abandoned work-stealing branch, executed **overlapping chunks**, and
+signalled the countdown past zero — a background-thread throw that ends the process without printing a
+failure. Whole suite runs finished at 176, 188 and 222 of 2748 tests, each reporting "Passed!".
+
+**It cost hours because the instrument could not see it.** Reverting `OverfitParallel.cs` from `HEAD` restored
+the *broken* file, because the branch was in `HEAD` — so every "revert and retest" reproduced the defect and
+pointed the blame back at the innocent parts of the same commit.
+
+**`Scripts/DispatchStress` is what found it, in seconds.** It hammers `For` with a per-index ledger and stops
+at the first dispatch that runs an index twice or not at all:
+
+| shape | before | after switching the branch off |
+|---|---|---|
+| length 2, 2 chunks per worker | fails at dispatch 16 | clean |
+| length 100, 3 chunks per worker | fails at dispatch 6 | clean |
+| length 4096, 2 chunks per worker | fails at dispatch 37 — 396 duplicated, 40 missing | clean |
+| **all 15 lengths x 5 factors** | - | **22,500 dispatches, 0.5 s, clean** |
+
+Suite 2748/0 twice, and the coverage test is back to its full 1/2/3/4/8 range.
+
+#### The re-measurement, and the condition nobody had checked
+
+With the dispatcher correct, region-major x4 was measured again — three ABAB passes per model, **all six
+negative**: the 60.9 MB CNN **18.72 to 18.20 ms (-2.8%)**, VGG-16 **27.63 to 26.70 ms (-3.4%)**, pool use
+65.0% to 69.5% and 76.3% to 79.4%. The original direction held and the magnitude grew.
+
+**Then the benchmark disagreed with the harness**, and the difference was the worker count:
+
+| pool | CNN | VGG-16 |
+|---|---:|---:|
+| **16 physical cores, pinned** | **-2.8%** | **-3.0%** |
+| **default, 32 logical** | **+0.0%** | -1.0% |
+
+> **The gain exists only when the pool is sized to physical cores.** The product uses
+> `Environment.ProcessorCount`, which is 32 here, so it gets none of it. Both switches therefore ship **off**:
+> a switch goes on when it pays in the configuration that ships, not in the one that measured best.
+
+**And that points somewhere better than the 3%.** SMT was already measured to be worth nothing on this
+machine — **16 workers 31.22 ms against 32 workers 31.55 ms** — so the pool is simply the wrong size. Sizing
+it to physical cores takes that ~1% directly *and* unlocks this ~3%. The two belong in one change with one
+measurement, which is `XC-98`.
+
 ### CORRECTION: `chunksPerWorker > 1` overlaps chunks, and that voids the region-major measurement (2026-08-19)
 
 **A conclusion recorded earlier today was wrong and is withdrawn.** Three cold test runs ended at 176, 188
