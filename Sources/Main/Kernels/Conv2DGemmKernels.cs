@@ -406,6 +406,43 @@ namespace DevOnBike.Overfit.Kernels
         internal static readonly bool UsePackedA =
             Environment.GetEnvironmentVariable(OverfitEnvironment.ConvPackA) != "0";
 
+        /// <summary>Cap on <see cref="ConvNBlock"/>, and the size the origin scratch is fixed at.</summary>
+        private const int MaxNBlock = 4;
+
+        /// <summary>
+        /// How many 32-column sub-panels one work item covers. 1 is the original; 4 makes the N-block 128
+        /// columns wide, which is <c>MLAS_SGEMM_STRIDEN</c>.
+        ///
+        /// <para><b>Read from MLAS.</b> `MlasSgemmOperation` takes <c>CountN = min(N - n, 128)</c>, packs a
+        /// panel that wide, and sweeps every row of M through it in one pass. This kernel did the same for
+        /// <b>32</b>.</para>
+        ///
+        /// <para><b>What it buys, corrected from a first reading that was wrong.</b> It does NOT reduce how
+        /// often A is read: with a 128-wide block the micro-kernel is still called four times per row
+        /// block, so A is read <c>N / 32</c> times either way. What changes is <b>where those reads come
+        /// from</b> - the four calls hit the same 147 KB of A back to back, so three of them find it in L1
+        /// rather than fetching it again for a separately scheduled panel. <b>A locality change, not a
+        /// traffic change</b>, and correspondingly smaller than a naive count of A reads suggests.</para>
+        ///
+        /// <para><b>An earlier grouping experiment measured this neutral</b> (groups of 1/2/4 at 72.7 / 73.0
+        /// / 73.3 ms) - but on the AVX2 path, against a micro-kernel that was spilling its accumulators, and
+        /// with A unpacked. <b>A null measured against a broken baseline is not a null</b>, which is the only
+        /// reason this is worth re-running now that the kernel reaches 93% of single-core peak.</para>
+        /// </summary>
+        internal static readonly int ConvNBlock = ResolveConvNBlock();
+
+        private static int ResolveConvNBlock()
+        {
+            var raw = Environment.GetEnvironmentVariable(OverfitEnvironment.ConvNBlock);
+
+            if (!int.TryParse(raw, out var parsed) || parsed < 1)
+            {
+                return 1;
+            }
+
+            return Math.Min(parsed, MaxNBlock);
+        }
+
         /// <summary>
         /// Set <c>OVERFIT_CONV_FUSED_IM2COL=0</c> to build the column matrix first, as before the fusion.
         /// </summary>
@@ -448,7 +485,7 @@ namespace DevOnBike.Overfit.Kernels
             int outW)
         {
             var nPanels = (n + Nr512 - 1) / Nr512;
-            var mBlocks = ResolveMBlocks(m, nPanels);
+            var mBlocks = ResolveFusedMBlocks(m, nPanels);
 
             // Padded to whole MR row blocks so the last block needs no special case; the padding rows
             // contribute zeros and are discarded at the store, exactly as the clamped rows were.
@@ -469,6 +506,15 @@ namespace DevOnBike.Overfit.Kernels
             }
 
             var packedSource = suppliedPack ? packedKernels : (ReadOnlySpan<float>)packedABuf.Span;
+
+            if (UsePackedA && ShouldExpandPanels(m, n, k, nPanels))
+            {
+                GemmExpandedIm2Col(
+                    packedSource, input, output, m, n, k, nPanels,
+                    inputH, inputW, kernelSize, padding, stride, outW);
+
+                return;
+            }
 
             fixed (float* pa = kernels, pin = input, pc = output, pPackedA = packedSource)
             {
@@ -491,6 +537,422 @@ namespace DevOnBike.Overfit.Kernels
             }
         }
 
+        /// <summary>
+        /// The convolution GEMM for a layer with too few panels to fill the workers: expand every panel once
+        /// into a shared buffer, then split M over it.
+        /// </summary>
+        private static unsafe void GemmExpandedIm2Col(
+            ReadOnlySpan<float> packedA,
+            ReadOnlySpan<float> input,
+            Span<float> output,
+            int m,
+            int n,
+            int k,
+            int nPanels,
+            int inputH,
+            int inputW,
+            int kernelSize,
+            int padding,
+            int stride,
+            int outW)
+        {
+            // Flat (row block, panel) pairs rather than a panel x M-block grid. The grid is what produced
+            // the defect this path exists to remove: seven panels and ceil(32/7) = 5 blocks is 35 items on
+            // 32 workers, so three workers run two items and the critical path is twice the ideal. With the
+            // panels already expanded, an item costs one micro-kernel call and 64 x 7 = 448 of them split
+            // into 32 ranges of 14 — balanced to one item.
+            var rowBlocks = (m + Mr - 1) / Mr;
+
+            using var expandedBuf = new PooledBuffer<float>(
+                checked(nPanels * k * Nr512), clearMemory: false);
+
+            fixed (float* pin = input, pc = output, pPackedA = packedA, pExpanded = expandedBuf.Span)
+            {
+                var ctx = new FusedGemmCtx(
+                    pPackedA, pin, pc, m, n, k, 1,
+                    inputH, inputW, kernelSize, padding, stride, outW, pExpanded, nPanels);
+
+                OverfitParallel.For(0, nPanels, 1, &ExpandPanelWorker, &ctx);
+                OverfitParallel.For(0, nPanels * rowBlocks, 1, &ExpandedGemmWorker, &ctx);
+            }
+        }
+
+        /// <summary>
+        /// Set <c>OVERFIT_CONV_VECTOR_GATHER=0</c> to gather im2col one element at a time behind a bounds
+        /// test, as every version before 2026-08-19 did.
+        ///
+        /// <para><b>Why this is the item that matters, and how that was established.</b> Both engines were
+        /// run through one loop at 1, 2, 4, 8 and 16 physical cores with ONNX Runtime's thread count set to
+        /// match. <b>Overfit scales 6.74x across 16 cores and ONNX Runtime scales 6.68x</b> - ours is the
+        /// better of the two - and the ratio between them is flat at <b>2.00x on a single core</b>. So the
+        /// gap is per-core work. A per-layer cost model, fitted on two layers and checked on seven held-out
+        /// ones (eight of nine inside 13%), splits that work in two: the GEMM term is <b>301 GFLOP/s, 84% of
+        /// this machine's single-core FMA ceiling</b>, and the gather term is <b>0.964 ns per element, about
+        /// 4.8 cycles</b>. Across VGG-16 the gather is <b>81.7 M elements, 78.8 ms of 204.4, or 39%</b>.</para>
+        ///
+        /// <para><b>And it does not have to be a gather.</b> At <c>stride == 1</c> and a fixed
+        /// <c>(ky, kx)</c>, consecutive output positions read <b>consecutive input addresses</b>. A run of
+        /// output positions sharing an output row is therefore a contiguous copy, not a scatter of indices,
+        /// so the interior is <c>Vector512</c> loads and stores and only the run's two ends need the bounds
+        /// test at all.</para>
+        ///
+        /// <para><b>The run structure depends on the panel, not on <c>kk</c></b>, which is what makes this
+        /// cheap: a 32-column panel of a 224-wide output spans one or two output rows, and that table is
+        /// built once and reused for every K row. Deriving it per element is what the old code did, and it
+        /// put an integer division on every one of 81.7 M gathers.</para>
+        /// </summary>
+        internal static readonly bool VectorGatherEnabled =
+            Environment.GetEnvironmentVariable(OverfitEnvironment.ConvVectorGather) != "0";
+
+        /// <summary>Copies a contiguous run of floats, widest registers first.</summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static unsafe void CopyRun(float* src, float* dst, int length)
+        {
+            var i = 0;
+
+            if (CpuFeatures.HasVector512)
+            {
+                for (; i + 16 <= length; i += 16)
+                {
+                    Vector512.Store(Vector512.Load(src + i), dst + i);
+                }
+            }
+
+            for (; i + 8 <= length; i += 8)
+            {
+                Vector256.Store(Vector256.Load(src + i), dst + i);
+            }
+
+            for (; i < length; i++)
+            {
+                dst[i] = src[i];
+            }
+        }
+
+        /// <summary>
+        /// Gathers one 32-column panel of the im2col matrix into <c>dst</c> as a contiguous <c>[k][32]</c>
+        /// region, which is the layout the micro-kernel consumes, so nothing downstream changes.
+        /// </summary>
+        private static unsafe void GatherSubPanel(
+            float* input,
+            float* dst,
+            int n0,
+            int nrEff,
+            int k,
+            int inputH,
+            int inputW,
+            int kernelSize,
+            int padding,
+            int stride,
+            int outW)
+        {
+            if (VectorGatherEnabled && stride == 1)
+            {
+                GatherSubPanelUnitStride(
+                    input, dst, n0, nrEff, k, inputH, inputW, kernelSize, padding, outW);
+
+                return;
+            }
+
+            GatherSubPanelScalar(
+                input, dst, n0, nrEff, k, inputH, inputW, kernelSize, padding, stride, outW);
+        }
+
+        /// <summary>
+        /// The unit-stride gather: runs of output positions sharing an output row read contiguous input, so
+        /// each run is a leading zero fill, a vector copy and a trailing zero fill.
+        /// </summary>
+        private static unsafe void GatherSubPanelUnitStride(
+            float* input,
+            float* dst,
+            int n0,
+            int nrEff,
+            int k,
+            int inputH,
+            int inputW,
+            int kernelSize,
+            int padding,
+            int outW)
+        {
+            var window = kernelSize * kernelSize;
+            var inputPlane = inputH * inputW;
+
+            // At most one run per column, which is the degenerate outW == 1 case; normally one or two.
+#pragma warning disable OVERFIT026 // BOUND: Nr512 (32) ints each = 128 B per array, fixed at compile time.
+            var runStart = stackalloc int[Nr512];
+            var runLength = stackalloc int[Nr512];
+            var runRow = stackalloc int[Nr512];
+            var runCol = stackalloc int[Nr512];
+#pragma warning restore OVERFIT026
+
+            var runs = 0;
+            var j = 0;
+
+            while (j < nrEff)
+            {
+                var position = n0 + j;
+                var oy = position / outW;
+                var ox = position - (oy * outW);
+                var length = Math.Min(nrEff - j, outW - ox);
+
+                runStart[runs] = j;
+                runLength[runs] = length;
+                runRow[runs] = oy;
+                runCol[runs] = ox;
+                runs++;
+
+                j += length;
+            }
+
+            for (var kk = 0; kk < k; kk++)
+            {
+                var kx = kk % kernelSize;
+                var ky = (kk / kernelSize) % kernelSize;
+                var channelBase = (kk / window) * inputPlane;
+                var row = dst + (kk * Nr512);
+
+                for (var r = 0; r < runs; r++)
+                {
+                    var at = row + runStart[r];
+                    var length = runLength[r];
+                    var iy = runRow[r] - padding + ky;
+
+                    if ((uint)iy >= (uint)inputH)
+                    {
+                        new Span<float>(at, length).Clear();
+
+                        continue;
+                    }
+
+                    var ixStart = runCol[r] - padding + kx;
+
+                    // The run splits into three pieces: columns left of the input, the part inside it, and
+                    // columns past its right edge. Only the middle one reads memory.
+                    var lead = ixStart < 0 ? Math.Min(-ixStart, length) : 0;
+                    var copyFrom = ixStart + lead;
+                    var available = inputW - copyFrom;
+                    var copyLength = Math.Min(length - lead, available);
+
+                    if (copyLength < 0)
+                    {
+                        copyLength = 0;
+                    }
+
+                    if (lead > 0)
+                    {
+                        new Span<float>(at, lead).Clear();
+                    }
+
+                    if (copyLength > 0)
+                    {
+                        CopyRun(input + channelBase + (iy * inputW) + copyFrom, at + lead, copyLength);
+                    }
+
+                    var trail = length - lead - copyLength;
+
+                    if (trail > 0)
+                    {
+                        new Span<float>(at + lead + copyLength, trail).Clear();
+                    }
+                }
+
+                // Lanes past nrEff are never stored, so this fill is not load-bearing. It stays because
+                // uninitialised pool memory can hold NaN, and NaN through an FMA chain costs on some parts
+                // even in a discarded lane.
+                if (nrEff < Nr512)
+                {
+                    new Span<float>(row + nrEff, Nr512 - nrEff).Clear();
+                }
+            }
+        }
+
+        /// <summary>The element-at-a-time gather, kept for strides other than 1 and as the A/B arm.</summary>
+        private static unsafe void GatherSubPanelScalar(
+            float* input,
+            float* dst,
+            int n0,
+            int nrEff,
+            int k,
+            int inputH,
+            int inputW,
+            int kernelSize,
+            int padding,
+            int stride,
+            int outW)
+        {
+            var window = kernelSize * kernelSize;
+            var inputPlane = inputH * inputW;
+
+#pragma warning disable OVERFIT026 // BOUND: Nr512 (32) ints each = 128 B per array, fixed at compile time.
+            var rowOrigin = stackalloc int[Nr512];
+            var colOrigin = stackalloc int[Nr512];
+#pragma warning restore OVERFIT026
+
+            for (var j = 0; j < nrEff; j++)
+            {
+                var position = n0 + j;
+                var oy = position / outW;
+
+                rowOrigin[j] = (oy * stride) - padding;
+                colOrigin[j] = ((position - (oy * outW)) * stride) - padding;
+            }
+
+            for (var kk = 0; kk < k; kk++)
+            {
+                var kx = kk % kernelSize;
+                var ky = (kk / kernelSize) % kernelSize;
+                var channelBase = (kk / window) * inputPlane;
+                var row = dst + (kk * Nr512);
+
+                for (var j = 0; j < nrEff; j++)
+                {
+                    var iy = rowOrigin[j] + ky;
+                    var ix = colOrigin[j] + kx;
+
+                    row[j] = (uint)iy < (uint)inputH && (uint)ix < (uint)inputW
+                        ? input[channelBase + (iy * inputW) + ix]
+                        : 0f;
+                }
+
+                for (var j = nrEff; j < Nr512; j++)
+                {
+                    row[j] = 0f;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Expands one 32-column panel of the im2col matrix into <c>dst</c> as a contiguous <c>[k][32]</c>
+        /// region — the layout the micro-kernel already consumes, so nothing downstream changes.
+        /// </summary>
+        private static unsafe void GatherPanel(in FusedGemmCtx c, int panel, float* dst)
+        {
+            var n0 = panel * Nr512;
+
+            GatherSubPanel(
+                c.Input, dst, n0, Math.Min(Nr512, c.N - n0), c.K,
+                c.InputH, c.InputW, c.KernelSize, c.Padding, c.Stride, c.OutW);
+        }
+
+        /// <summary>
+        /// Set <c>OVERFIT_CONV_EXPAND_PANELS=1</c> to expand every panel once into a shared buffer instead of
+        /// gathering each panel inside its own work item. <b>Off, because it is measured to lose — and it
+        /// refuted the hypothesis it was built on.</b>
+        ///
+        /// <para><b>What it fixes, in the measurement that produced it.</b> Work is one item per 32-column
+        /// panel, so VGG-16's last three convolutions — <c>N = 196</c> — produce <b>seven</b> items. With the
+        /// M-split off they run at 1007 GFLOP/s against this box's 5136 all-core ceiling: <b>19.6%, where
+        /// 7/32 workers is 21.9%</b>. They are near-perfectly efficient on seven cores and idle on the other
+        /// twenty-five. With the M-split on they get more items and run <i>slower</i>, because five row
+        /// blocks sharing a panel gather that panel five times.</para>
+        ///
+        /// <para><b>So the split is not the problem; the redundant gather is.</b> Expanding every panel once
+        /// into a shared buffer separates them: phase one gathers each panel exactly once, phase two splits
+        /// M over the result and reads it. This is the shape <c>MlasConvExpandThenGemmSegmented</c> has, and
+        /// the reason it is affordable here is the same reason the layer needed it — a small N. Seven panels
+        /// of <c>K = 4608</c> is <b>4.1 MB</b>; node 2's 1568 panels of <c>K = 576</c> would be 115 MB, which
+        /// is why the path is gated on panel count rather than applied everywhere.</para>
+        /// </summary>
+        internal static readonly bool ExpandPanelsEnabled =
+            Environment.GetEnvironmentVariable(OverfitEnvironment.ConvExpandPanels) == "1";
+
+        /// <summary>
+        /// Whether a layer's shape is one the shared expansion helps: fewer panels than workers, more than
+        /// one row block to split, and a buffer small enough that the expansion is not itself the cost.
+        /// </summary>
+        private static bool ShouldExpandPanels(int m, int n, int k, int nPanels)
+        {
+            if (!ExpandPanelsEnabled || ConvNBlock != 1 || nPanels <= 0)
+            {
+                return false;
+            }
+
+            if (nPanels >= OverfitParallel.MaxDegreeOfParallelism)
+            {
+                return false;
+            }
+
+            if ((m + Mr - 1) / Mr <= 1)
+            {
+                return false;
+            }
+
+            // 32 MiB, chosen so the buffer stays a small multiple of L3 rather than a second copy of the
+            // activation. VGG-16's small-N layers need 4.1 MB; a layer that needed more than this has enough
+            // panels to fill the workers anyway, so the bound never turns away a shape that wanted it.
+            return (long)nPanels * k * Nr512 * sizeof(float) <= 32L * 1024 * 1024;
+        }
+
+        /// <summary>Phase one of the expand-then-GEMM path: every panel gathered exactly once.</summary>
+        private static unsafe void ExpandPanelWorker(int panelStart, int panelEnd, void* ctxPtr)
+        {
+            ref readonly var c = ref Unsafe.AsRef<FusedGemmCtx>(ctxPtr);
+
+            for (var panel = panelStart; panel < panelEnd; panel++)
+            {
+                GatherPanel(in c, panel, c.Expanded + ((long)panel * c.K * Nr512));
+            }
+        }
+
+        /// <summary>
+        /// Phase two: the GEMM over the shared expansion, split on both M and N.
+        ///
+        /// <para>The split that was a loss in the fused worker is a win here for one reason — the panel is
+        /// already expanded, so the row blocks sharing it read it instead of gathering it again.</para>
+        /// </summary>
+        private static unsafe void ExpandedGemmWorker(int itemStart, int itemEnd, void* ctxPtr)
+        {
+            ref readonly var c = ref Unsafe.AsRef<FusedGemmCtx>(ctxPtr);
+
+            var k = c.K;
+            var n = c.N;
+            var m = c.M;
+
+#pragma warning disable OVERFIT026 // BOUND: Nr512 (32) floats = 128 B, fixed at compile time.
+            var tileScratch = stackalloc float[Nr512];
+#pragma warning restore OVERFIT026
+
+            // Panel OUTERMOST, so a range of items walks consecutive row blocks inside one panel and that
+            // panel stays in L2 while every row of A streams past it once.
+            //
+            // Measured 2026-08-19, and the wrong way round is expensive: with the panel innermost, B changes
+            // on every item and a layer with 25 panels re-reads 25 x 590 KB per row block. VGG-16's
+            // `out=401408` convolutions ran +48.9%, +22.2% and +39.3% that way, against +6.9% on the whole
+            // model. Same items, same arithmetic, same balance — only the traversal order.
+            var rowBlocks = (m + Mr - 1) / Mr;
+
+            for (var item = itemStart; item < itemEnd; item++)
+            {
+                var np = item / rowBlocks;
+                var rb = item - (np * rowBlocks);
+
+                var m0 = rb * Mr;
+                var mrEff = Math.Min(Mr, m - m0);
+                var n0 = np * Nr512;
+                var nrEff = Math.Min(Nr512, n - n0);
+                var packB = c.Expanded + ((long)np * k * Nr512);
+
+                if (!UsePackedA)
+                {
+                    MicroKernel8x32Avx512(c.A, m0, mrEff, k, packB, c.C, n, n0, nrEff);
+
+                    continue;
+                }
+
+                var cTile = c.C + ((long)m0 * n) + n0;
+
+                if (mrEff == Mr && nrEff == Nr512)
+                {
+                    MicroKernel8x32Avx512PackedAFull(c.A + ((long)rb * Mr * k), k, packB, cTile, n);
+
+                    continue;
+                }
+
+                MicroKernel8x32Avx512PackedAPartial(
+                    c.A + ((long)rb * Mr * k), mrEff, k, packB, cTile, n, nrEff, tileScratch);
+            }
+        }
+
         private static unsafe void GemmFusedPanelWorker512(int itemStart, int itemEnd, void* ctxPtr)
         {
             ref readonly var c = ref Unsafe.AsRef<FusedGemmCtx>(ctxPtr);
@@ -510,17 +972,15 @@ namespace DevOnBike.Overfit.Kernels
             var inputPlane = inputH * inputW;
             var window = kernelSize * kernelSize;
 
-            using var packBuf = new PooledBuffer<float>(checked(k * Nr512), clearMemory: false);
-            var packB = packBuf.Span;
+            var group = ConvNBlock;
+            var blockWidth = Nr512 * group;
 
-            // Input row and column origins for this panel's 32 output positions, hoisted out of the K loop.
-            // Computing them per element would put a division on every one of K*32 gathers.
-#pragma warning disable OVERFIT026 // BOUND: exactly Nr512 (32) ints each = 128 B per array, fixed at compile time.
-            var rowOrigin = stackalloc int[Nr512];
-            var colOrigin = stackalloc int[Nr512];
+            using var packBuf = new PooledBuffer<float>(checked(k * blockWidth), clearMemory: false);
+            var packB = packBuf.Span;
 
             // One scratch tile per worker, not per micro-kernel call: a stackalloc inside the kernel is
             // what put its frame back and spilled the accumulators in the first place.
+#pragma warning disable OVERFIT026 // BOUND: Nr512 (32) floats = 128 B, fixed at compile time.
             var tileScratch = stackalloc float[Nr512];
 #pragma warning restore OVERFIT026
 
@@ -537,46 +997,37 @@ namespace DevOnBike.Overfit.Kernels
                     continue;
                 }
 
-                var n0 = np * Nr512;
-                var nrEff = Math.Min(Nr512, n - n0);
-
-                for (var j = 0; j < nrEff; j++)
-                {
-                    var position = n0 + j;
-                    var oy = position / outW;
-
-                    rowOrigin[j] = (oy * stride) - padding;
-                    colOrigin[j] = ((position - (oy * outW)) * stride) - padding;
-                }
+                var n0 = np * blockWidth;
+                var blockEff = Math.Min(blockWidth, n - n0);
 
                 if (!AblatePackB)
                 {
-                    for (var kk = 0; kk < k; kk++)
+                    // Each sub-panel keeps its own contiguous [k][32] region, so the micro-kernel is
+                    // unchanged whatever the block width is.
+                    fixed (float* pGather = packB)
                     {
-                        var kx = kk % kernelSize;
-                        var ky = (kk / kernelSize) % kernelSize;
-                        var channelBase = (kk / window) * inputPlane;
-                        var dstBase = kk * Nr512;
-
-                        for (var j = 0; j < nrEff; j++)
+                        for (var s = 0; s < group; s++)
                         {
-                            var iy = rowOrigin[j] + ky;
-                            var ix = colOrigin[j] + kx;
+                            var subFirst = s * Nr512;
+                            var subEff = Math.Min(Nr512, blockEff - subFirst);
 
-                            packB[dstBase + j] =
-                                (uint)iy < (uint)inputH && (uint)ix < (uint)inputW
-                                    ? c.Input[channelBase + (iy * inputW) + ix]
-                                    : 0f;
-                        }
+                            if (subEff <= 0)
+                            {
+                                continue;
+                            }
 
-                        // Lanes past nrEff are never stored — StoreTile writes exactly nrEff columns — so
-                        // this fill is not load-bearing, and a mutation that writes 1f here leaves the whole
-                        // suite green. It stays because uninitialised pool memory can hold NaN, and feeding
-                        // NaN through the FMA chain costs on some parts even when the lane is discarded. It
-                        // is now outside the gather loop rather than a branch on every one of K*32 elements.
-                        for (var j = nrEff; j < Nr512; j++)
-                        {
-                            packB[dstBase + j] = 0f;
+                            GatherSubPanel(
+                                c.Input,
+                                pGather + ((long)s * k * Nr512),
+                                n0 + subFirst,
+                                subEff,
+                                k,
+                                inputH,
+                                inputW,
+                                kernelSize,
+                                padding,
+                                stride,
+                                outW);
                         }
                     }
                 }
@@ -588,38 +1039,46 @@ namespace DevOnBike.Overfit.Kernels
 
                 fixed (float* pPackB = packB)
                 {
+                    // M outer, sub-panel inner: the whole point of a wider block. The same eight rows of A
+                    // serve every sub-panel back to back, so only the first call has to fetch them.
                     for (var rb = rowBlockStart; rb < rowBlockEnd; rb++)
                     {
                         var m0 = rb * Mr;
                         var mrEff = Math.Min(Mr, m - m0);
 
-                        if (UsePackedA)
+                        for (var s = 0; s < group; s++)
                         {
-                            // Two bodies, selected here rather than inside one method. The full-tile body is
-                            // at the register limit — three prefetch instructions added to it measured 40%
-                            // slower — so even the extra live parameters an edge case needs are not free.
-                            if (mrEff == Mr && nrEff == Nr512)
+                            var subFirst = s * Nr512;
+                            var nrEff = Math.Min(Nr512, blockEff - subFirst);
+
+                            if (nrEff <= 0)
                             {
-                                MicroKernel8x32Avx512PackedAFull(
-                                    c.A + ((long)rb * Mr * k), k, pPackB, c.C + ((long)m0 * n) + n0, n);
+                                continue;
+                            }
+
+                            var subPackB = pPackB + ((long)s * k * Nr512);
+                            var subN0 = n0 + subFirst;
+
+                            if (UsePackedA)
+                            {
+                                var cTile = c.C + ((long)m0 * n) + subN0;
+
+                                if (mrEff == Mr && nrEff == Nr512)
+                                {
+                                    MicroKernel8x32Avx512PackedAFull(
+                                        c.A + ((long)rb * Mr * k), k, subPackB, cTile, n);
+
+                                    continue;
+                                }
+
+                                MicroKernel8x32Avx512PackedAPartial(
+                                    c.A + ((long)rb * Mr * k), mrEff, k, subPackB, cTile, n, nrEff, tileScratch);
 
                                 continue;
                             }
 
-                            MicroKernel8x32Avx512PackedAPartial(
-                                c.A + ((long)rb * Mr * k),
-                                mrEff,
-                                k,
-                                pPackB,
-                                c.C + ((long)m0 * n) + n0,
-                                n,
-                                nrEff,
-                                tileScratch);
-
-                            continue;
+                            MicroKernel8x32Avx512(c.A, m0, mrEff, k, subPackB, c.C, n, subN0, nrEff);
                         }
-
-                        MicroKernel8x32Avx512(c.A, m0, mrEff, k, pPackB, c.C, n, n0, nrEff);
                     }
                 }
             }
@@ -997,6 +1456,20 @@ namespace DevOnBike.Overfit.Kernels
             public readonly float* A;
             public readonly float* Input;
             public readonly float* C;
+
+            /// <summary>
+            /// The shared im2col expansion, one contiguous <c>[k][32]</c> region per panel, or
+            /// <see langword="null"/> when each work item gathers its own panel.
+            /// </summary>
+            public readonly float* Expanded;
+
+            /// <summary>
+            /// Panel count, used only by the expand-then-GEMM path, whose work items are flat
+            /// <c>(row block, panel)</c> pairs rather than the <c>panel x M-block</c> grid <see cref="MBlocks"/>
+            /// describes. Kept as its own field because reusing <see cref="MBlocks"/> for a second meaning is
+            /// the kind of saving that reads correctly and is wrong.
+            /// </summary>
+            public readonly int Panels;
             public readonly int M;
             public readonly int N;
             public readonly int K;
@@ -1021,11 +1494,15 @@ namespace DevOnBike.Overfit.Kernels
                 int kernelSize,
                 int padding,
                 int stride,
-                int outW)
+                int outW,
+                float* expanded = null,
+                int panels = 0)
             {
                 A = a;
                 Input = input;
                 C = c;
+                Expanded = expanded;
+                Panels = panels;
                 M = m;
                 N = n;
                 K = k;
@@ -1057,6 +1534,41 @@ namespace DevOnBike.Overfit.Kernels
         /// it is a trade and not a free win. It is therefore applied only where there are fewer panels than
         /// workers, and never widens the domain past the number of <c>Mr</c> row blocks that exist.</para>
         /// </summary>
+        /// <summary>
+        /// Whether the fused im2col path splits M as well as N. <b>Off, because it is measured to lose
+        /// there</b>; <c>OVERFIT_CONV_FUSED_M_SPLIT=1</c> restores it so the loss can be re-measured.
+        ///
+        /// <para><b>A win invalidated by a later change, which is the part worth remembering.</b> The M-split
+        /// was measured as a gain when the B pack it duplicated was a pack. In the fused path the same
+        /// duplication is an <b>im2col gather</b>: work items are <c>item / mBlocks</c>, so five row-blocks
+        /// sharing a panel gather that panel five times. On VGG-16's last three convolutions that is 16.5 MB
+        /// gathered where 4.1 MB is needed, and it costs more than the extra parallelism returns.</para>
+        ///
+        /// <para><b>Measured 2026-08-19, ABAB, three interleaved passes:</b> VGG-16 runs 35.47/34.73/34.92 ms
+        /// with the split and <b>33.68/33.62/33.49 without</b> — <b>-4.1% mean</b>, and the spread falls from
+        /// 2.1% to 0.6%. Per layer, nodes 24/26/28 go from 839/814/791 to <b>1007/1014/1025 GFLOP/s</b>.</para>
+        ///
+        /// <para><b>What this does NOT fix.</b> Without the split those layers run seven work items on 32
+        /// workers. 1007 GFLOP/s against this box's 5136 all-core ceiling is 19.6%, and 7/32 is 21.9% — they
+        /// are near-perfectly efficient <i>on seven cores</i>. The parallelism is still missing; the split
+        /// was simply the wrong way to buy it. Expanding the panels once into a shared buffer and then
+        /// splitting M over that buffer is the shape that buys it without the redundant gather, and it is
+        /// what <c>MlasConvExpandThenGemmSegmented</c> does.</para>
+        /// </summary>
+        internal static readonly bool FusedMSplitEnabled =
+            Environment.GetEnvironmentVariable(OverfitEnvironment.ConvFusedMSplit) == "1";
+
+        /// <summary>The M-split decision for the fused path, which is off unless explicitly restored.</summary>
+        private static int ResolveFusedMBlocks(int m, int nPanels)
+        {
+            if (!FusedMSplitEnabled)
+            {
+                return 1;
+            }
+
+            return ResolveMBlocks(m, nPanels);
+        }
+
         private static int ResolveMBlocks(int m, int nPanels)
         {
             if (!MSplitEnabled)

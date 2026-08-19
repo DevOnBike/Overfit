@@ -71,7 +71,10 @@ namespace DevOnBike.Overfit.Kernels
                     nameof(weightsInputOutput));
             }
 
-            if (weightsOutputInput.Length < inputSize * outputSize)
+            // Only the narrow-output paths read the output-major copy, so only they may demand it. The
+            // check used to be unconditional, which forced every caller to keep a full second copy of its
+            // weights whether anything would ever read it - see NeedsOutputMajorWeights.
+            if (NeedsOutputMajorWeights(outputSize) && weightsOutputInput.Length < inputSize * outputSize)
             {
                 throw new ArgumentException(
                     "Output-major weights span is too small.",
@@ -222,6 +225,23 @@ namespace DevOnBike.Overfit.Kernels
         internal const long ForwardParallelWeightBytes = 8L * 1024 * 1024;
 
         /// <summary>
+        /// Whether a layer of this width can reach a path that reads the output-major weight copy.
+        ///
+        /// <para>Both readers - <c>ForwardOutputMajorTiled</c> and <c>ForwardOutputMajorDot</c> - sit
+        /// behind <c>outputSize &lt; InputMajorVectorizedOutputThreshold</c>. Anything wider never touches
+        /// that copy, so keeping one is pure resident memory.</para>
+        ///
+        /// <para><b>Measured 2026-08-18 (`XC-82`).</b> Importing VGG-16 - a 527.8 MiB file - cost
+        /// <b>2,219 MiB of managed heap and 3,671 MiB of working set</b>. Its dense weights are 471.6 MiB
+        /// and every one of its fully-connected layers is 1000 outputs or wider, so the second copy was
+        /// <b>471.6 MiB, 21% of the managed heap, that nothing could ever read.</b></para>
+        /// </summary>
+        internal static bool NeedsOutputMajorWeights(int outputSize)
+        {
+            return outputSize < InputMajorVectorizedOutputThreshold;
+        }
+
+        /// <summary>
         /// Weight bytes above which a batch-1 layer is split by INPUT ROW rather than by output column.
         ///
         /// <para><b>The defect this fixes.</b> The column split gives each worker a range of output
@@ -261,7 +281,7 @@ namespace DevOnBike.Overfit.Kernels
         /// One inference row, with the output columns split across workers.
         ///
         /// <para>Splitting on <b>columns</b> rather than on the batch is what makes this safe without any
-        /// synchronisation: each worker owns a disjoint slice of <paramref name="output"/>, and everything
+        /// synchronisation: each worker owns a disjoint slice of the output, and everything
         /// else it touches — the input vector and the weight matrix — is read-only. The input is re-read by
         /// every worker, which is free: it is one vector, and at batch 1 it is orders of magnitude smaller
         /// than the weights it is multiplied against.</para>

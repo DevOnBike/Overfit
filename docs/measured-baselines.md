@@ -369,6 +369,375 @@ deliberately skipped — `PB-ORT1` measured the first at 61% within-version spre
 and found the second unable to resolve anything (BDN raises `MinIterationTime`; one iteration is 1.07 ms
 against a 100 ms target).
 
+### The vectorised im2col gather: -23.8% on a single core, and 2.00x against ONNX Runtime becomes 1.41x (2026-08-19)
+
+At `stride == 1` and a fixed `(ky, kx)`, consecutive output positions read consecutive input addresses. The
+gather is therefore a contiguous copy per run of output positions sharing an output row, not a scatter of
+indices. The run table depends on the panel and not on `kk`, so it is built once and reused for all K rows —
+which also removes the integer division the old code ran on every gathered element.
+`OVERFIT_CONV_VECTOR_GATHER=0` restores the element-at-a-time form.
+
+#### Single core, per layer — the arm the cost model made its prediction for
+
+| layer | scalar | vector | change |
+|---|---:|---:|---:|
+| K=576, out=3.2M (28.9 M elements) | 34.28 ms | **19.27 ms** | **-43.8%** |
+| K=1152, out=1.6M | 22.70 | 14.75 | -35.0% |
+| K=576, out=1.6M | 11.54 | 7.53 | -34.8% |
+| K=2304, out=0.8M | 18.42 | 13.41 | -27.2% |
+| K=4608, out=0.4M | 15.64 | 13.36 | -14.6% |
+| K=4608, out=100k | 4.49 | 4.02 | -10.5% |
+| **MaxPool x4** | 2.39 / 1.21 / 0.61 / 0.34 | **unchanged** | **+0.0%** |
+| **Linear x3** | 8.91 / 2.95 / 0.35 | **unchanged** | -0.8% / -0.3% |
+| **WALL** | **185.23** | **141.05** | **-23.8%** |
+
+**The gain rises with the element count, layer by layer, and the layers that do not gather do not move.**
+Four MaxPool nodes at +0.0% and three dense layers inside 1% are the canary *inside* the measurement: one
+thing changed, and it is the thing that was meant to.
+
+**Predicted 59 ms at a 4x gather; measured 44.2 ms, which implies 2.28x.** The model had the shape right and
+the magnitude high by a third. Recorded because the estimate was published before the fix existed.
+
+#### Both engines, one sitting, same loop and same core mask
+
+| cores | Overfit | ONNX Runtime | ratio | was |
+|---:|---:|---:|---:|---:|
+| 1 | **148.12 ms** | 105.28 ms | **1.41x** | 2.00x |
+| 4 | 47.98 | 33.92 | **1.41x** | 1.92x |
+| 16 | 27.26 | 16.09 | 1.69x | 1.98x |
+
+#### All cores, ABAB, ONNX Runtime in the same process
+
+| model | scalar gather | vector gather | change | canary |
+|---|---:|---:|---:|---:|
+| VGG-16 | 30.20 / 29.90 ms | **29.87 / 27.86 ms** | **-3.9%** | 18.84 / 19.23 / 18.94 / 19.05 |
+| CNN, 60.9 MB | 21.10 / 21.02 ms | **18.41 / 18.84 ms** | **-11.5%** | 9.69 / 9.69 / 9.59 / 9.75 |
+
+Parity unchanged in all eight runs. **The whole-model gain at 16 cores is far smaller than the single-core
+gain**, and that is not a contradiction: the gather was compute-bound work that parallelised well, so
+sixteen cores were already hiding most of it.
+
+> **It moved the bottleneck, and the next task is visible in the same table.** We now scale 5.43x across 16
+> cores where ONNX Runtime scales 6.54x — **the first time on this branch that their scaling is the better
+> of the two.** Removing per-core compute leaves a higher proportion of memory-bound work, so the ratio is
+> 1.41x at one and four cores but 1.69x at sixteen. The per-core problem is now smaller than the scaling
+> problem, which is the reverse of this morning.
+
+**Four of five mutations caught** — left-padding columns unzeroed, right-edge columns unzeroed, the input
+row offset sign flipped, and the last element of every run left stale. **The fifth escaped and should
+have**: the fill of lanes past `nrEff` is a performance guard against NaN in uninitialised pool memory, and
+the partial micro-kernel computes those lanes without storing them, so by construction it cannot change a
+result.
+
+### The 2.00x is the im2col gather, not the micro-kernel: a fitted cost model checked on seven held-out layers (2026-08-19)
+
+Single-core, per layer, VGG-16 (`Scripts/ProfHarness`, `PROF_AFFINITY=1`, `DOTNET_PROCESSOR_COUNT=1`). Two
+layers were used to fit two coefficients; the other seven were never used in the fit.
+
+```text
+layer time  =  0.964 ns x (K * N gathered elements)  +  3.32 ns x GFLOP
+```
+
+| layer | predicted | measured | error |
+|---|---:|---:|---:|
+| K=1152, out=1.6M | 26.2 ms | 27.16 ms | 3.5% |
+| K=576, out=1.6M | 13.11 | 13.81 | 5% |
+| K=576, out=3.2M | 40.15 | 43.03 | 7% |
+| K=1152, out=0.8M | 9.63 | 9.68 | **0.5%** |
+| K=4608, out=100k | 3.94 | 4.45 | 13% |
+| K=27, out=3.2M | 1.88 | 3.39 | **80% — outlier** |
+
+**Eight of nine layers inside 13%.** The K=27 first layer is the one it does not describe; its inner sweep is
+27 deep and something else dominates there, which is a separate question.
+
+**What the two coefficients say.**
+
+- **The GEMM term is 3.32 ns per GFLOP = 301 GFLOP/s, which is 84% of this box's 359 GFLOP/s single-core FMA
+  ceiling.** The micro-kernel is not the problem. It is within a few percent of what ONNX Runtime achieves
+  across its whole model.
+- **The gather term is 0.964 ns per element, about 4.8 cycles at 5 GHz** — the price of a scalar loop that
+  reads one element at a time behind two bounds comparisons.
+
+**Across VGG-16 the gather is 81.7 M elements = 78.8 ms of the 204.4 ms single-core total, or 39%.**
+
+**And it does not have to be a gather.** At `stride = 1`, for a fixed `(ky, kx)` consecutive output positions
+read **consecutive input addresses** — a contiguous run, not a scatter of indices. That is one `Vector512`
+load and store where the current code runs 32 scalar iterations with a branch each. Edge handling stays
+scalar; the interior, which is nearly all of it on a 224x224 input, does not.
+
+**Sizing it honestly**: a 4x faster gather removes 59 ms of 204, giving 145 ms against ONNX Runtime's 105 —
+**2.00x becomes 1.38x**. That is an estimate from the fitted coefficient, not a measurement of a fix that
+exists, and the achievable speedup of the vectorised form has not been measured.
+
+### The gap to ONNX Runtime is 2.00x per core, and our scaling is slightly BETTER than theirs (2026-08-19)
+
+**This measurement overturns the conclusion recorded earlier the same day, and the reason it does is worth
+more than the number.** The earlier reading compared our single-core figure against the *machine's*
+theoretical all-core FMA ratio and concluded the remaining gap was parallel scaling. ONNX Runtime's own
+single-core figure was never measured. It is the only comparison that could have settled it.
+
+`Scripts/ProfHarness` runs both engines through the same loop, the same warmup and the same affinity mask,
+with ONNX Runtime's `IntraOpNumThreads` set explicitly to the same core budget.
+
+| cores | Overfit | speedup | ONNX Runtime | speedup | ratio |
+|---:|---:|---:|---:|---:|---:|
+| 1 | 209.71 ms | 1.00x | **104.96 ms** | 1.00x | **2.00x** |
+| 2 | 111.00 | 1.89x | 56.80 | 1.85x | 1.95x |
+| 4 | 64.22 | 3.27x | 33.43 | 3.14x | 1.92x |
+| 8 | 40.46 | 5.18x | 21.43 | 4.90x | 1.89x |
+| 16 | 31.14 | **6.74x** | 15.72 | **6.68x** | 1.98x |
+
+**Our scaling matches theirs and is marginally better at every rung.** ONNX Runtime scales exactly as badly
+as we do — 6.68x across 16 cores against the machine's 14.30x. **The whole difference is per-core work, it
+is 2.00x, and it is flat.**
+
+> **ONNX Runtime runs at 82% of this box's single-core FMA ceiling (294 of 359 GFLOP/s). We run at 41%
+> (147 GFLOP/s).** That is the entire problem stated in one line, and it is not a threading problem.
+
+**It also explains the day's failures as one pattern.** The 128-column N-block, the M-split and the shared
+panel expansion all targeted parallelism, and all three lost. The three changes that worked — the register
+spill fix (3.46x on the kernel), the MR-major pack and the Relu fusion — all reduced per-core work. The
+selection was measured each time; the *reason* only became visible here.
+
+**What this retires.** `XC-85`'s premise for the small-N layers is refuted: they are not short of work
+items. 448 balanced items in place of 7 changed their rate from 1028 to 955 GFLOP/s, which is what "not
+core-starved" looks like. **And a second hypothesis died with it** — those layers are not weight-bandwidth
+bound either: this is a Ryzen 9 9950X3D with **128 MB of L3**, so a 9.44 MB weight matrix never leaves
+cache. Both were arithmetic that sounded right and neither survived a measurement.
+
+**Machine, for the record**: AMD Ryzen 9 9950X3D, 16 physical cores / 32 threads, L2 1 MB per core, L3
+128 MB across two CCDs (96 MB V-Cache + 32 MB). **The V-Cache asymmetry does not matter here**: eight cores
+on the V-Cache CCD run VGG-16 in 40.88 ms against 40.33 ms on the other one — 1.3%, and in favour of the CCD
+*without* it. **SMT does not help either**: 16 workers on 16 cores is 31.22 ms against 31.55 ms for 32
+workers, so `OverfitParallel`'s `Environment.ProcessorCount` pool is twice the useful size.
+
+### Folding Relu into the convolution epilogue: -5.7% on VGG-16, -8.4% on the 60.9 MB CNN (2026-08-19)
+
+`OVERFIT_FUSE_CONV_RELU=0` restores the separate node. ABAB, both models, ONNX Runtime in the same process.
+
+| model | Relu as its own node | fused | change |
+|---|---:|---:|---:|
+| VGG-16 | 34.66 / 34.68 ms | **32.54 / 32.82 ms** | **-1.99 ms (-5.7%)** |
+| CNN, 60.9 MB | 25.69 / 25.50 ms | **23.62 / 23.27 ms** | **-2.15 ms (-8.4%)** |
+
+**The canary moved the way that cannot fake this result.** ONNX Runtime was **1.9% slower** in the fused
+arms (18.84 -> 19.18 ms). A box drifting in our favour would have sped the canary up alongside us; it did
+the opposite, so the reading is real and if anything understated. Parity unchanged in all eight runs.
+
+**Predicted 1.7 ms, measured 1.99.** The prediction counted only the removal of the Relu pass. Bias and
+clamp now share one traversal as well, and that second saving was not in the estimate.
+
+**Why fusion and not threads** is in the per-layer section below: the Relu nodes were at **65.9 GB/s against
+a 90.8 GB/s DRAM ceiling**, so they were never short of parallelism. Only checking the unit showed that; the
+1.08x speedup on its own says the opposite.
+
+**Three mutations, all caught** - the clamp removed from the epilogue (caught by
+`AFusedConvolution_ClampsItsOwnOutput` and `Fusing_DoesNotChangeTheOutput`), the second-reader guard
+weakened to `readers >= 1` (`AConvolutionWhoseOutputHasASecondReader_IsNotFused`), and the `Relu` node left
+in place beside a convolution that now clamps (`AConvolutionWhoseOutputHasOneReader_IsFused` and
+`Importing_TheMnistCnn_FoldsReluIntoConvolution`). **The third mutation is the one worth having a test for**:
+it produces the *right answer* - `max(0, max(0, x))` is `max(0, x)` - so no parity check anywhere could
+see it. Suite 2738/0 in both arms of the switch.
+
+### Where the remaining gap to ONNX Runtime actually is: parallel scaling, not the kernel (2026-08-19)
+
+Measured with `artifacts/prof` — one process, one workload, no BenchmarkDotNet host/child split, 40 warmup
+calls then ten seconds of steady state. It reproduces the benchmark to within 1% (34.83 against 34.51 ms),
+so it is the same subject seen with a cleaner instrument. Thread count set with `DOTNET_PROCESSOR_COUNT`
+and **read back out of the process** before each reading is used.
+
+#### VGG-16 whole model
+
+| threads | ms/call | speedup | efficiency |
+|---:|---:|---:|---:|
+| 1 | 198.55 | 1.00x | 100% |
+| 2 | 107.73 | 1.84x | 92% |
+| 4 | 63.91 | 3.11x | 78% |
+| 8 | 42.64 | 4.66x | 58% |
+| 16 | 34.80 | 5.70x | 36% |
+| 32 | 34.56 | **5.74x** | 18% |
+
+**16 to 32 threads buys 0.7%.** The machine's measured single-core-to-all-core FMA ratio is **14.30x**
+(359 to 5136 GFLOP/s); this reaches **5.74x**, which is **40% of the available scaling**.
+
+> **The arithmetic that reframes the whole effort.** At 198.55 ms on one thread, scaling at the machine's
+> 14.30x would put VGG-16 at **13.9 ms — ahead of ONNX Runtime's 18.9 ms**. It sits at 34.56.
+> **The single-thread kernel is competitive; every remaining millisecond of the 1.8x gap is scaling.**
+> The register-spill fix, the packing and the tiling were all real wins - and the work that is left is not
+> in the micro-kernel at all.
+
+#### Per operator
+
+| operator | 1 thread | 4 | 32 | speedup | share at 32 |
+|---|---:|---:|---:|---:|---:|
+| ConvLayer (13) | 181.66 | 54.83 | 22.50 | 8.07x | 65.2% |
+| LinearLayer (3) | 11.11 | 8.92 | **9.12** | **1.22x** | 26.4% |
+| ReluActivation (15) | 1.85 | 1.78 | 1.72 | **1.08x** | 5.0% |
+| MaxPool2DLayer (5) | 5.07 | 1.71 | 1.13 | 4.49x | 3.3% |
+
+`LinearLayer` is **slower at 32 threads than at 4**. That is what a bandwidth-bound operator looks like once
+the extra threads only add contention.
+
+#### Per layer, and the four separate defects it separates
+
+| node | shape | 1 thread | 32 | speedup | GFLOP/s at 32 |
+|---|---|---:|---:|---:|---:|
+| 33 | Linear fc1 | 8.42 | **7.42** | **1.13x** | - |
+| 2 | Conv 224^2 K=576 | 41.22 | **3.99** | 10.33x | **927** |
+| 24/26/28 | Conv 14^2 K=4608 | 13.00 | **3.32** | **3.9x** | **830** |
+| 19/21 | Conv 28^2 K=4608 | 30.51 | 3.67 | 8.3x | **2077** (best) |
+| 0 | Conv 224^2 K=27 | 3.06 | **1.16** | 2.64x | **149** |
+| 1..29 | ReLU x15 | 1.85 | 1.72 | **1.00x** | - |
+
+**Checking the unit reversed the ReLU conclusion, which is the reason the rule exists.** A 1.00x speedup
+reads as "not parallelised". Node 1 is 64x224x224 = 3.21 M elements, so it reads 12.8 MB and writes 12.8 MB
+in 0.39 ms = **65.9 GB/s against a 90.8 GB/s DRAM ceiling**. ReLU is **not** an unparallelised compute
+operator - it is at 73% of the memory ceiling and parallelising it can return almost nothing. The available
+fix is the opposite one: **fuse it into the convolution's epilogue** so the tensor is written once instead of
+written, read and written again.
+
+`fc1` is the same shape of problem: 102.8 M parameters = **411 MB read per inference**, and
+411 MB / 7.42 ms = **55.4 GB/s** against the same 90.8 GB/s ceiling.
+
+Nodes 24/26/28 have only **196 output columns** - 6.1 panels of 32 - and reach 830 GFLOP/s where node 21,
+the same K on a larger output, reaches 2077. Node 0 has **K=27**, so the micro-kernel's inner sweep is 27
+deep and setup dominates: 149 GFLOP/s.
+
+### The 128-column N-block: refuted, and it is the same half-structure mistake twice (2026-08-19)
+
+MLAS packs a **128-column** B panel and sweeps all of M through it; this kernel packs **32**. The worker was
+restructured to gather `ConvNBlock * 32` columns per work item and loop M outer, sub-panel inner, so the same
+eight rows of A serve every sub-panel back to back.
+
+| N-block | VGG-16 | against 32 | ONNX Runtime canary |
+|---|---:|---:|---:|
+| 32 (1 sub-panel) | **34.51 / 34.55 ms** | - | 19.00 / 18.80 ms |
+| 64 (2) | 38.68 ms | **+12%** | 18.92 ms |
+| 128 (4) | 50.88 ms | **+47%** | 18.97 ms |
+
+**Monotonically worse, and the arithmetic should have been done before the code.** The packed B panel grows
+from `K x 32` to `K x 128` — **589 KB to 2.36 MB** — against a 1 MB L2. At 32 columns the panel fits; at 128
+it does not, and every micro-kernel call streams it from L3.
+
+**MLAS's panel is 64 KB because it blocks K at 128 at the same time.** Widening N without blocking K blows
+the cache budget, and the curve's slope is that budget being exceeded further.
+
+> **This is the second time half of this structure has been built and lost.** K-blocking without A-packing
+> lost; the N-block without K-blocking lost. In BLIS and MLAS these are **one construction with four coupled
+> parameters** - MR/NR, KC, MC, NC - chosen so that three products land in three cache levels: `KC x NR` in
+> L1, `MC x KC` in L2, `KC x NC` in L3. **Any subset breaks the balance it exists to hold.** Either all four
+> move together or none should.
+
+The switch stays, defaulting to 1, so the measurement is reproducible rather than re-derived.
+
+### `XC-82` re-measured: memory-only, and ONNX Runtime moved again (2026-08-19)
+
+Removing the dense layer's unread output-major weight copy touches VGG-16's fully-connected layers, so the
+figures published before it were unconfirmed on the current tree. Re-measured, two runs per model, ONNX
+Runtime in the same process:
+
+| model | Overfit before | after | ORT before | after |
+|---|---:|---:|---:|---:|
+| VGG-16 | 33.41 ms | **32.98 ms** (-1.3%) | 19.09 ms | **18.28 ms** (-4.2%) |
+| CNN, 60.9 MB | 24.13 ms | **24.12 ms** (-0.1%) | 9.78 ms | **9.19 ms** (-6.0%) |
+
+**`XC-82` is time-neutral.** Overfit did not move: -1.3% and -0.1% are inside the run-to-run spread. It was a
+memory change - 592 MiB of managed heap - and it cost nothing in time, which is what the change claimed.
+
+**The ratios got worse anyway, and only because ONNX Runtime got faster.** VGG-16 reads 1.75x -> 1.80x and the
+60.9 MB CNN 2.47x -> 2.63x, from a denominator that dropped 4-6% on a binary nobody touched.
+
+**That is the third sitting in which ONNX Runtime's large-CNN figure has moved on its own**: 12.93, then 9.79,
+then 9.19 ms - a **29% spread**. Ours moved 0.1% between the last two. **What moves it is still not
+identified**, and until it is, a large-CNN ratio quoted from one sitting cannot be compared with one quoted
+from another.
+
+> **A ratio has two operands and the other one is not under your control.** When a published number worsens,
+> check whose half moved before attributing it to your own change.
+
+### The pooled panel rent, measured — and the batch anomaly resolves by elimination (2026-08-18)
+
+The last untested candidate for the batch anomaly was the convolution worker's packed-panel rent: `K * 32`
+floats, **147,456 floats or 589 KB**, once per worker per dispatch, about **18.9 MB across 32 workers per
+convolution call**. 589 KB is well over the 85,000-byte large-object threshold, so a pool miss would be a
+large-object allocation on every convolution from every worker.
+
+| arm | mean | per unit | allocated |
+|---|---:|---:|---:|
+| single thread, 64 rents | 2.004 us | **31.3 ns** per rent+return | **none** |
+| parallel, dispatch only | 380.4 us | 5.94 us per dispatch | none |
+| parallel, every worker rents | 399.7 us | 6.24 us per dispatch | none |
+
+**The pool hits.** Nothing is allocated at this size, so there is no large-object path. The parallel
+difference is 19.2 us across 2,048 rents - about 9 ns each - and it sits **inside error bars of 25-37 us**.
+Against 0.79 ms of real work per image, 18.9 MB of rents costs at most 0.3 us. **Not the mechanism.**
+
+**One small correction to a documented figure.** `PooledBuffer`'s remarks record "Rent+Return on
+ArrayPool.Shared ~4 ns regardless of size". At 589 KB single-threaded it is **31 ns** - eight times that.
+Still negligible, but "regardless of size" is not exact.
+
+### So what the batch anomaly was
+
+By elimination, with each step measured rather than argued:
+
+| candidate | verdict |
+|---|---|
+| arithmetic, cache, algorithm | **eliminated** - the effect vanishes entirely at one worker |
+| parallel dispatch, hot | 5.51 us |
+| parallel dispatch, cold wake | 12.4 us penalty - 130x too small |
+| pooled panel rent | ~0.3 us per call, no allocation |
+| BenchmarkDotNet overhead on sub-millisecond calls | **the only candidate left** |
+
+That last one fits every observation. At one worker a call takes 6.7 ms and the harness overhead is
+invisible - and there batching does nothing at all (6.729 against 6.774 ms per image across an eightfold
+batch). At thirty-two workers a single image is 0.79 ms of work, and the anomaly appears exactly where
+per-call time falls below a millisecond. The non-monotonic points - batch 2 slower than batch 4 - are what a
+fixed per-iteration cost looks like when it is comparable to the work.
+
+> **A "gain" that disappears when you remove the parallelism, and that no component in the parallel path can
+> account for, is a property of the instrument.** Four candidates were measured and eliminated to reach that;
+> none of them needed to be guessed.
+
+**Nothing to build.** Batched graph inference is not worth writing, and neither is a cheaper dispatch: the
+effect that motivated both was the harness.
+
+### The dispatch cost, measured — and the direction it was supposed to open is closed (2026-08-18)
+
+The section below concluded that the batch anomaly was per-dispatch overhead and named reducing it as the
+lever. **That was wrong, and measuring the dispatch is what showed it.**
+
+`ParallelDispatchCostBenchmark` times one `OverfitParallel.For` with a trivial body against sixty-four of
+them chained inside a single measured call, so only the first of the chain can find the pool parked:
+
+| arm | mean | per dispatch |
+|---|---:|---:|
+| `Single` (the pool has an iteration gap to park in) | 17.86 us | **17.86 us** |
+| `Chained`, 64 back to back | 352.61 us | **5.51 us** |
+
+**Two results, and the second kills the plan.**
+
+**The hot dispatch costs 5.51 us, which validates a published claim.** `OverfitParallel`'s own remarks say
+the bulk-semaphore wake brought dispatch "from 32-47 us to ~5 us". Measured independently here: 5.51 us. The
+documentation is correct.
+
+**The cold-wake penalty is 12.4 us, and that is far too small to be what the batch sweep saw.** The batch
+measurement implied roughly **1.6 ms** of per-call overhead at Hw=14. The parking penalty is **12 us** -
+smaller by a factor of 130. Against 0.79 ms of real work per image, dispatch is negligible hot or cold.
+
+> **The benchmark's own refutation clause fired.** It was written to say that if hot and cold dispatch cost
+> the same, parking was not what the batch sweep measured. They differ - and both are so far below the
+> effect that the conclusion is the same: **parking is not the mechanism.**
+
+**So "reduce the dispatch cost" is closed as a direction.** There is nothing to win: 5.5 us for a 32-way
+fan-out is already good, and the entire parking penalty is 12 us once after idleness. Porting the decode
+pool's spin-park protocol - measured there at +23-25% - would burn cores at idle to win microseconds here.
+
+**The batch anomaly stays unexplained, but the elimination is now substantial**: not arithmetic, not cache,
+not the algorithm (it vanishes at one worker), and not dispatch. What remains untested is the per-worker
+`PooledBuffer` rent of `k * 32` floats - 589 KB per worker, about 18.9 MB per convolution call at 32 workers
+- and BenchmarkDotNet's own overhead on sub-millisecond calls. **Neither has been measured, and neither
+should be assumed.**
+
 ### The batch "gain" was per-dispatch overhead, and one worker proved it (2026-08-18, `XC-78`)
 
 The section below measured about 3x less time per image at batch 4 on an occupancy-starved shape, and

@@ -3,6 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using DevOnBike.Overfit.Maths;
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Ops;
@@ -14,6 +15,24 @@ namespace DevOnBike.Overfit.Tests.DeepLearning.Training
 {
     public class EndToEndTrainingTests
     {
+        // Seeded so this class trains the same model every run.
+        //
+        // `XC-83`: these tests assert a convergence threshold over weights initialised from an UNSEEDED
+        // generator, so every run trained a different model and the assertion sampled a distribution.
+        // Two of the family were caught failing intermittently - one at a final loss of 2.0235 against a
+        // `< 2.0f` bound whose own comment claimed the loss lands "well below" it.
+        //
+        // MathUtils.SetSeed is per-thread, so it belongs in the constructor: xUnit builds the instance on
+        // the thread that then runs the test and builds the model.
+        //
+        // A failure here after seeding is REPRODUCIBLE and therefore a real finding - do not respond by
+        // trying seeds until one passes. Widening a bound needs the outcome distribution measured over many
+        // seeds first; a threshold moved to accommodate one observed failure has no evidence behind it.
+        public EndToEndTrainingTests()
+        {
+            MathUtils.SetSeed(20260818);
+        }
+
         [Fact]
         public void NeuralNetwork_TrainsOnXORProblem_AndConvergesToCorrectPredictions()
         {

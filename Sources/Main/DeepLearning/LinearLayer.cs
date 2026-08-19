@@ -19,7 +19,11 @@ namespace DevOnBike.Overfit.DeepLearning
         private readonly int _outputSize;
 
         // Layout: [output, input] — transposed for inference BLAS call
-        private readonly TensorStorage<float> _weightsTransposed;
+        /// <summary>
+        /// The output-major copy of the weights, or null for a layer too wide to reach a path that reads
+        /// it. See <see cref="LinearKernels.NeedsOutputMajorWeights"/>.
+        /// </summary>
+        private readonly TensorStorage<float>? _weightsTransposed;
         private bool _inferenceCacheValid;
 
         // Cached view nodes — created once, reused across batches.
@@ -51,7 +55,11 @@ namespace DevOnBike.Overfit.DeepLearning
 
             Bias = new Parameter(new TensorShape(outputSize), requiresGrad: true, clearData: true);
 
-            _weightsTransposed = new TensorStorage<float>(inputSize * outputSize, clearMemory: false);
+            // Allocated only for widths that can actually reach an output-major path. On VGG-16 none of
+            // the dense layers can, and this copy was 471.6 MiB of the 2,219 MiB the import costs.
+            _weightsTransposed = LinearKernels.NeedsOutputMajorWeights(outputSize)
+                ? new TensorStorage<float>(inputSize * outputSize, clearMemory: false)
+                : null;
         }
 
         /// <summary>Long-lived trainable weight matrix [inputSize, outputSize]. Owned by the layer.</summary>
@@ -204,13 +212,19 @@ namespace DevOnBike.Overfit.DeepLearning
             Load(br);
         }
 
+        /// <summary>The output-major weights if this layer keeps them, otherwise empty.</summary>
+        private ReadOnlySpan<float> TransposedWeightSpan()
+        {
+            return _weightsTransposed == null ? default : _weightsTransposed.AsReadOnlySpan();
+        }
+
         public void ForwardInference(ReadOnlySpan<float> input, Span<float> output)
         {
             PrepareInference();
             LinearKernels.Forward(
                 input,
                 Weights.DataReadOnlySpan,
-                _weightsTransposed.AsReadOnlySpan(),
+                TransposedWeightSpan(),
                 Bias.DataReadOnlySpan,
                 output,
                 _inputSize,
@@ -222,7 +236,7 @@ namespace DevOnBike.Overfit.DeepLearning
             LinearKernels.Forward(
                 input,
                 Weights.DataReadOnlySpan,
-                _weightsTransposed.AsReadOnlySpan(),
+                TransposedWeightSpan(),
                 Bias.DataReadOnlySpan,
                 output,
                 _inputSize,
@@ -235,11 +249,16 @@ namespace DevOnBike.Overfit.DeepLearning
             _biasNode?.Dispose();
             Weights.Dispose();
             Bias.Dispose();
-            _weightsTransposed.Dispose();
+            _weightsTransposed?.Dispose();
         }
 
         private void RebuildTransposedWeightsInPlace()
         {
+            if (_weightsTransposed == null)
+            {
+                return;
+            }
+
             LinearKernels.TransposeInputOutputToOutputInput(
                 Weights.DataReadOnlySpan,
                 _weightsTransposed.AsSpan(),

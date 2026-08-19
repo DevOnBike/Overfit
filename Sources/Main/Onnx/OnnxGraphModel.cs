@@ -28,6 +28,9 @@ namespace DevOnBike.Overfit.Onnx
     public sealed class OnnxGraphModel : IDisposable
     {
         private readonly OnnxGraphNode[] _nodes;
+
+        /// <summary>The execution plan, for tests that assert on its shape rather than on its output.</summary>
+        internal ReadOnlySpan<OnnxGraphNode> Nodes => _nodes;
         private readonly TensorStorage<float>[] _buffers;
         private readonly int _inputSize;
         private readonly int _outputSize;

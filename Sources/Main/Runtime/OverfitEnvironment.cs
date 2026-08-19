@@ -59,8 +59,49 @@ namespace DevOnBike.Overfit.Runtime
         /// <summary>Set to 1 to repack conv kernels into MR-major micro-panels before the GEMM sweep.</summary>
         public const string ConvPackA = "OVERFIT_CONV_PACK_A";
 
+        /// <summary>32-column sub-panels per conv-GEMM work item; 1 is the original, 4 gives MLAS's 128.</summary>
+        public const string ConvNBlock = "OVERFIT_CONV_NBLOCK";
+
         /// <summary>Set to 0 to run pool=2 inference on one thread, as before the channel split.</summary>
         public const string ParallelPool = "OVERFIT_PARALLEL_POOL";
+
+        /// <summary>
+        /// Set to 0 to keep <c>Relu</c> as its own graph node instead of folding it into the preceding
+        /// convolution's bias epilogue.
+        ///
+        /// <para>It exists to be the second arm. Fusion deletes a node, so "did it help" cannot be answered
+        /// by a before-and-after build — the two arms have to run in one sitting against the same box.</para>
+        /// </summary>
+        public const string FuseConvRelu = "OVERFIT_FUSE_CONV_RELU";
+
+        /// <summary>
+        /// Set to 1 to re-enable the M-split inside the <b>fused im2col</b> convolution path.
+        ///
+        /// <para><b>The polarity is inverted against the four switches around it, and deliberately.</b> Those
+        /// default on because they are measured wins turned off for an A/B. This one defaults <b>off</b>
+        /// because it is a measured loss kept only so the loss stays reproducible — shipping it on the other
+        /// way round is how a switch once carried an unreachable number into the README.</para>
+        /// </summary>
+        public const string ConvFusedMSplit = "OVERFIT_CONV_FUSED_M_SPLIT";
+
+        /// <summary>
+        /// Set to 1 to expand every convolution panel once into a shared buffer instead of gathering each
+        /// panel inside its own work item.
+        ///
+        /// <para><b>Off by default: it is a measured loss.</b> It is kept because the measurement it
+        /// produced is the useful part — balanced work items did not help the layers it was built for, which
+        /// refutes the claim that those layers are short of parallelism.</para>
+        /// </summary>
+        public const string ConvExpandPanels = "OVERFIT_CONV_EXPAND_PANELS";
+
+        /// <summary>
+        /// Set to 0 to gather im2col one element at a time behind a bounds test, instead of copying the
+        /// contiguous runs a unit-stride convolution actually reads.
+        ///
+        /// <para>It is the A/B arm for the largest single item of per-core work measured in a convolution:
+        /// 39% of VGG-16's single-core time before the change.</para>
+        /// </summary>
+        public const string ConvVectorGather = "OVERFIT_CONV_VECTOR_GATHER";
 
         /// <summary>Set to 0 to split a large batch-1 dense layer by output column, as before the row split.</summary>
         public const string LinearRowSplit = "OVERFIT_LINEAR_ROW_SPLIT";

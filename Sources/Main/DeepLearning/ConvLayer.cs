@@ -5,6 +5,7 @@
 
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning.Abstractions;
+using DevOnBike.Overfit.Exceptions;
 using DevOnBike.Overfit.Kernels;
 using DevOnBike.Overfit.Maths;
 using DevOnBike.Overfit.Parameters;
@@ -252,6 +253,14 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public AutogradNode Forward(ComputationGraph? graph, AutogradNode input)
         {
+            if (FusedRelu)
+            {
+                throw new OverfitRuntimeException(
+                    "This convolution has a fused Relu, so it has no training forward: the importer removed "
+                    + "the Relu node when it fused, and this path would silently return a pre-activation "
+                    + "result with a gradient to match. Import the model again without fusion to train it.");
+            }
+
             _kernelsNode ??= Kernels.AsNode();
             if (Bias != null)
             {
@@ -360,6 +369,32 @@ namespace DevOnBike.Overfit.DeepLearning
             return _kernelsPacked == null ? default : _kernelsPacked.AsReadOnlySpan();
         }
 
+        /// <summary>
+        /// Whether this layer applies <c>max(0, x)</c> in its own epilogue, because the graph importer
+        /// folded a following <c>Relu</c> node into it.
+        ///
+        /// <para><b>Why fusion rather than parallelising the Relu.</b> Measured 2026-08-19 on VGG-16:
+        /// fifteen <c>ReluActivation</c> nodes cost 1.72 ms at 32 threads and 1.85 ms at 1 — a 1.08x
+        /// speedup, which reads as "never parallelised". It is not. Node 1 covers 64x224x224 = 3.21 M
+        /// elements, so it reads 12.8 MB and writes 12.8 MB in 0.39 ms = <b>65.9 GB/s against this box's
+        /// measured 90.8 GB/s DRAM read ceiling</b>. It is at 73% of the memory ceiling and there is no
+        /// parallelism left to win — threads were the wrong lever, and only checking the unit showed
+        /// that. Fusion removes the pass instead of speeding it up.</para>
+        ///
+        /// <para>It costs nothing where it lands: the bias epilogue already walks the whole output, so the
+        /// clamp rides along in a pass that had to happen anyway.</para>
+        ///
+        /// <para><b>Inference only.</b> <see cref="Forward"/> refuses to run a fused layer rather than
+        /// silently returning the unfused result — the importer deletes the <c>Relu</c> node when it sets
+        /// this, so an unfused forward would be missing an activation and its gradient would be wrong in a
+        /// way nothing downstream could see.</para>
+        /// </summary>
+        public bool FusedRelu
+        {
+            get;
+            internal set;
+        }
+
         public void ForwardInference(ReadOnlySpan<float> input, Span<float> output)
         {
             if (_padding == 0 && _stride == 1)
@@ -379,9 +414,23 @@ namespace DevOnBike.Overfit.DeepLearning
                     PackedKernelSpan());
             }
 
+            if (Bias != null && FusedRelu)
+            {
+                ApplyBiasAndReluNchw(output, Bias.DataReadOnlySpan, _outC, _outH, _outW);
+
+                return;
+            }
+
             if (Bias != null)
             {
                 ApplyBiasNchw(output, Bias.DataReadOnlySpan, _outC, _outH, _outW);
+
+                return;
+            }
+
+            if (FusedRelu)
+            {
+                ApplyReluNchw(output);
             }
         }
 
@@ -411,6 +460,39 @@ namespace DevOnBike.Overfit.DeepLearning
                     channelSlice[i] += b;
                 }
             }
+        }
+
+        /// <summary>
+        /// The bias epilogue with the folded <c>Relu</c>, in one pass over the output.
+        ///
+        /// <para>Separate from <see cref="ApplyBiasNchw"/> rather than a flag inside it: the branch would
+        /// sit in the innermost loop of a pass that walks 12.8 MB on VGG-16's first layers.</para>
+        /// </summary>
+        private static void ApplyBiasAndReluNchw(
+            Span<float> output,
+            ReadOnlySpan<float> bias,
+            int outC,
+            int outH,
+            int outW)
+        {
+            var spatialSize = outH * outW;
+
+            for (var c = 0; c < outC; c++)
+            {
+                var b = bias[c];
+                var channelSlice = output.Slice(c * spatialSize, spatialSize);
+
+                for (var i = 0; i < channelSlice.Length; i++)
+                {
+                    channelSlice[i] = MathF.Max(0f, channelSlice[i] + b);
+                }
+            }
+        }
+
+        /// <summary>The folded <c>Relu</c> alone, for a convolution that carries no bias.</summary>
+        private static void ApplyReluNchw(Span<float> output)
+        {
+            ActivationKernels.Relu(output, output);
         }
 
         private static void InitializeKernels(Span<float> span, int fanIn)

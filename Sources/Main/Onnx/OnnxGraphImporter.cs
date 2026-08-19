@@ -3,7 +3,9 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Onnx.Operators;
+using DevOnBike.Overfit.Runtime;
 using DevOnBike.Overfit.Onnx.Schema;
 using DevOnBike.Overfit.Tensors.Core;
 
@@ -45,6 +47,41 @@ namespace DevOnBike.Overfit.Onnx
 
             return LoadFromBytes(modelBytes, inputSize, outputSize, modelDir);
         }
+
+        /// <summary>
+        /// The same import with <c>Conv</c>-<c>Relu</c> fusion suppressed, for the arm that has to run beside
+        /// the fused one.
+        ///
+        /// <para><see cref="FuseConvReluEnabled"/> is a <c>static readonly</c> read once per process, so a
+        /// test cannot produce an unfused model by setting the environment variable and importing again —
+        /// it would import the fused path a second time and compare it with itself. The parameter is the
+        /// only honest way to hold both shapes in one process.</para>
+        /// </summary>
+        internal static OnnxGraphModel LoadUnfused(string path, int inputSize, int outputSize)
+        {
+            var fullPath = Path.GetFullPath(path);
+            var modelBytes = File.ReadAllBytes(fullPath);
+            var modelDir = Path.GetDirectoryName(fullPath) ?? string.Empty;
+
+            return LoadFromBytes(modelBytes, inputSize, outputSize, modelDir, fuseConvRelu: false);
+        }
+
+        /// <summary>
+        /// The fused counterpart of <see cref="LoadUnfused"/>, ignoring the environment switch.
+        ///
+        /// <para>A test that reached fusion through <see cref="Load"/> would assert on
+        /// <see cref="FuseConvReluEnabled"/> rather than on the fusion pass, and would fail in the arm that
+        /// turns the switch off — which it did, on the run that produced this method. The switch decides the
+        /// default; these two entry points decide what the tests are about.</para>
+        /// </summary>
+        internal static OnnxGraphModel LoadFused(string path, int inputSize, int outputSize)
+        {
+            var fullPath = Path.GetFullPath(path);
+            var modelBytes = File.ReadAllBytes(fullPath);
+            var modelDir = Path.GetDirectoryName(fullPath) ?? string.Empty;
+
+            return LoadFromBytes(modelBytes, inputSize, outputSize, modelDir, fuseConvRelu: true);
+        }
 #pragma warning restore OVERFIT040
 
         public static OnnxGraphModel LoadFromBytes(
@@ -52,6 +89,16 @@ namespace DevOnBike.Overfit.Onnx
             int inputSize,
             int outputSize,
             string? externalDataDir = null)
+        {
+            return LoadFromBytes(modelBytes, inputSize, outputSize, externalDataDir, FuseConvReluEnabled);
+        }
+
+        private static OnnxGraphModel LoadFromBytes(
+            byte[] modelBytes,
+            int inputSize,
+            int outputSize,
+            string? externalDataDir,
+            bool fuseConvRelu)
         {
             var model = OnnxProtoParser.ParseModel(modelBytes);
 
@@ -152,6 +199,12 @@ namespace DevOnBike.Overfit.Onnx
                 execNodes.Add(new OnnxGraphNode(module, inputSlots, outputSlot, outputSize2));
             }
 
+            // ── Fuse Conv → Relu ────────────────────────────────────────────
+            if (fuseConvRelu)
+            {
+                FuseConvRelu(execNodes);
+            }
+
             // ── Allocate buffers ────────────────────────────────────────────
             // TensorStorage rents from ArrayPool<T>.Shared (via its PooledBuffer<T> field)
             // — buffers are returned to the pool on OnnxGraphModel.Dispose(), avoiding GC pressure.
@@ -172,6 +225,107 @@ namespace DevOnBike.Overfit.Onnx
         // ─────────────────────────────────────────────────────────────────────
         // Private helpers
         // ─────────────────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Folds every <c>Relu</c> that consumes a convolution's output, and nothing else, into that
+        /// convolution's epilogue — removing the node and rewiring its readers onto the convolution's slot.
+        ///
+        /// <para><b>Why, in the numbers that produced it.</b> Measured on VGG-16 on 2026-08-19: the fifteen
+        /// <c>Relu</c> nodes cost 1.72 ms at 32 threads against 1.85 ms at 1. A 1.08x speedup invites the
+        /// conclusion that they were never parallelised — <b>they are at 65.9 GB/s against this box's
+        /// measured 90.8 GB/s DRAM ceiling</b>, so they are at 73% of the memory limit and threads cannot
+        /// help. The operator is not slow; the second traversal of the tensor is the cost. Removing the
+        /// traversal is the only lever that addresses it, and the convolution's bias epilogue already walks
+        /// the same memory, so the clamp is free where it lands.</para>
+        ///
+        /// <para><b>The safety condition is that the convolution's output has exactly one reader.</b> A
+        /// pre-activation tensor consumed by a skip connection as well as by the <c>Relu</c> must not be
+        /// clamped in place — the other consumer would silently read activated values. Readers are counted
+        /// across every node's input slots, <c>Add</c>'s two included, rather than assumed from the graph's
+        /// shape.</para>
+        /// </summary>
+        internal static readonly bool FuseConvReluEnabled =
+            Environment.GetEnvironmentVariable(OverfitEnvironment.FuseConvRelu) != "0";
+
+        internal static void FuseConvRelu(List<OnnxGraphNode> nodes)
+        {
+            var index = 0;
+
+            while (index < nodes.Count - 1)
+            {
+                if (!CanFuseConvRelu(nodes, index))
+                {
+                    index++;
+
+                    continue;
+                }
+
+                var conv = (ConvLayer)nodes[index].Module;
+                var convSlot = nodes[index].OutputSlot;
+                var reluSlot = nodes[index + 1].OutputSlot;
+
+                conv.FusedRelu = true;
+                nodes.RemoveAt(index + 1);
+
+                // Everything that read the Relu's output now reads the convolution's, which holds the
+                // activated values. Rewritten in place because InputSlots is the array the run loop indexes.
+                foreach (var node in nodes)
+                {
+                    for (var i = 0; i < node.InputSlots.Length; i++)
+                    {
+                        if (node.InputSlots[i] == reluSlot)
+                        {
+                            node.InputSlots[i] = convSlot;
+                        }
+                    }
+                }
+
+                // Deliberately no index++: the node that followed the Relu is now at index + 1, and a
+                // Conv → Relu → Relu chain would otherwise be half-fused.
+            }
+        }
+
+        /// <summary>
+        /// Whether the node at <paramref name="index"/> is a convolution whose output is consumed by the
+        /// immediately following <c>Relu</c> and by nothing else.
+        /// </summary>
+        internal static bool CanFuseConvRelu(List<OnnxGraphNode> nodes, int index)
+        {
+            if (nodes[index].Module is not ConvLayer conv || conv.FusedRelu)
+            {
+                return false;
+            }
+
+            var relu = nodes[index + 1];
+
+            if (relu.Module is not ReluActivation || relu.InputSlots.Length != 1)
+            {
+                return false;
+            }
+
+            var convSlot = nodes[index].OutputSlot;
+
+            if (relu.InputSlots[0] != convSlot)
+            {
+                return false;
+            }
+
+            var readers = 0;
+
+            foreach (var node in nodes)
+            {
+                foreach (var slot in node.InputSlots)
+                {
+                    if (slot == convSlot)
+                    {
+                        readers++;
+                    }
+                }
+            }
+
+            // The Relu is one of them; a second reader means the pre-activation tensor is live elsewhere.
+            return readers == 1;
+        }
 
         private static int[] ResolveInputSlots(
             OnnxNode node,
