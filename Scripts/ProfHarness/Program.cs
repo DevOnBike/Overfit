@@ -124,11 +124,18 @@ internal static class Prof
             return 2;
         }
 
-        using var options = new SessionOptions
+        // "default" leaves ONNX Runtime to pick its own thread counts, which is what every published
+        // comparison in this repository actually measured. `XC-88` exists because that number drifted 29%
+        // across sittings on an untouched binary, and the default arm is the one under suspicion.
+        var pickItsOwn = threads == "default";
+
+        using var options = new SessionOptions();
+
+        if (!pickItsOwn)
         {
-            IntraOpNumThreads = int.Parse(threads),
-            InterOpNumThreads = 1,
-        };
+            options.IntraOpNumThreads = int.Parse(threads);
+            options.InterOpNumThreads = 1;
+        }
 
         // PROF_ORT_OPT=extended drops ONNX Runtime below the layout-optimisation level, so its NCHWc
         // transform does not run and Conv falls back to MlasConv - im2col plus SGEMM, the same structure we
@@ -174,18 +181,37 @@ internal static class Prof
         Console.WriteLine("[PROF] warmup done, steady state starts now");
         Console.Out.Flush();
 
+        // Timed in two halves. A number that is stable within a process but differs between processes is
+        // per-process state — thread counts, or the arena. A number that drifts INSIDE one process is warm-up
+        // or the box. The halves are what separate those, and neither is visible from a single mean.
         var sw = Stopwatch.StartNew();
         var calls = 0;
         var last = 0f;
+        var halfway = seconds / 2.0;
+        var firstHalfCalls = 0;
+        var firstHalfSeconds = 0.0;
 
         while (sw.Elapsed.TotalSeconds < seconds)
         {
             using var results = session.Run(inputs);
             last = results[0].AsTensor<float>().GetValue(0);
             calls++;
+
+            if (firstHalfCalls == 0 && sw.Elapsed.TotalSeconds >= halfway)
+            {
+                firstHalfCalls = calls;
+                firstHalfSeconds = sw.Elapsed.TotalSeconds;
+            }
         }
 
         sw.Stop();
+
+        if (firstHalfCalls > 0 && calls > firstHalfCalls)
+        {
+            Console.WriteLine(
+                $"[PROF] halves: first {firstHalfSeconds * 1000.0 / firstHalfCalls:F3} ms, "
+                + $"second {(sw.Elapsed.TotalSeconds - firstHalfSeconds) * 1000.0 / (calls - firstHalfCalls):F3} ms");
+        }
 
         Console.WriteLine($"[PROF] {calls} calls in {sw.Elapsed.TotalSeconds:F2} s = "
                           + $"{sw.Elapsed.TotalMilliseconds / calls:F3} ms/call");

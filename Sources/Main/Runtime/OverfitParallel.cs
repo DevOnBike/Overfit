@@ -279,132 +279,6 @@ namespace DevOnBike.Overfit.Runtime
         // sides.
         private static PaddedCounter _nextChunk;
 
-        /// <summary>
-        /// Set <c>OVERFIT_PARALLEL_STEAL=0</c> to hand every chunk out from one global counter again.
-        ///
-        /// <para><b>What the global counter costs.</b> It gives a worker that finishes early the chunk the
-        /// counter has reached, which is the start of somebody else's region. Measured 2026-08-19 with uProf
-        /// at eight chunks per worker: supply from this core's L2 fell 5.7% while same-CCX L3 rose 40.3%,
-        /// another CCD's cache 62.1% and DRAM 70.0%, instruction count flat, CPI +10.8%. Region-major
-        /// indexing recovered part of that (-2.9% on the 60.9 MB CNN) by making chunk <c>k + regions</c> the
-        /// continuation of <c>k</c>'s region — but only while workers happen to finish in step, which is an
-        /// approximation with nothing holding it up.</para>
-        ///
-        /// <para><b>What this does instead.</b> Each worker takes a <b>home region</b> on wake and claims
-        /// sub-chunks from its own region's counter until that region is empty, only then walking the other
-        /// regions. Locality is held by construction rather than by luck, and the tail is still drained.</para>
-        ///
-        /// <para><b>Why it is safe even if no worker wakes at all.</b> The calling thread drains too, and a
-        /// drainer does not stop until every region reports empty. So correctness never depends on the
-        /// semaphore waking anybody — the worst case is a slow dispatch, not a lost chunk or a hang. That
-        /// property is what makes this change to the token model acceptable: the pool's token accounting has
-        /// leaked before, and the note on <see cref="DecodeWorkerLoop"/> records what that cost.</para>
-        /// </summary>
-        // OFF, and it must stay off. `XC-97`: the branch below is the abandoned work-stealing protocol, and
-        // any `chunksPerWorker` above 1 enters it and executes OVERLAPPING chunks, then signals the countdown
-        // past zero — a background-thread throw that ends the process without printing a failure. Whole suite
-        // runs finished at 176, 188 and 222 of 2748 tests, each reporting "Passed!", and it took a
-        // purpose-built stress harness to see it: `Scripts/DispatchStress` reproduces it in under twenty
-        // dispatches at two chunks per worker and is clean at one.
-        //
-        // It shipped switched ON because it was committed with the rest of the day's work while known to be
-        // unfinished. The code stays for now — the two design defects it demonstrated are documented on it
-        // and are worth more written down than re-derived — but nothing may switch it on until they are
-        // fixed and `Scripts/DispatchStress` is clean at every factor.
-        internal static readonly bool StealChunks = Environment.GetEnvironmentVariable(OverfitEnvironment.ParallelSteal) == "1";
-
-        /// <summary>Per-region claim counters, padded because every core hammers its own.</summary>
-        private static PaddedCounter[] _regionClaims = [];
-
-        /// <summary>Hands out home regions, one per waking drainer.</summary>
-        private static PaddedCounter _nextRegion;
-
-        /// <summary>Regions in the dispatch being drained. Written under <see cref="_gate"/>.</summary>
-        private static int _regionCount;
-
-        /// <summary>Sub-chunks per region. Written under <see cref="_gate"/>.</summary>
-        private static int _regionSubChunks;
-
-        /// <summary>Whether the dispatch in flight uses the stealing protocol. Written under <see cref="_gate"/>.</summary>
-        private static bool _stealingDispatch;
-
-        /// <summary>
-        /// Bumped once per stealing dispatch, so a drainer can tell whether the shape it captured still
-        /// describes the work it is claiming.
-        ///
-        /// <para><b>This is the defect the generation exists for.</b> A drainer reads <c>_regionCount</c> and
-        /// <c>_regionSubChunks</c> once on entry, but <c>_regionClaims</c> is shared and reset by the next
-        /// dispatch. A worker slow enough to straddle two dispatches then mixes the OLD shape with the NEW
-        /// counters: it computes <c>region * oldSubChunks + sub</c> where the dispatcher wrote
-        /// <c>region * newSubChunks + sub</c>, and executes a chunk nobody assigned it — a duplicate, and
-        /// with a large enough difference an index outside the descriptors entirely.
-        ///
-        /// <para>Reproduced by <c>Scripts/DispatchStress</c> in under four dispatches at two chunks per
-        /// worker. The decode pool solved the same problem the same way (<c>_decodeGen</c>) and its comments
-        /// say why a counted semaphore was not enough.</para>
-        /// </summary>
-        private static long _stealGeneration;
-
-        /// <summary>
-        /// Runs chunks until every region is empty: the home region first, then the others in order.
-        ///
-        /// <para>Claims are interlocked, so a sub-chunk is executed exactly once however many drainers walk
-        /// the same region. A drainer that finds everything claimed simply returns; the worker that claimed
-        /// them is what signals for them.</para>
-        /// </summary>
-        private static void DrainRegions()
-        {
-            // Generation FIRST, shape second. Read the other way round, a drainer could capture the previous
-            // dispatch's shape and this dispatch's generation and believe they belong together.
-            var generation = Volatile.Read(ref _stealGeneration);
-            var regions = _regionCount;
-            var subChunks = _regionSubChunks;
-
-            if (regions <= 0 || subChunks <= 0 || Volatile.Read(ref _stealGeneration) != generation)
-            {
-                return;
-            }
-
-            var home = (Interlocked.Increment(ref _nextRegion.Value) - 1) % regions;
-
-            if (home < 0)
-            {
-                home = 0;
-            }
-
-            // BOUND: regions * subChunks, both fixed for this generation. Every iteration either executes a
-            // chunk, finds the region empty, or finds the generation moved and stops.
-            for (var offset = 0; offset < regions; offset++)
-            {
-                var region = home + offset;
-
-                if (region >= regions)
-                {
-                    region -= regions;
-                }
-
-                for (var taken = 0; taken < subChunks; taken++)
-                {
-                    // Re-checked before every claim, not once per drainer: the next dispatch can begin at any
-                    // point in this loop, and a claim made after it began is a claim on somebody else's
-                    // counters with this drainer's stale shape.
-                    if (Volatile.Read(ref _stealGeneration) != generation)
-                    {
-                        return;
-                    }
-
-                    var sub = Interlocked.Increment(ref _regionClaims[region].Value) - 1;
-
-                    if (sub >= subChunks)
-                    {
-                        break;
-                    }
-
-                    ExecuteChunk((region * subChunks) + sub);
-                }
-            }
-        }
-
         // ── Decode spin-pool (default ON; OVERFIT_DECODE_POOL=0 opts out) ──────────
         // A SEPARATE pool of _decodePoolSize threads (== DecodeMaxWorkers) that SPIN on
         // _decodeGen instead of parking, so the ~180 tiny FFN/attention dispatches per
@@ -570,7 +444,6 @@ namespace DevOnBike.Overfit.Runtime
             // Sized for the widest split the factor allows, not for the worker count: a fan-out may now
             // create several chunks per worker so the claim counter has something to rebalance.
             _chunks = new ChunkState[(long)_workerCount * MaxChunkFactor];
-            _regionClaims = new PaddedCounter[_workerCount];
 
             for (var i = 0; i < _workerCount; i++)
             {
@@ -997,83 +870,6 @@ namespace DevOnBike.Overfit.Runtime
                 // slow falls a whole position behind and starts taking somebody else's region, so nothing
                 // stays contiguous. Locality needs a worker PINNED to a region, which is a change to the
                 // claim protocol rather than to this loop.
-                if (StealChunks && perWorker > 1 && cap > 1)
-                {
-                    var stealRegions = Math.Min(cap, chunkCount);
-                    var stealSubs = Math.Max(1, chunkCount / stealRegions);
-
-                    chunkCount = stealRegions * stealSubs;
-                    _chunkCount = chunkCount;
-                    _completion.Reset(chunkCount);
-
-                    _regionCount = stealRegions;
-                    _regionSubChunks = stealSubs;
-                    _stealingDispatch = true;
-                    _nextRegion.Value = 0;
-
-                    for (var r = 0; r < stealRegions; r++)
-                    {
-                        _regionClaims[r].Value = 0;
-                    }
-
-                    // Bumped LAST, after the shape and the counters are published and before any worker is
-                    // woken. The first version bumped it FIRST, and the comment claiming that was safe was
-                    // exactly backwards: a drainer could read the new generation and the OLD shape, pass its
-                    // own consistency check, and then index with the old formula into the new counters. That
-                    // is the same defect the generation was added to close, moved one line earlier.
-                    Interlocked.Increment(ref _stealGeneration);
-
-                    // Chunk index (region * subChunks + sub), so one region's chunks are contiguous indices
-                    // AND contiguous work. The region-major layout above interleaves the indices instead,
-                    // which is what it needs when claims come from one counter.
-                    var stealRegionWork = (totalWork + stealRegions - 1) / stealRegions;
-                    var stealSubWork = (stealRegionWork + stealSubs - 1) / stealSubs;
-
-                    for (var r = 0; r < stealRegions; r++)
-                    {
-                        var regionStart = (long)rangeStart + ((long)r * stealRegionWork);
-                        var regionEnd = Math.Min(regionStart + stealRegionWork, rangeEnd);
-
-                        for (var s = 0; s < stealSubs; s++)
-                        {
-                            var start = Math.Min(regionStart + ((long)s * stealSubWork), regionEnd);
-                            var index = (r * stealSubs) + s;
-
-                            _chunks[index].Start = (int)start;
-                            _chunks[index].End = (int)Math.Min(start + stealSubWork, regionEnd);
-                            _chunks[index].Body = body;
-                            _chunks[index].Context = context;
-                            _chunks[index].Error = null;
-                        }
-                    }
-
-                    // One token per DRAINER, not per chunk: a woken worker drains its region and then the
-                    // others, so it needs one wake however many chunks it runs.
-                    var drainers = Math.Min(stealRegions, _workerCount) - 1;
-
-                    if (drainers > 0)
-                    {
-                        _startSemaphore.Release(drainers);
-                    }
-
-                    DrainRegions();
-                    _completion.Wait();
-
-                    if (MeasureOccupancy)
-                    {
-                        RecordOccupancy(chunkCount, Stopwatch.GetTimestamp() - dispatchStarted);
-                    }
-
-                    for (var i = 0; i < chunkCount; i++)
-                    {
-                        _chunks[i].Error?.Throw();
-                    }
-
-                    _stealingDispatch = false;
-
-                    return;
-                }
-
                 // The chunk count is rounded to an exact regions x subChunks grid for the region-major
                 // layout. Without that, a count that is not a multiple of the region count leaves some
                 // regions without their last sub-chunk and part of the range is never executed — silently,
@@ -1443,13 +1239,6 @@ namespace DevOnBike.Overfit.Runtime
 #pragma warning restore OVERFIT023
             {
                 _startSemaphore.Wait();
-
-                if (_stealingDispatch)
-                {
-                    DrainRegions();
-
-                    continue;
-                }
 
                 // Claim a unique chunk index. Interlocked.Increment is a
                 // full fence — pairs with the semaphore release so the

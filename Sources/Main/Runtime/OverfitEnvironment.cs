@@ -126,11 +126,6 @@ namespace DevOnBike.Overfit.Runtime
         /// </summary>
         public const string ParallelRegionMajor = "OVERFIT_PARALLEL_REGION_MAJOR";
 
-        /// <summary>
-        /// Set to 0 to hand parallel chunks out from one global counter instead of giving each worker a home
-        /// region to drain before it steals from another.
-        /// </summary>
-        public const string ParallelSteal = "OVERFIT_PARALLEL_STEAL";
 
 
         /// <summary>Set to 0 to split a large batch-1 dense layer by output column, as before the row split.</summary>

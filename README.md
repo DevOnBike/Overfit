@@ -470,70 +470,39 @@ Honest positioning:
 
 #### How that ONNX Runtime ratio scales
 
-A single "faster than ONNX Runtime" number is misleading in both directions, so here is the whole curve.
-Same box, ONNX Runtime 1.29.0, re-measured 2026-08-18 with the IDE shut down. The two large-CNN rows
-include five changes from `XC-78` — a conv work-split, parallel pooling, a dense row-split, folding the
-convolution patch gather into the GEMM's own pack, and repacking the convolution kernels MR-major at load
-— which together took roughly a third off both:
+A single "faster than ONNX Runtime" number is misleading in both directions, so here is the curve across
+four orders of magnitude of model size. One machine, ONNX Runtime 1.29.0 running in the same process, parity
+asserted on every row.
 
 | model | Overfit | ONNX Runtime | who wins |
 |---|---:|---:|---|
 | `Linear(784→10)` — 7,840 params | **231 ns** | 1,880 ns | Overfit **8.1×** |
 | MLP `784→256→128→10` — ~235k params | **6.71 µs** | 8.73 µs | Overfit **1.3×** |
 | MNIST CNN (imported ONNX) | **5.36 µs** | 6.62 µs | Overfit **1.24×** |
-| a 60.9 MB CNN | 18.6 ms | **9.7 ms** | ONNX Runtime **1.91×** |
-| VGG-16 — 30.9 GFLOP/inference | 27.1 ms | **19.0 ms** | ONNX Runtime **1.42×** |
+| a 60.9 MB CNN | 18.5 ms | **9.8 ms** | ONNX Runtime **1.89×** |
+| VGG-16 — 30.9 GFLOP/inference | 27.4 ms | **18.9 ms** | ONNX Runtime **1.45×** |
 
 **What the two ends actually measure.** On a 7,840-parameter `Linear` the arithmetic takes a few hundred
-nanoseconds, so the result is dominated by ONNX Runtime's ~1.6 µs of per-call dispatch — that 8.2× is a real
-property you feel on small models called at high rates, and it is mostly a measure of **call overhead**. On
-VGG-16 the arithmetic dominates and the result measures **kernel quality**, where Microsoft's MLAS is
-about 1.8× ahead of us.
+nanoseconds, so the result is dominated by ONNX Runtime's per-call dispatch — that 8x is largely a measure of
+**call overhead**, and it is a real property you feel on small models called at high rates. On VGG-16 the
+arithmetic dominates and the result measures **kernel quality**, where Microsoft's hand-written MLAS is about
+1.45x ahead of us.
 
-**Where that gap is, measured rather than assumed — and it moved twice in one day.** Both engines were run
-through the same loop at 1, 2, 4, 8 and 16 physical cores. That showed the difference was **not** threading:
-scaling matched almost exactly and the ratio was flat at **2.00× on a single core**. A per-layer cost model,
-fitted on two layers and checked on seven held-out ones, then split the per-core work in two — the **GEMM
-micro-kernel at 301 GFLOP/s, 84% of this box's single-core FMA ceiling**, against a **scalar im2col gather
-worth 39% of single-core time**. Vectorising that gather took the single-core ratio to **1.41×**.
+**Where the remaining gap is: 92% of it is convolution.** The dense layers are at **1.05x** — two engines
+hitting the same wall on 411 MB of fp32 weights — and activations cost nothing on either side, because both
+fuse them into the convolution epilogue.
 
-It also moved the bottleneck, which is worth stating because it is the current position rather than a
-finished story: **Overfit now scales 5.43× across 16 cores where ONNX Runtime scales 6.54×**, so the
-remaining difference is memory-bound residue rather than kernel quality. Provenance, including the
-hypotheses that were refuted along the way, is in
-[`docs/measured-baselines.md`](docs/measured-baselines.md).
+**Both models started far further back.** VGG-16 was 79.0 ms and the 60.9 MB CNN 67.7 ms when this line of
+work began, i.e. 3.72x and 5.24x behind. They are now **2.9x and 3.6x faster in absolute terms**, and the gap
+closed over the same period, during which ONNX Runtime's own figure also fell — by how much is not
+attributed, and the [comparison document](docs/onnx-runtime-comparison.md) says why.
 
-**Every row is a like-for-like thread count, and that was checked rather than assumed.** The three small
-rows run ONNX Runtime pinned to one thread, so they are only honest if Overfit is single-threaded there too.
-Re-running them with `OVERFIT_PARALLEL_WORKERS=1` moved Overfit by 0.9% on the MLP and 1.2% on the MNIST CNN
-— i.e. those two models never reach a parallel path, and the comparison is one thread against one thread.
-The `Linear` row is the exception: forcing one worker made Overfit **faster**, 226 → 190 ns, which would
-raise the ratio to 9.9×. **The table publishes the slower, default-configuration number**, because that is
-what a consumer gets without setting anything. The two large CNN rows give both engines the whole machine.
+**Pick on the shape of your workload, not on one ratio**: many small in-process inferences favour Overfit; one
+large convolutional model favours ONNX Runtime.
 
-**The CNN gap is kernels, not threading**, and that is measured rather than assumed: with thread counts
-matched on both sides the gap is roughly constant across thread counts, and the two engines scale about
-equally with cores (Overfit 4.2×, ONNX Runtime 4.9× going from one thread to the whole machine; measured
-2026-08-17). Allocation stays 0 B on the Overfit side throughout, against 224–904 B per call for ONNX
-Runtime.
-
-**The output is identical, only the speed differs.** Both large-CNN rows carry a parity check in the
-benchmark's own setup: cosine 1.000000 against ONNX Runtime, max absolute difference 6.7e-8 on the 60.9 MB
-CNN and 3.2e-7 on VGG-16, same argmax. This is a performance gap, not an accuracy trade.
-
-**The two large-CNN rows carry a session-level uncertainty the small rows do not, and it is ONNX Runtime's figure that moves.** Across three sittings its 60.9 MB CNN result read 12.93, then 9.79, then 9.19 ms — a **29% spread on an untouched binary**, while ours moved 0.1% between the last two — while all three small benchmarks stayed inside 1.3% across the same gap. **What moved is not identified.** Both engines were re-measured together in the later sitting so the ratio is internally consistent, but do not compare a large-CNN millisecond figure here against one quoted in an earlier document.
-
-**One caveat on the near-parity rows.** Across process repeats Overfit's MLP figure moved 0.4% while ONNX
-Runtime's moved 7% and ML.NET's moved 29%, so the 1.3× is quoted from the repeat where the *opponent* was
-fastest. Treat the three rows between 1.2× and 1.3× as "about even", not as a ranking.
-
-**Pick on the shape of your workload, not on one ratio**: many small in-process inferences favour Overfit;
-one big convolutional model favours ONNX Runtime, and if you can ship native dependencies you should use it
-for that. Method and full caveats: [`docs/measured-baselines.md`](docs/measured-baselines.md).
-
-Full benchmark tables and caveats live in [`docs/TECHNICAL.md`](docs/TECHNICAL.md).
-
----
+> **The whole curve, the decomposition of the convolution gap, the six approaches measured NOT to close it,
+> and the session-level uncertainties are in
+> [`docs/onnx-runtime-comparison.md`](docs/onnx-runtime-comparison.md).**
 
 ## Supported model families
 

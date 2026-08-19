@@ -369,6 +369,116 @@ deliberately skipped — `PB-ORT1` measured the first at 61% within-version spre
 and found the second unable to resolve anything (BDN raises `MinIterationTime`; one iteration is 1.07 ms
 against a 100 ms target).
 
+### Verified headline after the 2026-08-19 session, and a regression check across the published table
+
+Two repeats per large model with ONNX Runtime in the same process, parity asserted on every run
+(cosine 1.000000, same argmax):
+
+| model | Overfit | ONNX Runtime | ratio | at the start of this line of work |
+|---|---:|---:|---:|---|
+| VGG-16 | 27.34 / 27.39 ms | 18.82 / 18.88 ms | **1.45x** | 79.01 ms, 3.72x |
+| CNN, 60.9 MB | 18.47 / 18.53 ms | 9.72 / 9.90 ms | **1.89x** | 67.70 ms, 5.24x |
+
+**2.9x and 3.6x faster in absolute terms**, with the gap closing from 3.72x and 5.24x **while ONNX Runtime
+itself got faster** over the same period (12.93 to 9.8 ms on the CNN).
+
+**No regression on the small models**, which is what the check was for: the MNIST CNN runs **5.324 us**
+against 5.36 previously, and the zero-allocation MLP path **6.949 us** against 6.71 — the second is +3.6%,
+inside this box's run-to-run band and on a different arm label, so it is not read as a change.
+
+### `XC-96` closed and the branch removed from the tree (2026-08-19)
+
+Three attempts, four defects found and fixed, and it still executed overlapping chunks. **The code is gone.**
+Dead code that ends the process when a switch is flipped is a liability, and nothing in the findings needs it
+to survive: the four defects, the exoneration of the claim protocol and the two remaining untested causes are
+all written up below and in `XC-96`.
+
+Removed: `StealChunks` and its environment name, `_regionClaims`, `_nextRegion`, `_regionCount`,
+`_regionSubChunks`, `_stealingDispatch`, `_stealGeneration`, `DrainRegions`, the dispatch branch and the
+worker-loop branch. Zero references left.
+
+Verified after removal: `Scripts/DispatchStress` clean at **22,500 dispatches** both with and without the
+now-meaningless environment variable set, and the suite **2748/0 twice**.
+
+### `XC-88`: the 29% ONNX Runtime drift does NOT reproduce, and the guard that judged the window was broken (2026-08-19)
+
+`XC-88` was filed because ONNX Runtime read **12.93, then 9.79, then 9.19 ms** on the same untouched binary
+across three sittings of the 60.9 MB CNN, and the task asked whether that tracked thread count, power state or
+ORT's own arena warm-up. The discriminating shape was stated before measuring: *stable inside a process but
+different between processes is per-process state; drifting inside one process is warm-up or the box; both
+engines drifting together is the box.*
+
+**Nine process launches across two independent instruments put ONNX Runtime between 9.69 and 10.04 ms.**
+
+| instrument | arm | readings | spread |
+|---|---|---|---|
+| plain loop, 5 launches | ORT, its own thread choice | 9.83..9.93 ms | **1.0%** |
+| plain loop, 5 launches | ORT, 16 threads forced | 9.69..10.04 ms | **3.6%** |
+| BenchmarkDotNet, 4 launches | ORT | 9.72..9.96 ms | 2.5% |
+| both instruments | **Overfit, the control** | 18.45..18.74 ms | **1.0-1.2%** |
+
+**Two of the three filed candidates are ruled out as live mechanisms.** Timing each process in halves put the
+first-to-second-half movement at **-3.2%..+1.5%**, so nothing is still warming after the 40 warm-up calls —
+that closes the arena. Thread count is closed from the other direction, and with a result worth keeping:
+**forcing 16 threads is measurably *worse* than letting ONNX Runtime choose**, 3.6% spread against 1.0%. The
+published comparisons use ORT's own choice and should keep doing so. The pin has not moved either —
+`Microsoft.ML.OnnxRuntime` has been 1.29.0 since 2026-04-06, so no package bump explains it.
+
+> **What is NOT established: what actually happened in the original three sittings.** Power state was the
+> third candidate and I did not measure it; it cannot be reconstructed now, because the sittings are gone and
+> the effect does not reproduce on demand. **"It does not reproduce" is not "it was the box"** — it only
+> means the cause is not a standing property of the engine, the harness or the pin. A reading taken today is
+> reproducible to 1-2.5% across launches; the 12.93 remains unexplained and stays quoted with its sitting.
+
+**The measurement also condemned itself, and that defect was real.** Both windows came back
+`*** CONTAMINATED ***` while the share probe beside the verdict printed **2.31% against an 8% ceiling** — a
+guard disagreeing with its own printed number. The cause: `DESKTOP_LOUD_SECONDS` condemned a window when one
+desktop application spent **8.0 core-seconds**, an absolute, and every sample it was calibrated on ran 30-32
+seconds. The denominator was never written down. `XC-88` measured for 296 s, where Parsec's ordinary
+unchanged background reaches 21.84 core-s of 4745 — **0.46%, a third of the calibrated share** — and was
+condemned for it.
+
+The failure direction is the bad one: **the rule got stricter the longer the window**, so the runs most
+expensive to repeat were the ones most likely to be thrown away. It is now `DESKTOP_LOUD_SHARE`, expressed as
+a share of the window, and the calibration is preserved rather than re-guessed: `8.0 / (30.0 x 16)` is still
+exactly 8.0 core-seconds at 30 seconds and becomes 80 at 300. Both `XC-88` windows clear at 0.51% and 0.46%.
+The **scanner** probe stays absolute on purpose — Defender and Windows Update thrash L3 and the disk far
+beyond what their CPU seconds suggest, so "any activity contaminates" is the intended rule there.
+
+### `XC-96` third attempt: the packed CAS claim does NOT close it, which exonerates the claim protocol (2026-08-19)
+
+The design named at the end of the second attempt was implemented: the per-region counters were replaced with
+**packed claim words taken by compare-and-swap**, reusing `DecodeChunkClaim` rather than inventing a second
+packing convention — the same `Publish` / `TryClaim` pair the decode pool already ships and already has a
+concurrency test for. The generation now travels **inside** each word, so a claim from a stale generation
+loses its CAS instead of being validated separately.
+
+**It still fails.** `Scripts/DispatchStress` with stealing on: length 2 at two chunks per worker fails at
+dispatch 10, length 100 at four fails at dispatch 4, length 4096 at two fails at dispatch 5. Always the same
+signature — an index executed twice, none missing.
+
+> **That is a finding, and it is the useful part.** With atomic, generation-validated claims **no index can be
+> claimed twice within a generation**, and the stealing branch was checked to `return` rather than fall
+> through into the ordinary descriptor loop. So the duplicate does not come from the claim protocol at all —
+> **the claim protocol is exonerated.** What remains are the two paths a chunk can be executed on without
+> being claimed: the token accounting, and the interaction between `_stealingDispatch` and the worker loop.
+
+**Stopped after the fourth attempt**, and this time not for lack of an idea but for lack of a *premise worth
+testing*. Four patches have each moved the failure later without closing it, and the fifth would be a guess.
+Recorded so the next attempt starts from what is ruled out rather than from the beginning:
+
+| # | defect | status |
+|---|---|---|
+| 1 | mode flag cleared at end of dispatch, late worker takes stale path | fixed |
+| 2 | caller drains greedily, dispatch runs single-threaded | fixed |
+| 3 | drainer captures shape while counters are reset under it | fixed |
+| 4 | generation published before the shape rather than after | fixed |
+| - | **claim protocol** | **exonerated by the CAS version still failing** |
+| ? | **token accounting, or `_stealingDispatch` versus the worker loop** | **untested** |
+
+**The branch remains off by default and the shipping path is unaffected**: `DispatchStress` clean at 22,500
+dispatches, suite 2748/0 after the work.
+
 ### `XC-96` second attempt: two more defects found, still not closed, and the design that would close it (2026-08-19)
 
 The work-stealing branch was re-opened with `Scripts/DispatchStress` as the instrument — a per-index ledger

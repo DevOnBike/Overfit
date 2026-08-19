@@ -13,6 +13,9 @@ for a first contribution.
   that contradict the obvious answer, and what not to build at all. **This is not how a web or
   line-of-business application is written**, and the difference is not taste — the library runs inside
   somebody else's process, often ahead-of-time compiled, with no JIT to rescue it.
+- [`onnx-runtime-comparison.md`](onnx-runtime-comparison.md) — Overfit against ONNX Runtime across four
+  orders of magnitude of model size: the whole curve, what the remaining convolution gap is made of, the six
+  approaches measured **not** to close it, and the session-level uncertainties a single ratio would hide.
 - [`performance-discipline.md`](performance-discipline.md) — how a performance claim is earned: the four
   ways a benchmark lies here, the table of measured changes that were **reverted**, and eleven rules
   distilled from a session in which nine mechanism hypotheses were killed by measurement.

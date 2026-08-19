@@ -140,9 +140,21 @@ DESKTOP_PROCESSES = {
 #: Core-seconds from a desktop application above which it is named in the report.
 DESKTOP_SECONDS = 0.5
 
-#: Core-seconds from a single desktop application that condemn a window on their own. Set well above the
-#: measured background of the always-present ones so it fires on something that started, not on the desktop.
-DESKTOP_LOUD_SECONDS = 8.0
+#: Share of the window's core-seconds, taken by a single desktop application, that condemns it on its own.
+#: Set well above the measured background of the always-present ones so it fires on something that started,
+#: not on the desktop.
+#:
+#: **This was an absolute 8.0 core-seconds until 2026-08-19, and that was a defect that only shows on long
+#: windows.** Every sample it was calibrated on ran 30-32 s, so 8.0 core-s meant "1.67% of the window"
+#: without anybody writing the denominator down. `XC-88` then measured for 296 s: Parsec's ordinary,
+#: unchanged background reached 21.84 core-s of 4745 - **0.46%, a third of the calibrated share** - and the
+#: window was condemned while the share probe beside it reported 2.31% against an 8% ceiling. A guard whose
+#: verdict contradicts its own printed number teaches the reader to ignore both.
+#:
+#: The failure direction is the bad one: it gets **stricter** the longer you measure, so the runs most
+#: expensive to repeat are the ones most likely to be thrown away. Expressed as a share it is invariant, and
+#: it keeps the calibration it was given rather than replacing it with a fresh guess.
+DESKTOP_LOUD_SHARE = 8.0 / (30.0 * PHYSICAL_CORES)
 
 #: Names belonging to the measurement itself, excluded from the foreign total.
 MEASUREMENT_PROCESSES = {
@@ -207,9 +219,11 @@ class Verdict:
         for name, seconds in self.named:
             print(f"  [machine]   scanner/updater active: {name} used {seconds:.2f} core-s")
 
+        loud = DESKTOP_LOUD_SHARE * self.available
+
         for name, seconds in self.desktop:
             closable = name not in ("dwm", "explorer")
-            verdict = " — CLOSE IT" if seconds >= DESKTOP_LOUD_SECONDS and closable else ""
+            verdict = " — CLOSE IT" if seconds >= loud and closable else ""
             print(f"  [machine]   desktop app: {name} used {seconds:.2f} core-s{verdict}")
 
         if not self.quiet:
@@ -256,7 +270,7 @@ def judge(before, after, wall_seconds, cores=PHYSICAL_CORES):
     UNCLOSABLE = {"dwm", "explorer"}
 
     shouting = [name for name, seconds in desktop
-                if seconds >= DESKTOP_LOUD_SECONDS and name not in UNCLOSABLE]
+                if seconds >= DESKTOP_LOUD_SHARE * available and name not in UNCLOSABLE]
     quiet = share <= QUIET_CEILING and not named and not shouting
 
     return Verdict(quiet, share, total, available, foreign, named, desktop)
