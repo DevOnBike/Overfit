@@ -104,6 +104,17 @@ namespace DevOnBike.Overfit.Runtime
         public const string ConvVectorGather = "OVERFIT_CONV_VECTOR_GATHER";
 
         /// <summary>
+        /// Set to 0 to evaluate GELU with the scalar <c>MathF.Tanh</c> loop that shipped before 2026-08-19
+        /// instead of the vectorised identity. Default is the vectorised one.
+        ///
+        /// <para><b>It exists to keep an A/B possible in ONE process.</b> The activation itself was measured
+        /// at 9.4-12.5x, but that says nothing about its share of a token, and comparing two separate
+        /// process launches cannot separate the change from the box. Both arms are kept so the question can
+        /// be re-asked on another model without rebuilding.</para>
+        /// </summary>
+        public const string GeluVector = "OVERFIT_GELU_VECTOR";
+
+        /// <summary>
         /// Set to 1 to record what each parallel fan-out cost: occupancy, straggler ratio and join overhead.
         ///
         /// <para>It exists because a hardware profiler cannot see this. Counters key on cycles not in halt,

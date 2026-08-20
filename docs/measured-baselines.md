@@ -400,6 +400,50 @@ worker-loop branch. Zero references left.
 Verified after removal: `Scripts/DispatchStress` clean at **22,500 dispatches** both with and without the
 now-meaningless environment variable set, and the suite **2748/0 twice**.
 
+### What the vectorised GELU is worth per TOKEN: 6.5-7.1% on GPT-2 small, and the microbenchmark under-predicts it 4.7x (2026-08-19)
+
+The activation was measured at 9.4-12.5x. That says nothing about a token, so it was measured end to end:
+GPT-2 small, 64 generated tokens, both arms **in one process** through
+`CachedFeedForwardBlock.VectorGelu`, so they share a JIT, a heap and a thermal state.
+
+**The lever was proven live first.** Making `ApplyGeLU` throw reddens all three GPT-2 KV-cache tests. Without
+that check a flat 1.00 would have read as "GELU does not matter" when it would have meant "the switch is not
+connected".
+
+| | sitting 1 | sitting 2 | movement |
+|---|---|---|---|
+| `Decode_ScalarGelu` | 835.3 ms | 833.8 ms | -0.18% |
+| `Decode_VectorGelu` | 775.8 ms | 779.2 ms | +0.44% |
+| `CanaryScalarMath` | 2.668 ms | 2.688 ms | +0.74% |
+| `CanaryMemory` | 0.351 ms | 0.353 ms | +0.51% |
+| **saving** | **929.6 us/token = 7.1%** | **852.7 us/token = 6.5%** | |
+
+**GPT-2 small is the upper bound**: plain GELU over the whole hidden layer, where a GeGLU model such as Gemma
+applies it only to the gate branch.
+
+**The canary was missing for the first two sittings and that cost a wrong reading.** Separated in time, the
+same binary gave savings of 1200 and 514 us/token — a 2.3x swing, with the SCALAR arm moving 4.8% and the
+vectorised one 0.7%. Back to back with canaries in place, everything is flat to under 1% and both sittings
+agree. **The two canaries are deliberately a PAIR**: one is a fixed scalar-transcendental loop, aimed at the
+specific suspect, and one is a fixed pass over memory. A canary made only of memory traffic could not have
+distinguished a scalar-throughput excursion from anything else.
+
+> **UNEXPLAINED, and recorded rather than smoothed over: the microbenchmark under-predicts the end-to-end
+> saving by 4.7x.** Per element the decode saves **24.1 ns** where `GeluActivationBenchmark` measured
+> **5.17 ns**. The element count is not the discrepancy — it was counted directly with a temporary probe and
+> came back **36,864 per token over exactly 12.00 calls**, matching the arithmetic to the digit. So the
+> scalar loop genuinely costs about 4.7x more per element inside a decode than in a benchmark of itself.
+>
+> Two hypotheses survive and neither is tested. **(a) Input distribution** — the benchmark feeds uniform
+> [-4, 4] and `MathF.Tanh` is argument-dependent. **(b) Cache residency** — between GELU calls the decode
+> streams megabytes of weights through every level, so the transcendental's own constants and tables start
+> cold each time, where a tight benchmark loop keeps them in L1. Ruled OUT: the decode spin pool, measured
+> both ways at 514 vs 547 us/token.
+>
+> **The transferable rule, which is worth more than the cause**: a kernel microbenchmark here under-reported
+> a real end-to-end effect by nearly 5x. Extrapolating from one to the other is not conservative in either
+> direction, and the end-to-end number has to be measured.
+
 ### GELU in the decode FFN was scalar and cost 6.0 ns per element: vectorised, 9.4-12.5x (2026-08-19)
 
 `CachedFeedForwardBlock.ApplySiLU` carried the note that *"the scalar path's per-element `MathF.Exp` was the

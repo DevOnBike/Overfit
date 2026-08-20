@@ -4,6 +4,7 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using System.Numerics.Tensors;
+using DevOnBike.Overfit.Runtime;
 using DevOnBike.Overfit.Tensors;
 
 namespace DevOnBike.Overfit.LanguageModels.Runtime
@@ -532,8 +533,39 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// <c>Sources/Benchmark/GeluActivationBenchmark.cs</c> holds both shapes with the scalar one as the
         /// baseline.</para>
         /// </summary>
+        /// <summary>
+        /// Which GELU evaluation runs. Read once from <see cref="OverfitEnvironment.GeluVector"/> and left
+        /// settable so a benchmark can alternate arms inside one process — a comparison across two process
+        /// launches cannot tell a code change from the machine moving.
+        /// </summary>
+        internal static bool VectorGelu { get; set; } =
+            Environment.GetEnvironmentVariable(OverfitEnvironment.GeluVector) != "0";
+
+        /// <summary>The scalar form that shipped before 2026-08-19, kept as the comparison arm.</summary>
+        internal static void ApplyGeLUScalar(Span<float> values)
+        {
+            const float sqrtTwoOverPi = 0.7978845608028654f;
+            const float coeff = 0.044715f;
+
+            for (var i = 0; i < values.Length; i++)
+            {
+                var x = values[i];
+                var x3 = x * x * x;
+                var inner = sqrtTwoOverPi * (x + (coeff * x3));
+
+                values[i] = 0.5f * x * (1f + MathF.Tanh(inner));
+            }
+        }
+
         internal static void ApplyGeLU(Span<float> values)
         {
+            if (!VectorGelu)
+            {
+                ApplyGeLUScalar(values);
+
+                return;
+            }
+
             // `TensorPrimitives` REJECTS an empty span — `ArgumentException: Input span arguments must not
             // be empty` — where the scalar loop this replaced simply did not execute. Found by the parity
             // test rather than by reasoning, which is the whole reason the empty case is in it: a
