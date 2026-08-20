@@ -276,6 +276,8 @@ written. They were missed because the question asked was *"how do I replicate th
 than *"what do we already share"* — the answer follows the question, and the wrong question is not recoverable
 by working harder on it. Through the shared interface the two engines came out level: 26.3 against 25.4 tok/s.
 
+**A third instance the same day, and it is the one that generalises: the instrument reported ELEVEN consecutive areas as `OK ... passed 0 failed 0 skipped 0`.** An orphaned test host from a killed run held `Global\DevOnBike.Overfit.MachineMeasurement`, the build guard correctly refused every subsequent compile, and each slice produced zero tests. The runner's verdict was `failed == 0`, so it printed OK eleven times for a suite that had not executed a single test. **Nothing failed because nothing ran, and the summary could not tell those apart** — the exact shape of `TG-T14`, where eight red tests sat unnoticed for six days behind a gate that never reached its own finish line, reproduced inside a tool written that afternoon to catch such things. Two rules follow. **Count what EXECUTED, never only what failed**: a slice with `passed + failed + skipped == 0` is a failure of the run and must exit non-zero. And **capture the reason, not just the absence** — the build errors were streaming past in the same output the runner was already reading, and it discarded them. The tell that saved it was not the counts but the elapsed time: `0.0 min` for an area that had taken 45.
+
 ## Verify before you answer — never guess a path, a symbol or a structure
 
 **If you lack the precise context, the file, or the command output needed to answer, STOP and run a tool.**

@@ -98,6 +98,12 @@
 
 	<ItemGroup>
 		<None Include="test_fixtures\**\*" CopyToOutputDirectory="PreserveNewest" />
+		<!-- xunit.runner.json is NOT copied automatically: checked 2026-08-20 against
+		     xunit.v3.core.mtp-v2 4.0.0's buildTransitive props and targets, and neither carries a rule for it.
+		     Dropping the file in the project without this line is a silent no-op — the runner simply never sees
+		     it and reports nothing, which is the same failure shape as the RunSettings key that made `TG-T14`'s
+		     first serial arm INCONCLUSIVE. -->
+		<Content Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
 	</ItemGroup>
 
 	<!-- AotSmokeTest is its own AOT-publish exe project living under Tests/; exclude its sources from this

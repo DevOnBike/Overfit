@@ -500,7 +500,26 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             // back to an F32 transposed LM head (the kernel's input-major layout).
             // Exhaustive across the quantized / F32-fallback pair below; see the note on wq/wk/wv.
             DecodeWeight lmHead = default;
-            if (quantize && dModel % Q8DotKernel.BlockSize == 0)
+
+            // Tied weights over an already-Q8 embedding: reuse it rather than rebuild it.
+            //
+            // This branch became REACHABLE on 2026-08-20, when `XC-97` made Q5_0 embeddings load as Q8
+            // instead of F32. Before that a tied non-K-quant embedding always arrived as F32 and `headKind`
+            // 3 below quantized it — the comment there still says "Reached only when token_embd is
+            // F16/F32/BF16", which was true until the change and is why this needed writing at the same
+            // time. Without it a tied Q5_0 model reaches `embedWeights.F32`, which is `_f32!` over a null,
+            // and dies with a NullReferenceException rather than a diagnosis.
+            //
+            // Reusing is also strictly better than requantizing: the LM head IS the embedding under tied
+            // weights, so a second Q8 copy is 145 MB of duplicate on Qwen2.5-0.5B.
+            var reuseTiedQuantizedEmbedding = quantize && tieWeights && embedWeights.IsQuantized;
+
+            if (reuseTiedQuantizedEmbedding)
+            {
+                lmHead = embedWeights.Quantized;
+            }
+
+            if (!reuseTiedQuantizedEmbedding && quantize && dModel % Q8DotKernel.BlockSize == 0)
             {
                 var lmHeadInfo = reader.Tensors[tieWeights ? "token_embd.weight" : "output.weight"];
                 var headKind = lmHeadInfo.Type == GgmlType.Q4_K && dModel % Q4KWeight.SuperBlockElements == 0 ? 0
@@ -914,6 +933,18 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             if (info.Type == GgmlType.Q8_0)
             {
                 return LoadQ8Native(reader, info, inDim, outDim);
+            }
+
+            // Q5_0 reaches Q8 without the F32 intermediate below (`XC-97`). The RESULT is identical either
+            // way — both routes end in the same `Q8DotKernel.Quantize` over the same decoded values — so
+            // this buys nothing in steady state and everything at the PEAK: the fallback underneath rents
+            // `inDim * outDim` floats per tensor, which for a 4864-wide FFN row is 17 MB held while the Q8
+            // output is built beside it.
+            if (info.Type == GgmlType.Q5_0
+                && inDim % GgmlDequant.Q5_0_BlockElements == 0
+                && inDim % Q8DotKernel.BlockSize == 0)
+            {
+                return LoadQ5_0AsQ8(reader, info, inDim, outDim, mmap);
             }
 
             var elementCount = checked((int)((long)inDim * outDim));
