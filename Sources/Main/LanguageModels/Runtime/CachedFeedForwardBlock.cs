@@ -510,26 +510,58 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             }
         }
 
-        private static void ApplyGeLU(Span<float> values)
+        /// <summary>
+        /// The tanh approximation of GELU, vectorised through the same primitive the SiLU path above uses.
+        ///
+        /// <para><b>The rewrite is an algebraic identity, not a second approximation.</b>
+        /// <c>tanh(z) = (1 - e^-2z) / (1 + e^-2z)</c>, so <c>0.5 * (1 + tanh(z))</c> is exactly
+        /// <c>1 / (1 + e^-2z)</c>, which is <c>sigmoid(2z)</c>. The published form
+        /// <c>0.5 * x * (1 + tanh(z))</c> is therefore <c>x * sigmoid(2z)</c> for the same <c>z</c>. Nothing
+        /// about the accuracy of the GELU approximation changes; only how it is evaluated does.</para>
+        ///
+        /// <para><b>Measured 2026-08-19, and the losing prediction is recorded with the winning one.</b> The
+        /// scalar loop below cost <b>6.0 ns per element</b> — roughly 28 cycles in <c>MathF.Tanh</c> alone.
+        /// This form makes three passes over the buffer where the scalar made one, and at these widths the
+        /// buffer sits in L1 or L2, so it was genuinely possible for the extra traffic to lose. It did not:
+        /// <b>10.1x at 3072, 11.1x at 11008, 11.5x at 14336</b>, all three widths, canary flat, run-to-run
+        /// spread 0.1-0.3%. Going through <c>Tanh</c> instead of the identity costs 1.12-1.21x, so the
+        /// identity is doing real work rather than tidying the algebra.</para>
+        ///
+        /// <para>Differs from the scalar form within a few ULP, the same caveat
+        /// <see cref="ApplySiLU"/> carries: this is not a byte-parity loader path.
+        /// <c>Sources/Benchmark/GeluActivationBenchmark.cs</c> holds both shapes with the scalar one as the
+        /// baseline.</para>
+        /// </summary>
+        internal static void ApplyGeLU(Span<float> values)
         {
-            // Approximation used by many transformer implementations:
-            //
-            // 0.5 * x * (1 + tanh(sqrt(2/pi) * (x + 0.044715*x^3)))
-            //
-            // This is intentionally scalar for now. The first goal is a correct,
-            // allocation-free single-token FFN block. Vectorization can be done
-            // later if this becomes a bottleneck.
+            // `TensorPrimitives` REJECTS an empty span — `ArgumentException: Input span arguments must not
+            // be empty` — where the scalar loop this replaced simply did not execute. Found by the parity
+            // test rather than by reasoning, which is the whole reason the empty case is in it: a
+            // vectorised rewrite inherits its primitive's argument contract, and that contract is not
+            // usually the one the loop had.
+            if (values.Length == 0)
+            {
+                return;
+            }
+
             const float sqrtTwoOverPi = 0.7978845608028654f;
             const float coeff = 0.044715f;
+
+            using var scratch = new PooledBuffer<float>(values.Length, clearMemory: false);
+
+            var inner = scratch.Span;
 
             for (var i = 0; i < values.Length; i++)
             {
                 var x = values[i];
                 var x3 = x * x * x;
-                var inner = sqrtTwoOverPi * (x + coeff * x3);
 
-                values[i] = 0.5f * x * (1f + MathF.Tanh(inner));
+                // The factor of two folded in here is what turns 0.5*(1+tanh(z)) into sigmoid(2z).
+                inner[i] = 2f * sqrtTwoOverPi * (x + (coeff * x3));
             }
+
+            TensorPrimitives.Sigmoid(inner, inner);
+            TensorPrimitives.Multiply(values, inner, values);
         }
     }
 }

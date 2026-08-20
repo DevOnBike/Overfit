@@ -213,8 +213,33 @@ class Verdict:
     def report(self, label):
         state = "QUIET" if self.quiet else "*** CONTAMINATED ***"
 
+        # WHICH probe fired, in the headline. Three times on 2026-08-19 this line read
+        # "*** CONTAMINATED *** — 0.75% (ceiling 8%)", which is a verdict contradicting the number printed
+        # beside it. The verdict was right and the number was about a different probe, but a reader cannot
+        # know that, and a guard that looks broken gets ignored. Naming the probe costs one string.
+        reason = ""
+
+        if not self.quiet:
+            loud = DESKTOP_LOUD_SHARE * self.available
+            causes = []
+
+            if self.share > QUIET_CEILING:
+                causes.append("share")
+
+            if self.named:
+                causes.append("scanner: " + ", ".join(name for name, _ in self.named))
+
+            shouting = [name for name, seconds in self.desktop
+                        if seconds >= loud and name not in ("dwm", "explorer")]
+
+            if shouting:
+                causes.append("desktop app: " + ", ".join(shouting))
+
+            reason = "  [condemned by " + "; ".join(causes) + "]"
+
         print(f"  [machine] {label}: {state} — foreign {self.foreign_seconds:.2f} core-s of "
-              f"{self.available:.0f} = {100 * self.share:.2f}% (ceiling {100 * QUIET_CEILING:.0f}%)")
+              f"{self.available:.0f} = {100 * self.share:.2f}% (ceiling {100 * QUIET_CEILING:.0f}%)"
+              f"{reason}")
 
         for name, seconds in self.named:
             print(f"  [machine]   scanner/updater active: {name} used {seconds:.2f} core-s")

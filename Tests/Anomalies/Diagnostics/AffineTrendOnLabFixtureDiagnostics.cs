@@ -52,11 +52,26 @@ namespace DevOnBike.Overfit.Tests.Anomalies.Diagnostics
             var name = Environment.GetEnvironmentVariable("OVERFIT_AFFINE_FIXTURE")
                        ?? "lab-window-healthy-12pod.csv";
 
-            Environment.SetEnvironmentVariable("OVERFIT_LAB_FIXTURE_NAME", name);
+            // Resolved locally and passed to the overload that takes a path. This used to set
+            // `OVERFIT_LAB_FIXTURE_NAME` instead, which selects the recording for EVERY test in the process
+            // and was never restored — `TG-T14`. The cost was not this test: it was five plain `[Fact]`
+            // tests in three other classes, which from then on loaded the twelve-replica HEALTHY recording
+            // where they expected the four-replica one with an injected throttle. They failed with an empty
+            // collection and an out-of-range index, neither of which points anywhere near here.
+            //
+            // It was invisible for at least six days because it needs `OVERFIT_RUN_LONG=1` to fire — this
+            // is a `[LongFact]`, so the ordinary suite never ran it — and the area gate that would have
+            // shown it hit its own timeout before finishing. The failure count also VARIED (7, 8, 9) with
+            // the order xunit happened to pick, which reads as flakiness rather than as a leak.
+            //
+            // The general rule: a test must not write a process-wide setting that another test reads. If
+            // one is unavoidable, restore it in a `finally` — and prefer, as here, an overload that takes
+            // the value as an argument.
+            var path = System.IO.Path.Combine(LabWindowFixture.Directory, name);
 
-            Assert.True(LabWindowFixture.Exists, $"no recording at {LabWindowFixture.Path}");
+            Assert.True(System.IO.File.Exists(path), $"no recording at {path}");
 
-            var (recorded, _) = LabWindowFixture.Load();
+            var (recorded, _) = LabWindowFixture.Load(path);
             var windowMinutes = Setting("OVERFIT_AFFINE_WINDOW", 20);
             var stepMinutes = Setting("OVERFIT_AFFINE_STEP", 5);
 

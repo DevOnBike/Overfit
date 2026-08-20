@@ -1,4 +1,17 @@
 # .gitattributes
 
+# Line endings are declared HERE rather than left to each developer's `core.autocrlf`, which is a
+# machine setting and not part of the repository. Checked 2026-08-19: the two rules below covered 9 of
+# 2261 tracked files, and `*.sh` matched none — so normalisation was resting entirely on one local git
+# config being set the same way on every clone. The index happened to be clean (every file stored as LF,
+# none mixed), but 28 files already carried MIXED endings in the WORKING TREE, and CI runs on Linux where
+# `core.autocrlf` defaults to false. A rule that only holds because one machine is configured a
+# particular way is not a rule.
+#
+# This line only declares the intent. Files already committed keep their stored form until somebody runs
+# `git add --renormalize .`, which rewrites whatever differs and is a separate, deliberate commit.
+*  text=auto
+
+
 *.ps1 text eol=crlf
 *.sh text eol=lf

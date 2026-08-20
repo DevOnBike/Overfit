@@ -400,6 +400,106 @@ worker-loop branch. Zero references left.
 Verified after removal: `Scripts/DispatchStress` clean at **22,500 dispatches** both with and without the
 now-meaningless environment variable set, and the suite **2748/0 twice**.
 
+### GELU in the decode FFN was scalar and cost 6.0 ns per element: vectorised, 9.4-12.5x (2026-08-19)
+
+`CachedFeedForwardBlock.ApplySiLU` carried the note that *"the scalar path's per-element `MathF.Exp` was the
+bottleneck"* and had been vectorised through `TensorPrimitives.Sigmoid`. `ApplyGeLU`, forty lines below it,
+still ran one `MathF.Tanh` per element and said so: *"Vectorization can be done later if this becomes a
+bottleneck."* The twin path had been measured; this one never had.
+
+**The rewrite is an algebraic identity, not a second approximation.** `tanh(z) = (1 - e^-2z)/(1 + e^-2z)`, so
+`0.5 * (1 + tanh(z))` is exactly `sigmoid(2z)`, and the published form `0.5 * x * (1 + tanh(z))` is exactly
+`x * sigmoid(2z)`. Nothing about the accuracy of the GELU approximation changes; only how it is evaluated.
+
+**The prediction that the fast arm might LOSE is recorded with the result, because it was reasonable.** The
+vectorised form makes three passes over the buffer where the scalar made one, and at these widths (12-56 KB)
+the buffer sits in L1 or L2. It lost anyway, and by a wide margin — scalar `MathF.Tanh` costs **6.0 ns per
+element**, about 28 cycles.
+
+| width | scalar | vectorised | shipped method | ratio (shipped) |
+|---|---|---|---|---|
+| 3072 (GPT-2 small) | 17,719 ns | 1,836 ns | 1,890 ns | **9.4x** |
+| 11008 (Qwen2.5-3B) | 74,515 ns | 6,721 ns | 7,787 ns | **9.6x** |
+| 14336 (Gemma-2 9B) | 100,210-113,216 ns | 8,785 ns | 9,051 ns | **11.5-12.5x** |
+
+**The 14336 baseline is quoted as a range on purpose.** It read 100,210 ns ±0.3% in the first sitting and
+113,216 ns ±12.5% in the second. The canary was flat in both (463.85 ns ±0.13%), so the box did not move —
+that one arm was disturbed. The vectorised arm read 8,751 and 8,785 across the same two sittings, stable to
+0.4%, so **the whole uncertainty in that row is in the baseline**, and the honest ratio is a range.
+
+**The identity earns its keep**: routing through `TensorPrimitives.Tanh` instead costs 1.12-1.21x more, so
+the algebra is doing work rather than tidying.
+
+**The shipped method is measured, not a copy of its shape.** `ShippedApplyGeLU` calls the real
+`CachedFeedForwardBlock.ApplyGeLU` through `InternalsVisibleTo`. It runs 3-16% behind the standalone arm
+because it includes a source copy and a `PooledBuffer` rental. This arm exists because a stale harness binary
+once made an entire sweep describe the previous library.
+
+**The parity test found a real regression in the change, before it shipped.** `TensorPrimitives` **rejects an
+empty span** — `ArgumentException: Input span arguments must not be empty` — where the scalar loop simply did
+not execute. The general lesson is worth more than the fix: **a vectorised rewrite inherits its primitive's
+argument contract, and that contract is usually not the one the loop had.** Guarded, with the reason recorded
+at the site.
+
+**Mutation-proven**, green/red/green, by dropping the factor of two from the identity — the one way to get it
+wrong that still looks plausible. Suite 2760/0 after the work. Benchmark:
+`Sources/Benchmark/GeluActivationBenchmark.cs`; parity: `Tests/LanguageModels/Runtime/GeluVectorisationParityTests.cs`.
+
+**NOT measured: what this is worth per token.** The activation was measured, not a decode step. For Gemma it
+is the gate branch of GeGLU and for GPT-2 the whole hidden layer, but its share of a token is a separate
+measurement and is not guessed here.
+
+### `TG-T14` RESOLVED: one test wrote a process-wide setting and eight tests failed somewhere else (2026-08-19)
+
+Eight `Anomalies` acceptance tests had been failing since at least 2026-08-13 with nobody knowing. The
+leading hypothesis on the row was a shifted metric-channel registry in static state. **That was wrong**, and
+the code says so directly: `LabWindowFixture.Load` maps channels **by name** through
+`Enum.TryParse<MetricIndex>(parts[0])`, and `MetricWindow` carries only `readonly` fields. There is no
+mutable static anywhere on that path.
+
+**The cause.** `AffineTrendOnLabFixtureDiagnostics` set `OVERFIT_LAB_FIXTURE_NAME` and never restored it —
+one `SetEnvironmentVariable`, no `try`, no `finally`. That variable selects the recording
+`LabWindowFixture` hands to **every** test in the process. From that point on, five plain `[Fact]` tests in
+three unrelated classes loaded the twelve-replica *healthy* window where they expected the four-replica one
+with an injected throttle.
+
+**Proven from the artefacts rather than argued.** `lab-window-healthy-12pod.csv` contains **zero**
+`CpuThrottleRatio` rows against one in `lab-window.csv`, and the validator's own message reads *"not reported
+by any of the 12 replicas"* — twelve, not four. One cause accounts for all three failure shapes: an empty
+collection where a degraded replica was expected, an out-of-range index where a faulted pod was, and a
+calibration refusing a window that failed its own gate.
+
+**Three layers of silence stacked, which is why it lasted.** The culprit is a `[LongFact]`, so the ordinary
+suite never ran it. The area gate that would have shown it hit its own timeout on 2026-08-13 (`exit 124`,
+63.31 min) and no complete earlier run existed at all. And the victim count **varied** — 7, 8, 9 — with the
+order xunit happened to pick, which reads as flakiness rather than as a leak.
+
+**The measurement that settled it cost 18 seconds.** With `OVERFIT_RUN_LONG` unset the area runs 592 tests
+with **zero** failures. The attributes were then checked test by test rather than assumed: **six of the eight
+victims are plain `[Fact]`**, so they genuinely ran and genuinely passed. Had they been `[LongFact]`, that
+zero would have meant *did not execute* and reading it as a pass would have repeated the exact defect this
+subsystem exists to catch.
+
+| arm | passed | failed | skipped |
+|---|---|---|---|
+| area gate, before | 606 | **7** | 10 |
+| area gate, after (same command, 64.2 min) | 615 | **0** | 8 (all lab) |
+| full fast suite, after | 2748 | 0 | 281 |
+
+**Fix**: the diagnostic now resolves the path locally and calls `LabWindowFixture.Load(path)`, which already
+existed. Nothing process-wide is written. The `OVERFIT_AFFINE_FIXTURE` knob is unchanged.
+
+**Guard**: `Tests/Diagnostics/LabFixtureSelectionLeakTests.cs`, one plain `[Fact]`, fails if any test source
+writes that variable. **Mutation-proven green/red/green** by re-introducing the exact line. It also asserts
+its own walk scanned more than 100 files, because "no offenders" and "no files read" are the same green.
+
+**Deliberately NOT written: the general rule.** *"Any test that writes a process-wide setting must restore
+it"* is the real rule, but a restore in source text can be a `finally`, a `Dispose`, or a captured value
+written back elsewhere. A first pass of that heuristic flagged `ModelFactTests`, which is correct and
+restores in `Dispose`. This repository already carries two analyzers that failed in the two opposite
+directions — one reporting code that did not exist, one silently reporting nothing — so the shipped check is
+the narrow one that cannot produce a false positive.
+
 ### `XC-88`: the 29% ONNX Runtime drift does NOT reproduce, and the guard that judged the window was broken (2026-08-19)
 
 `XC-88` was filed because ONNX Runtime read **12.93, then 9.79, then 9.19 ms** on the same untouched binary
