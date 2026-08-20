@@ -400,6 +400,249 @@ worker-loop branch. Zero references left.
 Verified after removal: `Scripts/DispatchStress` clean at **22,500 dispatches** both with and without the
 now-meaningless environment variable set, and the suite **2748/0 twice**.
 
+### `XC-97` fixed: a Q5_0 embedding no longer dequantizes to F32 — 373 MB saved, prediction 374 (2026-08-20)
+
+`GgufLlamaLoader.LoadEmbedding` kept the embedding verbatim and mmap-backed only for Q4_K and Q6_K. Q5_0 fell
+through to *"F32 fallback — full dequant into a flat [vocab x dModel] row-major buffer"*, which on
+Qwen2.5-0.5B measured **519 MB for a 469 MB model file**.
+
+| | before | after | |
+|---|---|---|---|
+| Qwen2.5-0.5B, managed heap after load | 1,132 MB | **759.2 MB** | **-373 MB (-33%)** |
+| Qwen2.5-3B (Q4_K control) | 484.1 MB | 484.1 MB | unmoved |
+| suite | 2,760 / 0 | 2,764 / 0 | +4 tests |
+
+**The arithmetic and the measurement agree to a megabyte.** The F32 embedding was 519 MB; in Q8 the same
+136M elements cost about 145 MB, predicting a 374 MB saving. Measured 373. The `FALLBACK embedding [Q5_0]`
+line the loader printed under instrumentation is simply gone, and the model still generates sensibly.
+
+**Q8 rather than a native Q5_0 weight type**: a fifth `DecodeWeight` case would touch every switch in the
+runtime, while `Q8Weight` is already first-class with kernels — the loader already converts to it for a tied
+LM head. **The accuracy argument is the point, not a concession**: a Q5_0 block carries 32 distinct levels
+and a Q8 block carries 256, so the target has eight times the resolution the source actually uses, and the
+only error is a second rounding of an already-quantized value.
+
+**Peak, not steady state.** The conversion streams row by row out of the mapping with a one-row scratch
+rented once per worker band. Converting through the full F32 table would have halved the steady state and
+left the load-time spike exactly where it was — and minimising peak RAM at load is the constraint this
+repository states for itself, so the cheaper implementation would have missed the point of the fix.
+
+> **The oracle is an equality, not a tolerance, and that was a deliberate choice.** The streaming route and
+> the full-F32-table route perform the same decode and the same quantization in the same order; only the
+> buffering differs. So they must agree **bit for bit**, and a tolerance would have hidden precisely the
+> mistake a streaming rewrite can make and a batch one cannot. Mutation-proven by corrupting the row stride:
+> `quant[896] differs: expected -87, got -127 (row 1, column 0)`. A second test checks the accuracy claim
+> against the Q5_0 source directly, because an equality against one's own reference cannot catch both routes
+> being wrong the same way.
+
+**Not finished: 759 MB is still 1.6x the model file.** The embedding was the largest single term, not the
+only one. About 470 MB remains unattributed, and the instrumentation only covered the embedding fallback and
+`AllocAndLoad` — other Q5_0 tensors may take a path nothing has looked at.
+
+### `XC-60` measured: the saving is 3.3 MB, not 67.5 MiB — one wrong constant, twenty-fold (2026-08-20)
+
+`XC-60` records that `CachedSingleHeadAttention._scoreScratch` is sized to the MODEL's context rather than the
+`maxContextLength` the caller asked for, and derives **86.4 MiB per stack** with **67.5 MiB saved per client**.
+Its own text says to confirm with a real measurement before quoting that anywhere. Measured, with managed heap
+read either side of the `CachedGptStack` constructor in the same process and the same run:
+
+| | the row's arithmetic | measured |
+|---|---|---|
+| `config.ContextLength` | 32,768 | **8,192** |
+| whole stack | 86.4 MiB | **22.5 MB** |
+| saving from capping the scratch to 2048 | 67.5 MiB | **3.3 MB** |
+
+**The mechanism is real and the magnitude is not.** The scratch genuinely ignores the caller's
+`maxContextLength` — a session asking for 2048 still pays for 8192 — but closing that is worth 3.3 MB against
+a change that crosses the engine constructor, so the row is closed as **not worth doing**, not as wrong.
+
+> **The whole error is one constant.** The row assumed 32,768 because that is what the GGUF metadata
+> advertises and what `overfit doctor` prints; the engine's config carries **8,192**, capped somewhere between
+> the file and the config. Every figure in the row — 128 KiB per head, 72.0 MiB of scratch, 86.4 MiB per
+> stack, the 4.6-session break-even in `XC-58` — was a multiple of that one value, and none of them was
+> checked against a running engine. **An arithmetic chain is only as sound as its least-verified input, and
+> the input that came from a document rather than from a process is the one to check first.**
+
+### Where our managed memory goes at load: weights are NOT copied, and `XC-60` is 20% of it (2026-08-20)
+
+Chasing the unexplained gigabyte from the server comparison. **First, a correction that must not be blurred:
+the server's 1,059 MB and the 438 MB below are NOT the same number.** The server carries ASP.NET and its own
+sessions on top; this section is about `OverfitClient.LoadGguf` alone, measured with checkpoints inside a
+harness. Do not add or compare them.
+
+Managed heap after `LoadGguf` on Qwen2.5-3B Q4_K_M: **438.6 MB** (452.9 MB when the model directory has
+sibling tokenizer files). Private commit at that point is 462 MB, of which only 24 MB is unmanaged — so this
+is the managed heap, not native allocation.
+
+| component | size | how it was established |
+|---|---|---|
+| session KV cache at 2048 tokens | **~146 MB** | measured as the delta across `CreateSession(2048)`; arithmetic agrees (2048 x 72 KiB) |
+| tokenizer | **40 MB** | probed directly; the sibling-file path and the GGUF-embedded path differ by only 14 MB |
+| attention scratch (`XC-60`) | **~86 MB** | that row's arithmetic, not separately measured here |
+| F32 tensors | **0.6 MB** | the loader was made to name every `AllocAndLoad` — all of it is layer norms |
+| copies of quantized tensors | **0 MB** | the loader was made to name every `new byte[...]` and printed **nothing** |
+| **unattributed** | **~165 MB** | — |
+
+**The main risk is closed by measurement rather than by reasoning: we do not copy the weights.** Every
+quantized tensor takes an mmap slice — `LoadQ6KNative` and its siblings return a `Q6KWeight` over the mapping
+and never reach their `new byte[]` fallback. Doing to ourselves what dotLLM's 1.92 GB "repacked" buffer does
+was the thing worth ruling out, and it is ruled out. `OVERFIT_REPACK_GEMV` is opt-in and off.
+
+**`XC-60` is worth more than the earlier estimate said.** Against the 1,059 MB server figure its 86.4 MiB
+looked like 8% and a distraction; against the 438 MB that load actually costs it is **about 20%** — and it is
+scratch the caller's own `maxContextLength` was supposed to bound and does not.
+
+**Four candidates were killed by measurement, each of which had a persuasive arithmetic behind it**, and the
+sequence is the point: a plausible size calculation is not evidence.
+1. *Embedding dequantized to F32* — 151,936 x 2,048 x 4 B = 1,244 MB against a measured 1,059. Killed by
+   reading: `LoadEmbedding` keeps K-quants verbatim and mmap-backed.
+2. *Vocabulary-driven* — killed by the model sweep: Qwen2.5-**0.5B** has the same vocabulary as the 3B and a
+   469 MB file, yet takes **1,119 MB**, the most of the three. (Its `dModel` is 896, and `896 % 256 != 0`
+   fails the native-path guard, so it really does dequantize to F32 — a separate defect, and a large one.)
+3. *A repacked or Q8 copy of the LM head* — killed by the byte-array probe printing nothing.
+4. *The sibling-tokenizer path* — killed by running the same GGUF from a directory with no siblings: 452.9 vs
+   438.6 MB, a 14 MB difference.
+
+**Left open: ~165 MB.** Not guessed at. Candidates never measured are `ArrayPool` retention, `GgufReader`
+metadata and the object overhead of 576 per-head weight objects.
+
+**Also found, and filed as `XC-97`: Qwen2.5-0.5B takes 1,132 MB of managed heap for a 469 MB model** — 2.4x
+its own file. **The cause was measured, not inferred, and the first inference was WRONG.** It looked like the
+`dModel % 256 != 0` guard (896 is not a multiple of 256, and every K-quant path in the loader tests that).
+Instrumenting the loader to name its fallbacks printed `FALLBACK embedding [Q5_0] 519.3 MB`: the type is
+**Q5_0**, and `LoadEmbedding` handles only Q4_K and Q6_K, so it dequantizes to F32 whatever the hidden size
+is. The 3B control on the same probe shows 0.6 MB of F32, all layer norms. Same class of defect as the one
+this section was opened to look for, on a model this repository ships tests against.
+
+### Peak RAM of the two SERVERS: 6.3x less committed memory, and ~1 GB of ours is unexplained (2026-08-20)
+
+The first RAM reading measured a harness I wrote, and it measured a configuration no product ships:
+`OverfitClient.LoadGguf` already creates a session at its default 2048-token context, and the harness then
+called `Engine.CreateSession()` with no argument, which resolves to the MODEL's full context. This one
+measures the two **products** — `overfit serve` against `dotllm serve` — one at a time, each driven to a
+fully-initialised state by one real `/v1/chat/completions` request before the peak is read.
+
+| unit | Overfit | dotLLM | ratio |
+|---|---|---|---|
+| peak working set | **2,906 MB** | 3,924 MB | 1.35x |
+| peak private commit | **1,059 MB** | **6,675 MB** | **6.3x** |
+
+Identical to the megabyte across three repeats on both sides, so the allocation is deterministic. Model file
+is 2,007 MB. **This is the one place the two engines are not close**, and it is the axis this repository's
+stated identity is about.
+
+**Their server commits 3.3x the model file and 3.4x what their own CLI committed** (1,989 MB for `dotllm run`
+on the same model). What their server does that their CLI does not was not investigated.
+
+> **Unexplained, and it is OUR number: what is our 1,059 MB?** The weights are mapped, so a mapping should
+> not appear in private commit. Three things are ruled out rather than assumed:
+> * **The KV cache is not the dominant term.** The harness reading (1,052 MB) and the server reading
+>   (1,059 MB) agree to 7 MB despite creating sessions at wildly different context lengths. Whatever this is,
+>   it does not move with context.
+> * **Repacked GEMV weights** — `OVERFIT_REPACK_GEMV` is opt-in and off by default, so we do not hold the
+>   second committed copy we criticise dotLLM for.
+> * **The embedding table** — read rather than guessed: `GgufLlamaLoader.LoadEmbedding` keeps Q4_K/Q6_K
+>   verbatim and mmap-backed, with zero managed bytes. Its own comment records this as already having cut
+>   1.2 GB to 255 MB for exactly this model. The arithmetic was tempting — vocab 151,936 x 2,048 in F32 is
+>   1,244 MB against a measured 1,059 — and it is wrong.
+>
+> **`XC-60` is real but it is not this.** Its 86.4 MiB per stack is about 8% of the figure, and the
+> context-independence above is consistent with its claim that the scratch ignores the caller's
+> `maxContextLength` — but fixing it would move the number by under a tenth. **Find the gigabyte first.**
+
+### Peak RAM against dotLLM: 1.85x lower on both units — and it points a question back at us (2026-08-20)
+
+The throughput comparison came out level, so memory is where the two designs actually differ. Measured on the
+same file, Qwen2.5-3B Q4_K_M, 2,007 MB on disk, three repeats each with the order alternated.
+
+**Two units, because they answer different questions and only one is the mechanism's.** *Peak working set* is
+physical pages resident INCLUDING memory-mapped file pages, which are reclaimable and shared — for an mmap'd
+model it counts something that is not really consumed. *Peak private commit* is what must be backed by RAM or
+the pagefile, and it is what decides whether a model fits on a low-end box.
+
+| unit | Overfit | dotLLM | ratio |
+|---|---|---|---|
+| peak working set | **2,084 MB** | 3,838 MB | **1.84x** |
+| peak private commit | **1,052 MB** | 1,989 MB | **1.89x** |
+
+Spread was +/-3 MB across three repeats. **This is the largest measured difference between the two engines
+and the only one outside noise.** Our peak working set is 2,084 MB against a 2,007 MB file — the peak is
+essentially the mapping and little else, which is the "map, do not copy" identity shown as a number rather
+than asserted in a README.
+
+**The prediction was half wrong, and that is the useful part.** dotLLM's own CLI attributes 1,834 MB to
+"repacked" weights held alongside the mapping, so the expected gap in private commit was about that. The
+measured gap is **+936 MB**, roughly half. Either that repacked buffer is not private commit in the way their
+report implies, or **we commit something large that nobody here has named** — the measurement cannot tell
+which.
+
+> **The question it turns back on us: why is our private commit 1,052 MB at all, when the weights are
+> mapped?** A mapping should not appear there. What is left is the KV cache and the attention scratch — and
+> `XC-60` already records that `CachedSingleHeadAttention._scoreScratch` is sized to the MODEL's context
+> length rather than the `maxContextLength` the caller asked for. That row was derived arithmetically and
+> **never measured**; this is the first number to check it against.
+
+### Overfit against dotLLM: level on throughput — and an hour lost to an instrument I wrote myself (2026-08-20)
+
+dotLLM (kkokosa) is the closest thing to a direct competitor: a pure-C# LLM inference engine, GGUF, Q4_K_M,
+SIMD, .NET 10, no llama.cpp underneath. Same file on both sides — `C:\qwen3b\qwen.q4km.gguf`, Qwen2.5-3B
+Q4_K_M — measured against their SOURCE at PR #414+, not the `0.1.0-preview.3` on nuget.org, because comparing
+a competitor against a stale package is the dishonesty this repository criticises elsewhere.
+
+**The result, from one instrument driving both engines through their own OpenAI-compatible servers**, one
+server at a time, `/v1/models` read back and asserted before each measurement, machine quiet at 2.00%:
+
+| | Overfit | dotLLM |
+|---|---|---|
+| throughput | **26.3 tok/s** | 25.4 tok/s |
+| ITL p50 | 38.08 ms | 38.67 ms |
+| ITL p95 | **39.24 ms** | 41.32 ms |
+| TTFT p50 | 0.8 ms | 41.0 ms |
+| errors | 0/16 | 0/16 |
+
+**Level.** 3.5% on throughput and 1.5% on median inter-token latency is not a difference worth a headline; we
+are marginally steadier in the tail. **The TTFT column is NOT a 50x win and must not be quoted as one**: 0.8
+ms cannot contain a prefill, so ours is certainly serving a cached prefix, and the benchmark sends the SAME
+prompt sixteen times, which measures the cache rather than prefill. Both engines enable prompt caching by
+default, so "we cache and they do not" is ruled out; why theirs costs 41 ms was not established.
+
+> **The method failure is the part worth keeping.** The first version of this comparison used dotLLM's own
+> mature CLI on one side and a harness I had written that morning on the other. **Two defects were found in
+> my harness during the run** — invented environment-variable names that set nothing, and reporting one
+> thread-pool size while setting two — and every suspicious number came through it.
+>
+> From it came a claim that **our decode degrades 28-41% with context while dotLLM's stays flat**. That claim
+> is **WITHDRAWN**. Measured properly — three repeats, order shuffled, our engine alone — the context penalty
+> from 5 to 673 tokens is **2.4-3.4 ms/token, about 7%**, and it is the same at 10, 16 and 32 general workers.
+> Two hypotheses were built on the withdrawn number and both were refuted: KV-band duplication across
+> head-parallel workers (no jump at the branch's own 2-vs-3-worker threshold once repeated), and an
+> oversubscribed general pool (pool size makes no difference).
+>
+> **Three rules, each earned here:**
+> 1. **Do not look for the cause of a number measured once.** Establish the effect with repeats first. An
+>    hour went into explaining an effect whose existence was never checked.
+> 2. **A smooth curve from single readings is more dangerous than a noisy one.** The original sweep ran
+>    contexts in ASCENDING order, so drift over time read as dependence on context, and the smoothness
+>    suppressed suspicion instead of raising it.
+> 3. **Before building an instrument for a comparison, enumerate what both sides already expose and take the
+>    intersection.** Both projects ship an OpenAI-compatible `serve`, and this repository already ships
+>    `overfit bench` to measure exactly that. Both were visible in greps run BEFORE the harness was written;
+>    the question asked was "how do I replicate their `run` command" rather than "what do we already share".
+
+**Cross-validation, after the fact rather than by design:** `overfit bench` puts our decode at 38.08 ms/token
+and the hand-written harness put it at ~40, so our own figure was not a harness artefact. That agreement was
+luck, not method — it was not set up as a control.
+
+**Not comparable and not measured:** memory. dotLLM's CLI reports 4.05 GB for this model, of which 1.92 GB is
+a second committed copy of the weights for R4 interleaving, alongside the 2.1 GB mapping. Nothing on our side
+reports the equivalent, so the row this repository would most want — peak RAM — is absent.
+
+**Outputs diverge.** Greedy on both, same file, prompt tokenised identically to 5 tokens, and they agree for
+eight characters before parting. Both continuations are ordinary English and neither is obviously wrong, but
+they cannot both be the argmax path. Settling it needs a logit comparison on identical input, which was not
+done. It does not affect the throughput comparison: the work per token is the same shapes over the same cache
+length whichever token wins.
+
 ### What the vectorised GELU is worth per TOKEN: 6.5-7.1% on GPT-2 small, and the microbenchmark under-predicts it 4.7x (2026-08-19)
 
 The activation was measured at 9.4-12.5x. That says nothing about a token, so it was measured end to end:

@@ -246,6 +246,36 @@ correctly and meant nothing.
 and what observation would refute the explanation. It is catchable from outside by someone who has not read
 the code, which is the entire point — nobody can challenge a premise that was never stated.
 
+## The instrument is a suspect, and the intersection beats the imitation
+
+Two rules earned on 2026-08-20, in one afternoon, comparing this engine against dotLLM. Both are cheap. The
+afternoon they cost was spent explaining an effect that did not exist.
+
+**A number measured ONCE is not a fact, and looking for its cause is not research.** Establish the effect
+with repeats before asking why — min and max across at least three runs, order shuffled. A context sweep was
+run one reading per point, ascending, and produced a smooth curve: 42, 48, 50, 56, 57, 58, 59, 59 ms. From it
+came "our decode degrades 28-41% with context and dotLLM's stays flat", and an hour of hypotheses, a
+threshold found in the code, and a table with six rows. Repeated properly the penalty is **7%** and both
+hypotheses were refuted. **A smooth curve out of single readings is MORE dangerous than a noisy one**: the
+smoothness came from running the points in ascending order, so drift over time wore the costume of the
+variable, and it suppressed suspicion instead of raising it. Predicting a result that then emerges from noise
+is worse than a random one, because it gets believed.
+
+**An instrument written for one measurement measures itself until it is checked separately.** The comparison
+used dotLLM's own mature CLI on one side and a harness written that morning on the other. The harness had
+**two defects inside two hours** — environment-variable names that were invented rather than verified, so the
+arm ran identical to the one it was supposed to differ from; and reporting one thread-pool size while setting
+two, so two runs six-fold apart looked like the same configuration. Every suspicious number came through it.
+An asymmetric comparison — their production path against your fresh code — puts all the uncertainty on your
+side of the table.
+
+**So: before building an instrument for a comparison, enumerate what BOTH sides already expose and take the
+intersection.** Both projects ship an OpenAI-compatible `serve`, and this repository already ships
+`overfit bench` to measure exactly that endpoint. Both were visible in greps run *before* the harness was
+written. They were missed because the question asked was *"how do I replicate their `run` command"* rather
+than *"what do we already share"* — the answer follows the question, and the wrong question is not recoverable
+by working harder on it. Through the shared interface the two engines came out level: 26.3 against 25.4 tok/s.
+
 ## Verify before you answer — never guess a path, a symbol or a structure
 
 **If you lack the precise context, the file, or the command output needed to answer, STOP and run a tool.**

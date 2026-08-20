@@ -615,6 +615,22 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                 return LoadQ6KNative(reader, info, dModel, vocab, mmap);
             }
 
+            // Q5_0 has no verbatim weight type here, so it used to fall straight through to the F32 dequant
+            // below. On Qwen2.5-0.5B that measured **519 MB for a 469 MB model file** — more managed heap
+            // than the model occupies on disk — because the fallback materialises [vocab × dModel] floats.
+            // `XC-97`.
+            //
+            // Converting to Q8 instead costs about a quarter of that and is near-lossless in the direction
+            // that matters: a Q5_0 block carries 32 distinct levels against Q8's 256, so the target has
+            // eight times the resolution the source uses. The conversion streams row by row out of the
+            // mapping, so the PEAK is the Q8 arrays alone rather than the F32 table plus them.
+            if (quantize && info.Type == GgmlType.Q5_0
+                && dModel % GgmlDequant.Q5_0_BlockElements == 0
+                && dModel % Q8DotKernel.BlockSize == 0)
+            {
+                return LoadQ5_0AsQ8(reader, info, dModel, vocab, mmap);
+            }
+
             // F32 fallback — full dequant into a flat [vocab × dModel] row-major buffer.
             var storage = TensorStorage<float>.Unpooled(checked((int)((long)vocab * dModel)));
             reader.LoadTensorAsF32(info, storage.AsSpan());
@@ -1153,6 +1169,33 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         /// [outDim, inDim] with Q6_K super-blocks along the contraction dim,
         /// exactly matching Q6KWeight's output-major layout (step 3.3c).
         /// </summary>
+        /// <summary>
+        /// Reads a Q5_0 tensor and converts it to Q8 without materialising the F32 table (`XC-97`).
+        ///
+        /// <para>With a mapping the raw blocks are a zero-copy slice, so the high-water mark is the Q8 output
+        /// alone. Without one the raw bytes are read into a pooled buffer first — still far smaller than the
+        /// F32 table it replaces, because Q5_0 is 22 bytes per 32 elements against F32's 128.</para>
+        /// </summary>
+        private static Q8Weight LoadQ5_0AsQ8(
+            GgufReader reader, GgufTensorInfo info, int inDim, int outDim, MemoryMappedModelFile? mmap)
+        {
+            var blocksPerRow = inDim / GgmlDequant.Q5_0_BlockElements;
+            var totalBytes = checked((int)((long)outDim * blocksPerRow * GgmlDequant.Q5_0_BlockBytes));
+
+            if (mmap != null)
+            {
+                var slice = mmap.Slice(reader.DataStart + (long)info.Offset, totalBytes);
+
+                return Q8Weight.QuantizeQ5_0Rows(slice.Span, outDim, inDim);
+            }
+
+            using var raw = new PooledBuffer<byte>(totalBytes, clearMemory: false);
+
+            reader.LoadTensorQ5_0Raw(info, raw.Span);
+
+            return Q8Weight.QuantizeQ5_0Rows(raw.Span, outDim, inDim);
+        }
+
         private static Q6KWeight LoadQ6KNative(
             GgufReader reader, GgufTensorInfo info, int inDim, int outDim, MemoryMappedModelFile? mmap)
         {

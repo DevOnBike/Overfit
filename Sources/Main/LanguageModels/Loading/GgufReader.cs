@@ -339,6 +339,43 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         /// (like Q4_K, unlike Q8_0's [F16 scale][int8 quants] interleave).
         /// Step 3.3c. Throws if the tensor is not Q6_K.
         /// </summary>
+        /// <summary>
+        /// Reads a Q5_0 tensor's blocks verbatim (22 bytes per 32 elements: 2 B FP16 <c>d</c> + 4 B
+        /// <c>qh</c> + 16 B <c>qs</c>). Used only on the no-mmap path; with a mapping the caller takes a
+        /// zero-copy slice instead. Throws if the tensor is not Q5_0.
+        /// </summary>
+        public void LoadTensorQ5_0Raw(GgufTensorInfo info, Span<byte> destination)
+        {
+            if (info == null)
+            {
+                throw new ArgumentNullException(nameof(info));
+            }
+            if (info.Type != GgmlType.Q5_0)
+            {
+                throw new OverfitRuntimeException(
+                    $"Tensor '{info.Name}' is {info.Type}, not Q5_0 — use LoadTensorAsF32.");
+            }
+
+            var elementCount = info.ElementCount;
+            if (elementCount % GgmlDequant.Q5_0_BlockElements != 0)
+            {
+                throw new OverfitFormatException(
+                    $"Q5_0 tensor '{info.Name}' element count {elementCount} is not divisible by "
+                    + $"{GgmlDequant.Q5_0_BlockElements}.");
+            }
+
+            var nBlocks = elementCount / GgmlDequant.Q5_0_BlockElements;
+            var byteCount = checked((int)(nBlocks * GgmlDequant.Q5_0_BlockBytes));
+            if (destination.Length < byteCount)
+            {
+                throw new ArgumentException(
+                    $"Destination span too small: {destination.Length} < {byteCount}.", nameof(destination));
+            }
+
+            _stream.Seek(_dataStart + (long)info.Offset, SeekOrigin.Begin);
+            _stream.ReadExactly(destination.Slice(0, byteCount));
+        }
+
         public void LoadTensorQ6_KRaw(GgufTensorInfo info, Span<byte> destination)
         {
             if (info == null)
