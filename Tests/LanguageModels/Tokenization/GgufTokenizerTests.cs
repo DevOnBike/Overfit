@@ -225,17 +225,32 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Tokenization
             var gguf = GgufTokenizer.Load(QwenMoeGguf);
             var reference = QwenTokenizer.Load(@"C:\qwen3b");
 
-            // A DIFFERENT KIND OF EARLY RETURN, and it used to be silent. Both fixtures are present and
-            // the test still had nothing to compare, because they describe different tokenizer revisions —
-            // and it reported that as a pass, i.e. as "the two vocabularies agree".
+            // THE TWO COUNTS ARE BOTH RIGHT AND WILL NEVER BE EQUAL — measured 2026-08-21, `XC-98`.
             //
-            // Asserted rather than skipped: reaching here means somebody deliberately has both files, so a
-            // mismatch is a fixture-pairing problem they can fix, and the sizes name it precisely. A box
-            // with neither never gets this far — the attribute skips it first.
-            Assert.True(gguf.VocabSize == reference.VocabSize,
-                $"the GGUF vocab has {gguf.VocabSize} entries and the reference tokenizer "
-                + $"{reference.VocabSize}: these are different tokenizer revisions, so this cross-check "
-                + "cannot say anything. Pair the MoE GGUF with the tokenizer.json of the same revision.");
+            // This assertion used to demand `gguf.VocabSize == reference.VocabSize` and reported the
+            // difference as "different tokenizer revisions". It is not. A GGUF conversion pads the token
+            // list up to the embedding matrix, and the padding is explicit: on Qwen2.5-3B the GGUF carries
+            // 151,936 entries (1187 x 128) against tokenizer.json's 151,665, and ids 151,665..151,935
+            // decode to the literal strings "[PAD151665]".."[PAD151935]". The same 271-entry gap appears on
+            // the Qwen1.5-MoE GGUF, so no pairing of fixtures could ever have satisfied the old form —
+            // including the one the old message told the reader to go and fetch.
+            //
+            // What replaces it is STRONGER, not weaker. Ignoring the tail would be the weakening this test
+            // was rescued from; instead the tail is asserted to BE padding, so a GGUF that quietly carried
+            // 271 real extra tokens still fails here.
+            Assert.True(gguf.VocabSize >= reference.VocabSize,
+                $"the GGUF vocab has {gguf.VocabSize} entries, FEWER than the reference tokenizer's "
+                + $"{reference.VocabSize}. Padding can only add, so these really are different tokenizers.");
+
+            for (var id = reference.VocabSize; id < gguf.VocabSize; id++)
+            {
+                var token = gguf.Decode(new[] { id });
+
+                Assert.True(token == $"[PAD{id}]",
+                    $"id {id} lies beyond the reference vocabulary and should be padding, but decodes to "
+                    + $"\"{token}\" rather than \"[PAD{id}]\". The GGUF carries a real token the reference "
+                    + "does not know, which means these ARE different tokenizer revisions.");
+            }
 
             foreach (var text in new[]
             {

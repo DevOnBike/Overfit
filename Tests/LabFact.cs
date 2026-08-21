@@ -108,19 +108,40 @@ namespace DevOnBike.Overfit.Tests
         /// <summary>Returns the first port that accepts a connection, or 0 with a description of what did not.</summary>
         private static (int Port, string Detail) Probe(LabEndpoint endpoint)
         {
-            // Prometheus is forwarded on three ports because the diagnostics default to different ones;
-            // any single answer means the tunnel is up.
+            // Prometheus is forwarded on three ports because the diagnostics default to different ones —
+            // and that premise requires ALL of them, not any.
+            //
+            // **This used to return on the first port that answered, and the comment drew the opposite
+            // conclusion from its own reasoning.** Measured 2026-08-21: with only 9090 forwarded the gate
+            // reported the lab available, nine tests ran, and the two that default to 9099 —
+            // `AnomalyGuardEndToEndDiagnostics` and `PrometheusMetricSourceLabDiagnostics` — died on a
+            // refused connection instead of skipping with a reason. A raw socket error is a worse report
+            // than this attribute's own marker, which says in words that the test checked nothing.
+            //
+            // `k8s\monitoring\forward.cmd` carries the matching note: it forwarded only 9090 until
+            // 2026-08-07, so a partial tunnel is the normal way to arrive here, not an exotic one.
             int[] ports = endpoint == LabEndpoint.Prometheus ? [9090, 9098, 9099] : [8081, 8082, 8083];
+
+            var missing = new List<int>();
 
             foreach (var port in ports)
             {
-                if (Accepts(port))
+                if (!Accepts(port))
                 {
-                    return (port, null);
+                    missing.Add(port);
                 }
             }
 
-            return (0, $"nothing listening on 127.0.0.1:{string.Join('/', ports)}");
+            if (missing.Count == 0)
+            {
+                return (ports[0], null);
+            }
+
+            return (0, missing.Count == ports.Length
+                ? $"nothing listening on 127.0.0.1:{string.Join('/', ports)}"
+                : $"a PARTIAL tunnel — 127.0.0.1:{string.Join('/', missing)} not listening while "
+                  + $"{string.Join('/', ports.Except(missing))} answers. Some diagnostics default to the "
+                  + "missing ports and would fail on a refused connection rather than skip");
         }
 
         private static bool Accepts(int port)

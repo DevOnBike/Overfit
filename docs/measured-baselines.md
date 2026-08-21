@@ -730,7 +730,7 @@ they cannot both be the argmax path. Settling it needs a logit comparison on ide
 done. It does not affect the throughput comparison: the work per token is the same shapes over the same cache
 length whichever token wins.
 
-### What the vectorised GELU is worth per TOKEN: 6.5-7.1% on GPT-2 small, and the microbenchmark under-predicts it 4.7x (2026-08-19)
+### What the vectorised GELU is worth per TOKEN: 6.5-7.1% on GPT-2 small, and WHY the microbenchmark under-predicted it (2026-08-19, explained 2026-08-21)
 
 The activation was measured at 9.4-12.5x. That says nothing about a token, so it was measured end to end:
 GPT-2 small, 64 generated tokens, both arms **in one process** through
@@ -758,21 +758,75 @@ agree. **The two canaries are deliberately a PAIR**: one is a fixed scalar-trans
 specific suspect, and one is a fixed pass over memory. A canary made only of memory traffic could not have
 distinguished a scalar-throughput excursion from anything else.
 
-> **UNEXPLAINED, and recorded rather than smoothed over: the microbenchmark under-predicts the end-to-end
-> saving by 4.7x.** Per element the decode saves **24.1 ns** where `GeluActivationBenchmark` measured
-> **5.17 ns**. The element count is not the discrepancy — it was counted directly with a temporary probe and
-> came back **36,864 per token over exactly 12.00 calls**, matching the arithmetic to the digit. So the
-> scalar loop genuinely costs about 4.7x more per element inside a decode than in a benchmark of itself.
+> **The microbenchmark under-predicted the end-to-end saving 4.3x. Measured 2026-08-21, and two thirds of
+> it is now attributed rather than hypothesised.** Both hypotheses recorded here on 2026-08-19 were wrong.
 >
-> Two hypotheses survive and neither is tested. **(a) Input distribution** — the benchmark feeds uniform
-> [-4, 4] and `MathF.Tanh` is argument-dependent. **(b) Cache residency** — between GELU calls the decode
-> streams megabytes of weights through every level, so the transcendental's own constants and tables start
-> cold each time, where a tight benchmark loop keeps them in L1. Ruled OUT: the decode spin pool, measured
-> both ways at 514 vs 547 us/token.
+> **First, a denominator correction, because the original number was built on it.** The element count was
+> recorded as *"36,864 per token over exactly 12.00 calls, matching the arithmetic to the digit"*. It is
+> **40,320 over 13.125 calls**. The decode also runs the **6 prompt positions**, so the work is 12 layers x
+> **70** positions / 64 tokens, not 12 x 64 / 64. The earlier probe agreed with the arithmetic because both
+> used the same wrong denominator — *agreement between a probe and a calculation is not a check when the
+> calculation is the thing being assumed*. Per element the decode saves **22.1 ns**, not 24.1, and the
+> factor is **4.3x**, not 4.7x.
 >
-> **The transferable rule, which is worth more than the cause**: a kernel microbenchmark here under-reported
-> a real end-to-end effect by nearly 5x. Extrapolating from one to the other is not conservative in either
-> direction, and the end-to-end number has to be measured.
+> **The instrument: `ApplyGeLU` timed from INSIDE a real decode**, nine repeats, ABAB, medians, with a
+> fixed scalar-transcendental canary per repeat. The in-GELU numbers hold to 5-9% across repeats and
+> **reproduced across two separate processes to 0.2%**, which matters because in one of those processes the
+> canary moved 21%: the box moved and the measured quantity did not follow it.
+>
+> **The ladder. Same loop, same array, same process; one condition changes per rung.**
+>
+> | condition | ns/element | vs the microbenchmark |
+> |---|---|---|
+> | `GeluActivationBenchmark`, quiet, its own array | 5.77 | 1.00x |
+> | the same loop quiet inside the probe process | 6.25 / 6.29 | **1.08x** |
+> | during a decode, private array copied into just before timing (L1-warm) | 8.92 | **1.55x** |
+> | during a decode, the real activation buffer | 11.29 | **1.96x** |
+>
+> **The 1.08x rung is the instrument validating itself.** A probe that disagreed with BenchmarkDotNet on a
+> quiet machine would have made every rung above it unreadable. Two quiet readings were taken, one before
+> the repeats and one after, agreeing to 0.6%, so a warmup artefact cannot pass as a quiet-machine number.
+>
+> So the 1.96x splits into **1.43x environment** (the decode's own concurrency and clock, which a
+> single-threaded microbenchmark does not reproduce) and **1.27x buffer** (the real activation buffer
+> against a private array pulled into L1 immediately before the loop reads it).
+>
+> **(a) INPUT DISTRIBUTION — REFUTED.** The penalty is the SAME on both arms: scalar 1.94-1.96x, vector
+> 2.27-2.34x. `TensorPrimitives.Sigmoid` is branchless and never calls `MathF.Tanh`, so no property of the
+> argument can slow it. *An effect that is equal on a branchy transcendental and on a branchless SIMD path
+> is not a property of the function.* The real distribution was captured anyway and is **not** the uniform
+> [-4, 4] the benchmark feeds — median **-1.685**, p25 -2.130, p75 -1.131, max 11.491, only 1.66% of values
+> past |x|>4. It is a genuinely different distribution and it turned out not to be the cause.
+>
+> **(b) CACHE RESIDENCY of the transcendental's constants — REFUTED as stated, and partly right by
+> accident.** It predicted the tables start cold between GELU calls. But the reference loop runs
+> immediately after the real call, with those tables at their warmest, and still reads 1.55x. What the
+> measurement does support is a **buffer** effect of 1.27x, which is a different claim about a different
+> object.
+>
+> **THE SPIN POOL — REFUTED AGAIN, this time in the loop's own unit.** It was ruled out on 2026-08-19 by
+> comparing end-to-end savings (514 vs 547 us/token), which is the wrong instrument for a claim about one
+> loop. Re-tested in two processes, because `OverfitParallel._decodePool` is `static readonly` and setting
+> the variable inside a running process changes nothing. **The lever was proven to have moved before the
+> result was read** — the probe writes `DecodePoolEnabled` and `DecodePoolSize` into every row, and the arms
+> read 1/10 and 0/10. In-GELU cost: scalar 11.21 -> 11.29 ns (**+0.7%**), vector 1.40 -> 1.35 ns
+> (**-3.2%**), both inside the repeat spread. The pool is not part of this.
+>
+> **STILL OPEN, and it is the smaller half.** The in-situ GELU saving is **395 us/token**. The wall saving
+> is **629 us/token** in the probe harness and **853-930** in BenchmarkDotNet. So **37-57% of the wall
+> saving is not inside `ApplyGeLU`**, and that part is not explained. The candidate consistent with the
+> 1.43x environment rung is that removing 395 us/token of serial scalar work lowers package power and
+> raises the clock for everything else — untested, and the probe harness cannot settle it: its wall spread
+> is 13-15% against an effect of 1.7%.
+>
+> **The transferable rule, which is still worth more than the cause.** A kernel microbenchmark here
+> under-reported a real end-to-end effect by 4.3x, and **1.96x of that was the kernel genuinely costing
+> more in situ than in a benchmark of itself**. Extrapolating from one to the other is not conservative in
+> either direction. Where a kernel number must be trusted in context, put the reference loop INSIDE the
+> harness on a private array — the ladder above cost one afternoon and turned two hypotheses into four
+> measurements.
+>
+> Method: `.claude/do-insitu.py`, `do-pool.py`, `do-ref.py`, `do-quiet.py` (scratch, not durable).
 
 ### GELU in the decode FFN was scalar and cost 6.0 ns per element: vectorised, 9.4-12.5x (2026-08-19)
 

@@ -23,9 +23,14 @@ namespace Benchmarks
     /// reproduce.</para>
     ///
     /// <para><b>GPT-2 small is the right subject for the upper bound.</b> Its FFN activation is plain GELU
-    /// over the whole hidden layer — 12 layers x 3072 units = 36,864 elements per token — where a GeGLU
-    /// model such as Gemma applies it only to the gate branch. If the share is negligible here it is
-    /// negligible everywhere.</para>
+    /// over the whole hidden layer, where a GeGLU model such as Gemma applies it only to the gate branch.
+    /// If the share is negligible here it is negligible everywhere.</para>
+    ///
+    /// <para><b>The element count is 40,320 per generated token, NOT 36,864.</b> This comment claimed
+    /// 36,864 — 12 layers x 3072 — until 2026-08-21, and a probe agreed with it because the probe divided
+    /// the same way. <see cref="Decode"/> calls <c>Reset</c> first, so the decode also runs the <b>6 prompt
+    /// positions</b>: 12 layers x 3072 units x <b>70</b> positions / 64 tokens = 40,320, or 13.125 calls per
+    /// token. Anything expressed per element here rests on that denominator.</para>
     ///
     /// <para><b>Both arms run in ONE process.</b> A ratio taken across two process launches cannot separate
     /// the code change from the machine, and this repository has already had a 29% between-sitting drift on
