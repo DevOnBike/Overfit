@@ -40,6 +40,9 @@ namespace DevOnBike.Overfit.GpuProbe
 
             report.SelectionNote = selection.Note;
             report.IsRealDevice = selection.IsRealDevice;
+            report.AcceleratorType = accelerator.AcceleratorType.ToString();
+            report.IsCuda = accelerator.AcceleratorType == AcceleratorType.Cuda;
+            report.WarmupRule = options.WarmupPolicy.Describe();
             report.Machine = MachineEcho.Collect(accelerator, selection.Context, options);
 
             log.WriteLine($"accelerator: {accelerator.AcceleratorType} '{accelerator.Name}' ({selection.Note})");
@@ -75,6 +78,12 @@ namespace DevOnBike.Overfit.GpuProbe
                 return Emit(report, 1);
             }
 
+            if (options.Fp16Bound)
+            {
+                MeasureFp16Bounds(options, report, log);
+                return Emit(report, 0);
+            }
+
             var measure = !options.ParityOnly;
             if (options.ParityOnly)
             {
@@ -94,14 +103,11 @@ namespace DevOnBike.Overfit.GpuProbe
             if (canary is not null)
             {
                 report.CanaryMeasured = true;
-                report.CanaryStartMs = canary.Measure();
-                log.WriteLine($"canary at the start: {report.CanaryStartMs:F2} ms");
+                report.CanaryStart = canary.Measure(options.WarmupPolicy);
+                log.WriteLine($"canary at the start: {report.CanaryStart!.MedianMs:F2} ms, {report.CanaryStart.Warmup.Describe()}");
             }
 
-            var cells = (options.Quick ? Cell.Quick : Cell.Production)
-                .Where(c => options.CellFilter.Length == 0 ||
-                            c.Name.Contains(options.CellFilter, StringComparison.OrdinalIgnoreCase))
-                .ToList();
+            var cells = SelectCells(options);
 
             if (cells.Count == 0)
             {
@@ -111,19 +117,23 @@ namespace DevOnBike.Overfit.GpuProbe
 
             foreach (var cell in cells)
             {
+                // Once per cell, not once per (cell, token count): the weight does not depend on the
+                // batch and quantizing lm_head's 1187 MiB three times dominated the whole run.
+                log.WriteLine(
+                    $"cell {cell.Name}: quantizing {cell.WeightBytesF32 / (1024.0 * 1024.0):F0} MiB of F32 weight...");
+                var weights = new CellWeights(cell, options.Seed);
+
                 foreach (var n in options.Batches)
                 {
-                    log.WriteLine(
-                        $"cell {cell.Name} n={n}: building the fixture " +
-                        $"({cell.WeightBytesF32 / (1024.0 * 1024.0):F0} MiB of F32 weight to quantize)...");
-                    report.Cells.Add(RunCell(cell, n, options, accelerator, measure, log, report));
+                    log.WriteLine($"cell {cell.Name} n={n}: running");
+                    report.Cells.Add(RunCell(weights, n, options, accelerator, measure, log, report));
                 }
             }
 
             if (canary is not null)
             {
-                report.CanaryEndMs = canary.Measure();
-                log.WriteLine($"canary at the end: {report.CanaryEndMs:F2} ms");
+                report.CanaryEnd = canary.Measure(options.WarmupPolicy);
+                log.WriteLine($"canary at the end: {report.CanaryEnd!.MedianMs:F2} ms, {report.CanaryEnd.Warmup.Describe()}");
             }
 
             var anyParityFailure = report.Cells.Any(c => c.Parity.Values.Any(p => !p.Passed));
@@ -131,7 +141,7 @@ namespace DevOnBike.Overfit.GpuProbe
         }
 
         private static CellResult RunCell(
-            Cell cell,
+            CellWeights weights,
             int n,
             ProbeOptions options,
             Accelerator accelerator,
@@ -139,8 +149,9 @@ namespace DevOnBike.Overfit.GpuProbe
             TextWriter log,
             Report report)
         {
+            var cell = weights.Cell;
             var result = new CellResult(cell, n);
-            using var fixture = new CellFixture(cell, n, options.Seed);
+            using var fixture = new CellFixture(weights, n, options.Seed);
 
             // The two CPU references, computed once and outside every clock. Everything else in this cell
             // is compared against them.
@@ -187,7 +198,23 @@ namespace DevOnBike.Overfit.GpuProbe
                 cuBlas.Forward(gpu.InputView, gpu.WeightView, gpu.OutputView, n, cell.K, cell.M);
                 accelerator.Synchronize();
                 gpu.ReadOutput(hostOutput);
-                result.Parity[ArmNames.X1] = ParityResult.Compare(fixture.OutputF32, hostOutput);
+                result.Parity[ArmNames.X2] = ParityResult.Compare(fixture.OutputF32, hostOutput);
+
+                // X1 is judged against the FP16-ACCUMULATE ceiling, which depends on k and was measured
+                // by --fp16-bound. Judging it against the F32 ceiling would fail a correct hgemm.
+                if (cuBlas.TryPrepareFp16(fixture.Input, fixture.WeightF32, n, cell.K, cell.M))
+                {
+                    cuBlas.ForwardFp16(n, cell.K, cell.M);
+                    accelerator.Synchronize();
+                    cuBlas.ReadFp16Output(hostOutput);
+                    result.Parity[ArmNames.X1] = ParityResult.Compare(
+                        fixture.OutputF32, hostOutput, ParityResult.Fp16Fp16AccumulateCeiling(cell.K));
+                }
+
+                if (cuBlas.Fp16Unavailable is not null)
+                {
+                    report.Fp16SkipReason ??= cuBlas.Fp16Unavailable;
+                }
             }
 
             foreach (var (arm, parity) in result.Parity)
@@ -215,28 +242,87 @@ namespace DevOnBike.Overfit.GpuProbe
             if (cuBlas is not null)
             {
                 arms.Add(Arm.Gpu(
-                    ArmNames.X1,
+                    ArmNames.X2,
                     accelerator,
                     () => cuBlas.Forward(gpu.InputView, gpu.WeightView, gpu.OutputView, n, cell.K, cell.M)));
+
+                if (cuBlas.Fp16Ready)
+                {
+                    arms.Add(Arm.Gpu(ArmNames.X1, accelerator, () => cuBlas.ForwardFp16(n, cell.K, cell.M)));
+                }
             }
 
-            var timings = ArmRunner.Interleave(arms, options.Warmups, options.Reps);
+            var run = ArmRunner.Interleave(arms, options.WarmupPolicy, options.Reps, log.WriteLine);
+            result.WarmupRounds = run.WarmupRounds;
+            result.WarmupStopReason = run.WarmupStopReason;
+
             foreach (var arm in arms)
             {
-                result.Timings[arm.Name] = timings[arm.Name];
-                log.WriteLine($"  {arm.Name,-24} median {timings[arm.Name].MedianMs,10:F3} ms");
+                result.Timings[arm.Name] = run.Timings[arm.Name];
+                result.Warmups[arm.Name] = run.Warmups[arm.Name];
+                log.WriteLine(
+                    $"  {arm.Name,-24} median {run.Timings[arm.Name].MedianMs,10:F3} ms   " +
+                    run.Warmups[arm.Name].Describe());
             }
 
             return result;
         }
+
+        /// <summary>
+        /// Runs the host-side FP16 accuracy measurement at every selected shape and puts the result in
+        /// the report. No device is touched, so this is the one part of the FP16 work that can be
+        /// answered on a machine with no NVIDIA card.
+        /// </summary>
+        private static void MeasureFp16Bounds(ProbeOptions options, Report report, TextWriter log)
+        {
+            report.TopBanners.Add(
+                "--fp16-bound: this run measured what FP16 costs in ACCURACY and timed nothing at all. " +
+                "Speed and numerical viability are two questions and this answers only the second.");
+
+            foreach (var cell in SelectCells(options))
+            {
+                log.WriteLine($"cell {cell.Name}: quantizing for the FP16 bound...");
+                var weights = new CellWeights(cell, options.Seed);
+
+                foreach (var n in options.Batches)
+                {
+                    log.WriteLine($"cell {cell.Name} n={n}: measuring the FP16 bound");
+                    using var fixture = new CellFixture(weights, n, options.Seed);
+                    fixture.RunC3Forward();
+
+                    var fp32Accumulate = new float[(long)n * cell.M];
+                    Fp16Reference.ForwardFp32Accumulate(
+                        fixture.Input, fixture.WeightF32, fp32Accumulate, n, cell.K, cell.M);
+                    var withFp32Acc = ParityResult.Compare(fixture.OutputF32, fp32Accumulate);
+
+                    var withFp16Acc = Fp16Reference.RelativeL2WithFp16Accumulate(
+                        fixture.Input, fixture.WeightF32, fixture.OutputF32,
+                        n, cell.K, cell.M, options.Seed, out var sampled);
+
+                    var line = string.Create(
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        $"{cell.Name,-14} k {cell.K,6} -> m {cell.M,6}  n={n,4}   " +
+                        $"fp32 acc {withFp32Acc.RelativeL2:E2}   fp16 acc {withFp16Acc:E2} " +
+                        $"(from {sampled} sampled output elements)");
+                    report.Fp16Bounds.Add(line);
+                    log.WriteLine("  " + line);
+                }
+            }
+        }
+
+        private static List<Cell> SelectCells(ProbeOptions options) =>
+            (options.Quick ? Cell.Quick : Cell.Production)
+            .Where(c => options.CellFilter.Length == 0 ||
+                        c.Name.Contains(options.CellFilter, StringComparison.OrdinalIgnoreCase))
+            .ToList();
 
         private static CuBlasArm? CreateCuBlas(ProbeOptions options, Accelerator accelerator, Report report)
         {
             if (!options.EnableCuBlas)
             {
                 report.CuBlasSkipReason ??=
-                    "not requested. Pass --x1 to measure it; it needs the CUDA TOOLKIT installed, which the " +
-                    "rest of this probe deliberately does not.";
+                    "not requested. Pass --x1 to measure it; it needs the CUDA REDISTRIBUTABLE installed " +
+                    "(cublas64_*.dll), which the rest of this probe deliberately does not.";
                 return null;
             }
 

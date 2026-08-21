@@ -11,8 +11,22 @@ namespace DevOnBike.Overfit.GpuProbe
         /// <summary>Timed repetitions per arm per cell. The plan's floor is 5.</summary>
         public int Reps { get; private set; } = 5;
 
-        /// <summary>Untimed repetitions before the clock starts. The plan's floor is 2.</summary>
-        public int Warmups { get; private set; } = 2;
+        /// <summary>
+        /// The FLOOR on untimed warm-up rounds, not the count. The count is decided by the stopping rule
+        /// in <see cref="WarmupPolicy"/>, because a fixed count is a number that worked once on one box.
+        /// The plan's floor is 2; this floor is 10, which is the smallest value at which the rule can be
+        /// evaluated at all (two windows of five).
+        /// </summary>
+        public int WarmupMinimum { get; private set; } = 10;
+
+        /// <summary>Hard cap on warm-up rounds, so the loop always terminates.</summary>
+        public int WarmupMaximum { get; private set; } = 100;
+
+        /// <summary>Relative move between two window medians that still counts as settled.</summary>
+        public double WarmupTolerance { get; private set; } = 0.05;
+
+        /// <summary>Wall-clock budget for one cell's warm-up phase, after the minimum rounds have run.</summary>
+        public double WarmupBudgetMs { get; private set; } = 30_000;
 
         /// <summary>Token counts to sweep. Provenance for all three is section 3.3 of the plan.</summary>
         public IReadOnlyList<int> Batches { get; private set; } = [16, 128, 256];
@@ -25,6 +39,12 @@ namespace DevOnBike.Overfit.GpuProbe
 
         /// <summary>Reduced shapes that exercise every path in seconds. NOT the QLoRA shapes.</summary>
         public bool Quick { get; private set; }
+
+        /// <summary>
+        /// Measure how much accuracy FP16 costs at each real shape, on the host, and print nothing else.
+        /// This is what sets the parity ceiling for the FP16 arm, and it needs no GPU at all.
+        /// </summary>
+        public bool Fp16Bound { get; private set; }
 
         /// <summary>Arm X1, the cuBLAS upper bound. Off by default; needs the CUDA toolkit.</summary>
         public bool EnableCuBlas { get; private set; }
@@ -61,6 +81,9 @@ namespace DevOnBike.Overfit.GpuProbe
                     case "--quick":
                         o.Quick = true;
                         continue;
+                    case "--fp16-bound":
+                        o.Fp16Bound = true;
+                        continue;
                     case "--x1":
                         o.EnableCuBlas = true;
                         continue;
@@ -71,7 +94,16 @@ namespace DevOnBike.Overfit.GpuProbe
                         o.Reps = ParseInt(value, o, key, minimum: 5);
                         continue;
                     case "--warmups":
-                        o.Warmups = ParseInt(value, o, key, minimum: 2);
+                        o.WarmupMinimum = ParseInt(value, o, key, minimum: 10);
+                        continue;
+                    case "--warmup-max":
+                        o.WarmupMaximum = ParseInt(value, o, key, minimum: 10);
+                        continue;
+                    case "--warmup-budget-ms":
+                        o.WarmupBudgetMs = ParseInt(value, o, key, minimum: 1000);
+                        continue;
+                    case "--warmup-tolerance":
+                        o.WarmupTolerance = ParseFraction(value, o, key);
                         continue;
                     case "--seed":
                         o.Seed = ParseInt(value, o, key, minimum: 0);
@@ -98,10 +130,23 @@ namespace DevOnBike.Overfit.GpuProbe
             return o;
         }
 
+        /// <summary>
+        /// The stopping rule this run will use. Built here so the one place that owns the defaults is
+        /// the one place the command line writes to.
+        /// </summary>
+        public WarmupPolicy WarmupPolicy => new(
+            Math.Max(WarmupMinimum, 10),
+            Math.Max(WarmupMaximum, Math.Max(WarmupMinimum, 10)),
+            WarmupTolerance,
+            windowSize: 5,
+            WarmupBudgetMs);
+
         public string Describe() =>
-            $"reps={Reps} warmups={Warmups} batches=[{string.Join(",", Batches)}] " +
+            $"reps={Reps} warmupMin={WarmupMinimum} warmupMax={WarmupMaximum} " +
+            $"warmupTolerance={WarmupTolerance} warmupBudgetMs={WarmupBudgetMs} " +
+            $"batches=[{string.Join(",", Batches)}] " +
             $"cells='{(CellFilter.Length == 0 ? "all" : CellFilter)}' seed={Seed} " +
-            $"quick={Quick} parityOnly={ParityOnly} x1={EnableCuBlas} " +
+            $"quick={Quick} parityOnly={ParityOnly} fp16Bound={Fp16Bound} x1={EnableCuBlas} " +
             $"device='{(Device.Length == 0 ? "auto" : Device)}' allowCpuAccelerator={AllowCpuAccelerator}";
 
         public static string Usage =>
@@ -111,11 +156,18 @@ namespace DevOnBike.Overfit.GpuProbe
 
               --parity-only             run the correctness oracles only, print no timing
               --quick                   small shapes, seconds not minutes; NOT the QLoRA shapes
+              --fp16-bound              measure what FP16 costs in accuracy at each shape, then stop
               --x1                      also measure cuBLAS (needs the CUDA TOOLKIT, not just the driver)
               --allow-cpu-accelerator   measure even if the only accelerator is ILGPU's CPU emulator
               --device=cuda|opencl|cpu  force a backend instead of taking the best available
               --reps=N                  timed repetitions per arm (minimum 5)
-              --warmups=N               untimed repetitions per arm (minimum 2)
+              --warmups=N               MINIMUM untimed warm-up rounds (minimum 10). The actual count is
+                                        decided by the stopping rule, which warms until the median of the
+                                        last 5 readings of every arm is within a tolerance of the median
+                                        of the 5 before it. The report prints how many rounds it took.
+              --warmup-max=N            hard cap on warm-up rounds (default 100)
+              --warmup-budget-ms=N      wall-clock budget for one cell's warm-up (default 30000)
+              --warmup-tolerance=F      settled when two window medians are within F, e.g. 0.05
               --cells=SUBSTRING         only cells whose name contains SUBSTRING
               --batches=16,128,256      token counts to sweep
               --seed=N                  seed of the synthetic weights and activations
@@ -133,6 +185,23 @@ namespace DevOnBike.Overfit.GpuProbe
             {
                 o.Error = $"{key} must be at least {minimum} (the plan's floor), got {parsed}";
                 return minimum;
+            }
+
+            return parsed;
+        }
+
+        private static double ParseFraction(string value, ProbeOptions o, string key)
+        {
+            if (!double.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var parsed))
+            {
+                o.Error = $"{key} needs a number, got '{value}'";
+                return 0.05;
+            }
+
+            if (parsed <= 0 || parsed >= 1)
+            {
+                o.Error = $"{key} must be a fraction strictly between 0 and 1, got {parsed}";
+                return 0.05;
             }
 
             return parsed;

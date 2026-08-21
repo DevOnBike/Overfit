@@ -167,6 +167,44 @@ Found on 2026-08-08, when the plan's determinism oracle turned out not to detect
 determinism and clock-independence were two properties behind one test, and only a mutation that stayed
 green revealed it.
 
+**A MUTATED BUILD'S OUTPUT FILES ARE MUTATED TOO. Overwrite them with a clean-build run before you
+finish, and name them in your report.** Added 2026-08-21, and it is the most expensive lesson of that day
+because the existing discipline all held and still did not prevent it.
+
+The rules protect the SOURCE: refuse a dirty target, match the anchor exactly once, verify the restore
+byte-for-byte, keep backups out of the tree. Every one was obeyed — each restore was byte-identical and the
+rebuilt assembly's hash returned to its pre-mutation value every time. And the mutated build had already
+written its report artefact into the working tree, where it sat looking exactly like a normal result. The
+user committed it. The lead read it off disk, diagnosed the wrong cause, and told the user twice before a
+later run pinned the real one.
+
+**The source was pristine; the OUTPUT was a lie.** One clean re-run after the last restore would have
+prevented all of it. So know what your mutated runs write, and leave nothing behind that a reader would
+mistake for a measurement of the shipped code.
+
+**If you will be silent for more than a few minutes, send a one-line holding message naming what is running
+and what you are still holding.** From outside, working silently and having died are identical, and that
+ambiguity caused a two-writer collision on the same day: an agent had a twelve-minute background run and
+nothing to say until it returned, so it said nothing; `ListAgents` showed nothing reachable; the dispatcher
+concluded it had finished and sent a second writer at the same directory. One message would have prevented
+it. Name what is in flight and what only you know, because both are lost if you go quiet for good.
+
+**Before you start writing into a directory, and again before you report, list its modification times. A
+file newer than your last write is another agent.** Added 2026-08-21 from an incident that was the
+dispatcher's fault, not the agent's: two developers were sent at `Demo/GpuProbe` because the first never
+reported and `ListAgents` showed nothing reachable, so it was presumed finished. It was alive. Nine of its
+source files were rewritten underneath it while one of its background runs was in flight.
+
+The existing rule about distinct scratch paths per agent INSTANCE worked perfectly and was never the
+hazard. The scratch collision is noisy; a SOURCE collision is silent. The `Edit` tool's "file changed on
+disk" notice is not a sufficient detector either — the agent that hit this found out from a system reminder
+attached to an unrelated read, and only because the reminder happened to quote the file. One `ls` of the
+directory costs nothing and is the only cheap detector found so far.
+
+**When you do detect one: stop, do not revert the other agent's work, and ask who owns the directory.**
+That is what happened here and it was right. Then hand over what only you know — an in-flight run, a
+retired risk, a mutation result — because it is lost when you go quiet.
+
 **A GREEN whose output is BIT-IDENTICAL to the baseline is ambiguous, and reporting either reading is
 wrong until you settle it.** It means one of two opposite things: the mutation was never reached, or it was
 reached and is numerically inert. "The test is vacuous" and "the mutation was too weak to move the output"
@@ -397,6 +435,14 @@ culture settles it: `sb.Append($"…{0.5:0.##}")` gives `0,5` on `pl-PL`, `sb.Ap
 gives `0.5`. Measure the behaviour, not the diagnostic's absence.
 
 ## Before you implement a signed plan, check its mechanism can fire — added 2026-08-10
+
+**Extended 2026-08-21: also check what the mechanism does on the NEGATIVE input the plan assumes will fail.
+A clean fallback that returns plausible values is the dangerous case, not the exception.** The trap that
+nearly produced a fake GPU result was the opposite shape to the one this section was written for.
+`Context.Create(b => b.Cuda())` does NOT throw on a machine with no NVIDIA card — it returns a context
+holding one device named `CPUAccelerator`. A probe that took `Devices[0]` and labelled the column "GPU"
+would have printed an emulator's speedup with nothing on screen saying so. "Can it fire?" was yes; the
+question that mattered was: what does it do when it should NOT fire?
 
 **A signed plan is a decision record, not a proof that the mechanism works.** Read the code the plan
 delegates to, find the gates the specified input must clear, and **quote them**. If the input cannot clear
@@ -701,6 +747,13 @@ in the script rather than to ask.
 **What this buys, each learned the hard way in this repository:**
 
 - The command lives in a file that can be **re-read and corrected** rather than retyped from memory.
+**A run you perform for one purpose still reports everything else it found. Print the whole of a short run
+rather than a filter of it.** Added 2026-08-21, and the incident is exact: a probe printed
+`CANARY MOVED - SITTING SUSPECT ... -93.5 %` on a completely idle machine, in a run the agent performed
+itself, and the agent filtered its own log down to the three lines it was looking for and never read it.
+The whole output was 80 lines; there was no reason to filter it at all. The existing rule protects a failing
+TEST NAME from a filter and says nothing about a failing SELF-CHECK. They are the same loss.
+
 - Output is filtered **in Python, not with `grep`/`head`**. `dotnet build` on this solution emits far more
   than fits in a report; print only the errors, the diagnostics you asked for, and the summary — and when
   a test fails, print the **test name**. A real failure has been lost twice here to a filter that kept

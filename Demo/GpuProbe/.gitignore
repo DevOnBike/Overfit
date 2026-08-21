@@ -1,0 +1,5 @@
+# The probe writes its report beside itself. A returned report carries a third party's machine identity
+# and must pass a leak scan before anybody commits it, so it is ignored by default rather than staged by
+# accident.
+gpu-probe-report.txt
+gpu-probe-report.json

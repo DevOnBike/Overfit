@@ -5,7 +5,6 @@
 
 using System.Numerics.Tensors;
 using DevOnBike.Overfit.Autograd;
-using DevOnBike.Overfit.LanguageModels.Loading;
 using DevOnBike.Overfit.LanguageModels.Runtime;
 using DevOnBike.Overfit.Runtime;
 using DevOnBike.Overfit.Tensors;
@@ -14,14 +13,9 @@ using DevOnBike.Overfit.Tensors.Core;
 namespace DevOnBike.Overfit.GpuProbe
 {
     /// <summary>
-    /// Everything one cell needs on the host: a synthetic Q4_K weight, the SAME weight decoded to F32
-    /// (which is what arm C3 uses and what the device receives), synthetic activations, and the two
-    /// computation graphs the real training op runs on.
-    /// <para>
-    /// The F32 weight is produced by decoding the QUANTIZED weight, not by keeping the pre-quantization
-    /// floats. Quantization is lossy, so keeping the originals would leave arms C1 and C3 computing two
-    /// different functions and the parity check comparing the device against the wrong reference.
-    /// </para>
+    /// Everything one cell needs on the host at ONE token count: synthetic activations, the output and
+    /// gradient buffers the CPU arms write, and the two computation graphs the real training op runs on.
+    /// The weight itself lives in <see cref="CellWeights"/> and is shared across the batch sweep.
     /// </summary>
     internal sealed class CellFixture : IDisposable
     {
@@ -35,27 +29,18 @@ namespace DevOnBike.Overfit.GpuProbe
         private readonly float[] _partials;
         private readonly int _partitions;
 
-        public CellFixture(Cell cell, int n, int seed)
+        public CellFixture(CellWeights weights, int n, int seed)
         {
-            Cell = cell;
+            Weights = weights;
+            Cell = weights.Cell;
             N = n;
 
+            var cell = weights.Cell;
             var k = cell.K;
             var m = cell.M;
-            var rnd = new Random(seed);
 
-            // One buffer, used twice: random F32 in, quantized out, then decoded back over itself.
-            WeightF32 = new float[(long)m * k];
-            for (var i = 0; i < WeightF32.Length; i++)
-            {
-                WeightF32[i] = (float)(rnd.NextDouble() * 2 - 1) * 0.08f;
-            }
-
-            Quantized = new Q4KWeight(GgmlQuant.QuantizeQ4_K(WeightF32, k, m), k, m);
-            for (var o = 0; o < m; o++)
-            {
-                Quantized.DecodeRow(o, WeightF32.AsSpan(o * k, k));
-            }
+            // Offset from the weight's own seed so the activations are not correlated with it.
+            var rnd = new Random(seed + 1);
 
             Input = new float[(long)n * k];
             for (var i = 0; i < Input.Length; i++)
@@ -105,10 +90,12 @@ namespace DevOnBike.Overfit.GpuProbe
 
         public int N { get; }
 
-        /// <summary>The dequantized weight — what the device gets and what arms C3 and C4 read.</summary>
-        public float[] WeightF32 { get; }
+        public CellWeights Weights { get; }
 
-        public Q4KWeight Quantized { get; }
+        /// <summary>The dequantized weight — what the device gets and what arms C3 and C4 read.</summary>
+        public float[] WeightF32 => Weights.F32;
+
+        public Q4KWeight Quantized => Weights.Quantized;
 
         public float[] Input { get; }
 

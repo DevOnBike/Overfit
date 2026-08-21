@@ -28,3 +28,5 @@
 - [`:F0` on a real is NOT culture-invariant](reference_f0_on_reals_is_invariant.md) — `+Infinity`→`∞`, `NaN`→`epäluku`/`ليس رقم`; a probe missing NaN/±Inf, or using only `pl-PL`, returns the WRONG verdict. Rule defect ⇔ invariant for EVERY value the type can hold.
 - [Default-valued mechanism = blind mutation arm](reference_default_valued_mechanism_blind_arm.md) — a broken default is indistinguishable from a correct one while both equal `default(T)`; the `OVERFIT_TILED_PREFILL=1` arm is what discriminates, and it doubles as the capability probe.
 - [A gentle mutation reads as GREEN](reference_gentle_mutation_reads_as_green.md) — inert vs never-reached look identical; discriminate with a destructive probe + a dll hash. Dead band measured: 0.9 inert, 0.7 red.
+- [ILGPU route facts](reference_ilgpu_route_facts.md) — driver-only (`nvcuda`), toolkit names live in ILGPU.Algorithms; a `b.Cuda()` context still contains a CPU device; Synchronize moved a headline 0.13x -> 1036.58x.
+- [A canary needs symmetric warm-up](feedback_warmup_symmetry_canary.md) — cold-vs-warm made an idle machine read -93.5 %; read EVERY line of a timed run, not just the arm you wanted.

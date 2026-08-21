@@ -27,6 +27,17 @@ namespace DevOnBike.Overfit.GpuProbe
 
         public Dictionary<string, ParityResult> Parity { get; } = [];
 
+        /// <summary>
+        /// What the warm-up phase established about each arm, kept beside the timings rather than
+        /// discarded: a number whose warm-up evidence has been dropped is a number nobody can weigh.
+        /// </summary>
+        public Dictionary<string, WarmupOutcome> Warmups { get; } = [];
+
+        /// <summary>Warm-up rounds this cell ran, and which condition ended them.</summary>
+        public int WarmupRounds { get; set; }
+
+        public string WarmupStopReason { get; set; } = string.Empty;
+
         public List<string> Notes { get; } = [];
 
         /// <summary>

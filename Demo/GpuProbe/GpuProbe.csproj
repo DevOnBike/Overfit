@@ -30,6 +30,11 @@
              probe's own report for what that does and does not establish. -->
         <PackageReference Include="ILGPU" Version="1.5.3" />
         <PackageReference Include="ILGPU.Algorithms" Version="1.5.3" />
+
+        <!-- The live view. Version pinned INLINE because this project sets
+             ManagePackageVersionsCentrally=false (Decision D3), so there is no central list to carry
+             it. Managed-only and it renders to a plain console when the terminal cannot do ANSI. -->
+        <PackageReference Include="Spectre.Console" Version="0.49.1" />
     </ItemGroup>
 
 </Project>

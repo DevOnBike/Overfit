@@ -18,6 +18,7 @@ namespace DevOnBike.Overfit.GpuProbe
         public const string G1 = "G1 gpu naive forward";
         public const string G2 = "G2 gpu tiled forward";
         public const string G3 = "G3 gpu tiled backward";
-        public const string X1 = "X1 cublas forward";
+        public const string X1 = "X1 cublas fp16 fwd";
+        public const string X2 = "X2 cublas fp32 fwd";
     }
 }

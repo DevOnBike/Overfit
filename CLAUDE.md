@@ -179,7 +179,11 @@ Practical consequences, each of which has already gone wrong at least once:
   a test fails, print the **test name** — twice now a real failure has been lost because the filter kept
   only the summary.
 - **Watch the quoting.** Long scripts belong in `do.py` written with `Write`, not squeezed into
-  `python -c` — backticks, `$`, `\` and regex character classes get eaten by the shell on the way in.
+  `python -c` — backticks, `$`, `\`, regex character classes **and any non-ASCII character** get
+  eaten by the shell on the way in. The non-ASCII half was added on 2026-08-21 after an em-dash inside
+  a README anchor string was mangled by a heredoc: every match returned zero, the patch silently did
+  nothing, and only an assertion caught it. **An em-dash is far more common in this repository's prose
+  than a backtick, and unlike a backtick it looks correct in the source you typed.**
 
 Repeatable versions of the three most common cycles live in `.claude/commands/` — `/check` (build + full
 suite), `/bench <filter>` (benchmark + the measurement traps to check before believing the number), and
