@@ -54,18 +54,18 @@ internal static class Program
         // unmanaged part: pooled buffers, NativeMemory, and anything the mapping forces resident.
         Mark("start");
 
-        // The tokenizer alone, before anything else. `LoadGguf` builds the tokenizer, the engine AND a
-        // session at its default 2048-token context, so its total tells you nothing about which of the three
-        // holds the memory. Qwen2.5's vocabulary is 151,936 entries plus BPE merge rules, all managed
-        // objects, which is the one candidate the tensor-level instrumentation could not see.
-        {
-            var probe = DevOnBike.Overfit.LanguageModels.Tokenizers.GgufTokenizer.Load(modelPath);
-
-            Mark($"after GgufTokenizer.Load ({probe.GetType().Name})");
-        }
-
-        Mark("after tokenizer released");
-
+        // REMOVED 2026-08-21: a `GgufTokenizer.Load` probe stood here, added the day before to test whether
+        // the tokenizer explained an unattributed gigabyte. It did not — the hypothesis was refuted the same
+        // hour — but the probe was left behind, and it holds ~40 MB for the life of the process.
+        //
+        // **Every load-time figure this harness reported for a day was 40 MB high**, including a 727.2 MB
+        // reading that was quoted in `measured-baselines.md` and a 759.2 that preceded it. Nothing about
+        // those numbers looked wrong; the error surfaced only when the measurement was split into parts that
+        // had to add up, and the parts came to 40 MB more than the whole.
+        //
+        // The lesson is not "remove probes when done" — it is that a probe which allocates is part of the
+        // subject from the moment it exists. If one is needed again, take the reading with and without it in
+        // the same sitting, or measure the tokenizer from inside `LoadGguf` where it is already being built.
         var loadSw = Stopwatch.StartNew();
         using var client = OverfitClient.LoadGguf(modelPath, mmap: true);
         loadSw.Stop();

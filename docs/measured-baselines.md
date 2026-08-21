@@ -400,6 +400,93 @@ worker-loop branch. Zero references left.
 Verified after removal: `Scripts/DispatchStress` clean at **22,500 dispatches** both with and without the
 now-meaningless environment variable set, and the suite **2748/0 twice**.
 
+### Load-time memory fully accounted on BOTH models: from "470 MB unknown" to ~55 MB (2026-08-21)
+
+Supersedes the partial split below it. Every resident-weight path in `GgufLlamaLoader` was stamped and both
+models measured, so this is a breakdown rather than a calculation.
+
+| component | Qwen2.5-3B (Q4_K) | Qwen2.5-0.5B (Q5_0) |
+|---|---|---|
+| .NET runtime baseline at entry | 23.3 | 26.6 |
+| harness probe tokenizer — **an artefact, since REMOVED** | 16.9 | 13.5 |
+| chat-template `GgufReader` | 12.2 | 10.0 |
+| tokenizer (sibling files) | 37.0 | 38.0 |
+| FFN / embedding / LM head | **0 — all mapped** | **515.5** |
+| **`attn_output` via the F32 fallback** | **153.0** | 19.5 |
+| session KV cache at 2048 | ~151 | 50.5 |
+| **attributed** | **393.4** | **673.6** |
+| measured, with the probe | 452.8 | 727.2 |
+| **measured, probe removed** | **435.9** | **713.7** |
+| **unattributed** | **~59** | **~54** |
+
+**The remainder is the same size on both models, and that is itself the evidence.** A term that does not
+scale with the model is not weights; it looks like the object overhead of several hundred per-head weight
+instances plus the tensor index, and it is small enough to stop here.
+
+**Three findings, in order of size.**
+
+**(1) `attn_output` costs 153 MB on the 3B and is filed as `XC-101`.** On a model whose every other weight is
+mapped at zero cost, this one tensor is the largest managed term in the load. It is structural: `Wo` is split
+per head, a head is `headDim` wide, and `headDim` is smaller than the 256-element K-quant super-block — so
+no per-head K-quant representation exists and the F32 fallback is the only path.
+
+**(2) The 0.5B is expensive for reasons the 3B is not.** 515.5 MB of weights against zero, because its
+quantisations are the two this loader cannot hold verbatim: Q5_0 (no native type; +144.1 MB over its on-disk
+size) and a Q8_0 LM head (interleaved on disk, split in memory; ~145 MB — `XC-100`). A model four times
+larger loads in 452.8 MB against 727.2.
+
+> **(3) The instrument was inflating every reading, and the first correction of it was ALSO wrong.**
+> `Scripts/GenHarness` carried a `GgufTokenizer.Load` probe added the previous day to test a hypothesis that
+> was refuted the same hour; it was never removed and held memory for the life of the process. Every
+> load-time figure quoted from that harness — including the 727.2 MB above and the 759.2 that preceded it —
+> was high by it.
+>
+> **The size was first written down here as "40 MB", from the reading at entry, and that was wrong.**
+> Removing the probe and re-measuring gives **13.5 MB on the 0.5B and 16.9 MB on the 3B**; the rest of that
+> 40 was the .NET runtime's own baseline, which the entry stamp had swept in with it. Corrected figures:
+> **713.7 MB and 435.9 MB**. The attribution table above is otherwise unchanged, and the ~55 MB remainder
+> survives on both models.
+>
+> Two lessons, and the second is the sharper one. **A probe that allocates is part of the subject from the
+> moment it exists** — the tell was never in the totals, only in a split whose parts had to add up. And
+> **a correction is a measurement too**: "40 MB" was one reading, attributed by eye, published as a fact,
+> and wrong by 2.5x within the hour. This is the fifth instrument defect in two days and the first one whose
+> fix needed its own fix.
+
+### Where the 727 MB actually goes on Qwen2.5-0.5B: 515 attributed, 212 still open (2026-08-21)
+
+`XC-97` took the load from 1,132 MB of managed heap to 727 MB and left "~470 MB unattributed". That figure
+was itself too large, and the correction is worth stating: **it never counted what the layer weights legally
+cost.** The loader was made to stamp every resident weight it builds, so the split below is measured, not
+calculated — the same discipline `XC-60` failed, where a whole row hung on one constant taken from a document
+instead of from a running process.
+
+| component | managed | how |
+|---|---|---|
+| `token_embd.weight` | **146.1 MB** | Q5_0 -> Q8, streamed from the mapping |
+| `blk.N.ffn_gate.weight` (24) | **112.2 MB** | Q5_0 -> Q8 |
+| `blk.N.ffn_up.weight` (24) | **112.2 MB** | Q5_0 -> Q8 |
+| LM head `output.weight` | **~145 MB** | Q8_0, **copied** — `LoadQ8Native` has no mmap path (`XC-100`) |
+| `blk.N.ffn_down.weight` (24) | **0** | 12 Q6_K + 12 Q4_K, both sliced from the mapping |
+| attention projections | **0** | per-head loaders, sliced from the mapping |
+| **attributed** | **~515 MB** | |
+| **still open** | **~212 MB** | tokenizer via the sibling-file path is part of it; the rest is unknown |
+
+**The cost of having no native Q5_0 weight type is now a number rather than an estimate: +144.1 MB.** Those
+49 tensors occupy 226.4 MB on disk as Q5_0 and 370.5 MB resident as Q8 — Q5_0 is 0.6875 bytes per parameter
+against Q8's 1.0625, so the conversion is 1.55x, and that is the price of reusing a first-class weight type
+instead of adding a fifth one.
+
+> **The control explains itself and is the useful comparison.** Qwen2.5-3B is four times the model and loads
+> in **484 MB** against the 0.5B's 727. Every one of its weights is Q4_K or Q6_K, whose on-disk layout IS the
+> resident layout, so they are slices of the mapping and cost nothing; its LM head is Q6_K and also free.
+> **The 0.5B is expensive precisely because its quantisations are the two this loader cannot map** — Q5_0
+> (no native type) and Q8_0 (interleaved on disk, split in memory). Neither is a defect in the model file;
+> both are gaps in what the loader can hold verbatim.
+
+**Session KV cache measured separately**: `CreateSession(2048)` adds **50.5 MB** on this model, matching the
+arithmetic (24 layers x 2 x 2 KV heads x 64 head_dim x 2048 x 4 B).
+
 ### `XC-97` fixed: a Q5_0 embedding no longer dequantizes to F32 — 373 MB saved, prediction 374 (2026-08-20)
 
 `GgufLlamaLoader.LoadEmbedding` kept the embedding verbatim and mmap-backed only for Q4_K and Q6_K. Q5_0 fell
