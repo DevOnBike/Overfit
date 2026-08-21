@@ -2,3 +2,4 @@
 - [Which benchmark covers which decode path (and which do not exist)](benchmark_class_map.md) — `ForDecode` has NEVER been in `Sources/Benchmark`; the tok/s claims come from `[ModelFact]` diagnostics that are skipped by default.
 - [Measurement traps confirmed on this box](traps_this_box.md) — dispatch-counter liveness probe, cross-process floor ±3-4%, run-1-is-slow, `Stopwatch.StartNew` = 40 B of scaffolding.
 - [The PB-12 audit harness and how to rebuild it](harness_pb12.md) — `.claude/pb12/` (gitignored scratch), takes the benchmark mutex, ABAB + canary + liveness probe.
+- [Repack sidecar "81.0 MB managed" — audited 2026-08-21](audit_repack_sidecar_81mb.md) — SUPPORTED: 80.9 MiB measured / 81.0000 MiB arithmetic. Output NOT byte-identical (divergent at 64 tokens). Two reusable techniques: heap-hard-limit squeeze for live-vs-garbage, and byte-for-byte sidecar verification.
