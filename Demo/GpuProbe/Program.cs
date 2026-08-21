@@ -78,6 +78,12 @@ namespace DevOnBike.Overfit.GpuProbe
                 return Emit(report, 1);
             }
 
+            if (options.LivePerturbation)
+            {
+                LivePerturbation.Run(options, report, log);
+                return Emit(report, 0);
+            }
+
             if (options.Fp16Bound)
             {
                 MeasureFp16Bounds(options, report, log);
@@ -99,14 +105,6 @@ namespace DevOnBike.Overfit.GpuProbe
                     "oracles below did run and are valid. Pass --allow-cpu-accelerator to time it anyway.");
             }
 
-            var canary = measure ? new Canary() : null;
-            if (canary is not null)
-            {
-                report.CanaryMeasured = true;
-                report.CanaryStart = canary.Measure(options.WarmupPolicy);
-                log.WriteLine($"canary at the start: {report.CanaryStart!.MedianMs:F2} ms, {report.CanaryStart.Warmup.Describe()}");
-            }
-
             var cells = SelectCells(options);
 
             if (cells.Count == 0)
@@ -115,29 +113,106 @@ namespace DevOnBike.Overfit.GpuProbe
                 return Emit(report, 2);
             }
 
+            // The live view is opened here, around the whole measured run, or is null - which is what
+            // --live gets on a machine with no NVIDIA driver, with the reason in the report. Everything
+            // timed below runs with it frozen; it repaints between phases and between cells only.
+            var state = new LiveProbeState { CellsTotal = cells.Count * options.Batches.Count };
+            using var view = LiveView.Open(options, accelerator, state, report);
+            if (report.LiveViewNote is not null)
+            {
+                log.WriteLine("live view: " + report.LiveViewNote);
+            }
+
+            RunUnderView(view, () => MeasureCells(cells, options, accelerator, measure, log, report, view));
+
+            if (view is not null)
+            {
+                // Both counts, not just the bad one. "0 dropped" on its own is also what a view that never
+                // started would report, and the frame count is what tells those two apart.
+                report.LiveViewNote +=
+                    $" It painted {LiveView.FramesPainted} frames during this run, and dropped " +
+                    $"{LiveView.DroppedInsideTimedRegion} repaints that were requested from inside a timed region.";
+            }
+
+            if (LiveView.DroppedInsideTimedRegion > 0)
+            {
+                report.TopBanners.Add(
+                    "A LIVE REPAINT WAS REQUESTED INSIDE A TIMED REGION. It was dropped rather than performed, " +
+                    "so no number below carries the cost of that frame - but the request means the view is being " +
+                    "driven from the wrong place, and the next such call may be a sensor read that is not " +
+                    "guarded. Treat this as a defect in the probe, not in the machine, and report it.");
+            }
+
+            var anyParityFailure = report.Cells.Any(c => c.Parity.Values.Any(p => !p.Passed));
+            return Emit(report, anyParityFailure ? 1 : 0);
+        }
+
+        /// <summary>
+        /// Runs the whole measured part of the probe, with the live display attached when there is one.
+        /// Spectre owns the console for the duration of <see cref="LiveView.Run"/>, so the body has to be
+        /// inside it rather than beside it.
+        /// </summary>
+        private static void RunUnderView(LiveView? view, Action body)
+        {
+            if (view is null)
+            {
+                body();
+                return;
+            }
+
+            view.Run(body);
+        }
+
+        private static void MeasureCells(
+            IReadOnlyList<Cell> cells,
+            ProbeOptions options,
+            Accelerator accelerator,
+            bool measure,
+            TextWriter log,
+            Report report,
+            LiveView? view)
+        {
+            var canary = measure ? new Canary() : null;
+            if (canary is not null)
+            {
+                view?.Show("canary at the start - a fixed host workload, to see later whether the box moved");
+                report.CanaryMeasured = true;
+                report.CanaryStart = canary.Measure(options.WarmupPolicy, view);
+                log.WriteLine($"canary at the start: {report.CanaryStart!.MedianMs:F2} ms, {report.CanaryStart.Warmup.Describe()}");
+            }
+
             foreach (var cell in cells)
             {
                 // Once per cell, not once per (cell, token count): the weight does not depend on the
                 // batch and quantizing lm_head's 1187 MiB three times dominated the whole run.
                 log.WriteLine(
                     $"cell {cell.Name}: quantizing {cell.WeightBytesF32 / (1024.0 * 1024.0):F0} MiB of F32 weight...");
+
+                // n is not known yet, and the view prints no batch until it is. A quantize of over a
+                // gigabyte takes long enough that a frozen display showing the PREVIOUS cell's batch
+                // would be read as a hung probe.
+                view?.ShowCell(cell.Name, 0, "quantizing the F32 weight");
                 var weights = new CellWeights(cell, options.Seed);
 
                 foreach (var n in options.Batches)
                 {
                     log.WriteLine($"cell {cell.Name} n={n}: running");
-                    report.Cells.Add(RunCell(weights, n, options, accelerator, measure, log, report));
+                    var result = RunCell(weights, n, options, accelerator, measure, log, report, view);
+                    report.Cells.Add(result);
+
+                    // The view's throughput panel is this cell's own medians, rendered a second time -
+                    // never a second timer. Two timers disagree and then nobody can say which figure the
+                    // report means.
+                    view?.Completed(result);
                 }
             }
 
             if (canary is not null)
             {
-                report.CanaryEnd = canary.Measure(options.WarmupPolicy);
+                view?.Show("canary at the end - the same workload again, to see whether the box moved");
+                report.CanaryEnd = canary.Measure(options.WarmupPolicy, view);
                 log.WriteLine($"canary at the end: {report.CanaryEnd!.MedianMs:F2} ms, {report.CanaryEnd.Warmup.Describe()}");
             }
-
-            var anyParityFailure = report.Cells.Any(c => c.Parity.Values.Any(p => !p.Passed));
-            return Emit(report, anyParityFailure ? 1 : 0);
         }
 
         private static CellResult RunCell(
@@ -147,14 +222,17 @@ namespace DevOnBike.Overfit.GpuProbe
             Accelerator accelerator,
             bool measure,
             TextWriter log,
-            Report report)
+            Report report,
+            LiveView? view = null)
         {
             var cell = weights.Cell;
             var result = new CellResult(cell, n);
+            view?.ShowCell(cell.Name, n, "building the fixture");
             using var fixture = new CellFixture(weights, n, options.Seed);
 
             // The two CPU references, computed once and outside every clock. Everything else in this cell
             // is compared against them.
+            view?.Show("computing the CPU references");
             fixture.RunC3Forward();
             fixture.RunC4Backward();
 
@@ -171,11 +249,18 @@ namespace DevOnBike.Overfit.GpuProbe
             fixture.ReadC2InputGrad(hostInputGrad);
             result.Parity[ArmNames.C2] = ParityResult.Compare(fixture.InputGradF32, hostInputGrad);
 
+            // The last repaint before the upload, which is itself a timed region and declares itself as
+            // one. Watching VRAM climb is most of the reason somebody asked for this view, so it is worth
+            // a frame here even though the number below is measured with the display held still.
+            view?.Show("uploading the weight to the device");
+
             using var gpu = new GpuArms(accelerator, n, cell.K, cell.M);
             result.WeightUploadMs = gpu.UploadWeight(fixture.WeightF32);
             gpu.UploadInput(fixture.Input);
             gpu.UploadOutputGrad(fixture.OutputGrad);
             log.WriteLine($"  weight upload: {result.WeightUploadMs:F1} ms");
+
+            view?.Show("checking parity of the device kernels against the host");
 
             gpu.RunNaiveForward();
             accelerator.Synchronize();
@@ -252,7 +337,7 @@ namespace DevOnBike.Overfit.GpuProbe
                 }
             }
 
-            var run = ArmRunner.Interleave(arms, options.WarmupPolicy, options.Reps, log.WriteLine);
+            var run = ArmRunner.Interleave(arms, options.WarmupPolicy, options.Reps, log.WriteLine, view);
             result.WarmupRounds = run.WarmupRounds;
             result.WarmupStopReason = run.WarmupStopReason;
 

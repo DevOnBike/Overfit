@@ -40,6 +40,28 @@ namespace DevOnBike.Overfit.GpuProbe
         /// <summary>Reduced shapes that exercise every path in seconds. NOT the QLoRA shapes.</summary>
         public bool Quick { get; private set; }
 
+        /// <summary>Show the live device view while the probe runs.</summary>
+        public bool Live { get; private set; }
+
+        /// <summary>
+        /// Drive the live view from synthetic readings instead of a device. The view is exercisable on a
+        /// machine with no NVIDIA card only because of this.
+        /// </summary>
+        public bool LiveStub { get; private set; }
+
+        /// <summary>
+        /// Measure what the live view costs the HOST arms, ABAB in one process, and print nothing else.
+        /// Needs no GPU. This is what decides whether the view must be suspended while timing.
+        /// </summary>
+        public bool LivePerturbation { get; private set; }
+
+        /// <summary>
+        /// Rounds between repaints in the LIVE block of <c>--live-perturbation</c>. 1, the default, is a
+        /// repaint between every round and is what the original measurement used. A larger value measures
+        /// the cadence the probe actually ships: one repaint, then a run of rounds with none.
+        /// </summary>
+        public int LivePerturbationEvery { get; private set; } = 1;
+
         /// <summary>
         /// Measure how much accuracy FP16 costs at each real shape, on the host, and print nothing else.
         /// This is what sets the parity ceiling for the FP16 arm, and it needs no GPU at all.
@@ -80,6 +102,20 @@ namespace DevOnBike.Overfit.GpuProbe
                         continue;
                     case "--quick":
                         o.Quick = true;
+                        continue;
+                    case "--live":
+                        o.Live = true;
+                        continue;
+                    case "--live-stub":
+                        o.Live = true;
+                        o.LiveStub = true;
+                        continue;
+                    case "--live-perturbation":
+                        o.LivePerturbation = true;
+                        continue;
+                    case "--live-perturbation-every":
+                        o.LivePerturbation = true;
+                        o.LivePerturbationEvery = ParseInt(value, o, key, minimum: 1);
                         continue;
                     case "--fp16-bound":
                         o.Fp16Bound = true;
@@ -147,6 +183,7 @@ namespace DevOnBike.Overfit.GpuProbe
             $"batches=[{string.Join(",", Batches)}] " +
             $"cells='{(CellFilter.Length == 0 ? "all" : CellFilter)}' seed={Seed} " +
             $"quick={Quick} parityOnly={ParityOnly} fp16Bound={Fp16Bound} x1={EnableCuBlas} " +
+            $"live={Live} liveStub={LiveStub} livePerturbationEvery={LivePerturbationEvery} " +
             $"device='{(Device.Length == 0 ? "auto" : Device)}' allowCpuAccelerator={AllowCpuAccelerator}";
 
         public static string Usage =>
@@ -157,6 +194,12 @@ namespace DevOnBike.Overfit.GpuProbe
               --parity-only             run the correctness oracles only, print no timing
               --quick                   small shapes, seconds not minutes; NOT the QLoRA shapes
               --fp16-bound              measure what FP16 costs in accuracy at each shape, then stop
+              --live                    show the live device view (card, VRAM, temperature, throughput)
+              --live-stub               the same view driven by synthetic readings, so it works with no GPU
+              --live-perturbation       measure what the live view costs the host arms, then stop
+              --live-perturbation-every=N  the same, repainting every N rounds instead of every round.
+                                        N=1 is the default cadence of the flag above; a larger N is the
+                                        cadence the probe ships, which repaints between phases only.
               --x1                      also measure cuBLAS (needs the CUDA TOOLKIT, not just the driver)
               --allow-cpu-accelerator   measure even if the only accelerator is ILGPU's CPU emulator
               --device=cuda|opencl|cpu  force a backend instead of taking the best available

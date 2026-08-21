@@ -17,6 +17,15 @@ namespace DevOnBike.Overfit.GpuProbe
     /// keeps running to the end of the phase: dropping it would change what the other arms are
     /// interleaved against half way through the measurement.
     /// </para>
+    /// <para>
+    /// <b>The live view, when there is one, is frozen for both phases and repaints only between them.</b>
+    /// That is measured rather than assumed: with a repaint between every round, the C3 host arm's median
+    /// moved by 12 % to 42 % across three runs of <c>--live-perturbation --quick</c>, and the host arms are
+    /// the baseline every device ratio is divided by. The repaint is not concurrent with the arm - nothing
+    /// here is threaded - so what it costs is the state it leaves behind: a 2 MiB F32 weight evicted from
+    /// cache by a frame's worth of allocation, which is also why the quantized arm C1, whose weight is
+    /// eight times smaller, is unaffected at 0.970 to 0.983.
+    /// </para>
     /// </summary>
     internal static class ArmRunner
     {
@@ -24,17 +33,22 @@ namespace DevOnBike.Overfit.GpuProbe
             IReadOnlyList<Arm> arms,
             WarmupPolicy policy,
             int reps,
-            Action<string>? log = null)
+            Action<string>? log = null,
+            LiveView? view = null)
         {
             ArgumentOutOfRangeException.ThrowIfLessThan(reps, 5);
 
-            var warm = Warm(arms, policy, log, out var rounds, out var stopReason);
+            var warm = Warm(arms, policy, log, view, out var rounds, out var stopReason);
 
             var samples = new Dictionary<string, List<double>>(arms.Count);
             foreach (var arm in arms)
             {
                 samples[arm.Name] = new List<double>(reps);
             }
+
+            // Painted here, between the two phases, and then held still until every repetition is done.
+            view?.FreezeFor("timing - the display holds still until this phase ends, so that a repaint " +
+                            "cannot move the numbers it is about to show");
 
             for (var r = 0; r < reps; r++)
             {
@@ -43,6 +57,8 @@ namespace DevOnBike.Overfit.GpuProbe
                     samples[arm.Name].Add(arm.TimeOnce());
                 }
             }
+
+            view?.Resume();
 
             var timings = new Dictionary<string, Measurement>(arms.Count);
             foreach (var arm in arms)
@@ -63,9 +79,15 @@ namespace DevOnBike.Overfit.GpuProbe
             IReadOnlyList<Arm> arms,
             WarmupPolicy policy,
             Action<string>? log,
+            LiveView? view,
             out int rounds,
             out string stopReason)
         {
+            // Frozen for this phase as well as for the timed one, and for a second reason on top of the
+            // measured perturbation: these readings feed the stopping rule and its noise band. A repaint
+            // between rounds widens that band, and a wider band accepts a drift it was built to reject.
+            view?.FreezeFor("warming up - the display holds still until the arms have settled");
+
             var history = new Dictionary<string, List<double>>(arms.Count);
             foreach (var arm in arms)
             {
@@ -136,6 +158,11 @@ namespace DevOnBike.Overfit.GpuProbe
                         $"before the minimum of {policy.MinRounds} rounds could finish. This cell is too slow for " +
                         "the budget. Raise --warmup-budget-ms.";
                 }
+            }
+
+            if (view is not null)
+            {
+                view.State.WarmupRound = round;
             }
 
             log?.Invoke($"  warm-up: {round} rounds - {stopReason}");

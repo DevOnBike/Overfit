@@ -64,10 +64,16 @@ namespace DevOnBike.Overfit.GpuProbe
         /// </summary>
         public double UploadWeight(ReadOnlySpan<float> weight)
         {
+            // This is a timed region that does NOT go through Arm.TimeOnce, so it has to declare
+            // itself: the upload is the one number in the report a live repaint could reach otherwise.
+            TimedRegion.Enter();
             var start = Stopwatch.GetTimestamp();
             _weight.View.CopyFromCPU(_accelerator.DefaultStream, weight);
             _accelerator.Synchronize();
-            return Stopwatch.GetElapsedTime(start).TotalMilliseconds;
+            var elapsed = Stopwatch.GetElapsedTime(start).TotalMilliseconds;
+            TimedRegion.Leave();
+
+            return elapsed;
         }
 
         public void UploadInput(ReadOnlySpan<float> input)

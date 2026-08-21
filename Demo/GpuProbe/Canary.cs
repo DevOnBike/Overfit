@@ -43,11 +43,16 @@ namespace DevOnBike.Overfit.GpuProbe
             }
         }
 
-        /// <summary>Warms to the stopping rule, then returns the median of <see cref="Reps"/> readings.</summary>
-        public CanaryReading Measure(WarmupPolicy policy)
+        /// <summary>
+        /// Warms to the stopping rule, then returns the median of <see cref="Reps"/> readings.
+        /// <paramref name="view"/> is taken only so that the live display is frozen while this runs: the
+        /// canary is the reading that says whether the box moved, so a repaint inside it would be the
+        /// instrument disturbing the instrument that watches the instrument.
+        /// </summary>
+        public CanaryReading Measure(WarmupPolicy policy, LiveView? view = null)
         {
             var arm = Arm.Cpu("canary", Multiply);
-            var run = ArmRunner.Interleave([arm], policy, Reps);
+            var run = ArmRunner.Interleave([arm], policy, Reps, log: null, view: view);
             return new CanaryReading(run.Timings[arm.Name].MedianMs, run.Warmups[arm.Name]);
         }
 

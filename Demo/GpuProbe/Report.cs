@@ -63,6 +63,12 @@ namespace DevOnBike.Overfit.GpuProbe
         /// <summary>Measured FP16 accuracy cost per shape, from --fp16-bound. Empty otherwise.</summary>
         public List<string> Fp16Bounds { get; } = [];
 
+        /// <summary>What the live view costs the host arms, from --live-perturbation. Empty otherwise.</summary>
+        public List<string> LivePerturbation { get; } = [];
+
+        /// <summary>What drove the live view this run, or why there was none.</summary>
+        public string? LiveViewNote { get; set; }
+
         public string? CuBlasSkipReason { get; set; }
 
         /// <summary>Why the FP16 arm specifically is absent, when cuBLAS itself loaded.</summary>
@@ -155,6 +161,24 @@ namespace DevOnBike.Overfit.GpuProbe
                     "  not the answer: a vendor library is the upper bound and it was not measured here.");
             }
 
+            if (LiveViewNote is not null)
+            {
+                sb.AppendLine();
+                sb.AppendLine("LIVE VIEW: " + LiveViewNote);
+            }
+
+            if (LivePerturbation.Count > 0)
+            {
+                sb.AppendLine();
+                sb.AppendLine("WHAT THE LIVE VIEW COSTS THE HOST ARMS, measured ABAB in one process");
+                sb.AppendLine("  The lever is whether the repaint happens; everything else is identical. A ratio near");
+                sb.AppendLine("  1.000 means the view is free at this cadence; above it, the view must be suspended.");
+                foreach (var line in LivePerturbation)
+                {
+                    sb.AppendLine("  " + line);
+                }
+            }
+
             if (Fp16Bounds.Count > 0)
             {
                 sb.AppendLine();
@@ -207,6 +231,8 @@ namespace DevOnBike.Overfit.GpuProbe
                 ["oracleFailures"] = OracleFailures,
                 ["cuBlasSkipReason"] = CuBlasSkipReason,
                 ["fp16Bounds"] = Fp16Bounds,
+                ["livePerturbation"] = LivePerturbation,
+                ["liveViewNote"] = LiveViewNote,
                 ["fp16SkipReason"] = Fp16SkipReason,
                 ["cells"] = Cells.Select(c => new Dictionary<string, object?>
                 {

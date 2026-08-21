@@ -51,7 +51,10 @@ namespace DevOnBike.Overfit.GpuProbe
                 : TelemetryReading.Of(TotalBytes * (0.30 + (0.45 * _random.NextDouble())));
 
             return new TelemetrySample(
-                "STUB NVIDIA GeForce RTX 0000 Ti SUPER Founders Edition (a deliberately over-long name)",
+                // The brackets are deliberate too: a card name containing '[' is valid MARKUP to
+                // Spectre and throws unless the view escapes it. That defect is reachable only from a
+                // name like this one.
+                "STUB NVIDIA GeForce RTX 0000 Ti [Founders Edition] (a deliberately over-long name)",
                 total,
                 used,
                 TelemetryReading.Of(38 + (_random.NextDouble() * 44)),

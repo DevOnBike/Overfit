@@ -65,10 +65,13 @@ namespace DevOnBike.Overfit.GpuProbe
         {
             _before?.Invoke();
 
+            // Both flag writes are outside the timestamps, so the measured region pays nothing for them.
+            TimedRegion.Enter();
             var start = Stopwatch.GetTimestamp();
             _body();
             _barrier?.Invoke();
             var elapsed = Stopwatch.GetElapsedTime(start).TotalMilliseconds;
+            TimedRegion.Leave();
 
             _after?.Invoke();
             return elapsed;
