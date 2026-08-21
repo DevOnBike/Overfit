@@ -807,6 +807,17 @@ the report rather than implied by its size.
 invocation `python D:/Overfit/.claude/do-overfit-architect.py`.** Write the file with `Write`, then run that one
 command. Do not issue ad-hoc `dotnet` / `grep` / `sed` / `kubectl` lines directly.
 
+**The rule governs COMMAND EXECUTION, not file authoring — write prose files with the `Write` tool
+directly.** Added 2026-08-21 because the rule cannot bootstrap itself: authoring the scratch file needs a
+shell heredoc, and a heredoc breaks on an apostrophe in the content (`bash: unexpected EOF while looking
+for matching '`), which prose-heavy output is full of. A plan file, an ADR or a memory entry therefore goes
+straight through `Write`. Nothing is lost — the reason the scratch file exists is that a COMMAND should
+live somewhere re-readable and correctable, and a document already does.
+
+**Search with the `Grep` tool, not `rg` in a shell.** Measured the same day: `rg` is not on this box's PATH,
+so the first search in a freshly written scratch file failed outright. `Grep` is the route and its results
+integrate with the permission UI.
+
 **Write the `STATUS:` line into the plan, in the pipeline's vocabulary, before you close.** Measured
 2026-08-13: `Scripts/plan_gate_check.py` was extended to read plans and **three of the plans written that
 week carried no status line at all** — including two of yours from the same day. A plan with no status is

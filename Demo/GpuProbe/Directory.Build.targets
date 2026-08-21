@@ -1,0 +1,11 @@
+<!--
+    SENTINEL, second half. MSBuild walks up for Directory.Build.targets SEPARATELY from
+    Directory.Build.props, so the props sentinel beside this file does not stop it. Without this the
+    repository root Directory.Build.targets would apply to this project.
+
+    Today the root targets are all conditioned on MSBuildProjectName == 'Main' and would be inert here,
+    so this file changes nothing at the moment. It is present so that the isolation Decision D3 asks for
+    is a property of the directory rather than a property of somebody else's Condition attribute.
+-->
+<Project>
+</Project>

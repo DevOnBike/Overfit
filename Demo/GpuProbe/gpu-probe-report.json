@@ -1,0 +1,178 @@
+{
+  "machine": {
+    "utc": "2026-08-21 20:42:16Z",
+    "probe version": "gpu-probe 1, plan docs/specs/gpu-probe-route-and-design-plan.md",
+    "accelerator type": "OpenCL",
+    "accelerator name": "gfx1036",
+    "accelerator memory bytes": "38880100352",
+    "accelerator max group size": "256",
+    "accelerator warp size": "32",
+    "accelerator max shared memory per group": "65536",
+    "devices ILGPU offered": "OpenCL:gfx1036 | CPU:CPUAccelerator | CPU:CPUAccelerator | CPU:CPUAccelerator | CPU:CPUAccelerator | CPU:CPUAccelerator",
+    "cpu model": "AMD Ryzen 9 9950X3D 16-Core Processor",
+    "cpu logical processors": "32",
+    "os": "Microsoft Windows 10.0.26200",
+    "os architecture": "X64",
+    "process architecture": "X64",
+    "dotnet": ".NET 10.0.11",
+    "server gc": "False",
+    "DevOnBike.Overfit": "DevOnBike.Overfit asm 10.1.0.0 file 10.1.0 (resolved from beside the executable, copied there by the build)",
+    "ILGPU": "ILGPU asm 1.5.3.0 file 1.5.3.0 (resolved from beside the executable, copied there by the build)",
+    "options": "reps=5 warmups=2 batches=[256] cells=\u0027wide\u0027 seed=42 quick=True parityOnly=False x1=False device=\u0027auto\u0027 allowCpuAccelerator=False",
+    "RAM type and speed": "not readable without WMI or a native call - PLEASE FILL IN MANUALLY",
+    "other load on the machine during the run": "PLEASE FILL IN MANUALLY"
+  },
+  "acceleratorChoice": "NO CUDA device on this machine; fell back to OpenCL, which is a weaker bound",
+  "isRealDevice": true,
+  "canaryStartMs": 94.6459,
+  "canaryEndMs": 6.1445,
+  "canaryMoveFraction": -0.9350790684012726,
+  "oracle": [
+    "  shape oracle G1 naive forward     maxAbs 0.00E\u002B000, bit-identical to the hand loop  PASS",
+    "  shape oracle G2 tiled forward     maxAbs 0.00E\u002B000, bit-identical to the hand loop  PASS",
+    "  shape oracle G3 tiled backward    maxAbs 0.00E\u002B000, bit-identical to the hand loop  PASS"
+  ],
+  "oracleFailures": [],
+  "cuBlasSkipReason": "not requested. Pass --x1 to measure it; it needs the CUDA TOOLKIT installed, which the rest of this probe deliberately does not.",
+  "cells": [
+    {
+      "cell": "quick_wide",
+      "k": 512,
+      "m": 1024,
+      "n": 256,
+      "callsPerStep": 0,
+      "macShareOfStep": 0,
+      "forwardFlops": 268435456,
+      "weightUploadMs": 0.5157,
+      "weightBytes": 2097152,
+      "notes": [],
+      "arms": {
+        "C1 cpu q4k forward": {
+          "minMs": 5.5155,
+          "medianMs": 5.9185,
+          "maxMs": 9.2101,
+          "samplesMs": [
+            9.2101,
+            5.9185,
+            5.5155,
+            6.9065,
+            5.8653
+          ],
+          "gflops": 45.355319084227425
+        },
+        "C2 cpu q4k backward": {
+          "minMs": 3.6994,
+          "medianMs": 3.8407,
+          "maxMs": 6.967,
+          "samplesMs": [
+            6.967,
+            3.8407,
+            3.9238,
+            3.6994,
+            3.7967
+          ],
+          "gflops": 69.89232587809514
+        },
+        "C3 cpu f32 forward": {
+          "minMs": 6.0396,
+          "medianMs": 6.8414,
+          "maxMs": 7.853,
+          "samplesMs": [
+            7.1744,
+            6.1266,
+            6.0396,
+            7.853,
+            6.8414
+          ],
+          "gflops": 39.23691875931827
+        },
+        "C4 cpu f32 backward": {
+          "minMs": 3.2766,
+          "medianMs": 3.6705,
+          "maxMs": 5.5058,
+          "samplesMs": [
+            5.5058,
+            3.4994,
+            3.6705,
+            5.0279,
+            3.2766
+          ],
+          "gflops": 73.13321236888707
+        },
+        "G1 gpu naive forward": {
+          "minMs": 0.0272,
+          "medianMs": 0.0307,
+          "maxMs": 0.0419,
+          "samplesMs": [
+            0.0272,
+            0.0419,
+            0.034,
+            0.0277,
+            0.0307
+          ],
+          "gflops": 8743.825928338762
+        },
+        "G2 gpu tiled forward": {
+          "minMs": 0.0055,
+          "medianMs": 0.0066,
+          "maxMs": 0.0107,
+          "samplesMs": [
+            0.0059,
+            0.0078,
+            0.0055,
+            0.0066,
+            0.0107
+          ],
+          "gflops": 40672.03878787879
+        },
+        "G3 gpu tiled backward": {
+          "minMs": 0.0027,
+          "medianMs": 0.0037,
+          "maxMs": 0.0068,
+          "samplesMs": [
+            0.0027,
+            0.0068,
+            0.0037,
+            0.0031,
+            0.0055
+          ],
+          "gflops": 72550.12324324324
+        }
+      },
+      "parity": {
+        "C1 cpu q4k forward": {
+          "passed": true,
+          "cosine": 0.9999999999999999,
+          "maxRelative": 0,
+          "detail": "ok"
+        },
+        "C2 cpu q4k backward": {
+          "passed": true,
+          "cosine": 0.9999999999999384,
+          "maxRelative": 6.257454192306585E-07,
+          "detail": "ok"
+        },
+        "G1 gpu naive forward": {
+          "passed": true,
+          "cosine": 0.999999999999809,
+          "maxRelative": 1.7793052124523786E-06,
+          "detail": "ok"
+        },
+        "G2 gpu tiled forward": {
+          "passed": true,
+          "cosine": 0.999999999999809,
+          "maxRelative": 1.7793052124523786E-06,
+          "detail": "ok"
+        },
+        "G3 gpu tiled backward": {
+          "passed": true,
+          "cosine": 0.9999999999997446,
+          "maxRelative": 2.8533616245899747E-06,
+          "detail": "ok"
+        }
+      }
+    }
+  ],
+  "ramTypeAndSpeed": null,
+  "otherLoadDuringRun": null
+}

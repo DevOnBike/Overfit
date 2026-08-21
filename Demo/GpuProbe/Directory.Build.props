@@ -1,0 +1,15 @@
+<!--
+    SENTINEL. Stops MSBuild's upward walk for Directory.Build.props at this directory, so the
+    repository root props do NOT apply to this project (Decision D3 of
+    docs/specs/gpu-probe-route-and-design-plan.md).
+
+    Three concrete things this prevents:
+      * the root props wire Sources/Analyzers into every project not on its exclusion list, which would
+        drag a Roslyn analyzer build onto a stranger's machine;
+      * the root props turn on NuGetAudit with NU1901-1904 as errors, so one advisory against a GPU
+        package would fail the build;
+      * ManagePackageVersionsCentrally=true would demand that ILGPU be pinned in the solution's
+        Directory.Packages.props, which is exactly what finding F5 of the plan says not to do.
+-->
+<Project>
+</Project>

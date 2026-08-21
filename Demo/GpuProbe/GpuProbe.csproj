@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <OutputType>Exe</OutputType>
+        <TargetFramework>net10.0</TargetFramework>
+        <Nullable>enable</Nullable>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <AssemblyName>GpuProbe</AssemblyName>
+        <RootNamespace>DevOnBike.Overfit.GpuProbe</RootNamespace>
+        <InvariantGlobalization>true</InvariantGlobalization>
+
+        <!-- Decision D3: this project is NOT in Overfit.sln and does NOT participate in the solution's
+             central package management. Both sentinels beside this file keep the root props/targets out;
+             this property keeps the root Directory.Packages.props out. -->
+        <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
+
+        <!-- ILGPU generates IL and PTX at runtime and uses System.Reflection throughout. Native-AOT is
+             therefore not an option here and must not be attempted (plan, Decision D2 and section 2).
+             A self-contained, JIT publish is fine and is the preferred handover form. -->
+        <PublishAot>false</PublishAot>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <!-- The PUBLISHED package, deliberately, not a ProjectReference (Decision D3). The probe prints
+             the resolved assembly version at startup so the reader can tell which library the CPU arm
+             actually measured (Risk R5). -->
+        <PackageReference Include="DevOnBike.Overfit" Version="10.1.0" />
+
+        <!-- Managed-only: 5 DLLs, empty runtimes/ folder, no native payload. See the R1 section of the
+             probe's own report for what that does and does not establish. -->
+        <PackageReference Include="ILGPU" Version="1.5.3" />
+        <PackageReference Include="ILGPU.Algorithms" Version="1.5.3" />
+    </ItemGroup>
+
+</Project>
