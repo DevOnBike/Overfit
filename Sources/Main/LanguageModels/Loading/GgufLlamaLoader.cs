@@ -290,7 +290,34 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             var kNeedsF32 = !fusedQkv && (!attnQuantizable || AnyLayerNeedsF32(reader, "attn_k", nLayers, dModel));
             var vNeedsF32 = !fusedQkv && (!attnQuantizable || AnyLayerNeedsF32(reader, "attn_v", nLayers, dModel));
             // Wo: K-quant per-head is blocked by headDim < 256, but Q8_0 per-head works (else F32 fallback).
-            var oNeedsF32 = !attnQuantizable || AnyLayerOutputNeedsF32(reader, nLayers);
+            //
+            // The whole-matrix O handles are resolved HERE, before the layer loop, and the loop below reuses
+            // them rather than rebuilding them. They are zero-copy views over the mmap, so resolving all of
+            // them up front copies nothing — and it means ONE call to `UseWholeOutputOnly`, on the exact
+            // handle the loop will use, decides both whether a layer builds a per-head Wo and whether the F32
+            // scratch that build would need is rented at all. A pre-loop scan answering the second question
+            // separately would be a second predicate, and two predicates that must agree drift apart.
+            var woWholeByLayer = new DecodeWeight[nLayers];
+            var oNeedsF32 = false;
+
+            for (var l = 0; l < nLayers; l++)
+            {
+                var outputName = $"blk.{l}.attn_output.weight";
+                woWholeByLayer[l] = TryLoadWholeAttnQ4K(reader, outputName, dModel, nHeads * headDim, mmap, repacked);
+
+                if (UseWholeOutputOnly(woWholeByLayer[l], nHeads, nKvHeads))
+                {
+                    continue;
+                }
+
+                // Same test the deleted AnyLayerOutputNeedsF32 made: anything that is not natively Q8_0 per
+                // head takes the dequantise-and-split path. A missing tensor is left to LoadOutputHeads to
+                // report, exactly as before — it must not silently force a rent.
+                oNeedsF32 = oNeedsF32
+                    || !attnQuantizable
+                    || (reader.Tensors.TryGetValue(outputName, out var outputInfo)
+                        && outputInfo.Type != GgmlType.Q8_0);
+            }
 
             using var qFull = qNeedsF32 ? new PooledBuffer<float>(qFullElems, clearMemory: false) : default;
             using var kFull = kNeedsF32 ? new PooledBuffer<float>(kFullElems, clearMemory: false) : default;
@@ -366,7 +393,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                 var wqWhole = TryLoadWholeAttnQ4K(reader, $"blk.{l}.attn_q.weight", nHeads * headDim, dModel, mmap, repacked);
                 var wkWhole = TryLoadWholeAttnQ4K(reader, $"blk.{l}.attn_k.weight", nKvHeads * headDim, dModel, mmap, repacked);
                 var wvWhole = TryLoadWholeAttnQ4K(reader, $"blk.{l}.attn_v.weight", nKvHeads * headDim, dModel, mmap, repacked);
-                var woWhole = TryLoadWholeAttnQ4K(reader, $"blk.{l}.attn_output.weight", dModel, nHeads * headDim, mmap, repacked);
+                var woWhole = woWholeByLayer[l];   // resolved before the loop; see the note at oNeedsF32.
 
                 // The per-head Wo is the single largest managed cost of loading a well-quantised model — 153 MB
                 // on Qwen2.5-3B, because no per-head K-quant representation of Wo exists (headDim < the
@@ -994,19 +1021,6 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             for (var l = 0; l < nLayers; l++)
             {
                 if (reader.Tensors.TryGetValue($"blk.{l}.{suffix}.weight", out var info) && !IsKQuantNative(info, dModel))
-                {
-                    return true;
-                }
-            }
-            return false;
-        }
-
-        // Wo per-head can be Q8_0-native; anything else takes the F32 fallback. True if any layer's Wo isn't Q8_0.
-        private static bool AnyLayerOutputNeedsF32(GgufReader reader, int nLayers)
-        {
-            for (var l = 0; l < nLayers; l++)
-            {
-                if (reader.Tensors.TryGetValue($"blk.{l}.attn_output.weight", out var info) && info.Type != GgmlType.Q8_0)
                 {
                     return true;
                 }
