@@ -301,16 +301,36 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Demo.MiniInstruction
                     generated,
                     prompt);
 
+                // The printed answer is one draw from a top-k distribution.
+                // The asserted answer is the greedy argmax path, which is a
+                // property of the weights alone. See XC-99: asserting on the
+                // sampled draw tested the seed, not the model.
+                var greedyGenerated = GenerateInstructionGreedySample(
+                    model,
+                    tokenizer,
+                    prompt,
+                    RequestedNewTokens);
+
+                var greedyAnswer = ExtractFirstAssistantAnswer(
+                    greedyGenerated,
+                    prompt);
+
                 _output.WriteLine("Prompt:");
                 _output.WriteLine(prompt);
                 _output.WriteLine("");
-                _output.WriteLine("Answer:");
+                _output.WriteLine("Answer (sampled, printed only):");
                 _output.WriteLine(answer);
+                _output.WriteLine("");
+                _output.WriteLine("Answer (greedy, asserted):");
+                _output.WriteLine(greedyAnswer);
                 _output.WriteLine("");
 
                 AssertInstructionTextLooksValid(generated);
                 AssertInstructionAnswerLooksValid(answer);
-                AssertExpectedDemoAnswer(prompt, answer);
+
+                AssertInstructionTextLooksValid(greedyGenerated);
+                AssertInstructionAnswerLooksValid(greedyAnswer);
+                AssertExpectedDemoAnswer(prompt, greedyAnswer);
             }
 
             AssertDemoCachedMatchesLegacyGreedy(
@@ -614,6 +634,43 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Demo.MiniInstruction
                 tokenizer,
                 prompt,
                 safeTokens);
+        }
+
+        /// <summary>
+        /// Generates the same continuation greedily: no temperature, no top-k,
+        /// no repetition penalty and no random number generator.
+        ///
+        /// The output is a deterministic function of the loaded weights, so an
+        /// assertion over it reddens when the model changes and cannot redden
+        /// because a draw fell differently.
+        /// </summary>
+        private static string GenerateInstructionGreedySample(
+            GPT1Model model,
+            CharacterTokenizer tokenizer,
+            string prompt,
+            int requestedNewTokens)
+        {
+            model.Eval();
+
+            var promptTokens = tokenizer.Encode(prompt);
+            var maxNewTokens = GetSafeGeneratedTokenCount(
+                model.Config.ContextLength,
+                promptTokens.Length,
+                requestedNewTokens);
+
+            var generatedTokens = new int[maxNewTokens];
+
+            using var runtime = SlmRuntimeFactory.CreateGpt1(model);
+
+            var generatedCount = runtime.GenerateGreedy(
+                promptTokens,
+                generatedTokens,
+                maxNewTokens);
+
+            var continuation = tokenizer.Decode(
+                generatedTokens.AsSpan(0, generatedCount).ToArray());
+
+            return prompt + continuation;
         }
 
         private static string GenerateDisplaySampleWithRepetitionPenalty(

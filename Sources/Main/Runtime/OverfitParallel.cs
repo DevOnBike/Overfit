@@ -532,9 +532,47 @@ namespace DevOnBike.Overfit.Runtime
         private static long _occupancyWallTicks;
         private static long _occupancyBusyTicks;
         private static long _occupancyWorstTicks;
+
+        /// <summary>Each dispatch's worst chunk, weighted by that dispatch's own chunk count. The
+        /// straggler ratio needs this; <see cref="_occupancyWorstTicks"/> stays RAW because the
+        /// overhead figure is `wall - worst` and wants the critical path, not a weighted sum. They
+        /// were one field until 2026-08-21, and re-purposing it drove overhead to -1887%.</summary>
+        private static long _occupancyWorstWeightedTicks;
         private static long _occupancyReservedTicks;
         private static long _occupancyDispatches;
         private static long _occupancyChunks;
+
+        /// <summary>Busy-weighted sum of each dispatch's granularity reference, and the busy time it covers.
+        /// The reference is `widestChunkItems * chunkCount / totalItems` — what the straggler WOULD read on
+        /// perfectly uniform per-item cost, given integer item counts. Reported next to the straggler so a
+        /// structural number is not read as imbalance. It is NOT a lower bound: the straggler falls below it
+        /// whenever the widest chunk is not the slowest.</summary>
+        private static double _occupancyFloorWeighted;
+
+        private static long _occupancyFloorBusy;
+
+        /// <summary>
+        /// Upper edges of the per-dispatch straggler buckets. The aggregate ratio cannot say whether an
+        /// imbalance is spread across every dispatch or concentrated in a few, and those two call for
+        /// opposite work: a broad one is a property of the split, a narrow one is a property of a handful of
+        /// layers. Both the COUNT and the BUSY TIME per bucket are kept, because the count says how many
+        /// dispatches are unbalanced and the busy time says how much of the run they are.
+        /// </summary>
+        private static readonly double[] OccupancyBucketEdges = [1.05, 1.15, 1.3, 1.6, 2.5];
+
+        private static readonly long[] _occupancyBucketCounts = new long[OccupancyBucketEdges.Length + 1];
+
+        private static readonly long[] _occupancyBucketBusy = new long[OccupancyBucketEdges.Length + 1];
+
+        private static double _occupancyWorstDispatchRatio;
+
+        private static int _occupancyWorstDispatchChunks;
+
+        private static long _occupancyWorstDispatchBusy;
+
+        private static long _occupancyWorstDispatchItems;
+
+        private static long _occupancyWorstDispatchWidest;
 
         /// <summary>
         /// Adds one fan-out to the totals. Called with <see cref="_gate"/> held, which is also what makes the
@@ -544,6 +582,8 @@ namespace DevOnBike.Overfit.Runtime
         {
             long busy = 0;
             long worst = 0;
+            long items = 0;
+            long widest = 0;
 
             for (var i = 0; i < chunkCount; i++)
             {
@@ -554,11 +594,104 @@ namespace DevOnBike.Overfit.Runtime
                 {
                     worst = ticks;
                 }
+
+                // Item counts as well as times. A chunk holds `ceil(totalItems / chunkCount)` items and the
+                // last one holds the remainder, so on perfectly uniform per-item cost the worst chunk is
+                // `widest * chunkCount / items` times the mean. Worked example: 100 items over 32 chunks is
+                // 4 * 32 / 100 = 1.28x with no imbalance at all, which is why a straggler figure alone
+                // cannot be read as evidence of imbalance.
+                //
+                // It is a REFERENCE VALUE UNDER UNIFORMITY, not a lower bound, and calling it a floor was
+                // wrong — measured 2026-08-21 on the 60.9 MB CNN at 16 workers, the straggler is 1.27x
+                // against a value of 1.35x. Below it, which a bound could not be. The straggler falls below
+                // whenever the WIDEST chunk is not the SLOWEST, i.e. when per-item costs vary in a way that
+                // partly cancels the width imbalance.
+                //
+                // Read the two together. At 32 workers the same model gives 1.02x here against a straggler
+                // of 1.34x: chunks are near enough one item each, so granularity explains almost none of it
+                // and the imbalance is real. At 16 workers many dispatches have fewer items than workers, so
+                // the widths are forced uneven and this rises to 1.35x.
+                var width = _chunks[i].End - _chunks[i].Start;
+                items += width;
+
+                if (width > widest)
+                {
+                    widest = width;
+                }
+            }
+
+            AddOccupancySample(chunkCount, wallTicks, busy, worst, items, widest);
+        }
+
+        /// <summary>
+        /// Folds one dispatch's summary into the totals. Separated from <see cref="RecordOccupancy"/> so the
+        /// arithmetic can be tested with exact integers and no threads.
+        ///
+        /// <para><b>Why that separation exists.</b> The property that matters — balanced work reports 1.00
+        /// whatever mix of chunk counts the dispatches have — is arithmetic. Asserting it through real
+        /// parallel execution measures the box's load instead, and that mistake was made and caught here on
+        /// 2026-08-21: the end-to-end version passed alone and failed in one full-suite run out of two,
+        /// which is the `TG-T12` shape this repository already has a row for.</para>
+        /// </summary>
+        internal static void AddOccupancySample(
+            int chunkCount, long wallTicks, long busy, long worst, long items = 0, long widest = 0)
+        {
+            // Busy-weighted so it is directly comparable with the straggler ratio, which is also a
+            // busy-weighted quantity. Zero items means the caller did not supply widths — the arithmetic
+            // tests do that deliberately — and such a sample contributes nothing to the floor.
+            if (items > 0 && widest > 0)
+            {
+                _occupancyFloorWeighted += (double)widest * chunkCount / items * busy;
+                _occupancyFloorBusy += busy;
             }
 
             _occupancyWallTicks += wallTicks;
             _occupancyBusyTicks += busy;
+
+            // Weighted by THIS dispatch's chunk count, not summed raw and multiplied by the global mean
+            // later. For a perfectly balanced dispatch `worst == busy / chunkCount`, so `worst * chunkCount`
+            // is exactly `busy` and the ratio in OccupancyReport cancels to 1.00 whatever mix of chunk
+            // counts the model produces.
+            //
+            // Summing `worst` raw was WRONG whenever dispatches differ in chunk count, and they do: the
+            // 60.9 MB CNN reports mean chunks 26.4 on a 32-worker pool, so some fan-outs create far fewer
+            // chunks than others. Worked example of the old form — two dispatches, BOTH perfectly balanced,
+            // equal busy time B, one with 4 chunks and one with 48: sum of worsts is B/4 + B/48 = 0.2708B,
+            // the global mean is 26, and the report claimed 0.2708B * 26 / 2B = 3.52x. Balanced work,
+            // reported as a threefold straggler. The small-chunk dispatches dominated the numerator because
+            // their `worst` is a large fraction of their own busy time.
             _occupancyWorstTicks += worst;
+            _occupancyWorstWeightedTicks += worst * chunkCount;
+
+            // Per-dispatch ratio, bucketed. Same definition as the aggregate, applied to one fan-out:
+            // 1.00 means this dispatch's chunks all finished together.
+            if (busy > 0)
+            {
+                var ratio = (double)worst * chunkCount / busy;
+                var bucket = OccupancyBucketEdges.Length;
+
+                for (var i = 0; i < OccupancyBucketEdges.Length; i++)
+                {
+                    if (ratio < OccupancyBucketEdges[i])
+                    {
+                        bucket = i;
+
+                        break;
+                    }
+                }
+
+                _occupancyBucketCounts[bucket]++;
+                _occupancyBucketBusy[bucket] += busy;
+
+                if (ratio > _occupancyWorstDispatchRatio)
+                {
+                    _occupancyWorstDispatchRatio = ratio;
+                    _occupancyWorstDispatchChunks = chunkCount;
+                    _occupancyWorstDispatchBusy = busy;
+                    _occupancyWorstDispatchItems = items;
+                    _occupancyWorstDispatchWidest = widest;
+                }
+            }
             _occupancyReservedTicks += (long)chunkCount * wallTicks;
             _occupancyChunks += chunkCount;
             _occupancyDispatches++;
@@ -672,6 +805,21 @@ namespace DevOnBike.Overfit.Runtime
                 _occupancyWallTicks = 0;
                 _occupancyBusyTicks = 0;
                 _occupancyWorstTicks = 0;
+                _occupancyWorstWeightedTicks = 0;
+                _occupancyFloorWeighted = 0;
+                _occupancyFloorBusy = 0;
+
+                for (var i = 0; i < _occupancyBucketCounts.Length; i++)
+                {
+                    _occupancyBucketCounts[i] = 0;
+                    _occupancyBucketBusy[i] = 0;
+                }
+
+                _occupancyWorstDispatchRatio = 0;
+                _occupancyWorstDispatchChunks = 0;
+                _occupancyWorstDispatchBusy = 0;
+                _occupancyWorstDispatchItems = 0;
+                _occupancyWorstDispatchWidest = 0;
                 _occupancyReservedTicks = 0;
                 _occupancyChunks = 0;
                 _occupancyDispatches = 0;
@@ -706,6 +854,126 @@ namespace DevOnBike.Overfit.Runtime
         /// overhead, while an imbalanced one shows the reverse. Reporting a single "efficiency" number would
         /// merge two causes that call for opposite work.</para>
         /// </summary>
+        /// <summary>
+        /// The straggler ratio <see cref="OccupancyReport"/> prints, as a number rather than inside a
+        /// culture-formatted string. Exists so a test can assert on it without parsing a decimal comma.
+        ///
+        /// <para>1.00 means every chunk of every dispatch finished in the same time as its siblings. It is
+        /// each dispatch's worst chunk weighted by THAT dispatch's chunk count, over total busy time —
+        /// which is what makes it cancel to 1.00 for balanced work whatever mix of chunk counts the model
+        /// produces. The report reads this property rather than repeating the expression, because two
+        /// copies of one formula drift.</para>
+        /// </summary>
+        internal static double OccupancyStragglerRatio
+        {
+            get
+            {
+                lock (_gate)
+                {
+                    return _occupancyBusyTicks == 0
+                        ? 0.0
+                        : (double)_occupancyWorstWeightedTicks / _occupancyBusyTicks;
+                }
+            }
+        }
+
+        /// <summary>
+        /// The per-dispatch straggler distribution, one line per bucket, plus the single worst fan-out.
+        ///
+        /// <para><b>Why this exists separately from <see cref="OccupancyReport"/>.</b> The aggregate ratio
+        /// answers "how unbalanced", never "where". Those have opposite fixes: an imbalance spread evenly
+        /// across every dispatch is a property of how work is split, while one concentrated in a few
+        /// dispatches is a property of those layers and the split is fine. Measured 2026-08-21, the 60.9 MB
+        /// CNN reports 1.34x aggregate at the shipping default with a uniform-cost reference of 1.02x, so
+        /// the imbalance is real — and nothing in the aggregate says which of the 510 dispatches carry
+        /// it.</para>
+        ///
+        /// <para>Both columns are needed. <b>Count</b> is how many fan-outs land in a bucket;
+        /// <b>busy</b> is how much worker time they represent. A hundred badly balanced dispatches that
+        /// together account for 2% of the run are not the problem, and the count alone would say they
+        /// are.</para>
+        /// </summary>
+        /// <summary>
+        /// The largest per-dispatch straggler ratio seen since the last reset, as a number. Exists so a test
+        /// can assert on the worst-dispatch tracking without matching a culture-formatted string.
+        /// </summary>
+        internal static double OccupancyWorstDispatchRatio
+        {
+            get
+            {
+                lock (_gate)
+                {
+                    return _occupancyWorstDispatchRatio;
+                }
+            }
+        }
+
+        public static string OccupancyHistogram()
+        {
+            lock (_gate)
+            {
+                if (_occupancyDispatches == 0)
+                {
+                    return MeasureOccupancy
+                        ? "(no fan-out recorded — every call took the inline fast path)"
+                        : $"(occupancy not measured — set {OverfitEnvironment.ParallelOccupancy}=1)";
+                }
+
+                long totalBusy = 0;
+
+                for (var i = 0; i < _occupancyBucketBusy.Length; i++)
+                {
+                    totalBusy += _occupancyBucketBusy[i];
+                }
+
+                var toMs = 1000.0 / Stopwatch.Frequency;
+                var text = new System.Text.StringBuilder();
+
+                text.Append("per-dispatch straggler distribution (")
+                    .Append(_occupancyDispatches)
+                    .AppendLine(" dispatches)");
+
+                for (var i = 0; i < _occupancyBucketCounts.Length; i++)
+                {
+                    var label = i == 0
+                        ? $"       < {OccupancyBucketEdges[0]:F2}"
+                        : i == OccupancyBucketEdges.Length
+                            ? $"    >= {OccupancyBucketEdges[^1]:F2}"
+                            : $"{OccupancyBucketEdges[i - 1]:F2} - {OccupancyBucketEdges[i]:F2}";
+
+                    var share = totalBusy == 0 ? 0.0 : 100.0 * _occupancyBucketBusy[i] / totalBusy;
+
+                    text.Append("  ")
+                        .Append(label.PadLeft(13))
+                        .Append("  count ")
+                        .Append(_occupancyBucketCounts[i].ToString().PadLeft(5))
+                        .Append("   busy ")
+                        .Append((_occupancyBucketBusy[i] * toMs).ToString("F1").PadLeft(9))
+                        .Append(" ms  ")
+                        .Append(share.ToString("F1").PadLeft(5))
+                        .AppendLine("%");
+                }
+
+                text.Append("  worst dispatch ")
+                    .Append(_occupancyWorstDispatchRatio.ToString("F2"))
+                    .Append("x over ")
+                    .Append(_occupancyWorstDispatchChunks)
+                    .Append(" chunks, busy ")
+                    .Append((_occupancyWorstDispatchBusy * toMs).ToString("F2"))
+                    .Append(" ms");
+
+                if (_occupancyWorstDispatchItems > 0)
+                {
+                    text.Append(", ")
+                        .Append(_occupancyWorstDispatchItems)
+                        .Append(" items, widest chunk ")
+                        .Append(_occupancyWorstDispatchWidest);
+                }
+
+                return text.ToString();
+            }
+        }
+
         public static string OccupancyReport()
         {
             lock (_gate)
@@ -727,7 +995,12 @@ namespace DevOnBike.Overfit.Runtime
                 // pool, and only this ratio shows it.
                 var poolUse = (double)_occupancyBusyTicks / (_workerCount * (double)_occupancyWallTicks);
                 var meanChunks = (double)_occupancyChunks / _occupancyDispatches;
-                var straggler = (double)_occupancyWorstTicks * meanChunks / _occupancyBusyTicks;
+                // `_occupancyWorstTicks` already carries each dispatch's worst chunk WEIGHTED by that
+                // dispatch's own chunk count (see RecordOccupancy), so this is a plain ratio. It read
+                // `worst * meanChunks / busy` until 2026-08-21, which used the GLOBAL mean against every
+                // dispatch and inflated the figure whenever chunk counts varied.
+                var straggler = OccupancyStragglerRatio;   // Monitor is re-entrant; one definition.
+                var floor = _occupancyFloorBusy == 0 ? 1.0 : _occupancyFloorWeighted / _occupancyFloorBusy;
                 var overhead = (double)(_occupancyWallTicks - _occupancyWorstTicks) / _occupancyWallTicks;
 
                 return $"layout {(RegionMajorChunks ? "region-major" : "slice-major")}, "
@@ -735,7 +1008,8 @@ namespace DevOnBike.Overfit.Runtime
                     + $"dispatches {_occupancyDispatches}, mean chunks {meanChunks:F1}, "
                     + $"wall {_occupancyWallTicks * toMs:F1} ms, busy {_occupancyBusyTicks * toMs:F1} ms | "
                     + $"pool use {100 * poolUse:F1}%, occupancy {100 * occupancy:F1}%, "
-                    + $"straggler {straggler:F2}x, overhead {100 * overhead:F1}%";
+                    + $"straggler {straggler:F2}x (uniform-cost reference {floor:F2}x), "
+                    + $"overhead {100 * overhead:F1}%";
             }
         }
 #pragma warning restore OVERFIT047

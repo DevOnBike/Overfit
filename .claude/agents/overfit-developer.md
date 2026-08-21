@@ -167,6 +167,23 @@ Found on 2026-08-08, when the plan's determinism oracle turned out not to detect
 determinism and clock-independence were two properties behind one test, and only a mutation that stayed
 green revealed it.
 
+**A GREEN whose output is BIT-IDENTICAL to the baseline is ambiguous, and reporting either reading is
+wrong until you settle it.** It means one of two opposite things: the mutation was never reached, or it was
+reached and is numerically inert. "The test is vacuous" and "the mutation was too weak to move the output"
+lead to opposite work. **Settle it with a destructive variant of the SAME anchor** — zero the output, or
+scale it far harder — and report both arms. If the destructive variant reddens, the anchor is reached and
+the original mutation was inert; if it also stays green, the anchor is not on the path at all. Two cheap
+corroborations that the compile took: the rebuilt assembly's hash must CHANGE on the mutated build and
+return to its pre-mutation value after restore.
+
+Added 2026-08-21, and it cost a round trip on `XC-99`. Scaling every residual update by 0.9 left both the
+greedy and the sampled text bit-identical, so the test stayed green with no rule pointing at the
+discriminator. The `0f` probe reddened and 0.7 reddened, which is what established that the method was on
+the path and the 0.9 arm was inert rather than unreached. **Note what that arm does and does not prove**: a
+UNIFORM scale of a residual stream is a peculiarly benign perturbation and may leave an argmax ordering
+untouched, so blindness to it is NOT evidence of blindness to a small non-uniform change. Say which you
+measured.
+
 **On an anomaly task (`AN-*`, `RS-*`, `PS-*`), follow the seven-step procedure in `CLAUDE.md`** — "How an
 anomaly task is run, start to finish". The three that bind you hardest, because breaking them is what made
 the procedure necessary: **read the code path and quote the decisive arithmetic before measuring what it
