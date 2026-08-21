@@ -46,6 +46,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
             // got 322); with it, the test passes. The failure was never about prefix reuse — the thing this
             // test exists to verify — and it took the first-ever [LongFact] run to surface it at all.
             // `BatchedPrefillParityTests` learned the same lesson two days earlier and carries the same scope.
+            // Scope BEFORE load, and the order is load-bearing since 2026-08-21: the loader reads this flag to
+            // decide whether to build the per-head attention output weights at all
+            // (GgufLlamaLoader.UseWholeOutputOnly). Reordering these two lines throws a named error.
             using var layout = new NonRepackedKernelScope();
             using var engine = CachedLlamaInferenceEngine.LoadGguf(ModelPath);
 

@@ -17,6 +17,12 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
     ///   $env:OVERFIT_REPACK_ATTN="1"; dotnet test --filter ~AttentionWholeMatrixDecodeCoherence   (whole path)
     ///   $env:OVERFIT_REPACK_ATTN="0"; dotnet test --filter ~AttentionWholeMatrixDecodeCoherence   (per-head)
     /// Both must answer "Paris". [LongFact] — needs C:\qwen3b\qwen.q4km.gguf.
+    /// <para><b>The "0" arm is no longer a pure per-head decode, since 2026-08-21.</b>
+    /// <c>CachedMultiHeadAttention.TryDecodeWholeOutput</c> runs the O projection whole by DEFAULT on any
+    /// Q4_K GQA block, with no flag, because that is what makes the per-head Q8 Wo array (153 MB on this
+    /// model) redundant. So the "0" arm here is per-head Q/K/V with a whole O, and the flag now toggles only
+    /// the whole-Q half. The fully per-head reference is reachable through
+    /// <c>BatchedQuantProjection.DisableRepackedKernelsForParity</c>, which both paths honour.</para>
     /// </summary>
     public sealed class AttentionWholeMatrixDecodeCoherenceTests
     {

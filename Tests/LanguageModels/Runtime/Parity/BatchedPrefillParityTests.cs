@@ -136,8 +136,12 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
                 return;
             }
 
-            using var engine = CachedLlamaInferenceEngine.LoadGguf(ModelPath);
+            // The scope is entered BEFORE the load, and the order is load-bearing since 2026-08-21: the
+            // loader reads this flag to decide whether to build the per-head attention output weights at all
+            // (GgufLlamaLoader.UseWholeOutputOnly), and an array it skipped cannot be produced afterwards.
+            // Loading first and scoping second throws a named error rather than silently comparing arms.
             using var kernels = UseNonRepackedKernels();
+            using var engine = CachedLlamaInferenceEngine.LoadGguf(ModelPath);
 
             // A ≥16-token prompt to trigger the batched path; arbitrary in-vocab ids.
             var prompt = new int[40];
@@ -222,10 +226,16 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
             fast.Reset(prompt);
             var fastLogits = fast.LastLogits.ToArray();
 
+            // The reference arm needs its OWN engine, loaded inside the scope. Since 2026-08-21 the loader
+            // reads this flag to decide whether the per-head attention output weights are built at all
+            // (GgufLlamaLoader.UseWholeOutputOnly), so the engine above — loaded outside the scope — does not
+            // carry them and cannot serve as the non-repacked reference. Two loads of the same file give
+            // identical weights, so the comparison is unchanged; it costs one extra load in a [LongFact].
             float[] referenceLogits;
             using (var kernels = UseNonRepackedKernels())
             {
-                using var reference = engine.CreateSession(256);
+                using var referenceEngine = CachedLlamaInferenceEngine.LoadGguf(ModelPath);
+                using var reference = referenceEngine.CreateSession(256);
                 reference.Reset(prompt);
                 referenceLogits = reference.LastLogits.ToArray();
             }

@@ -3,7 +3,9 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using DevOnBike.Overfit.Exceptions;
 using DevOnBike.Overfit.LanguageModels.Runtime;
+using DevOnBike.Overfit.Tensors.Core;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
 {
@@ -165,6 +167,47 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
             // Cache not advanced — position 0 not visible
             Assert.Throws<ArgumentOutOfRangeException>(() =>
                 decoder.Decode([1f, 2f], in bw, cache, 0, 0, new float[2]));
+        }
+
+        /// <summary>
+        /// The loader skips building the per-head attention output weights when decode is going to project O
+        /// through the whole-matrix Q4_K handle instead — that skip is where XC-101's 153 MB goes, on
+        /// Qwen2.5-3B. Its one failure mode is a caller that sets
+        /// <c>BatchedQuantProjection.DisableRepackedKernelsForParity</c> AFTER the model is loaded, asking for
+        /// a representation that was never built and cannot be rebuilt without re-reading the file.
+        /// <para>
+        /// This pins that the per-head path STOPS with a named, actionable error instead of projecting through
+        /// an empty handle. Projecting through it would produce zeros — a model that answers slightly wrongly,
+        /// which is far harder to trace than a model that stops.
+        /// </para>
+        /// </summary>
+        [Fact]
+        public void Decode_WithoutPerHeadOutputWeights_ThrowsAndNamesTheParityFlag()
+        {
+            using var cache = KeyValueCache.Create(
+                layerCount: 1, kvHeadCount: 1, maxSequenceLength: 2, headDimension: 2);
+
+            var decoder = new CachedMultiHeadAttention(dModel: 2, headCount: 1, maxSequenceLength: 2);
+
+            // wo left at default — exactly what GgufLlamaLoader produces when UseWholeOutputOnly holds.
+            var heads = new[]
+            {
+                new SingleHeadWeights(
+                    wq: default(DecodeWeight),
+                    bq: new TensorStorage<float>(0),
+                    wo: default(DecodeWeight)),
+            };
+
+            var bw = new BlockWeights(heads: heads);
+
+            cache.Advance();
+
+            var error = Assert.Throws<OverfitRuntimeException>(() =>
+                decoder.Decode([1f, 2f], in bw, cache, 0, 0, new float[2]));
+
+            // The message has to name the flag and the fix, or it sends the reader to the wrong subsystem.
+            Assert.Contains("DisableRepackedKernelsForParity", error.Message, StringComparison.Ordinal);
+            Assert.Contains("BEFORE loading the model", error.Message, StringComparison.Ordinal);
         }
 
         [Fact]

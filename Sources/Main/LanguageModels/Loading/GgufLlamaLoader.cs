@@ -359,16 +359,24 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                     wk = LoadQkvHeads(reader, $"blk.{l}.attn_k.weight", nKvHeads, dModel, headDim, kFull.Span, attnQuantizable, mmap);
                     wv = LoadQkvHeads(reader, $"blk.{l}.attn_v.weight", nKvHeads, dModel, headDim, vFull.Span, attnQuantizable, mmap);
                 }
-                var wo = LoadOutputHeads(reader, $"blk.{l}.attn_output.weight", nHeads, dModel, headDim, oFull.Span, attnQuantizable);
-
                 // Whole-matrix Q4_K attention handles (M2 plumbing; empty unless Q4_K + mmap + repackable).
-                // Output-major dims: Q/K/V contract over dModel; O contracts over nHeads·headDim. Dormant
-                // until the M3 OVERFIT_REPACK_ATTN decode path; the per-head wq/wk/wv/wo above stay active.
-                // (Note: whole-O reads the on-disk Q4_K bytes directly even though per-head O is dequantized.)
+                // Output-major dims: Q/K/V contract over dModel; O contracts over nHeads·headDim. Q/K/V stay
+                // dormant until the OVERFIT_REPACK_ATTN decode path; O is live by default and is loaded FIRST,
+                // because whether the per-head Wo below is built at all depends on it.
                 var wqWhole = TryLoadWholeAttnQ4K(reader, $"blk.{l}.attn_q.weight", nHeads * headDim, dModel, mmap, repacked);
                 var wkWhole = TryLoadWholeAttnQ4K(reader, $"blk.{l}.attn_k.weight", nKvHeads * headDim, dModel, mmap, repacked);
                 var wvWhole = TryLoadWholeAttnQ4K(reader, $"blk.{l}.attn_v.weight", nKvHeads * headDim, dModel, mmap, repacked);
                 var woWhole = TryLoadWholeAttnQ4K(reader, $"blk.{l}.attn_output.weight", dModel, nHeads * headDim, mmap, repacked);
+
+                // The per-head Wo is the single largest managed cost of loading a well-quantised model — 153 MB
+                // on Qwen2.5-3B, because no per-head K-quant representation of Wo exists (headDim < the
+                // 256-element super-block) so it is dequantised to F32 and re-quantised to Q8. When decode will
+                // project O whole instead, that array is never read, and building it is pure waste.
+                var wholeOutputOnly = UseWholeOutputOnly(woWhole, nHeads, nKvHeads);
+
+                var wo = wholeOutputOnly
+                    ? new DecodeWeight[nHeads]
+                    : LoadOutputHeads(reader, $"blk.{l}.attn_output.weight", nHeads, dModel, headDim, oFull.Span, attnQuantizable);
 
                 // Attention biases (optional — Qwen has them, Llama doesn't);
                 // always F32 in GGUF, never quantized.
@@ -1090,6 +1098,30 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             var elems = checked((int)((long)headCount * dModel * headDim));
             LoadTensor(reader, name, f32Scratch.Slice(0, elems));
             return SplitQuery(f32Scratch, headCount, dModel, headDim, quantizable);
+        }
+
+        /// <summary>
+        /// True when decode will project the attention output through the WHOLE-matrix Q4_K handle, so the
+        /// per-head Wo array is never read and must not be built.
+        ///
+        /// <para><b>This must mirror <c>CachedMultiHeadAttention.TryDecodeWholeOutput</c>'s gate exactly</b>,
+        /// and it is written from the handle this loader has just built rather than from a second scan of the
+        /// file — two predicates that have to agree are two predicates that drift. <c>HasGqa</c> on the decode
+        /// side is <c>_kvHeads != null</c>, which <c>CachedLlamaInferenceEngine</c> sets from
+        /// <c>KvHeads &lt; NHeads</c>; that is the <paramref name="nKvHeads"/> test here.</para>
+        ///
+        /// <para><b>The parity hook is read HERE, at load time, and that is a real constraint on callers.</b>
+        /// <c>BatchedQuantProjection.DisableRepackedKernelsForParity</c> is normally flipped around a block of
+        /// work, long after the model is loaded — but an array that was never built cannot be produced later.
+        /// So a test that needs the per-head reference must enter its scope BEFORE loading the model, and the
+        /// decode paths throw a named error rather than dereferencing an empty handle if it does not.</para>
+        /// </summary>
+        private static bool UseWholeOutputOnly(in DecodeWeight woWhole, int nHeads, int nKvHeads)
+        {
+            return nKvHeads < nHeads
+                && !BatchedQuantProjection.DisableRepackedKernelsForParity
+                && woWhole.IsQ4K
+                && woWhole.Quantized4K.CanRepack;
         }
 
         /// <summary>
