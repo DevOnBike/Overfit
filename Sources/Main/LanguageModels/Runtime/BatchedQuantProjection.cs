@@ -26,9 +26,69 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// flipped by perf benches to measure the end-to-end delta. Not a runtime knob.</summary>
         internal static bool UseWeightStationaryQ4K = true;
 
-        /// <summary>Gates the register-tiled Q4_K prefill GEMM (<see cref="Q4KGemvKernel.GemmTiled"/>). Defaults to
-        /// the <c>OVERFIT_TILED_PREFILL</c> env flag; mutable so perf/coherence benches can A/B it in one process.</summary>
-        internal static bool UseTiledPrefillQ4K = Q4KGemvKernel.TiledPrefillEnabled;
+        /// <summary>
+        /// Gates the register-tiled Q4_K prefill GEMM (<see cref="Q4KGemvKernel.GemmTiled"/>). Defaults to the
+        /// <c>OVERFIT_TILED_PREFILL</c> env flag; mutable so perf/coherence benches can A/B it in one process.
+        ///
+        /// <para><b>A per-thread override over a process-wide default.</b> A write binds the writing thread
+        /// only; a thread that has never written reads <see cref="Q4KGemvKernel.TiledPrefillEnabled"/>. Six test
+        /// classes write this flag, four of them <c>[ModelFact]</c>, and xunit runs their collections in parallel
+        /// (<c>Tests/xunit.runner.json</c> sets <c>parallelizeTestCollections</c>, and none of the six carries a
+        /// <c>[Collection]</c>). The overlap is measured, not argued: under <c>OVERFIT_RUN_LONG=1</c> the fast
+        /// <c>[Fact]</c> and the <c>[ModelFact]</c> that contradicts it started 3.1 us apart and ran concurrently
+        /// for 51.7 ms — the fast test's whole window inside the model test's. As a plain <c>static</c> each
+        /// could switch the kernel under whatever else was mid-assertion.
+        /// </para>
+        ///
+        /// <para><b>Both directions are silent, which is why this needs structure and not an assertion.</b> A
+        /// concurrent <c>true</c> does not redden the fast test: the read below is
+        /// <c>(w.IsPrepacked || UseTiledPrefillQ4K)</c>, so the test passes <i>vacuously</i> and the "even with
+        /// the flag off" property it exists to prove goes untested. A concurrent <c>false</c> does not redden the
+        /// model test either — measured 2026-08-21, the two kernels differ by <c>1.150e-5</c> max abs
+        /// (<c>2.255e-6</c> relative) and a 301-token prompt gave 24 of 24 identical greedy tokens either way.
+        /// What it destroys is that test's <i>purpose</i>: its no-sidecar arm stops calling <c>EnsureRepacked</c>,
+        /// the runtime-repack path the whole comparison is about, while <c>Assert.Equal</c> still passes. No test
+        /// outcome separates either broken state from a healthy run, so only making the collision impossible
+        /// fixes it.
+        /// </para>
+        ///
+        /// <para><b>The same shape removes a second, independent defect: the lost update.</b> Every writer saves
+        /// the old value and puts it back, and against a shared <c>static</c> two of those read-modify-write
+        /// pairs interleave — A saves <c>false</c>, A sets <c>true</c>, B saves <c>true</c>, A restores
+        /// <c>false</c>, B restores <c>true</c> — which leaves the flag wrong for every test that runs
+        /// afterwards. Isolating the reads alone would not have fixed that. There is no shared mutable location
+        /// left: the fallback is <c>static readonly</c> and the only mutable slot is per-thread, so a
+        /// save/restore pair can only ever touch its own.
+        /// </para>
+        ///
+        /// <para><b>Why not the <see cref="ThreadStaticAttribute"/> used on
+        /// <see cref="DisableRepackedKernelsForParity"/> below.</b> A <c>[ThreadStatic]</c> field initialiser runs
+        /// on the <b>first thread only</b>, so <c>[ThreadStatic] ... = TiledPrefillEnabled</c> would leave every
+        /// other thread reading <c>false</c> whatever <c>OVERFIT_TILED_PREFILL</c> says — a worse defect than the
+        /// one being fixed, and a silent one. The backing field below is nullable and has <i>no</i> initialiser:
+        /// its per-thread default is <c>null</c> on every thread, and the fallback is evaluated at every read.
+        /// </para>
+        ///
+        /// <para><b>Failure mode this buys, named rather than assumed away:</b> the flag must be written on the
+        /// thread that then drives the prefill. A writer that hands off — an <c>async</c> continuation,
+        /// <c>Task.Run</c>, <c>GenerateStreamAsync</c>'s <c>await Task.Yield()</c> — silently gets the default
+        /// back, which for an A/B is the dead-flag trap that once ran both arms identically. Checked when this
+        /// shipped: the single production read (<c>DispatchQ4K</c>, below) runs on the calling thread before any
+        /// fan-out; none of the six writing test classes contains <c>async</c>, <c>await</c> or <c>Task.Run</c>,
+        /// so each drives the engine synchronously; and every write in <c>Sources/Benchmark</c> sits in the same
+        /// method body as its <c>Dispatch</c> call.
+        /// </para>
+        /// </summary>
+        internal static bool UseTiledPrefillQ4K
+        {
+            get => _useTiledPrefillQ4KOverride ?? Q4KGemvKernel.TiledPrefillEnabled;
+            set => _useTiledPrefillQ4KOverride = value;
+        }
+
+        /// <summary>Per-thread override for <see cref="UseTiledPrefillQ4K"/>; <c>null</c> means "use the
+        /// <c>OVERFIT_TILED_PREFILL</c> default". Deliberately without an initialiser — see that property.</summary>
+        [ThreadStatic]
+        private static bool? _useTiledPrefillQ4KOverride;
 
         /// <summary>Gates the register-tiled Q6_K prefill GEMM (<see cref="Q6KGemvKernel.GemmTiled"/>).
         /// Mutable so perf tests can A/B it in one process.
@@ -68,8 +128,11 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         ///
         /// <para><b>Do not copy the attribute onto the sibling flags above.</b> A <c>[ThreadStatic]</c> field
         /// initialiser runs on the first thread only; this field's correct default is <c>default(bool)</c> and
-        /// it has no initialiser, while <see cref="UseWeightStationaryQ4K"/>, <see cref="UseTiledPrefillQ4K"/>
-        /// and <see cref="UseTiledPrefillQ6K"/> all do and would silently lose theirs on every other thread.</para>
+        /// it has no initialiser, while <see cref="UseWeightStationaryQ4K"/> and <see cref="UseTiledPrefillQ6K"/>
+        /// both do and would silently lose theirs on every other thread. <see cref="UseTiledPrefillQ4K"/> had the
+        /// same cross-class collision and could not take this attribute for exactly that reason; it uses a
+        /// nullable <c>[ThreadStatic]</c> override with the default evaluated at every read, which is the shape
+        /// to copy if either of the other two ever needs isolating.</para>
         ///
         /// <para><b>Failure mode this buys, named rather than assumed away:</b> the flag must be set on the
         /// thread that drives the prefill. A test that opens the scope and then runs the engine from another

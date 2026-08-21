@@ -6,6 +6,7 @@
 using System.Runtime.Intrinsics.X86;
 using DevOnBike.Overfit.LanguageModels.Loading;
 using DevOnBike.Overfit.LanguageModels.Runtime;
+using DevOnBike.Overfit.Tests.TestSupport;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
 {
@@ -51,38 +52,31 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
                 input[i] = (float)(rng.NextDouble() * 2.0 - 1.0);
             }
 
-            var prev = BatchedQuantProjection.UseTiledPrefillQ4K;
-            try
+            // Flag OFF — only IsPrepacked can select tiled. The scope binds THIS thread, so a concurrent
+            // writer in another class cannot turn it back on and make this assertion pass vacuously.
+            using var flagOff = new TiledPrefillQ4KScope(false);
+            DecodeWeight dw = weight;
+            var got = new float[rows * outputSize];
+            BatchedQuantProjection.Dispatch(input, rows, in dw, ReadOnlySpan<float>.Empty, got, inputSize, outputSize);
+
+            // Reference: the tiled kernel directly.
+            var aq = new sbyte[rows * inputSize];
+            var asc = new float[rows * spr];
+            var ab = new short[rows * bsumsPerRow];
+            for (var n = 0; n < rows; n++)
             {
-                BatchedQuantProjection.UseTiledPrefillQ4K = false; // flag OFF — only IsPrepacked can select tiled
-
-                DecodeWeight dw = weight;
-                var got = new float[rows * outputSize];
-                BatchedQuantProjection.Dispatch(input, rows, in dw, ReadOnlySpan<float>.Empty, got, inputSize, outputSize);
-
-                // Reference: the tiled kernel directly.
-                var aq = new sbyte[rows * inputSize];
-                var asc = new float[rows * spr];
-                var ab = new short[rows * bsumsPerRow];
-                for (var n = 0; n < rows; n++)
-                {
-                    Q4KDotKernel.QuantizeActivationQ8K(
-                        input.AsSpan(n * inputSize, inputSize),
-                        aq.AsSpan(n * inputSize, inputSize),
-                        asc.AsSpan(n * spr, spr),
-                        ab.AsSpan(n * bsumsPerRow, bsumsPerRow));
-                }
-                var expected = new float[rows * outputSize];
-                Q4KGemvKernel.GemmTiled(repacked, outputSize, inputSize, rows, aq, asc, ab, expected);
-
-                for (var i = 0; i < expected.Length; i++)
-                {
-                    Assert.Equal(expected[i], got[i]); // tiled path ran despite the flag being off
-                }
+                Q4KDotKernel.QuantizeActivationQ8K(
+                    input.AsSpan(n * inputSize, inputSize),
+                    aq.AsSpan(n * inputSize, inputSize),
+                    asc.AsSpan(n * spr, spr),
+                    ab.AsSpan(n * bsumsPerRow, bsumsPerRow));
             }
-            finally
+            var expected = new float[rows * outputSize];
+            Q4KGemvKernel.GemmTiled(repacked, outputSize, inputSize, rows, aq, asc, ab, expected);
+
+            for (var i = 0; i < expected.Length; i++)
             {
-                BatchedQuantProjection.UseTiledPrefillQ4K = prev;
+                Assert.Equal(expected[i], got[i]); // tiled path ran despite the flag being off
             }
         }
     }

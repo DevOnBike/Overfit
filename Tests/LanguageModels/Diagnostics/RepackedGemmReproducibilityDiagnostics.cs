@@ -6,6 +6,7 @@
 using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Runtime;
 using DevOnBike.Overfit.LanguageModels.Tokenizers;
+using DevOnBike.Overfit.Tests.TestSupport;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
 {
@@ -66,7 +67,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
         {
             using var engine = CachedLlamaInferenceEngine.LoadGguf(ModelPath);
             var tokenizer = GgufTokenizer.Load(ModelPath);
-            var original = BatchedQuantProjection.UseTiledPrefillQ4K;
+            using var flag = new TiledPrefillQ4KScope();
 
             var paragraph =
                 "The history of computing is a long and winding road that begins with mechanical calculators, "
@@ -74,56 +75,49 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
                 + "modern processors. Each generation made machines smaller, faster, and far more capable. ";
             var prompt = tokenizer.Encode(string.Concat(Enumerable.Repeat(paragraph, 6)));
 
-            try
+            var off = Generate(engine, prompt, tiled: false, times: 3);
+            var on = Generate(engine, prompt, tiled: true, times: 3);
+
+            _out.WriteLine($"prompt {prompt.Length} tokens, 3 runs per setting");
+            _out.WriteLine("");
+            _out.WriteLine($"flag OFF, self-consistent: {AllEqual(off)}");
+            _out.WriteLine($"flag ON,  self-consistent: {AllEqual(on)}");
+
+            var matched = 0;
+
+            while (matched < GenerateTokens && off[0][matched] == on[0][matched])
             {
-                var off = Generate(engine, prompt, tiled: false, times: 3);
-                var on = Generate(engine, prompt, tiled: true, times: 3);
-
-                _out.WriteLine($"prompt {prompt.Length} tokens, 3 runs per setting");
-                _out.WriteLine("");
-                _out.WriteLine($"flag OFF, self-consistent: {AllEqual(off)}");
-                _out.WriteLine($"flag ON,  self-consistent: {AllEqual(on)}");
-
-                var matched = 0;
-
-                while (matched < GenerateTokens && off[0][matched] == on[0][matched])
-                {
-                    matched++;
-                }
-
-                _out.WriteLine($"OFF vs ON: {matched}/{GenerateTokens} tokens match");
-                _out.WriteLine("");
-                _out.WriteLine($"OFF: {tokenizer.Decode(off[0])[..Math.Min(80, tokenizer.Decode(off[0]).Length)]}");
-                _out.WriteLine($"ON : {tokenizer.Decode(on[0])[..Math.Min(80, tokenizer.Decode(on[0]).Length)]}");
-                _out.WriteLine("");
-
-                if (matched == GenerateTokens)
-                {
-                    _out.WriteLine("READING: the flag changes nothing. Either the sidecar covers every Q4_K "
-                                   + "weight this prompt touches — so IsPrepacked really does make the A/B "
-                                   + "inert — or the two kernels agree exactly. The sibling test's 1.04x "
-                                   + "timing says the former.");
-                }
-                else if (AllEqual(off) && AllEqual(on))
-                {
-                    _out.WriteLine("READING: each setting is self-consistent but they DISAGREE with each "
-                                   + "other. That is not non-determinism — it is a real, reproducible "
-                                   + "difference between the tiled and weight-stationary kernels, which is "
-                                   + "a correctness question about one of them.");
-                }
-                else
-                {
-                    _out.WriteLine("READING: a setting disagreed with itself. Non-determinism after all — "
-                                   + "and the repetition test above simply had not hit it.");
-                }
-
-                _out.WriteLine("");
-                _out.WriteLine("(diagnostic — reports, does not assert)");
+                matched++;
             }
-            finally
+
+            _out.WriteLine($"OFF vs ON: {matched}/{GenerateTokens} tokens match");
+            _out.WriteLine("");
+            _out.WriteLine($"OFF: {tokenizer.Decode(off[0])[..Math.Min(80, tokenizer.Decode(off[0]).Length)]}");
+            _out.WriteLine($"ON : {tokenizer.Decode(on[0])[..Math.Min(80, tokenizer.Decode(on[0]).Length)]}");
+            _out.WriteLine("");
+
+            if (matched == GenerateTokens)
             {
-                BatchedQuantProjection.UseTiledPrefillQ4K = original;
+                _out.WriteLine("READING: the flag changes nothing. Either the sidecar covers every Q4_K "
+                               + "weight this prompt touches — so IsPrepacked really does make the A/B "
+                               + "inert — or the two kernels agree exactly. The sibling test's 1.04x "
+                               + "timing says the former.");
             }
+            else if (AllEqual(off) && AllEqual(on))
+            {
+                _out.WriteLine("READING: each setting is self-consistent but they DISAGREE with each "
+                               + "other. That is not non-determinism — it is a real, reproducible "
+                               + "difference between the tiled and weight-stationary kernels, which is "
+                               + "a correctness question about one of them.");
+            }
+            else
+            {
+                _out.WriteLine("READING: a setting disagreed with itself. Non-determinism after all — "
+                               + "and the repetition test above simply had not hit it.");
+            }
+
+            _out.WriteLine("");
+            _out.WriteLine("(diagnostic — reports, does not assert)");
         }
 
         private List<int[]> Generate(

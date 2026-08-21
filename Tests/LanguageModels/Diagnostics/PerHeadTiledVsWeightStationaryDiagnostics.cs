@@ -4,6 +4,7 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using DevOnBike.Overfit.LanguageModels.Runtime;
+using DevOnBike.Overfit.Tests.TestSupport;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
 {
@@ -48,99 +49,92 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
         public void DoTheTwoKernelsAgreeOnAPerHeadWeight()
         {
             using var engine = CachedLlamaInferenceEngine.LoadGguf(ModelPath);
-            var original = BatchedQuantProjection.UseTiledPrefillQ4K;
+            using var flag = new TiledPrefillQ4KScope();
 
-            try
+            var layer = engine.GetTrainableLayer(0);
+            var dModel = engine.Config.DModel;
+            var headDim = dModel / engine.Config.NHeads;
+
+            _out.WriteLine($"dModel {dModel}, headDim {headDim}, rows {Rows}");
+            _out.WriteLine("");
+            _out.WriteLine("weight        Q4_K  CanRepack  IsPrepacked   <- IsPrepacked false = the flag decides");
+
+            Report("Wq[0] per-head", layer.Wq[0]);
+            Report("Wk[0] per-head", layer.Wk[0]);
+            Report("FfnGate whole ", layer.FfnGate);
+
+            // Deterministic input: the comparison must not depend on what a random generator hands out.
+            var input = new float[Rows * dModel];
+
+            for (var i = 0; i < input.Length; i++)
             {
-                var layer = engine.GetTrainableLayer(0);
-                var dModel = engine.Config.DModel;
-                var headDim = dModel / engine.Config.NHeads;
-
-                _out.WriteLine($"dModel {dModel}, headDim {headDim}, rows {Rows}");
-                _out.WriteLine("");
-                _out.WriteLine("weight        Q4_K  CanRepack  IsPrepacked   <- IsPrepacked false = the flag decides");
-
-                Report("Wq[0] per-head", layer.Wq[0]);
-                Report("Wk[0] per-head", layer.Wk[0]);
-                Report("FfnGate whole ", layer.FfnGate);
-
-                // Deterministic input: the comparison must not depend on what a random generator hands out.
-                var input = new float[Rows * dModel];
-
-                for (var i = 0; i < input.Length; i++)
-                {
-                    input[i] = MathF.Sin(i * 0.001f) * 0.5f;
-                }
-
-                var weight = layer.Wq[0];
-                var bias = layer.Bq[0] is null
-                    ? ReadOnlySpan<float>.Empty
-                    : layer.Bq[0].AsReadOnlySpan();
-
-                var stationary = new float[Rows * headDim];
-                var tiled = new float[Rows * headDim];
-
-                BatchedQuantProjection.UseTiledPrefillQ4K = false;
-                BatchedQuantProjection.Dispatch(input, Rows, in weight, bias, stationary, dModel, headDim);
-
-                BatchedQuantProjection.UseTiledPrefillQ4K = true;
-                BatchedQuantProjection.Dispatch(input, Rows, in weight, bias, tiled, dModel, headDim);
-
-                var maximum = 0f;
-                var index = 0;
-                var sum = 0.0;
-                var magnitude = 0.0;
-
-                for (var i = 0; i < stationary.Length; i++)
-                {
-                    var difference = MathF.Abs(stationary[i] - tiled[i]);
-                    sum += difference;
-                    magnitude = Math.Max(magnitude, Math.Abs(stationary[i]));
-
-                    if (difference > maximum)
-                    {
-                        maximum = difference;
-                        index = i;
-                    }
-                }
-
-                var mean = sum / stationary.Length;
-
-                _out.WriteLine("");
-                _out.WriteLine($"outputs {stationary.Length} values, |value| up to {magnitude:F4}");
-                _out.WriteLine($"  max |difference|  {maximum:E3}  at [{index}]  "
-                               + $"(stationary {stationary[index]:F6}, tiled {tiled[index]:F6})");
-                _out.WriteLine($"  mean |difference| {mean:E3}");
-                _out.WriteLine($"  relative to magnitude: {(magnitude > 0 ? maximum / magnitude : 0):E3}");
-                _out.WriteLine("");
-
-                if (maximum == 0f)
-                {
-                    _out.WriteLine("READING: bit-identical. The two kernels agree exactly on this weight, so "
-                                   + "the flag cannot be the source of any divergence downstream.");
-                }
-                else if (magnitude > 0 && maximum / magnitude < 1e-4f)
-                {
-                    _out.WriteLine("READING: they differ, but at reassociation scale — the repacked GEMM sums "
-                                   + "in a different order and floating-point addition is not associative. "
-                                   + "Expected, and the repository already accepts it. Note it can still "
-                                   + "flip an argmax after 36 layers, which is why coherence gates over a "
-                                   + "prepacked model are fragile by construction.");
-                }
-                else
-                {
-                    _out.WriteLine("READING: the difference is far larger than reassociation explains. One of "
-                                   + "the two kernels is wrong on per-head weights — a correctness defect, "
-                                   + "not flakiness.");
-                }
-
-                _out.WriteLine("");
-                _out.WriteLine("(diagnostic — reports, does not assert)");
+                input[i] = MathF.Sin(i * 0.001f) * 0.5f;
             }
-            finally
+
+            var weight = layer.Wq[0];
+            var bias = layer.Bq[0] is null
+                ? ReadOnlySpan<float>.Empty
+                : layer.Bq[0].AsReadOnlySpan();
+
+            var stationary = new float[Rows * headDim];
+            var tiled = new float[Rows * headDim];
+
+            BatchedQuantProjection.UseTiledPrefillQ4K = false;
+            BatchedQuantProjection.Dispatch(input, Rows, in weight, bias, stationary, dModel, headDim);
+
+            BatchedQuantProjection.UseTiledPrefillQ4K = true;
+            BatchedQuantProjection.Dispatch(input, Rows, in weight, bias, tiled, dModel, headDim);
+
+            var maximum = 0f;
+            var index = 0;
+            var sum = 0.0;
+            var magnitude = 0.0;
+
+            for (var i = 0; i < stationary.Length; i++)
             {
-                BatchedQuantProjection.UseTiledPrefillQ4K = original;
+                var difference = MathF.Abs(stationary[i] - tiled[i]);
+                sum += difference;
+                magnitude = Math.Max(magnitude, Math.Abs(stationary[i]));
+
+                if (difference > maximum)
+                {
+                    maximum = difference;
+                    index = i;
+                }
             }
+
+            var mean = sum / stationary.Length;
+
+            _out.WriteLine("");
+            _out.WriteLine($"outputs {stationary.Length} values, |value| up to {magnitude:F4}");
+            _out.WriteLine($"  max |difference|  {maximum:E3}  at [{index}]  "
+                           + $"(stationary {stationary[index]:F6}, tiled {tiled[index]:F6})");
+            _out.WriteLine($"  mean |difference| {mean:E3}");
+            _out.WriteLine($"  relative to magnitude: {(magnitude > 0 ? maximum / magnitude : 0):E3}");
+            _out.WriteLine("");
+
+            if (maximum == 0f)
+            {
+                _out.WriteLine("READING: bit-identical. The two kernels agree exactly on this weight, so "
+                               + "the flag cannot be the source of any divergence downstream.");
+            }
+            else if (magnitude > 0 && maximum / magnitude < 1e-4f)
+            {
+                _out.WriteLine("READING: they differ, but at reassociation scale — the repacked GEMM sums "
+                               + "in a different order and floating-point addition is not associative. "
+                               + "Expected, and the repository already accepts it. Note it can still "
+                               + "flip an argmax after 36 layers, which is why coherence gates over a "
+                               + "prepacked model are fragile by construction.");
+            }
+            else
+            {
+                _out.WriteLine("READING: the difference is far larger than reassociation explains. One of "
+                               + "the two kernels is wrong on per-head weights — a correctness defect, "
+                               + "not flakiness.");
+            }
+
+            _out.WriteLine("");
+            _out.WriteLine("(diagnostic — reports, does not assert)");
         }
 
         /// <summary>

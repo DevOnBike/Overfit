@@ -7,6 +7,7 @@ using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Loading;
 using DevOnBike.Overfit.LanguageModels.Runtime;
 using DevOnBike.Overfit.LanguageModels.Tokenizers;
+using DevOnBike.Overfit.Tests.TestSupport;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
 {
@@ -33,11 +34,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
 
             var sidecar = Gguf + ".repack";
             var preexisting = File.Exists(sidecar);
-            var prevToggle = BatchedQuantProjection.UseTiledPrefillQ4K;
+            using var tiledOn = new TiledPrefillQ4KScope(true); // exercise the EnsureRepacked path
             try
             {
-                BatchedQuantProjection.UseTiledPrefillQ4K = true; // exercise the EnsureRepacked path
-
                 var tok = GgufTokenizer.Load(Gguf);
                 var prompt = tok.Encode(
                     "The history of computing is a long and winding road that begins with mechanical "
@@ -59,7 +58,6 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             }
             finally
             {
-                BatchedQuantProjection.UseTiledPrefillQ4K = prevToggle;
                 if (!preexisting && File.Exists(sidecar))
                 {
                     File.Delete(sidecar);

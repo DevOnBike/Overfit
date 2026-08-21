@@ -8,6 +8,7 @@ using System.Text;
 using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Runtime;
 using DevOnBike.Overfit.LanguageModels.Tokenizers;
+using DevOnBike.Overfit.Tests.TestSupport;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
 {
@@ -74,7 +75,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
             // because the gate runs one chunk per process; in an ordinary `dotnet test` it would silently
             // change the kernel every later prefill test dispatches to, and those tests would then be
             // measuring something nobody chose.
-            using var flag = new TiledPrefillFlagScope();
+            using var flag = new TiledPrefillQ4KScope();
 
             var (ttftOff, textOff, idsOff, logitsOff) = RunOnce(engine, tok, prompt, tiled: false);
             var (ttftOn, textOn, idsOn, logitsOn) = RunOnce(engine, tok, prompt, tiled: true);
@@ -152,22 +153,6 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
                 + $"logits at vocab[{worst}]. Reassociation between these kernels is expected and measures "
                 + "0.770661 on this model, deterministically; an order of magnitude "
                 + "more than that is a defect in one of them, not floating-point noise.");
-        }
-
-        /// <summary>
-        /// Saves <see cref="BatchedQuantProjection.UseTiledPrefillQ4K"/> and puts it back on dispose.
-        ///
-        /// <para>Saves rather than forces <c>false</c>: the field's default comes from the
-        /// <c>OVERFIT_TILED_PREFILL</c> environment flag, so restoring a hardcoded value would quietly
-        /// override whatever the box was configured with.</para>
-        /// </summary>
-        private readonly struct TiledPrefillFlagScope : IDisposable
-        {
-            private readonly bool _original;
-
-            public TiledPrefillFlagScope() => _original = BatchedQuantProjection.UseTiledPrefillQ4K;
-
-            public void Dispose() => BatchedQuantProjection.UseTiledPrefillQ4K = _original;
         }
 
         private static (double ttftMs, string text, List<int> ids, float[] logits) RunOnce(
