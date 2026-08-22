@@ -31,8 +31,10 @@ the only cuBLAS library names that version of ILGPU contains are `cublas64_10`, 
 carrying a CUDA 13 redistributable and nothing older is expected to have no cuBLAS that ILGPU can name.
 That inference has not been run against a CUDA 13 install, and this project has not confirmed what
 NVIDIA calls the CUDA 13 library — but the direction is not in doubt, and the failure is the quiet kind:
-**both** cuBLAS arms skip, the primary one included, and the report that comes back looks entirely
-normal apart from one `NOT MEASURED` line. If you already have CUDA 13, install 12 as well. The probe
+**X1 and X2 both skip**, and the report that comes back looks entirely
+normal apart from one `NOT MEASURED` line. X3 resolves its own cuBLAS and may still run — see the arm
+table below — so the run is not necessarily empty, but the FP16 floor and its FP32 control are gone and
+the numbers that remain cannot be compared with anybody else's. If you already have CUDA 13, install 12 as well. The probe
 prints which `cublas64_*.dll` it actually loaded, and, when none loaded, which of the three names it
 tried, so the report names the problem instead of leaving you to guess.
 
@@ -71,7 +73,7 @@ call at the smallest real shape. A discrete card should be far faster, but *how 
 what the probe is measuring*, so any estimate here would be a guess dressed as a fact.
 
 The full sweep was **not run to completion** on that machine — it was stopped after the third
-combination, because a two-CU integrated GPU is not the hardware the answer is wanted about and the
+combination, because that integrated GPU is not the hardware the answer is wanted about and the
 box was needed for other work. So the hour is a budget, not a measurement.
 
 If it is taking too long, two levers, in this order: `GpuProbe.exe --x1 --cells=attn` runs only the two
@@ -199,7 +201,7 @@ Ten arms per shape, run **interleaved** so drift over the sitting falls on all o
 | G1 | a naive GPU kernel, one thread per output element — the floor a first port gets |
 | G2 | a shared-memory tiled GPU kernel |
 | G3 | the GPU backward, which reads the weight in the transposed direction |
-| X1 | **cuBLAS FP16 (`cublasHgemm`) — the primary arm.** Off by default; needs the CUDA 12 redistributable |
+| X1 | **cuBLAS FP16 (`cublasHgemm`) — the FP16 FLOOR.** It accumulates in FP16, which is neither the fastest nor the most accurate FP16 path a card offers. Quote it as a lower bound, never as what the hardware can do. Off by default; needs the CUDA 12 redistributable |
 | X2 | cuBLAS FP32 (`cublasSgemm`), the control that makes the FP16 number readable |
 | X3 | **cuBLAS `cublasGemmEx` with `CUBLAS_COMPUTE_32F` — FP16 storage, FP32 accumulate, the path a tensor core actually takes.** Reached through this project's own P/Invoke, because `ILGPU.Algorithms` exports no `GemmEx` at all. Same `--x1` flag |
 
