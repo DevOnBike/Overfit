@@ -19,6 +19,41 @@ four of them.
 
 Dev box for most figures: Ryzen 9 9950X3D, Windows, .NET 10, Release.
 
+## What FP16 costs in accuracy, and it corrected a signed plan by 30 % — 2026-08-22
+
+Measured on the host by `GpuProbe --fp16-bound`, so **no GPU is involved and none is needed**. Relative
+L2 against an F32 reference, at the real Qwen-3B shapes. Three columns because the middle one is the
+arm the probe actually builds, and it was the column the plan omitted.
+
+| cell | FP32 accumulate, F32 out | **FP32 accumulate, FP16 out** | FP16 accumulate |
+|---|---|---|---|
+| `ffn_gate_up` k 2048 -> m 11008 | 2.88e-4 | **3.56e-4** | 6.53e-3 |
+| `ffn_down` k 11008 -> m 2048 | 2.87e-4 | **3.52e-4** | 1.58e-2 |
+| `attn_qo` k 2048 -> m 2048 | 2.88e-4 | **3.56e-4** | 6.58e-3 |
+| `lm_head` k 2048 -> m 151936 | 2.88e-4 | **3.55e-4** | 6.70e-3 |
+| `attn_kv` k 2048 -> m 256 | 2.97e-4 | **3.64e-4** | 6.91e-3 |
+
+**The correction.** `XC-107` `AMENDMENT 2` section `A2.3` predicted a **3.4x** margin under the
+`ParityResult.Fp16Fp32AccumulateCeiling` of 1e-3, taken from the left-hand column. But arm `X3` writes
+into an **FP16 output buffer**, which pays one more rounding than that bound accounts for. The real
+margin is **2.7x**. The plan's figure was not wrong arithmetic; it was the wrong column.
+
+**What the ceiling still does, and it is the reason the arm is safe to hand to a stranger.** The
+likeliest implementation mistake in a `cublasGemmEx` call is passing compute type **64**
+(`CUBLAS_COMPUTE_16F`) where **68** (`CUBLAS_COMPUTE_32F`) was meant — adjacent values in the same enum,
+verified against NVIDIA's `cublas_api.h:205` and `:207`. That mistake lands in the right-hand column,
+**6.5x to 15.8x over the ceiling**, so it fails parity instead of printing a fast wrong number.
+
+**The k-dependence in the right-hand column is a confirmed mechanism, not a fitted curve.** `hgemm`
+rounds its running sum once per multiply-add, so error grows as `sqrt(k)`. Fitting `C*sqrt(k)` to the
+k=11008 point ALONE gives `C=1.51e-4`, which then **predicts** 6.82e-3 at k=2048 against 6.53e-3,
+6.58e-3 and 6.91e-3 measured. The left two columns are flat in k, as FP32 accumulation requires.
+
+**NOT CHECKED, and it bounds every figure above.** These are host computations. **No line of any FP16
+device path has ever executed** — this machine has no NVIDIA card. The FP16-accumulate column is a
+subsample estimator over **4096 sampled output elements per shape**, not the full tensor, and the report
+line says so.
+
 ## big.LITTLE: sizing the worker pool to `ProcessorCount` costs 2x on a phone — 2026-08-14
 
 Measured in `Demo/OverfitChatApp` on a Motorola Edge 50 Fusion (Snapdragon 7s Gen 2: 4x A78 up to

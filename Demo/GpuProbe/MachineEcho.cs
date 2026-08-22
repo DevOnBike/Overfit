@@ -49,6 +49,11 @@ namespace DevOnBike.Overfit.GpuProbe
             Add("accelerator warp size", accelerator.WarpSize.ToString());
             Add("accelerator max shared memory per group", accelerator.MaxSharedMemoryPerGroup.ToString());
 
+            // The compute-unit count for EVERY accelerator type, not only CUDA. It used to live in the
+            // CUDA branch below, so a run on an OpenCL or CPU device reported no unit count at all - and
+            // "how many of my GPU's units are being used" is the question this probe was asked twice.
+            AddComputeUnits(Add, accelerator);
+
             if (accelerator is CudaAccelerator cuda)
             {
                 var device = (CudaDevice)cuda.Device;
@@ -83,6 +88,61 @@ namespace DevOnBike.Overfit.GpuProbe
             Add("other load on the machine during the run", "PLEASE FILL IN MANUALLY");
 
             return new MachineEcho(f);
+        }
+
+        /// <summary>
+        /// Prints the parallel-unit count and the two numbers that bound occupancy with it, for whatever
+        /// kind of accelerator this is.
+        /// <para>
+        /// <b>What the number IS, measured on 2026-08-22 rather than assumed.</b> ILGPU 1.5.3 declares
+        /// <c>NumMultiprocessors</c> on the BASE <c>Device</c> type, and for an OpenCL device it carries
+        /// the driver's <c>CL_DEVICE_MAX_COMPUTE_UNITS</c> unchanged. That was checked against the driver
+        /// directly - <c>clGetDeviceInfo</c> on this machine's <c>gfx1036</c> returns 1 with status
+        /// <c>CL_SUCCESS</c>, which is exactly what ILGPU reports, and the same query's
+        /// <c>CL_DEVICE_MAX_CLOCK_FREQUENCY</c> of 2200 matches ILGPU's own <c>ClockRate</c>. So the value
+        /// is a pass-through, not an ILGPU default.
+        /// </para>
+        /// <para>
+        /// <b>What it is NOT.</b> It is the count the RUNTIME reports, which is not always the count of
+        /// physical shader units - an OpenCL driver may report work-group processors rather than the
+        /// cores inside them, and nothing this probe can observe distinguishes the two. The value is
+        /// therefore labelled with the interface it came from, so a reader knows what to go and check
+        /// rather than reading a hardware fact that was never measured.
+        /// </para>
+        /// <para>
+        /// A non-positive count is printed as UNKNOWN with the raw value, never as a zero. "The runtime
+        /// declined to answer" and "this device has no compute units" must not read the same.
+        /// </para>
+        /// </summary>
+        private static void AddComputeUnits(Action<string, string> add, Accelerator accelerator)
+        {
+            var device = accelerator.Device;
+            var units = device.NumMultiprocessors;
+            var perUnit = device.MaxNumThreadsPerMultiprocessor;
+
+            var source = accelerator.AcceleratorType switch
+            {
+                AcceleratorType.Cuda => "CUDA streaming multiprocessors, from cudaDeviceProp",
+                AcceleratorType.OpenCL => "OpenCL CL_DEVICE_MAX_COMPUTE_UNITS, verbatim from the driver - " +
+                                          "the runtime's count, which is not necessarily the count of " +
+                                          "physical shader cores",
+                AcceleratorType.CPU => "ILGPU's CPU emulator, which models a single multiprocessor",
+                _ => "reported by ILGPU for this accelerator type",
+            };
+
+            add("accelerator compute units", units > 0
+                ? $"{units} ({source})"
+                : $"UNKNOWN - the runtime returned {units}, which is not a count. Read this as not " +
+                  "answered, NOT as a device with no compute units.");
+
+            add("accelerator max threads per compute unit", perUnit > 0
+                ? perUnit.ToString()
+                : $"UNKNOWN - the runtime returned {perUnit}");
+
+            // Printed beside the two above so the arithmetic is visible rather than asserted. On both
+            // devices seen here the product is exact: OpenCL gfx1036 gives 1 x 256 = 256, and the CPU
+            // emulator gives 1 x 16 = 16. Whether ILGPU DERIVES one from the others was not checked.
+            add("accelerator max threads total", device.MaxNumThreads.ToString());
         }
 
         public string Render()
