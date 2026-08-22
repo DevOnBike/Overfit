@@ -30,3 +30,4 @@
 - [A gentle mutation reads as GREEN](reference_gentle_mutation_reads_as_green.md) — inert vs never-reached look identical; discriminate with a destructive probe + a dll hash. Dead band measured: 0.9 inert, 0.7 red.
 - [ILGPU route facts](reference_ilgpu_route_facts.md) — driver-only (`nvcuda`), toolkit names live in ILGPU.Algorithms; a `b.Cuda()` context still contains a CPU device; Synchronize moved a headline 0.13x -> 1036.58x.
 - [A canary needs symmetric warm-up](feedback_warmup_symmetry_canary.md) — cold-vs-warm made an idle machine read -93.5 %; read EVERY line of a timed run, not just the arm you wanted.
+- [string.Create + interpolation chains](reference_string_create_interpolation_chain.md) — CS1620 "must be passed with the 'ref' keyword" really means one operand of the `+` chain lacks `$`.

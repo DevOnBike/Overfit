@@ -63,9 +63,7 @@ namespace DevOnBike.Overfit.GpuProbe
                 Add("cuda multiprocessors", device.NumMultiprocessors.ToString());
             }
 
-            Add("devices ILGPU offered", string.Join(
-                " | ",
-                context.Devices.Select(d => $"{d.AcceleratorType}:{d.Name}")));
+            Add("devices ILGPU offered", DescribeDevices(context));
 
             Add("cpu model", CpuModel());
             Add("cpu logical processors", Environment.ProcessorCount.ToString());
@@ -88,6 +86,37 @@ namespace DevOnBike.Overfit.GpuProbe
             Add("other load on the machine during the run", "PLEASE FILL IN MANUALLY");
 
             return new MachineEcho(f);
+        }
+
+        /// <summary>
+        /// Every device ILGPU enumerated, with repeats collapsed to a count.
+        /// <para>
+        /// ILGPU offers one CPU accelerator per worker configuration, so this line read
+        /// <c>CPU:CPUAccelerator | CPU:CPUAccelerator | ...</c> five times over on the development
+        /// machine and the one entry that mattered was lost in it. Only IDENTICAL strings are collapsed,
+        /// and the string is the whole of what this field ever printed - so nothing that was visible
+        /// before is hidden now, and the multiplier keeps the total count readable.
+        /// </para>
+        /// </summary>
+        private static string DescribeDevices(Context context)
+        {
+            var seen = new List<KeyValuePair<string, int>>();
+
+            foreach (var device in context.Devices)
+            {
+                var name = $"{device.AcceleratorType}:{device.Name}";
+                var at = seen.FindIndex(e => e.Key == name);
+
+                if (at < 0)
+                {
+                    seen.Add(new KeyValuePair<string, int>(name, 1));
+                    continue;
+                }
+
+                seen[at] = new KeyValuePair<string, int>(name, seen[at].Value + 1);
+            }
+
+            return string.Join(" | ", seen.Select(e => e.Value == 1 ? e.Key : $"{e.Key} x{e.Value}"));
         }
 
         /// <summary>

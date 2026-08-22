@@ -141,6 +141,18 @@ namespace DevOnBike.Overfit.GpuProbe
             // no view was asked for. It is not echoed here: the echo that used to live at this line fired
             // only for the notes Open had written, so the one case that wrote no note - --live not passed -
             // was the one case that printed nothing, which is indistinguishable from a broken view.
+            // What the run INTENDS to measure, recorded before it starts. A snapshot written half way
+            // through can then name the combinations that never ran, which is the part that decides
+            // whether the file answers the question - the largest shapes are last.
+            report.CombinationsExpected = cells.Count * options.Batches.Count;
+            foreach (var cell in cells)
+            {
+                foreach (var n in options.Batches)
+                {
+                    report.PlannedCombinations.Add($"{cell.Name} n={n}");
+                }
+            }
+
             var state = new LiveProbeState { CellsTotal = cells.Count * options.Batches.Count };
             using var view = LiveView.Open(options, accelerator, state, report, log);
 
@@ -200,6 +212,12 @@ namespace DevOnBike.Overfit.GpuProbe
                 report.CanaryMeasured = true;
                 report.CanaryStart = canary.Measure(options.WarmupPolicy, view);
                 log.WriteLine($"canary at the start: {report.CanaryStart!.MedianMs:F2} ms, {report.CanaryStart.Warmup.Describe()}");
+
+                // The first snapshot, before any cell. It carries no timings, and that is the point of
+                // it: it proves the report files can actually be written on this machine, in the first
+                // half-minute rather than after the first shape - which on the largest cell is minutes
+                // away. A read-only directory then costs a restart instead of an hour.
+                Snapshot(report, log);
             }
 
             foreach (var cell in cells)
@@ -221,6 +239,11 @@ namespace DevOnBike.Overfit.GpuProbe
                     var result = RunCell(weights, n, options, accelerator, measure, log, report, view);
                     report.Cells.Add(result);
 
+                    // BETWEEN cells, never inside one. Nothing is timed at this point: RunCell has
+                    // returned, every TimedRegion it opened is closed, and no warm-up round is in
+                    // flight. IncrementalReport re-checks that rather than trusting this comment.
+                    Snapshot(report, log);
+
                     // The view's throughput panel is this cell's own medians, rendered a second time -
                     // never a second timer. Two timers disagree and then nobody can say which figure the
                     // report means.
@@ -233,6 +256,11 @@ namespace DevOnBike.Overfit.GpuProbe
                 view?.Show("canary at the end - the same workload again, to see whether the box moved");
                 report.CanaryEnd = canary.Measure(options.WarmupPolicy, view);
                 log.WriteLine($"canary at the end: {report.CanaryEnd!.MedianMs:F2} ms, {report.CanaryEnd.Warmup.Describe()}");
+
+                // The closing canary is what lifts the run out of "incomplete", so the file is refreshed
+                // once more here. A process killed between this line and the final emit then leaves a
+                // report that is complete rather than one that says it is missing a reading it has.
+                Snapshot(report, log);
             }
         }
 
@@ -538,8 +566,28 @@ namespace DevOnBike.Overfit.GpuProbe
             return arm;
         }
 
+        /// <summary>
+        /// Writes the report as it stands, between cells. A refusal or a failure is logged and the run
+        /// carries on: the timings held in memory are worth more than the snapshot.
+        /// </summary>
+        private static void Snapshot(Report report, TextWriter log)
+        {
+            if (IncrementalReport.Write(report, TextFile, JsonFile))
+            {
+                return;
+            }
+
+            log.WriteLine("  report snapshot NOT written: " + IncrementalReport.Describe());
+        }
+
         private static int Emit(Report report, int exitCode)
         {
+            if (IncrementalReport.Snapshots > 0 || IncrementalReport.FailedWrites > 0 ||
+                IncrementalReport.DroppedInsideTimedRegion > 0)
+            {
+                report.WriteNote = IncrementalReport.Describe();
+            }
+
             var text = report.RenderText();
             Console.Out.WriteLine(text);
 

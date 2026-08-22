@@ -3,3 +3,9 @@
 # accident.
 gpu-probe-report.txt
 gpu-probe-report.json
+
+# The snapshot writer renders each incremental report beside its target and renames it into place, so a
+# process killed mid-write leaves the PREVIOUS snapshot rather than a truncated one. That window is the
+# only time these two exist, and only a kill inside it leaves one behind.
+gpu-probe-report.txt.writing
+gpu-probe-report.json.writing

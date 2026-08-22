@@ -42,6 +42,52 @@ namespace DevOnBike.Overfit.GpuProbe
 
         public bool CanaryMeasured { get; set; }
 
+        /// <summary>
+        /// How many shape/batch combinations this run INTENDED to measure. Zero when the run is not a
+        /// measuring one (a refused start, --parity-only's caller still sets it, --fp16-bound does not).
+        /// </summary>
+        public int CombinationsExpected { get; set; }
+
+        /// <summary>Every combination the run intended to measure, in order, as "cell n=N".</summary>
+        public List<string> PlannedCombinations { get; } = [];
+
+        /// <summary>How many snapshots <see cref="IncrementalReport"/> has written, this one included.</summary>
+        public int SnapshotsWritten { get; set; }
+
+        /// <summary>What the snapshot writer has to say, or null when nothing has been written.</summary>
+        public string? WriteNote { get; set; }
+
+        /// <summary>Combinations that were planned and never measured, in the order they were planned.</summary>
+        public IReadOnlyList<string> CombinationsNotMeasured
+        {
+            get
+            {
+                var done = new HashSet<string>(Cells.Select(Key));
+                return PlannedCombinations.Where(p => !done.Contains(p)).ToList();
+            }
+        }
+
+        /// <summary>
+        /// True when the closing canary is still missing. It is a distinct fact from the combination
+        /// count: a run killed during the closing canary has measured every combination and STILL cannot
+        /// say whether the machine drifted underneath them.
+        /// </summary>
+        public bool ClosingCanaryMissing => CanaryMeasured && CanaryEnd is null;
+
+        /// <summary>
+        /// True when this report does not describe a finished run - because combinations are missing, or
+        /// because the closing canary was never taken.
+        /// </summary>
+        public bool RunIsIncomplete =>
+            (CombinationsExpected > 0 && Cells.Count < CombinationsExpected) || ClosingCanaryMissing;
+
+        /// <summary>The short marker that goes on every line a reader might paste on its own.</summary>
+        public string IncompleteMarker => CombinationsExpected > 0
+            ? $"  [INCOMPLETE RUN {Cells.Count}/{CombinationsExpected}]"
+            : "  [INCOMPLETE RUN]";
+
+        private static string Key(CellResult cell) => $"{cell.Cell.Name} n={cell.N}";
+
         public double CanaryStartMs => CanaryStart?.MedianMs ?? 0;
 
         public double CanaryEndMs => CanaryEnd?.MedianMs ?? 0;
@@ -106,8 +152,16 @@ namespace DevOnBike.Overfit.GpuProbe
         /// </summary>
         public bool GemmExBorrowedOperands { get; set; }
 
+        /// <summary>
+        /// How far the closing canary moved from the opening one, as a fraction. ZERO while the closing
+        /// reading is missing, and that guard is not cosmetic: an absent <see cref="CanaryEnd"/> reads as
+        /// 0 ms, which made every incremental snapshot print "CANARY MOVED - SITTING SUSPECT ... -100.0 %"
+        /// about a machine that had done nothing wrong. Callers must test
+        /// <see cref="ClosingCanaryMissing"/> before reading this; a fraction of zero on its own would
+        /// say the machine held still, which is the opposite of what an unfinished run knows.
+        /// </summary>
         public double CanaryMove =>
-            CanaryStartMs > 0 ? (CanaryEndMs - CanaryStartMs) / CanaryStartMs : 0;
+            !ClosingCanaryMissing && CanaryStartMs > 0 ? (CanaryEndMs - CanaryStartMs) / CanaryStartMs : 0;
 
         public string RenderText()
         {
@@ -117,12 +171,28 @@ namespace DevOnBike.Overfit.GpuProbe
             sb.AppendLine("(copy everything from the line above to the line at the very bottom)");
             sb.AppendLine();
 
+            AppendIncompleteBanner(sb);
+
             foreach (var banner in TopBanners)
             {
                 sb.AppendLine(banner);
             }
 
-            if (CanaryMeasured)
+            if (ClosingCanaryMissing)
+            {
+                sb.AppendLine(string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"canary 512-cubed CPU GEMM: {CanaryStartMs:F2} ms at the start, AND THE CLOSING READING WAS NEVER TAKEN."));
+                sb.AppendLine(
+                    "  The closing canary is what says whether the machine drifted under the measurement, so this");
+                sb.AppendLine(
+                    "  run cannot say that it did not. That is not the same as saying it held still.");
+                sb.AppendLine(string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"  canary warm-up: start {CanaryStart?.Warmup.Describe()}"));
+            }
+
+            if (CanaryMeasured && !ClosingCanaryMissing)
             {
                 var moved = Math.Abs(CanaryMove) > Canary.MoveThreshold;
                 var line = string.Create(
@@ -159,6 +229,11 @@ namespace DevOnBike.Overfit.GpuProbe
             if (WarmupRule.Length > 0)
             {
                 sb.AppendLine("  warm-up rule       : " + WarmupRule);
+            }
+
+            if (WriteNote is not null)
+            {
+                sb.AppendLine("  report snapshots   : " + WriteNote);
             }
 
             sb.Append(Machine?.Render());
@@ -276,7 +351,7 @@ namespace DevOnBike.Overfit.GpuProbe
             }
 
             sb.AppendLine();
-            sb.AppendLine("RESULTS");
+            sb.AppendLine("RESULTS" + (RunIsIncomplete ? IncompleteMarker : string.Empty));
             sb.AppendLine("  ms per call, min / median / max over the timed repetitions, arms interleaved ABAB.");
             sb.AppendLine("  A cell whose parity check failed shows no timing at all - that is deliberate.");
             sb.AppendLine("  'warm' is the warm-up rounds that arm ran; 'ok' means its timings had stopped moving.");
@@ -285,6 +360,8 @@ namespace DevOnBike.Overfit.GpuProbe
             {
                 AppendCell(sb, cell, run);
             }
+
+            AppendNotMeasured(sb);
 
             sb.AppendLine();
             AppendLimitations(sb);
@@ -306,10 +383,19 @@ namespace DevOnBike.Overfit.GpuProbe
                 ["headlineSuppressed"] = !run.MayPrint,
                 ["headlineSuppressionReasons"] = run.Blockers,
                 ["tensorCores"] = TensorCoreStatus(),
+                ["runIncomplete"] = RunIsIncomplete,
+                ["combinationsExpected"] = CombinationsExpected,
+                ["combinationsCompleted"] = Cells.Count,
+                ["combinationsNotMeasured"] = CombinationsNotMeasured,
+                ["snapshotsWritten"] = SnapshotsWritten,
+                ["snapshotNote"] = WriteNote,
                 ["canaryStartMs"] = CanaryMeasured ? CanaryStartMs : null,
-                ["canaryEndMs"] = CanaryMeasured ? CanaryEndMs : null,
-                ["canaryMoveFraction"] = CanaryMeasured ? CanaryMove : null,
-                ["canarySettled"] = CanaryMeasured ? CanarySettled : null,
+                // Null, never 0, while the closing reading is missing. A zero here is indistinguishable
+                // from a machine that finished exactly as fast as it started.
+                ["canaryEndMs"] = CanaryMeasured && !ClosingCanaryMissing ? CanaryEndMs : null,
+                ["canaryClosingTaken"] = CanaryMeasured ? !ClosingCanaryMissing : null,
+                ["canaryMoveFraction"] = CanaryMeasured && !ClosingCanaryMissing ? CanaryMove : null,
+                ["canarySettled"] = CanaryMeasured && !ClosingCanaryMissing ? CanarySettled : null,
                 ["oracle"] = OracleLines,
                 ["oracleFailures"] = OracleFailures,
                 ["cuBlasSkipReason"] = CuBlasSkipReason,
@@ -325,6 +411,9 @@ namespace DevOnBike.Overfit.GpuProbe
                 ["gemmExBorrowedOperands"] = GemmExLibrary is null ? null : GemmExBorrowedOperands,
                 ["cells"] = Cells.Select(c => new Dictionary<string, object?>
                 {
+                    // On EVERY cell, not only at the root. A consumer that slices one element out of this
+                    // array - which is the JSON equivalent of pasting one table - must still see it.
+                    ["fromIncompleteRun"] = RunIsIncomplete,
                     ["cell"] = c.Cell.Name,
                     ["k"] = c.Cell.K,
                     ["m"] = c.Cell.M,
@@ -444,9 +533,12 @@ namespace DevOnBike.Overfit.GpuProbe
                 CultureInfo.InvariantCulture,
                 $"  {cell.Cell.Name}  k {cell.Cell.K} -> m {cell.Cell.M}  n={cell.N}  " +
                 $"{gflop:F2} GFLOP per call  weight {cell.Cell.WeightBytesF32 / (1024.0 * 1024.0):F1} MiB"));
-            sb.AppendLine(cell.WeightUploadMs > 0
+            sb.Append(cell.WeightUploadMs > 0
                 ? string.Create(CultureInfo.InvariantCulture, $"  uploaded in {cell.WeightUploadMs:F1} ms")
                 : string.Empty);
+
+            // Last on the line, so it survives a truncation as well as a copy of the heading alone.
+            sb.AppendLine(RunIsIncomplete ? IncompleteMarker : string.Empty);
 
             if (cell.Cell.CallsPerStep > 0)
             {
@@ -471,7 +563,14 @@ namespace DevOnBike.Overfit.GpuProbe
                 sb.AppendLine($"    warm-up: {cell.WarmupRounds} rounds - {cell.WarmupStopReason}");
             }
 
-            sb.AppendLine("    arm                        min ms   median ms      max ms   spread    GFLOP/s  warm   parity");
+            // The marker goes on the column header as well as on the cell heading above, because the
+            // table is the unit somebody pastes on its own and the heading is the first line they drop.
+            // It does NOT go on the individual arm rows: those numbers are as valid here as they would be
+            // in a finished run - the missing information is which OTHER combinations never ran - and a
+            // suffix on every row would break the alignment that makes the table readable.
+            sb.AppendLine(
+                "    arm                        min ms   median ms      max ms   spread    GFLOP/s  warm   parity" +
+                (RunIsIncomplete ? IncompleteMarker : string.Empty));
 
             foreach (var (arm, measurement) in cell.Timings)
             {
@@ -527,6 +626,74 @@ namespace DevOnBike.Overfit.GpuProbe
             {
                 sb.AppendLine("         " + note);
             }
+        }
+
+        /// <summary>
+        /// Says, at the very top, that this file is a snapshot of a run that had not finished.
+        /// <para>
+        /// It is rendered rather than pushed into <see cref="TopBanners"/> on purpose:
+        /// <see cref="RenderText"/> now runs once per completed combination, and anything appended to
+        /// that list would be repeated once per render.
+        /// </para>
+        /// </summary>
+        private void AppendIncompleteBanner(StringBuilder sb)
+        {
+            if (!RunIsIncomplete)
+            {
+                return;
+            }
+
+            if (CombinationsExpected > 0 && Cells.Count < CombinationsExpected)
+            {
+                sb.AppendLine(string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"INCOMPLETE RUN - THIS IS A SNAPSHOT, NOT A FINISHED MEASUREMENT. {Cells.Count} of " +
+                    $"{CombinationsExpected} shape/batch combinations were measured. The probe rewrites this " +
+                    $"file after every one of them, so a run that was interrupted - or that is STILL GOING as " +
+                    $"you read this - leaves the results it had. Nothing in the file can tell those two apart."));
+                sb.AppendLine(
+                    "  Each completed combination below is exactly as valid as it would be in a finished run.");
+                sb.AppendLine(
+                    "  What is missing is the rest of them, and they are listed under COMBINATIONS NOT MEASURED.");
+            }
+
+            if (ClosingCanaryMissing)
+            {
+                sb.AppendLine(
+                    "INCOMPLETE RUN - THE CLOSING CANARY WAS NEVER TAKEN, so nothing here establishes that the");
+                sb.AppendLine(
+                    "  machine held still under the measurement. No ratio is printed anywhere in this file for");
+                sb.AppendLine(
+                    "  that reason; the per-arm timings are still facts about the arms and are printed in full.");
+            }
+        }
+
+        /// <summary>
+        /// Names the combinations that never ran. A count of what is missing is not enough - which
+        /// shapes are absent is the part that decides whether the file answers the question, and the
+        /// largest shapes run last.
+        /// </summary>
+        private void AppendNotMeasured(StringBuilder sb)
+        {
+            var missing = CombinationsNotMeasured;
+            if (missing.Count == 0)
+            {
+                return;
+            }
+
+            sb.AppendLine();
+            sb.AppendLine(string.Create(
+                CultureInfo.InvariantCulture,
+                $"COMBINATIONS NOT MEASURED ({missing.Count} of {CombinationsExpected})"));
+            foreach (var combination in missing)
+            {
+                sb.AppendLine("  " + combination);
+            }
+
+            sb.AppendLine(
+                "  The run stopped before these. They are not failures and nothing at all can be read from");
+            sb.AppendLine(
+                "  their absence - not that they are slow, not that they crashed, not that they were skipped.");
         }
 
         /// <summary>

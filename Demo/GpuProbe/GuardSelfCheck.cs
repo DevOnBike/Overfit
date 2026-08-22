@@ -52,11 +52,20 @@ namespace DevOnBike.Overfit.GpuProbe
         public static bool Failed { get; private set; }
 
         /// <summary>
-        /// Runs the four arms. Call once, from the entry point, before anything is timed.
+        /// Runs the five arms. Call once, from the entry point, before anything is timed.
         /// </summary>
         /// <param name="seed">Seeds the stub sensor. Nothing below reads a sample, so it only has to exist.</param>
         public static void Run(int seed)
         {
+            if (IncrementalReport.Snapshots != 0 || IncrementalReport.DroppedInsideTimedRegion != 0)
+            {
+                Fail(
+                    $"it ran after the snapshot writer had already been used ({IncrementalReport.Snapshots} " +
+                    $"snapshots, {IncrementalReport.DroppedInsideTimedRegion} drops). The check resets those " +
+                    "counters, so running it here would erase evidence from the run itself.");
+                return;
+            }
+
             if (LiveView.FramesPainted != 0 || LiveView.DroppedInsideTimedRegion != 0)
             {
                 Fail(
@@ -76,6 +85,23 @@ namespace DevOnBike.Overfit.GpuProbe
                 return;
             }
 
+            // ARM 5 first, because it is the one arm that needs no console - and the give-up path below,
+            // for a machine where Spectre cannot be prepared, returns before any of the repaint arms run.
+            // Ordered second it would have been skipped on exactly the machines least like this one.
+            //
+            // It covers the other expensive thing that happens between cells: writing the report to disk.
+            // IncrementalReport.Write renders tens of kilobytes and touches the file system, so a
+            // snapshot requested from inside a clock would move that number the same way a repaint would.
+            // This arm is what makes its drop counter mean something; without it the counter reads zero
+            // whether the guard works or has been deleted, which is the shape of the defect this whole
+            // file exists to prevent.
+            if (!CheckSnapshotGuard())
+            {
+                return;
+            }
+
+            IncrementalReport.ResetCounters();
+
             var telemetry = new StubTelemetry(seed);
             var view = LiveView.TryCreate(telemetry, new LiveProbeState(), force: true);
 
@@ -83,9 +109,11 @@ namespace DevOnBike.Overfit.GpuProbe
             {
                 telemetry.Dispose();
                 Note =
-                    "COULD NOT RUN - the console could not be prepared here (" +
-                    (LiveView.Unavailable ?? "no reason recorded") + "), so the drop guard is UNVERIFIED " +
-                    "for this run. That is not the same as passing. Nothing else about this run changed.";
+                    "PARTLY RUN. The snapshot guard passed: a report snapshot requested from inside a timed " +
+                    "region was refused and wrote no file. The four REPAINT arms could not run, because the " +
+                    "console could not be prepared here (" + (LiveView.Unavailable ?? "no reason recorded") +
+                    "), so the repaint drop guard is UNVERIFIED for this run. That is not the same as " +
+                    "passing. Nothing else about this run changed.";
                 return;
             }
 
@@ -180,13 +208,86 @@ namespace DevOnBike.Overfit.GpuProbe
             }
 
             LiveView.ResetCounters();
+
             Note =
-                "PASSED. Four arms, before anything was timed: a repaint outside a timed region was " +
+                "PASSED. Five arms, before anything was timed: a repaint outside a timed region was " +
                 "accepted, a repaint inside one was dropped and counted, a repaint inside one was dropped " +
-                "and counted even with the view suspended, and a repaint after the region closed was " +
-                "accepted again. So the drop count printed below is a measurement and not a default. This " +
-                "says nothing about what a repaint COSTS - that is --live-perturbation - and nothing about " +
-                "a stopwatch written without TimedRegion.Enter around it, which no flag can see.";
+                "and counted even with the view suspended, a repaint after the region closed was " +
+                "accepted again, and a REPORT SNAPSHOT requested from inside a timed region was refused " +
+                "with no file written. So the drop counts printed below are measurements and not defaults. " +
+                "This says nothing about what a repaint or a snapshot COSTS - that is --live-perturbation - " +
+                "and nothing about a stopwatch written without TimedRegion.Enter around it, which no flag " +
+                "can see. It also does not prove the report DIRECTORY is writable: that is established by " +
+                "the first real snapshot, which is taken before any cell for exactly that reason.";
+        }
+
+        /// <summary>
+        /// Arm 5. Drives <see cref="IncrementalReport.Write"/> from inside a timed region and requires
+        /// that it refuses and writes nothing. Returns false when the arm failed.
+        /// </summary>
+        private static bool CheckSnapshotGuard()
+        {
+            var stem = Path.Combine(
+                Path.GetTempPath(), "gpu-probe-guard-" + Guid.NewGuid().ToString("N"));
+            var textPath = stem + ".txt";
+            var jsonPath = stem + ".json";
+
+            TimedRegion.Enter();
+            var wrote = IncrementalReport.Write(new Report(), textPath, jsonPath);
+            TimedRegion.Leave();
+
+            var landed = File.Exists(textPath) || File.Exists(jsonPath);
+            if (landed)
+            {
+                Delete(textPath);
+                Delete(jsonPath);
+            }
+
+            if (wrote || landed)
+            {
+                Fail(
+                    "a report snapshot requested from INSIDE a timed region was written instead of being " +
+                    "refused. Rendering the report allocates tens of kilobytes and writing it is a file " +
+                    "system round trip; between a timestamp and its synchronise, either one moves that " +
+                    "number and leaves the report looking entirely normal.");
+                return false;
+            }
+
+            if (IncrementalReport.DroppedInsideTimedRegion != 1)
+            {
+                Fail(
+                    $"a report snapshot requested from inside a timed region wrote nothing, but the drop " +
+                    $"counter reads {IncrementalReport.DroppedInsideTimedRegion} instead of 1. The write was " +
+                    "stopped by something other than the guard - most likely it failed - so the guard itself " +
+                    "is unverified and the count the report prints is not a measurement of it.");
+                return false;
+            }
+
+            if (IncrementalReport.Snapshots != 0)
+            {
+                Fail(
+                    $"a refused snapshot still counted as one of {IncrementalReport.Snapshots} written. The " +
+                    "report would then claim a snapshot that never reached the disk.");
+                return false;
+            }
+
+            return true;
+        }
+
+        private static void Delete(string path)
+        {
+            try
+            {
+                File.Delete(path);
+            }
+            catch (IOException)
+            {
+                // The arm has already failed and the run is about to abort; a leftover file in the temp
+                // directory is not worth taking the process down for.
+            }
+            catch (UnauthorizedAccessException)
+            {
+            }
         }
 
         private static void Fail(string what)

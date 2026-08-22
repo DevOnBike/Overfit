@@ -45,7 +45,33 @@ namespace DevOnBike.Overfit.GpuProbe
         {
             var blockers = new List<string>();
 
-            if (report.CanaryMeasured && Math.Abs(report.CanaryMove) > Canary.MoveThreshold)
+            // Before the canary tests, because it is the reason the canary cannot be read at all. A
+            // report written between cells has an opening canary and no closing one, so nothing in it
+            // establishes that the machine held still - and CanaryMove is deliberately zero in that
+            // state, which on its own would read as "it did not move".
+            if (report.ClosingCanaryMissing)
+            {
+                blockers.Add(
+                    "the closing canary has not been taken. This file was written between cells, so the run " +
+                    "was still going or was interrupted, and the reading that would say whether the machine " +
+                    "drifted under the measurement does not exist yet. An absent canary is not evidence that " +
+                    "nothing moved. WHAT TO DO: let the run reach its end, or re-run the shapes you need with " +
+                    "--cells so the sweep finishes.");
+            }
+
+            if (report.CombinationsExpected > 0 && report.Cells.Count < report.CombinationsExpected)
+            {
+                blockers.Add(string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"this run measured {report.Cells.Count} of {report.CombinationsExpected} shape/batch " +
+                    $"combinations. The per-arm timings that DID complete are printed above and stand on their " +
+                    $"own; a ratio is the thing that travels out of a report as an answer, and an answer taken " +
+                    $"from an unfinished sweep gets quoted as though the sweep had finished. " +
+                    $"WHAT TO DO: run it again and let it finish, or narrow it with --cells so that it can."));
+            }
+
+            if (report.CanaryMeasured && !report.ClosingCanaryMissing &&
+                Math.Abs(report.CanaryMove) > Canary.MoveThreshold)
             {
                 blockers.Add(string.Create(
                     CultureInfo.InvariantCulture,
@@ -56,7 +82,7 @@ namespace DevOnBike.Overfit.GpuProbe
                     $"WHAT TO DO: close the browser and anything else heavy, let the machine idle for a minute, run again."));
             }
 
-            if (report.CanaryMeasured && !report.CanarySettled)
+            if (report.CanaryMeasured && !report.ClosingCanaryMissing && !report.CanarySettled)
             {
                 blockers.Add(
                     $"the canary itself did not settle ({report.CanaryStart?.Warmup.Describe()} at the start, " +

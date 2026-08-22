@@ -76,6 +76,14 @@ The full sweep was **not run to completion** on that machine — it was stopped 
 combination, because that integrated GPU is not the hardware the answer is wanted about and the
 box was needed for other work. So the hour is a budget, not a measurement.
 
+**You are allowed to stop it, and stopping it is not the same as losing it.** The probe saves the
+report after every shape/batch combination, overwriting the previous save, so whatever it had
+measured when you closed the window is on disk. A file written that way says so on its own first
+line, on the `RESULTS` heading, on every shape heading and on every table header, and it lists the
+combinations that never ran. Partial results are worth sending. It prints no speed-up ratio in that
+state, on purpose: the reference workload it times at the END is what says whether your machine
+stayed still, and an interrupted run never gets that far.
+
 If it is taking too long, two levers, in this order: `GpuProbe.exe --x1 --cells=attn` runs only the two
 small shapes, and `--reps=5` is already the minimum but `--warmup-max=20` will cut the warm-up phase.
 Say which you used when you send the result, because `--cells=attn` leaves out the shapes that carry
@@ -95,7 +103,9 @@ after everything else. If the machine drifted between the two, it says so and wi
 
 **Copy everything between the `=== BEGIN GPU PROBE REPORT ===` and `=== END GPU PROBE REPORT ===`
 lines, and send that.** The same text is also saved as `gpu-probe-report.txt` beside the executable, and
-as `gpu-probe-report.json` — sending either file instead is fine.
+as `gpu-probe-report.json` — sending either file instead is fine. Both files exist from the first
+minute of the run and are rewritten after every shape, so if the probe never finished, send the file:
+it holds everything that did.
 
 **Two lines in the report say `PLEASE FILL IN MANUALLY`.** They ask for your RAM type and speed, and for
 what else was running on the machine. The probe cannot read either. Please fill them in; a timing from a
