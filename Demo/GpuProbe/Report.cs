@@ -69,6 +69,13 @@ namespace DevOnBike.Overfit.GpuProbe
         /// <summary>What drove the live view this run, or why there was none.</summary>
         public string? LiveViewNote { get; set; }
 
+        /// <summary>
+        /// What <see cref="GuardSelfCheck"/> found before anything was timed. It is in the report rather
+        /// than only on the console because the report is the artefact a stranger pastes back, and a
+        /// drop count of zero means nothing until the reader knows the counter was capable of moving.
+        /// </summary>
+        public string? SelfCheckNote { get; set; }
+
         public string? CuBlasSkipReason { get; set; }
 
         /// <summary>Why the FP16 arm specifically is absent, when cuBLAS itself loaded.</summary>
@@ -167,6 +174,12 @@ namespace DevOnBike.Overfit.GpuProbe
                 sb.AppendLine("LIVE VIEW: " + LiveViewNote);
             }
 
+            if (SelfCheckNote is not null)
+            {
+                sb.AppendLine();
+                sb.AppendLine("REPAINT GUARD SELF-CHECK: " + SelfCheckNote);
+            }
+
             if (LivePerturbation.Count > 0)
             {
                 sb.AppendLine();
@@ -233,6 +246,7 @@ namespace DevOnBike.Overfit.GpuProbe
                 ["fp16Bounds"] = Fp16Bounds,
                 ["livePerturbation"] = LivePerturbation,
                 ["liveViewNote"] = LiveViewNote,
+                ["selfCheckNote"] = SelfCheckNote,
                 ["fp16SkipReason"] = Fp16SkipReason,
                 ["cells"] = Cells.Select(c => new Dictionary<string, object?>
                 {

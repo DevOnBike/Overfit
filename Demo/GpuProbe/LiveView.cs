@@ -42,6 +42,8 @@ namespace DevOnBike.Overfit.GpuProbe
         private readonly LiveProbeState _state;
         private readonly IAnsiConsole _console;
 
+        private static bool _countersReset;
+
         private LiveDisplayContext? _context;
         private TelemetrySample? _latest;
 
@@ -75,6 +77,32 @@ namespace DevOnBike.Overfit.GpuProbe
 
         /// <inheritdoc cref="FramesPainted"/>
         public static int DroppedInsideTimedRegion { get; private set; }
+
+        /// <summary>
+        /// Puts both counters back to zero. <b>For <see cref="GuardSelfCheck"/> only, and only before
+        /// anything is measured.</b>
+        /// <para>
+        /// The self-check has to drive <see cref="Refresh"/> from inside a real timed region to prove the
+        /// guard fires, which moves the drop counter; leaving that increment behind would make every run
+        /// report a drop it did not suffer, and the report treats a non-zero drop count as a defect
+        /// worth escalating. Called a second time it would do the opposite and erase a real one, so it
+        /// refuses: the counters are the only evidence that the repaints stayed out of the clocks.
+        /// </para>
+        /// </summary>
+        public static void ResetCounters()
+        {
+            if (_countersReset)
+            {
+                throw new InvalidOperationException(
+                    "LiveView.ResetCounters may be called once, by the self-check, before anything is " +
+                    "measured. A later call would erase a real drop count, which is the evidence that no " +
+                    "repaint landed inside a timed region.");
+            }
+
+            _countersReset = true;
+            FramesPainted = 0;
+            DroppedInsideTimedRegion = 0;
+        }
 
         /// <summary>What the view shows. The probe writes to it; the view only reads it.</summary>
         public LiveProbeState State => _state;
@@ -126,15 +154,34 @@ namespace DevOnBike.Overfit.GpuProbe
         /// reading in the exact sense this probe refuses everywhere else. <c>--live-stub</c> is the
         /// explicit way to ask for it, and the report names the source either way.
         /// </para>
+        /// <para>
+        /// <b>Every one of the three refusals says so on the CONSOLE, at the moment it is taken, as well
+        /// as in the report.</b> The report is the durable record and the console line is the immediate
+        /// one, and only the second is any use to somebody watching a twelve-minute run start: a report
+        /// note is read when the run is over. The case with no message at all was the worst of the three,
+        /// because a user who forgot <c>--live</c> got total silence and could not tell it apart from a
+        /// broken view. <see cref="Announce"/> writes both from one place so the two cannot diverge.
+        /// </para>
         /// </summary>
+        /// <param name="log">
+        /// Standard error, which is also what the view draws on. Written to before the display starts,
+        /// never during it - Spectre owns the stream for the whole of <see cref="Run"/>.
+        /// </param>
         public static LiveView? Open(
             ProbeOptions options,
             Accelerator accelerator,
             LiveProbeState state,
-            Report report)
+            Report report,
+            TextWriter log)
         {
             if (!options.Live)
             {
+                Announce(
+                    report,
+                    log,
+                    "NOT ASKED FOR - --live was not passed, so no live view ran. Nothing else about this run " +
+                    "depended on one. Pass --live to watch the card while the probe runs, or --live-stub to " +
+                    "see the panels driven by synthetic readings on a machine with no NVIDIA driver.");
                 return null;
             }
 
@@ -144,10 +191,14 @@ namespace DevOnBike.Overfit.GpuProbe
 
             if (telemetry is null)
             {
-                report.LiveViewNote =
+                Announce(
+                    report,
+                    log,
                     "ASKED FOR WITH --live AND NOT SHOWN - " + (NvmlTelemetry.Unavailable ?? "no reason recorded") +
-                    " Nothing else about this run changed: the view is an observer and its absence costs no " +
-                    "measurement.";
+                    ". No fallback to the stub was made, deliberately: pass --live-stub to see the panels " +
+                    "anyway, and read them knowing that its numbers are SYNTHETIC - invented on the spot, not " +
+                    "measurements of this card. Nothing else about this run changed: the view is an observer " +
+                    "and its absence costs no measurement.");
                 return null;
             }
 
@@ -155,19 +206,42 @@ namespace DevOnBike.Overfit.GpuProbe
             if (view is null)
             {
                 telemetry.Dispose();
-                report.LiveViewNote =
+                Announce(
+                    report,
+                    log,
                     "ASKED FOR WITH --live AND NOT SHOWN - " + (Unavailable ?? "no reason recorded") +
-                    " Nothing else about this run changed.";
+                    ". Run the probe in a real terminal and do not redirect its standard error. --live-stub " +
+                    "does NOT help here: the stub replaces the sensors, not the terminal, so it is refused on " +
+                    "the same line. Nothing else about this run changed.");
                 return null;
             }
 
-            report.LiveViewNote =
+            Announce(
+                report,
+                log,
                 "SHOWN during this run, driven by " + telemetry.SourceName +
                 " It repaints between phases only, and is suspended for every warm-up round and every timed " +
                 "repetition. That cadence is not a precaution, it is measured: a repaint between rounds moved " +
-                "the C3 host arm's median by up to 42 % at the quick shape, and the host arms are the baseline " +
-                "every device ratio is divided by. Run --live-perturbation to reproduce it on your own machine.";
+                "the C3 host arm's median by 33 to 41 % across three sittings at the quick shape - one box, " +
+                "one shape, so read it as an order of magnitude and not as a constant - and the host arms are " +
+                "the baseline every device ratio is divided by. Run --live-perturbation to reproduce it on " +
+                "your own machine.");
             return view;
+        }
+
+        /// <summary>
+        /// Writes one outcome to the report AND to the console, from one place.
+        /// <para>
+        /// One place because the two had already drifted: the report carried a reason for two of the three
+        /// refusals and the console carried whichever of them <c>Program</c> happened to echo, while the
+        /// third refusal - <c>--live</c> not passed at all - reached neither. A caller that has to remember
+        /// to do both will eventually do one.
+        /// </para>
+        /// </summary>
+        private static void Announce(Report report, TextWriter log, string note)
+        {
+            report.LiveViewNote = note;
+            log.WriteLine("live view: " + note);
         }
 
         /// <summary>Runs <paramref name="body"/> with the display attached.</summary>

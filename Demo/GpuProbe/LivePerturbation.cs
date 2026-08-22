@@ -117,6 +117,24 @@ namespace DevOnBike.Overfit.GpuProbe
                 $"shape {cell.Name} k {cell.K} -> m {cell.M} n={n}; {Blocks} blocks of {RoundsPerBlock} " +
                 $"rounds, alternating, one process, one sitting; {cadence}.");
 
+            // The counts, not only the medians. A ratio near 1.000 has three causes that the medians
+            // alone cannot tell apart - the view is genuinely free at this cadence, the lever is dead
+            // and both sides refreshed, or the lever is dead the other way and neither side did. The
+            // frame count separates all three, and it was measured rather than argued: with
+            // LiveView.Suspended mutated to a no-op the count goes from 48 to 108 - every block
+            // repaints, including the untimed warm-up one - while C3's ratio collapses from 1.362 to
+            // 0.950. Read the counts first and the ratio second.
+            var perBlock = (RoundsPerBlock + options.LivePerturbationEvery - 1) / options.LivePerturbationEvery;
+            var allowed = (Blocks / 2) * perBlock;
+            var asked = (Blocks + 1) * perBlock;
+            report.LivePerturbation.Add(
+                $"the view painted {LiveView.FramesPainted} frames and dropped " +
+                $"{LiveView.DroppedInsideTimedRegion} repaints as inside-a-timed-region. {asked} repaints " +
+                $"were requested in all and {allowed} of them - the refreshing blocks - should have been " +
+                "painted. Far fewer means the B blocks never saw a repaint and the ratio measures nothing; " +
+                $"near {asked} means the suspension is not working and BOTH sides refreshed; any drop at " +
+                "all means the timed-region flag is stuck and every repaint was thrown away.");
+
             if (Console.IsErrorRedirected)
             {
                 report.LivePerturbation.Add(

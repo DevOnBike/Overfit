@@ -48,9 +48,10 @@ namespace DevOnBike.Overfit.GpuProbe
         /// <summary>Why there is no live telemetry at all, or null when there is.</summary>
         public static string? Unavailable { get; private set; }
 
+        // Both variants end in a full stop because the report joins this straight onto the next sentence.
         public string SourceName => _nvml is null
-            ? $"ILGPU CUDA driver API only - VRAM and name are live, the sensors are not ({_nvmlNote})"
-            : "ILGPU CUDA driver API for memory, NVML for the sensors";
+            ? $"ILGPU CUDA driver API only - VRAM and name are live, the sensors are not ({_nvmlNote})."
+            : "ILGPU CUDA driver API for memory, NVML for the sensors.";
 
         /// <summary>
         /// Returns null and sets <see cref="Unavailable"/> rather than throwing. NVML failing on its own
@@ -62,8 +63,11 @@ namespace DevOnBike.Overfit.GpuProbe
             if (accelerator is not CudaAccelerator cuda)
             {
                 Unavailable =
+                    // No trailing full stop and no advice: LiveView.Open owns the sentence this is joined
+                    // into and the --live-stub half of it, so the advice reaches the reader whichever
+                    // branch recorded the reason rather than only this one.
                     $"the selected accelerator is {accelerator.AcceleratorType}, not CUDA, and there is no " +
-                    "vendor-neutral way to read a card's temperature. Pass --live-stub to see the view anyway.";
+                    "vendor-neutral way to read a card's temperature";
                 return null;
             }
 

@@ -35,6 +35,26 @@ namespace DevOnBike.Overfit.GpuProbe
             var log = Console.Error;
             var report = new Report();
 
+            // Before the device, before the oracles and before anything is timed. It needs no GPU and no
+            // terminal, it costs the report nothing, and it is the only thing in this project that ever
+            // drives a repaint from inside a timed region - so it is the only thing that can tell a
+            // working drop guard from a deleted one. A run whose guard is broken must not produce timings
+            // at all: a repaint landing inside a clock is invisible in every number it touches.
+            GuardSelfCheck.Run(options.Seed);
+            report.SelfCheckNote = GuardSelfCheck.Note;
+            log.WriteLine("repaint guard self-check: " + GuardSelfCheck.Note);
+
+            if (GuardSelfCheck.Failed)
+            {
+                report.TopBanners.Add(
+                    "THE REPAINT GUARD SELF-CHECK FAILED, SO NOTHING WAS MEASURED. The guard that keeps a " +
+                    "console repaint out of a timed region does not work in this build, and a frame drawn " +
+                    "between a timestamp and its synchronise moves that number while the report looks " +
+                    "entirely normal. The reason is under REPAINT GUARD SELF-CHECK below. This is a defect " +
+                    "in the probe, not in the machine it was run on.");
+                return Emit(report, 1);
+            }
+
             using var selection = DeviceSelection.Open(options);
             var accelerator = selection.Accelerator;
 
@@ -116,12 +136,13 @@ namespace DevOnBike.Overfit.GpuProbe
             // The live view is opened here, around the whole measured run, or is null - which is what
             // --live gets on a machine with no NVIDIA driver, with the reason in the report. Everything
             // timed below runs with it frozen; it repaints between phases and between cells only.
+            //
+            // Open writes its own outcome to `log` as well as to the report, including the outcome where
+            // no view was asked for. It is not echoed here: the echo that used to live at this line fired
+            // only for the notes Open had written, so the one case that wrote no note - --live not passed -
+            // was the one case that printed nothing, which is indistinguishable from a broken view.
             var state = new LiveProbeState { CellsTotal = cells.Count * options.Batches.Count };
-            using var view = LiveView.Open(options, accelerator, state, report);
-            if (report.LiveViewNote is not null)
-            {
-                log.WriteLine("live view: " + report.LiveViewNote);
-            }
+            using var view = LiveView.Open(options, accelerator, state, report, log);
 
             RunUnderView(view, () => MeasureCells(cells, options, accelerator, measure, log, report, view));
 
