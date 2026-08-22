@@ -115,6 +115,20 @@ namespace DevOnBike.Overfit.GpuProbe
             return norm > 0 ? Math.Sqrt(diff) / Math.Sqrt(norm) : 0;
         }
 
+        /// <summary>
+        /// Rounds an F32 result to FP16 and back, which is the LAST thing a cuBLAS call with
+        /// <c>Ctype = CUDA_R_16F</c> does before the value reaches memory.
+        /// <para>
+        /// <b>Arm X3 needs this and arm X1's measured bound does not include it.</b>
+        /// <see cref="ForwardFp32Accumulate"/> leaves its result in F32, so the 2.87e-4 to 2.97e-4 figure
+        /// measured from it is the cost of rounding the two INPUTS and nothing else. X3 writes its output
+        /// into an FP16 buffer, so it pays one more rounding, on the output. Applying this to the
+        /// FP32-accumulate result gives the bound X3 is actually judged against, measured rather than
+        /// argued.
+        /// </para>
+        /// </summary>
+        public static void RoundResultToFp16(Span<float> values) => RoundToFp16(values, values);
+
         private static void RoundToFp16(ReadOnlySpan<float> source, Span<float> destination)
         {
             for (var i = 0; i < source.Length; i++)

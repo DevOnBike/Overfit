@@ -20,5 +20,13 @@ namespace DevOnBike.Overfit.GpuProbe
         public const string G3 = "G3 gpu tiled backward";
         public const string X1 = "X1 cublas fp16 fwd";
         public const string X2 = "X2 cublas fp32 fwd";
+
+        /// <summary>
+        /// <c>cublasGemmEx</c> with <c>CUBLAS_COMPUTE_32F</c> - FP16 storage, FP32 accumulate. Reached
+        /// through this project's own P/Invoke because ILGPU.Algorithms exports no <c>GemmEx</c>, and
+        /// named separately from X1 because the two differ in accumulate precision, which is both a
+        /// speed and an accuracy difference.
+        /// </summary>
+        public const string X3 = "X3 cublas gemmex tc";
     }
 }

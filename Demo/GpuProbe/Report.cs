@@ -78,8 +78,33 @@ namespace DevOnBike.Overfit.GpuProbe
 
         public string? CuBlasSkipReason { get; set; }
 
+        /// <summary>
+        /// Which <c>cublas64_*.dll</c> the run actually loaded, when the cuBLAS arms ran. Null otherwise.
+        /// </summary>
+        public string? CuBlasLibrary { get; set; }
+
         /// <summary>Why the FP16 arm specifically is absent, when cuBLAS itself loaded.</summary>
         public string? Fp16SkipReason { get; set; }
+
+        /// <summary>Why arm X3, the <c>cublasGemmEx</c> tensor-core path, is not measured. Null when it ran.</summary>
+        public string? GemmExSkipReason { get; set; }
+
+        /// <summary>
+        /// The cuBLAS library arm X3's OWN resolver loaded. It can differ from
+        /// <see cref="CuBlasLibrary"/>, and when it does the two FP16 arms measured two different
+        /// libraries and must not be read as one comparison.
+        /// </summary>
+        public string? GemmExLibrary { get; set; }
+
+        /// <summary>What <c>cublasGetVersion_v2</c> reported through X3's own handle, or null.</summary>
+        public string? GemmExVersion { get; set; }
+
+        /// <summary>
+        /// True when X3 reused arm X1's FP16 device buffers rather than allocating its own. False means
+        /// X1 was absent, so X3 uploaded a set of operands - which matters for VRAM and for reading the
+        /// report, because there is then no X1 beside X3 to compare against.
+        /// </summary>
+        public bool GemmExBorrowedOperands { get; set; }
 
         public double CanaryMove =>
             CanaryStartMs > 0 ? (CanaryEndMs - CanaryStartMs) / CanaryStartMs : 0;
@@ -168,6 +193,48 @@ namespace DevOnBike.Overfit.GpuProbe
                     "  not the answer: a vendor library is the upper bound and it was not measured here.");
             }
 
+            if (CuBlasLibrary is not null)
+            {
+                sb.AppendLine();
+                sb.AppendLine("ARMS X1/X2 (cuBLAS): ran through " + CuBlasLibrary);
+                sb.AppendLine(
+                    "  ILGPU 1.5.3 contains cublas64_10, cublas64_11 and cublas64_12 and no name for a major 13,");
+                sb.AppendLine(
+                    "  so the version above is the one that mattered on this machine. Recorded because a result");
+                sb.AppendLine("  read a month later cannot be re-asked which library produced it.");
+            }
+
+            if (GemmExSkipReason is not null)
+            {
+                sb.AppendLine();
+                sb.AppendLine("ARM X3 (cublasGemmEx, FP32 accumulate): NOT MEASURED - " + GemmExSkipReason);
+                sb.AppendLine("  X3 is the TENSOR CORE path. X1, if it ran, is cublasHgemm, which accumulates in FP16");
+                sb.AppendLine("  and is a FLOOR on what this card does at FP16, not the ceiling. Its absence means the");
+                sb.AppendLine("  fastest FP16 route the card offers was not measured.");
+            }
+
+            if (GemmExLibrary is not null)
+            {
+                sb.AppendLine();
+                sb.AppendLine("ARM X3 (cublasGemmEx): ran through " + GemmExLibrary +
+                              (GemmExVersion is null
+                                  ? ", version not reported"
+                                  : ", cublasGetVersion_v2 reports " + GemmExVersion));
+                sb.AppendLine(
+                    "  X3 resolves its own cuBLAS and owns its own handle. Its candidate list starts at a major");
+                sb.AppendLine(
+                    "  13; ILGPU 1.5.3 contains only cublas64_10, cublas64_11 and cublas64_12. So on a machine");
+                sb.AppendLine(
+                    "  carrying only a CUDA 13 redistributable X3 runs where X1 and X2 cannot - check the two");
+                sb.AppendLine("  library lines above against each other before comparing any X1 and X3 number.");
+
+                if (!GemmExBorrowedOperands)
+                {
+                    sb.AppendLine(
+                        "  X3 uploaded its OWN FP16 operands, which means arm X1 was not available to share them.");
+                }
+            }
+
             if (LiveViewNote is not null)
             {
                 sb.AppendLine();
@@ -197,8 +264,11 @@ namespace DevOnBike.Overfit.GpuProbe
                 sb.AppendLine();
                 sb.AppendLine("WHAT FP16 COSTS IN ACCURACY, measured on the host at each shape");
                 sb.AppendLine("  relative L2 against the F32 result. 'fp32 acc' is what a TENSOR CORE and cublasGemmEx");
-                sb.AppendLine("  with CUBLAS_COMPUTE_32F do; 'fp16 acc' is what cublasHgemm does, and it is the only");
-                sb.AppendLine("  FP16 entry point ILGPU's cuBLAS wrapper exposes.");
+                sb.AppendLine("  with CUBLAS_COMPUTE_32F do, with the result left in F32 - it prices the rounding of the");
+                sb.AppendLine("  two INPUTS and nothing else. 'fp32 acc/fp16 out' adds one rounding of the output, which");
+                sb.AppendLine("  is what arm X3 actually pays because it writes into an FP16 buffer; that column, not the");
+                sb.AppendLine("  first, is the bound X3's 1e-3 parity ceiling has to clear. 'fp16 acc' is what cublasHgemm");
+                sb.AppendLine("  does, and it is the only FP16 entry point ILGPU's cuBLAS wrapper exposes.");
                 foreach (var line in Fp16Bounds)
                 {
                     sb.AppendLine("  " + line);
@@ -243,11 +313,16 @@ namespace DevOnBike.Overfit.GpuProbe
                 ["oracle"] = OracleLines,
                 ["oracleFailures"] = OracleFailures,
                 ["cuBlasSkipReason"] = CuBlasSkipReason,
+                ["cuBlasLibrary"] = CuBlasLibrary,
                 ["fp16Bounds"] = Fp16Bounds,
                 ["livePerturbation"] = LivePerturbation,
                 ["liveViewNote"] = LiveViewNote,
                 ["selfCheckNote"] = SelfCheckNote,
                 ["fp16SkipReason"] = Fp16SkipReason,
+                ["gemmExSkipReason"] = GemmExSkipReason,
+                ["gemmExLibrary"] = GemmExLibrary,
+                ["gemmExVersion"] = GemmExVersion,
+                ["gemmExBorrowedOperands"] = GemmExLibrary is null ? null : GemmExBorrowedOperands,
                 ["cells"] = Cells.Select(c => new Dictionary<string, object?>
                 {
                     ["cell"] = c.Cell.Name,
@@ -305,7 +380,9 @@ namespace DevOnBike.Overfit.GpuProbe
                 : capability;
 
             var fp16Measured = Cells.Any(c => c.Timings.ContainsKey(ArmNames.X1));
-            if (!fp16Measured)
+            var gemmExMeasured = Cells.Any(c => c.Timings.ContainsKey(ArmNames.X3));
+
+            if (!fp16Measured && !gemmExMeasured)
             {
                 return "NOT engaged - no FP16 arm ran, so nothing in this report could have used them. " +
                        "The custom kernels G1/G2/G3 are FP32 because ILGPU exposes no wmma/mma.sync from a " +
@@ -313,12 +390,36 @@ namespace DevOnBike.Overfit.GpuProbe
                        $"FLOOR. Compute capability: {capabilityText}.";
             }
 
+            // Checked rather than asserted: --batches accepts anything, and a batch that is not a multiple
+            // of 8 rules out a tensor core for that shape whatever the card is.
+            var shapes = Cells
+                .Where(c => c.Timings.ContainsKey(ArmNames.X1) || c.Timings.ContainsKey(ArmNames.X3))
+                .ToList();
+            var allMultiplesOfEight = shapes.Count > 0 &&
+                shapes.All(c => CublasGemmExArm.ShapeAllowsTensorCores(c.N, c.Cell.K, c.Cell.M));
+            var shapeText = allMultiplesOfEight
+                ? "every k, m and n that ran here is a multiple of 8"
+                : "at least one k, m or n that ran here is NOT a multiple of 8, which rules a tensor core " +
+                  "out for that shape - the per-cell notes say which";
+
+            if (gemmExMeasured)
+            {
+                return "NOT OBSERVABLE, preconditions reported instead. Arm X3 ran cublasGemmEx with " +
+                       "CUBLAS_COMPUTE_32F - FP16 storage, FP32 accumulate, which is the path a tensor core " +
+                       $"takes - on a device of compute capability {capabilityText}, and {shapeText}. " +
+                       "Tensor cores need capability 7.0 or above. NO API reports whether they were " +
+                       "actually used, so the preconditions are stated and the inference is left visible " +
+                       "rather than dressed up as an observation. The X2 FP32 arm beside X3 is the control " +
+                       "that makes a large gain readable as evidence they engaged.";
+            }
+
             // N1 of the plan asks whether tensor cores ENGAGED. Nothing in ILGPU or the CUDA driver API
             // reports that, so the preconditions are stated and the inference is left visible rather than
             // dressed up as an observation. Saying "engaged" on the strength of a capability number would
             // be exactly the kind of claim this probe exists to avoid.
             return $"NOT OBSERVABLE, preconditions reported instead. Arm X1 ran cublasHgemm on a device of " +
-                   $"compute capability {capabilityText}; every k, m and n here is a multiple of 8. Tensor " +
+                   $"compute capability {capabilityText}; {shapeText}. Arm X3, the CUBLAS_COMPUTE_32F path " +
+                   "that a tensor core actually takes, did NOT run - see its skip reason above. Tensor " +
                    "cores need capability 7.0 or above, and on Pascal cuBLAS falls back to CUDA cores at " +
                    "about FP32 speed. NO API reports whether they were actually used, so treat a large X1 " +
                    "gain as evidence they engaged and a small one as evidence they did not - the X2 arm " +
@@ -405,8 +506,12 @@ namespace DevOnBike.Overfit.GpuProbe
             AppendRatio(sb, cell, run, ArmNames.C4, ArmNames.G3, "         backward C4 cpu f32 -> G3 gpu tiled");
             AppendRatio(sb, cell, run, ArmNames.C3, ArmNames.X1, "         forward  C3 cpu f32 -> X1 cuBLAS fp16");
             AppendRatio(sb, cell, run, ArmNames.C3, ArmNames.X2, "         forward  C3 cpu f32 -> X2 cuBLAS fp32");
+            AppendRatio(sb, cell, run, ArmNames.C3, ArmNames.X3, "         forward  C3 cpu f32 -> X3 gemmEx tc");
             AppendRatio(sb, cell, run, ArmNames.G2, ArmNames.X1, "         our kernel gap G2 -> X1 cuBLAS fp16");
+            AppendRatio(sb, cell, run, ArmNames.G2, ArmNames.X3, "         our kernel gap G2 -> X3 gemmEx tc");
             AppendRatio(sb, cell, run, ArmNames.X2, ArmNames.X1, "         fp32 -> fp16 gain, same library, same card");
+            AppendRatio(sb, cell, run, ArmNames.X2, ArmNames.X3, "         fp32 -> tensor-core gain, X2 -> X3");
+            AppendRatio(sb, cell, run, ArmNames.X1, ArmNames.X3, "         hgemm -> gemmEx gain, what ILGPU cannot reach");
 
             if (cell.Timings.TryGetValue(ArmNames.C1, out var c1) &&
                 cell.Timings.TryGetValue(ArmNames.C3, out var c3) &&
@@ -481,8 +586,12 @@ namespace DevOnBike.Overfit.GpuProbe
                 ("backward", ArmNames.C4, ArmNames.G3),
                 ("forwardCuBlasFp16", ArmNames.C3, ArmNames.X1),
                 ("forwardCuBlasFp32", ArmNames.C3, ArmNames.X2),
+                ("forwardCuBlasGemmEx", ArmNames.C3, ArmNames.X3),
                 ("ourKernelGap", ArmNames.G2, ArmNames.X1),
+                ("ourKernelGapGemmEx", ArmNames.G2, ArmNames.X3),
                 ("fp32ToFp16Gain", ArmNames.X2, ArmNames.X1),
+                ("fp32ToTensorCoreGain", ArmNames.X2, ArmNames.X3),
+                ("hgemmToGemmExGain", ArmNames.X1, ArmNames.X3),
             };
 
             var result = new Dictionary<string, object?>();
@@ -567,6 +676,12 @@ namespace DevOnBike.Overfit.GpuProbe
             sb.AppendLine("     accurate FP16 path the card offers, and the true FP16 ceiling is above it. Measured");
             sb.AppendLine("     on the host: FP32-accumulate costs a relative L2 of 2.9e-4 and FP16-accumulate costs");
             sb.AppendLine("     6.5e-3 at k=2048 and 1.6e-2 at k=11008 - a factor of 23 to 55 between the two.");
+            sb.AppendLine("  4a. Arm X3 exists to reach that entry point, through this project's own P/Invoke rather");
+            sb.AppendLine("     than through ILGPU. It owns its cuBLAS handle and borrows only device pointers, the");
+            sb.AppendLine("     stream and the CUDA context. Its ABI constants were verified against NVIDIA's own");
+            sb.AppendLine("     cublas_api.h. NO LINE OF ANY cuBLAS ARM HAS EVER RUN ON THE MACHINE THAT WROTE THIS");
+            sb.AppendLine("     PROBE - there is no NVIDIA device there - so X1, X2 and X3 are all first-run code on");
+            sb.AppendLine("     whatever machine produced the numbers above.");
             sb.AppendLine("  4b. Nothing here says FP16 is numerically USABLE for QLoRA training. Speed and numerical");
             sb.AppendLine("     viability are two questions and this probe answers only the first.");
             sb.AppendLine("  5. No optimizer, no LoRA adapter operations, no autograd tape overhead, no host-device");

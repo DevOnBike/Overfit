@@ -3,6 +3,8 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Diagnostics;
+using System.Runtime.InteropServices;
 using ILGPU;
 using ILGPU.Runtime;
 using ILGPU.Runtime.Cuda;
@@ -48,6 +50,21 @@ namespace DevOnBike.Overfit.GpuProbe
     /// </summary>
     internal sealed class CuBlasArm : IDisposable
     {
+        /// <summary>
+        /// The only cuBLAS library names ILGPU 1.5.3 contains, read out of the assembly's own bytes on
+        /// 2026-08-22: <c>cublas64_10</c>, <c>cublas64_11</c> and <c>cublas64_12</c>, two occurrences
+        /// each. <c>cublas64_13</c> and <c>V13</c> appear zero times.
+        /// <para>
+        /// <b>This list is the handover risk of the whole probe.</b> A machine carrying only a CUDA 13
+        /// redistributable is expected to satisfy none of these, which skips X1 AND X2 - the primary arm
+        /// among them - and returns a report that looks entirely normal apart from one NOT MEASURED
+        /// line. Naming the three in the failure text turns that silence into a statement the reader can
+        /// act on. It is used to REPORT, never to decide: ILGPU picks its own name and this array only
+        /// says what was tried.
+        /// </para>
+        /// </summary>
+        private static readonly string[] KnownLibraries = ["cublas64_12", "cublas64_11", "cublas64_10"];
+
         private readonly CuBlas _blas;
         private readonly Accelerator _accelerator;
 
@@ -64,11 +81,41 @@ namespace DevOnBike.Overfit.GpuProbe
         /// <summary>Why the arm is not measured, or null when it is.</summary>
         public static string? Unavailable { get; private set; }
 
+        /// <summary>
+        /// Which <c>cublas64_*.dll</c> this process actually loaded, once the arm is running - observed
+        /// in the module list rather than assumed from a name in the source. Null until
+        /// <see cref="TryCreate"/> succeeds.
+        /// <para>
+        /// It is in the report because the version is the thing most likely to be wrong on a machine
+        /// nobody here can see, and because "cuBLAS worked" and "cuBLAS worked, through 12" are different
+        /// facts to somebody reading a result a month later.
+        /// </para>
+        /// </summary>
+        public static string? LoadedLibrary { get; private set; }
+
         /// <summary>Why the FP16 arm specifically is not measured, when the FP32 one is.</summary>
         public string? Fp16Unavailable { get; private set; }
 
         /// <summary>True once the FP16 buffers exist and the FP16 arm may be called.</summary>
         public bool Fp16Ready => _inputHalf is not null && _weightHalf is not null && _outputHalf is not null;
+
+        /// <summary>
+        /// The raw device pointer ILGPU allocated for the FP16 input, so arm X3 can pass it straight to
+        /// <c>cublasGemmEx</c> through its own P/Invoke instead of allocating and uploading a second
+        /// copy. A device pointer is scoped to the CUDA CONTEXT, which both arms share, and not to the
+        /// cuBLAS module - which is why sharing this is safe while sharing a cuBLAS HANDLE is not.
+        /// </summary>
+        public nint Fp16InputPointer => _inputHalf!.NativePtr;
+
+        /// <summary>The device pointer for the FP16 weight. See <see cref="Fp16InputPointer"/>.</summary>
+        public nint Fp16WeightPointer => _weightHalf!.NativePtr;
+
+        /// <summary>
+        /// The device pointer for the FP16 output. Arms X1 and X3 write to the SAME buffer; every read
+        /// back happens immediately after the write that produced it, and nothing in the timed phase
+        /// depends on its contents.
+        /// </summary>
+        public nint Fp16OutputPointer => _outputHalf!.NativePtr;
 
         /// <summary>
         /// Returns null and sets <see cref="Unavailable"/> when cuBLAS cannot be used here. Every failure
@@ -85,28 +132,105 @@ namespace DevOnBike.Overfit.GpuProbe
 
             try
             {
-                return new CuBlasArm(new CuBlas(cuda), accelerator);
+                var arm = new CuBlasArm(new CuBlas(cuda), accelerator);
+                LoadedLibrary = DescribeLoadedLibrary();
+                return arm;
             }
             catch (DllNotFoundException ex)
             {
-                Unavailable = $"cublas64_*.dll was not found ({ex.Message.Trim()}); install the CUDA redistributable";
+                Unavailable =
+                    $"cublas64_*.dll was not found ({ex.Message.Trim()}); install the CUDA 12 " +
+                    "redistributable - CUDA 13 does not satisfy this. " + DescribeCandidates();
                 return null;
             }
             catch (TypeInitializationException ex)
             {
-                Unavailable = $"cuBLAS failed to initialize ({ex.InnerException?.Message.Trim() ?? ex.Message.Trim()})";
+                Unavailable =
+                    $"cuBLAS failed to initialize ({ex.InnerException?.Message.Trim() ?? ex.Message.Trim()}). " +
+                    DescribeCandidates();
                 return null;
             }
             catch (EntryPointNotFoundException ex)
             {
-                Unavailable = $"the installed cuBLAS is a different version ({ex.Message.Trim()})";
+                Unavailable =
+                    $"the installed cuBLAS is a different version ({ex.Message.Trim()}). " + DescribeCandidates();
                 return null;
             }
             catch (NotSupportedException ex)
             {
-                Unavailable = $"cuBLAS is not supported here ({ex.Message.Trim()})";
+                Unavailable = $"cuBLAS is not supported here ({ex.Message.Trim()}). " + DescribeCandidates();
                 return null;
             }
+        }
+
+        /// <summary>
+        /// Reports which <c>cublas64_*.dll</c> is loaded into this process, by reading the module list.
+        /// <para>
+        /// An OBSERVATION and not a guess: the name ILGPU used is not exposed by its API, so the only
+        /// honest way to state it is to look at what the loader actually mapped. Returns a stated reason
+        /// rather than a name when the module list cannot be read, because a missing name and a wrong
+        /// name must not look the same in the report.
+        /// </para>
+        /// </summary>
+        private static string DescribeLoadedLibrary()
+        {
+            try
+            {
+                using var process = Process.GetCurrentProcess();
+                foreach (ProcessModule module in process.Modules)
+                {
+                    if (module.ModuleName.StartsWith("cublas64_", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return module.ModuleName;
+                    }
+                }
+
+                return "loaded, but no cublas64_*.dll is in this process's module list - which should be " +
+                       "impossible once cuBLAS has initialized, so read the name as UNKNOWN rather than absent";
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or NotSupportedException
+                                          or PlatformNotSupportedException)
+            {
+                return $"loaded, but its file name could not be read here ({ex.Message.Trim()})";
+            }
+        }
+
+        /// <summary>
+        /// Names the libraries ILGPU could have used and says which of them this machine can load, so a
+        /// skip line says what is missing instead of only that something is.
+        /// <para>
+        /// <b>What this does and does not establish.</b> It loads by the same names ILGPU contains,
+        /// through the ordinary OS search, so a name that fails here is one ILGPU is not going to find
+        /// either. It cannot distinguish a library that is absent from one whose own dependencies are
+        /// missing, and it says nothing about what a CUDA 13 install is called - this project has never
+        /// seen one. The wording below is bounded to what was actually attempted.
+        /// </para>
+        /// </summary>
+        private static string DescribeCandidates()
+        {
+            var found = new List<string>();
+            foreach (var name in KnownLibraries)
+            {
+                if (NativeLibrary.TryLoad(name, out var handle))
+                {
+                    found.Add(name);
+                    NativeLibrary.Free(handle);
+                }
+            }
+
+            var tried = string.Join(", ", KnownLibraries);
+
+            if (found.Count == 0)
+            {
+                return $"None of the cuBLAS names ILGPU 1.5.3 contains ({tried}) could be loaded on this " +
+                       "machine, so there is no cuBLAS here that ILGPU knows how to ask for. A CUDA 13 " +
+                       "redistributable alone produces exactly this: ILGPU 1.5.3 carries no name for a " +
+                       "major 13. Install the CUDA 12 redistributable.";
+            }
+
+            return $"Of the cuBLAS names ILGPU 1.5.3 contains ({tried}), this machine can load " +
+                   string.Join(", ", found) +
+                   " - so the library is present and the failure above is something other than a missing file.";
         }
 
         /// <summary>

@@ -18,6 +18,14 @@
              therefore not an option here and must not be attempted (plan, Decision D2 and section 2).
              A self-contained, JIT publish is fine and is the preferred handover form. -->
         <PublishAot>false</PublishAot>
+
+        <!-- Required by arm X3, and required by the SOURCE GENERATOR rather than by anything written by
+             hand: [LibraryImport] emits its marshalling stubs inside `unsafe` blocks unconditionally, so
+             the build fails with SYSLIB1062 and CS0227 without this, whatever the parameter shapes are.
+             Measured on 2026-08-22 - the design for X3 recorded that declaring alpha/beta as `in float`
+             would avoid needing this. It does not; that escape hatch does not exist. No hand-written
+             `unsafe` appears anywhere in this project and none should. -->
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     </PropertyGroup>
 
     <ItemGroup>

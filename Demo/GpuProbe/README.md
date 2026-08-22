@@ -16,7 +16,7 @@ Design and the reasoning behind every choice: [`docs/specs/gpu-probe-route-and-d
 | | what | how to check it is there |
 |---|---|---|
 | required | an NVIDIA graphics **driver** (the ordinary one, from GeForce Experience or nvidia.com) | open a terminal and run `nvidia-smi`. It prints your driver version and your card's name. If the command is not found, the driver is not installed |
-| required | the **CUDA redistributable**, for the `cublas64_*.dll` library | see step 2 — the probe tells you itself, and that is a better check than looking for the file |
+| required | the **CUDA 12 redistributable**, for the `cublas64_12.dll` library. **The version matters — see below** | see step 2 — the probe tells you itself, and that is a better check than looking for the file |
 
 You do **not** need Python, Visual Studio, a model file, or the full CUDA Toolkit SDK. You do **not**
 need the .NET SDK if you were sent a built folder.
@@ -24,6 +24,17 @@ need the .NET SDK if you were sent a built folder.
 The driver alone is enough for most of the probe. The `cublas64_*.dll` library is what the **most
 important** arm needs — the one that measures what NVIDIA's own code does on your card. Without it the
 probe still runs and still prints numbers, but those numbers are a floor rather than an answer.
+
+**Install CUDA 12, and CUDA 13 will not do instead.** The probe reaches cuBLAS through ILGPU 1.5.3, and
+the only cuBLAS library names that version of ILGPU contains are `cublas64_10`, `cublas64_11` and
+`cublas64_12` — read out of the assembly's own bytes, where a major 13 appears nowhere. So a machine
+carrying a CUDA 13 redistributable and nothing older is expected to have no cuBLAS that ILGPU can name.
+That inference has not been run against a CUDA 13 install, and this project has not confirmed what
+NVIDIA calls the CUDA 13 library — but the direction is not in doubt, and the failure is the quiet kind:
+**both** cuBLAS arms skip, the primary one included, and the report that comes back looks entirely
+normal apart from one `NOT MEASURED` line. If you already have CUDA 13, install 12 as well. The probe
+prints which `cublas64_*.dll` it actually loaded, and, when none loaded, which of the three names it
+tried, so the report names the problem instead of leaving you to guess.
 
 ### 2. Check it in under a minute, before the real run
 
@@ -123,7 +134,7 @@ printed. *Check `nvidia-smi` works, and that you are not running on an integrate
 **`ARM X1 (cuBLAS): NOT MEASURED`** — the `cublas64_*.dll` library did not load, and the line says why.
 The probe still measures its own hand-written GPU kernels, but those are a **floor**: they are what a
 first attempt at a port would get, not what the card can do. The gap between the two is usually large.
-*Install the CUDA redistributable and run again with `--x1`.*
+*Install the **CUDA 12** redistributable and run again with `--x1`. If the line names `cublas64_10`, `cublas64_11` and `cublas64_12` as the names it tried, none of them is on this machine — CUDA 13 does not satisfy it.*
 
 **`TENSOR CORES: ...`** — without `--x1` this says `NOT engaged`, because no FP16 arm ran and nothing
 could have used them; every number is then a lower bound for your card. With `--x1` it says
@@ -147,7 +158,7 @@ a bug in the probe, not on your machine. Please send the report — that is exac
 --parity-only             run the correctness checks only, print no timing
 --quick                   small shapes, seconds not minutes; NOT the real shapes
 --fp16-bound              measure what FP16 costs in ACCURACY at each shape, then stop. No GPU needed
---x1                      also measure cuBLAS. Needs the CUDA redistributable; use it if you have it
+--x1                      also measure cuBLAS. Needs the CUDA 12 redistributable, not 13
 --allow-cpu-accelerator   measure even if there is no GPU at all
 --device=cuda|opencl|cpu  force a backend instead of taking the best available
 --reps=N                  timed repetitions per arm (minimum 5)
@@ -164,7 +175,7 @@ a bug in the probe, not on your machine. Please send the report — that is exac
 
 ## Handing it to somebody else
 
-Preferred — they then need nothing installed but the graphics driver and the CUDA redistributable:
+Preferred — they then need nothing installed but the graphics driver and the CUDA 12 redistributable:
 
 ```
 dotnet publish Demo/GpuProbe/GpuProbe.csproj -c Release -r win-x64 --self-contained -o <folder>
@@ -177,7 +188,7 @@ runtime; an ahead-of-time compiled build cannot work and the failure is not obvi
 
 ## What it does, so a number from it is not misread
 
-Nine arms per shape, run **interleaved** so drift over the sitting falls on all of them equally:
+Ten arms per shape, run **interleaved** so drift over the sitting falls on all of them equally:
 
 | arm | what it is |
 |---|---|
@@ -188,8 +199,16 @@ Nine arms per shape, run **interleaved** so drift over the sitting falls on all 
 | G1 | a naive GPU kernel, one thread per output element — the floor a first port gets |
 | G2 | a shared-memory tiled GPU kernel |
 | G3 | the GPU backward, which reads the weight in the transposed direction |
-| X1 | **cuBLAS FP16 (`cublasHgemm`) — the primary arm.** Off by default; needs the redistributable |
+| X1 | **cuBLAS FP16 (`cublasHgemm`) — the primary arm.** Off by default; needs the CUDA 12 redistributable |
 | X2 | cuBLAS FP32 (`cublasSgemm`), the control that makes the FP16 number readable |
+| X3 | **cuBLAS `cublasGemmEx` with `CUBLAS_COMPUTE_32F` — FP16 storage, FP32 accumulate, the path a tensor core actually takes.** Reached through this project's own P/Invoke, because `ILGPU.Algorithms` exports no `GemmEx` at all. Same `--x1` flag |
+
+**X1 and X3 are not two names for the same thing, and the difference cuts both ways.** X1 is
+`cublasHgemm`, which accumulates in FP16; X3 accumulates in FP32. X1 is what a naive port reaches for and
+is a FLOOR; X3 is the ceiling. **X3 also resolves its own cuBLAS**, and its candidate list starts at
+`cublas64_13.dll`, which ILGPU 1.5.3 contains no name for — so on a machine carrying only a CUDA 13
+redistributable **X3 can be the only cuBLAS arm that runs.** The report prints each arm's library, and
+they must be checked against each other before any X1-to-X3 ratio is read.
 
 **The headline is C3 against G2, never C1 against G2.** C1 includes a dequantize the GPU arms do not
 perform, so comparing against it would flatter the GPU. C1 minus C3 is reported separately as the cost of
@@ -210,6 +229,15 @@ it is what a training run would feel. The ceilings are measured rather than assu
 rounds its running sum once per multiply-add. Measured relative L2 for FP16: **6.5e-3 at k = 2048** and
 **1.6e-2 at k = 11008** — a sqrt(k) fit to the second predicts 6.8e-3 for the first, so the mechanism is
 confirmed rather than curve-fitted.
+
+**Arm X3 is judged against a flat 1e-3, and the bound behind it was measured on 2026-08-22** by the same
+`--fp16-bound` run, which now prints a third column. FP32 accumulate with the result left in F32 costs
+**2.87e-4 to 2.97e-4**; X3 writes into an FP16 output buffer, so it pays one more rounding and its real
+bound is **3.52e-4 to 3.64e-4**, flat across every k as the mechanism predicts. That leaves a **2.7x**
+margin under the ceiling, not the 3.4x a reading of the first column alone would give. The same ceiling is
+what catches the one mistake that would matter: passing `CUBLAS_COMPUTE_16F` (64) instead of
+`CUBLAS_COMPUTE_32F` (68) would give FP16 accumulate at 6.5e-3, **6.5x over the ceiling**, so a wrong
+compute type fails parity instead of printing a fast wrong number.
 
 **A suspect sitting suppresses the headline ratio; it does not merely annotate it.** The same principle
 as the parity gate, and it exists because of a measured failure on 2026-08-21: the probe printed

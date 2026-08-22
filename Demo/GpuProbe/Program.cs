@@ -323,6 +323,42 @@ namespace DevOnBike.Overfit.GpuProbe
                 }
             }
 
+            // Arm X3 is created OUTSIDE the block above on purpose. It resolves its own cuBLAS library and
+            // its candidate list starts at a major 13, which ILGPU 1.5.3 has no name for - so on a machine
+            // carrying only a CUDA 13 redistributable X3 is the ONLY cuBLAS arm that can run. Nesting it
+            // inside "if (cuBlas is not null)" would have made that advantage unreachable while leaving the
+            // report free to claim it.
+            using var gemmEx = CreateGemmEx(options, accelerator, cuBlas, fixture, n, cell, report);
+            if (gemmEx is not null)
+            {
+                if (!CublasGemmExArm.ShapeAllowsTensorCores(n, cell.K, cell.M))
+                {
+                    result.Notes.Add(
+                        $"X3: n={n}, k={cell.K} or m={cell.M} is not a multiple of 8, so a tensor core " +
+                        "cannot be used for this shape whatever the card is. The arm still runs and the " +
+                        "number is still cuBLAS; it is not a tensor-core number.");
+                }
+
+                var accepted = gemmEx.TryForward(n, cell.K, cell.M, out var gemmExFailure);
+                if (!accepted)
+                {
+                    report.GemmExSkipReason ??= gemmExFailure;
+                }
+
+                if (accepted)
+                {
+                    accelerator.Synchronize();
+                    gemmEx.ReadOutput(hostOutput);
+
+                    // The ceiling that was written for this arm and, until now, judged nothing. X3 stores
+                    // its output in FP16, so it pays the two input roundings the 2.9e-4 host bound
+                    // measures PLUS one rounding of the output; --fp16-bound now measures that third
+                    // column so the margin against 1e-3 is a measured number rather than an argued one.
+                    result.Parity[ArmNames.X3] = ParityResult.Compare(
+                        fixture.OutputF32, hostOutput, ParityResult.Fp16Fp32AccumulateCeiling);
+                }
+            }
+
             foreach (var (arm, parity) in result.Parity)
             {
                 log.WriteLine($"  parity {arm,-24} cos {parity.Cosine:F7} maxRel {parity.MaxRelative:E1} " +
@@ -356,6 +392,14 @@ namespace DevOnBike.Overfit.GpuProbe
                 {
                     arms.Add(Arm.Gpu(ArmNames.X1, accelerator, () => cuBlas.ForwardFp16(n, cell.K, cell.M)));
                 }
+            }
+
+            // Only timed once cuBLAS has already ACCEPTED this shape. TryForward above is where an absent
+            // cublasGemmEx entry point or a rejected argument surfaces, which is why the timed body can be
+            // a bare call with no exception handling inside the clock.
+            if (gemmEx is not null && gemmEx.LastStatus == CublasNative.StatusSuccess)
+            {
+                arms.Add(Arm.Gpu(ArmNames.X3, accelerator, () => gemmEx.Forward(n, cell.K, cell.M)));
             }
 
             var run = ArmRunner.Interleave(arms, options.WarmupPolicy, options.Reps, log.WriteLine, view);
@@ -401,6 +445,14 @@ namespace DevOnBike.Overfit.GpuProbe
                         fixture.Input, fixture.WeightF32, fp32Accumulate, n, cell.K, cell.M);
                     var withFp32Acc = ParityResult.Compare(fixture.OutputF32, fp32Accumulate);
 
+                    // The third column, and it is the one arm X3 is judged against. 'fp32 acc' above
+                    // leaves the result in F32, so it prices the two INPUT roundings only. X3 writes into
+                    // an FP16 output buffer (Ctype = CUDA_R_16F), so it pays one more rounding on the way
+                    // out. Measuring it here is the only part of X3's accuracy that can be established on
+                    // a machine with no NVIDIA device.
+                    Fp16Reference.RoundResultToFp16(fp32Accumulate);
+                    var withFp16Out = ParityResult.Compare(fixture.OutputF32, fp32Accumulate);
+
                     var withFp16Acc = Fp16Reference.RelativeL2WithFp16Accumulate(
                         fixture.Input, fixture.WeightF32, fixture.OutputF32,
                         n, cell.K, cell.M, options.Seed, out var sampled);
@@ -408,7 +460,8 @@ namespace DevOnBike.Overfit.GpuProbe
                     var line = string.Create(
                         System.Globalization.CultureInfo.InvariantCulture,
                         $"{cell.Name,-14} k {cell.K,6} -> m {cell.M,6}  n={n,4}   " +
-                        $"fp32 acc {withFp32Acc.RelativeL2:E2}   fp16 acc {withFp16Acc:E2} " +
+                        $"fp32 acc {withFp32Acc.RelativeL2:E2}   fp32 acc/fp16 out {withFp16Out.RelativeL2:E2}   " +
+                        $"fp16 acc {withFp16Acc:E2} " +
                         $"(from {sampled} sampled output elements)");
                     report.Fp16Bounds.Add(line);
                     log.WriteLine("  " + line);
@@ -436,8 +489,52 @@ namespace DevOnBike.Overfit.GpuProbe
             if (arm is null)
             {
                 report.CuBlasSkipReason ??= CuBlasArm.Unavailable;
+                return null;
             }
 
+            // Which cublas64_*.dll was mapped, not which one the source names. On a machine with only a
+            // CUDA 13 redistributable there is nothing here for ILGPU 1.5.3 to load, and the skip reason
+            // above names the three it can ask for - the version is the likeliest thing to be wrong on a
+            // machine nobody here can see.
+            report.CuBlasLibrary = CuBlasArm.LoadedLibrary;
+            return arm;
+        }
+
+        /// <summary>
+        /// Builds arm X3, the <c>cublasGemmEx</c> / <c>CUBLAS_COMPUTE_32F</c> path, or records why it was
+        /// not measured. It shares the <c>--x1</c> flag with the other two cuBLAS arms because it needs
+        /// the same redistributable; it does NOT share their library, and that is the point of it.
+        /// </summary>
+        private static CublasGemmExArm? CreateGemmEx(
+            ProbeOptions options,
+            Accelerator accelerator,
+            CuBlasArm? cuBlas,
+            CellFixture fixture,
+            int n,
+            Cell cell,
+            Report report)
+        {
+            if (!options.EnableCuBlas)
+            {
+                report.GemmExSkipReason ??=
+                    "not requested. Pass --x1 to measure it; --x1 enables all three cuBLAS arms and they " +
+                    "all need the CUDA REDISTRIBUTABLE installed (cublas64_*.dll), which the rest of this " +
+                    "probe deliberately does not.";
+                return null;
+            }
+
+            var arm = CublasGemmExArm.TryCreate(
+                accelerator, cuBlas, fixture.Input, fixture.WeightF32, n, cell.K, cell.M);
+
+            if (arm is null)
+            {
+                report.GemmExSkipReason ??= CublasGemmExArm.Unavailable;
+                return null;
+            }
+
+            report.GemmExLibrary = CublasGemmExArm.ResolvedLibrary;
+            report.GemmExVersion = CublasGemmExArm.Version;
+            report.GemmExBorrowedOperands = arm.BorrowedOperands;
             return arm;
         }
 
