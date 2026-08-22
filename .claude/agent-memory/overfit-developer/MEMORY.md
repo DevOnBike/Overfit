@@ -31,3 +31,4 @@
 - [ILGPU route facts](reference_ilgpu_route_facts.md) — driver-only (`nvcuda`), toolkit names live in ILGPU.Algorithms; a `b.Cuda()` context still contains a CPU device; Synchronize moved a headline 0.13x -> 1036.58x.
 - [A canary needs symmetric warm-up](feedback_warmup_symmetry_canary.md) — cold-vs-warm made an idle machine read -93.5 %; read EVERY line of a timed run, not just the arm you wanted.
 - [string.Create + interpolation chains](reference_string_create_interpolation_chain.md) — CS1620 "must be passed with the 'ref' keyword" really means one operand of the `+` chain lacks `$`.
+- [Provenance record for an unexplained result](reference_provenance_record.md) — `Scripts/provenance.py`; its mtime check sees only source-newer-than-dll, `--compare` is the other arm.
