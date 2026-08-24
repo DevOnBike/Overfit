@@ -10,7 +10,7 @@
          the build with error OVERFIT008 — i.e. the analyzer stays alive. This package ships the RS* rules FOR
          analyzer authors; unlike Microsoft.CodeAnalysis.CSharp below it does NOT set the Roslyn API the
          analyzer compiles against, so it is not bound by the SDK's compiler version. -->
-    <PackageVersion Include="Microsoft.CodeAnalysis.Analyzers" Version="5.6.0" />
+    <PackageVersion Include="Microsoft.CodeAnalysis.Analyzers" Version="5.9.0" />
     <PackageVersion Include="Microsoft.CodeAnalysis.BannedApiAnalyzers" Version="5.6.0" />
     <!-- MUST be <= the SDK compiler's Roslyn version (currently 5.0.0 on .NET SDK 10.0.1xx) — a NEWER
          reference makes the compiler silently REJECT the whole analyzer (CS9057: every OVERFIT rule
@@ -20,7 +20,7 @@
          "Kompilacja powiodła się", and a deliberate Parallel.For violation went UNREPORTED (all 20 OVERFIT
          rules silently off). Expect this package to show as permanently "outdated"; that is INTENTIONAL, not
          debt. Bump it only when the SDK's own Roslyn version moves up. -->
-    <PackageVersion Include="Microsoft.CodeAnalysis.CSharp" Version="5.0.0" />
+    <PackageVersion Include="Microsoft.CodeAnalysis.CSharp" Version="5.9.0" />
     <!-- Tools/SemanticNavigator only. Held at the SAME 5.0.0 as Microsoft.CodeAnalysis.CSharp above, and for a
          different reason than that package's own pin: MSBuildWorkspace loads the OVERFIT analyzers out of each
          project it opens, so the navigator is an analyzer HOST. A host older than the analyzers cannot load
@@ -166,7 +166,7 @@
          runtime and SDK, which DOES change the JIT. That install is a separate action and does warrant a
          canary. See XC-21. -->
     <PackageVersion Include="System.Numerics.Tensors" Version="10.0.11" />
-    <PackageVersion Include="xunit.v3" Version="3.2.2" />
-    <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5" />
+    <PackageVersion Include="xunit.v3" Version="4.0.0" />
+    <PackageVersion Include="xunit.runner.visualstudio" Version="4.0.0" />
   </ItemGroup>
 </Project>
