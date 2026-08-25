@@ -5,6 +5,7 @@
 
 using System.Buffers;
 using System.IO.MemoryMappedFiles;
+using DevOnBike.Overfit.Exceptions;
 
 namespace DevOnBike.Overfit.LanguageModels.Loading
 {
@@ -24,9 +25,22 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
     /// the mmap-backed weights must keep this alive and dispose it last
     /// (see <see cref="Runtime.CachedLlamaInferenceEngine"/>). Slices handed out are
     /// invalid once this is disposed; never read them afterwards.
+    ///
+    /// <b>A path through a Windows symbolic link works, deliberately.</b> There is exactly one
+    /// source of truth for the length — the handle this type opens — because two sources
+    /// disagree on a reparse point. Measured on <c>C:\qwen3b\qwen.q4km.gguf</c> (2026-08-25,
+    /// Windows 11, .NET 10): <c>FileInfo.Length</c> is <c>2104932768</c> for the file and
+    /// <c>0</c> through a file symbolic link to it, because it reads the reparse point's own
+    /// metadata rather than the target's; <c>FileStream.Length</c> is <c>2104932768</c> through
+    /// both. A <b>hard link</b>, a <b>directory junction</b> and a <b>directory symbolic link</b>
+    /// all report <c>2104932768</c> from either API — only a symbolic link on the final path
+    /// component carries the disagreement. The view's capacity is not usable as the length
+    /// either: it is rounded up to the page, <c>2104934400</c> for the same file, which would
+    /// let <see cref="Slice(long,int)"/> hand out bytes past the end of the file.
     /// </summary>
     public sealed unsafe class MemoryMappedModelFile : IDisposable
     {
+        private readonly FileStream _file;
         private readonly MemoryMappedFile _mmf;
         private readonly MemoryMappedViewAccessor _view;
         private readonly byte* _base;
@@ -36,18 +50,50 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         {
             ArgumentException.ThrowIfNullOrEmpty(path);
 
-            Length = new FileInfo(path).Length;
+            // Open the file ONCE and take both the length and the map from that one handle.
+            // FileInfo.Length is not usable here: on a Windows reparse point it reads the link's
+            // own metadata, so a file symbolic link reports 0 while the map below (capacity 0 =
+            // "to end of file") spans the target's real bytes — see the type doc for the numbers.
+            var file = new FileStream(
+                path, FileMode.Open, FileAccess.Read, FileShare.Read, bufferSize: 1, FileOptions.None);
+            MemoryMappedFile? mmf = null;
+            MemoryMappedViewAccessor? view = null;
 
-            // Read-only, whole-file map. capacity 0 = "to end of file".
-            _mmf = MemoryMappedFile.CreateFromFile(
-                path, FileMode.Open, mapName: null, capacity: 0, MemoryMappedFileAccess.Read);
-            _view = _mmf.CreateViewAccessor(0, 0, MemoryMappedFileAccess.Read);
+            try
+            {
+                Length = file.Length;
 
-            byte* p = null;
-            _view.SafeMemoryMappedViewHandle.AcquirePointer(ref p);
-            // PointerOffset is the gap the OS inserted for page alignment (0 here, but
-            // honour it so file offset 0 maps to _base).
-            _base = p + _view.PointerOffset;
+                if (Length == 0)
+                {
+                    throw new OverfitFormatException(
+                        $"Model file '{path}' is 0 bytes, so there is nothing to map. "
+                        + "If it is a symbolic link, its target may be missing, empty or on a "
+                        + "drive that is not mounted; check the target before the link.");
+                }
+
+                // Read-only, whole-file map over the handle above. capacity 0 = "to end of file".
+                mmf = MemoryMappedFile.CreateFromFile(
+                    file, mapName: null, capacity: 0, MemoryMappedFileAccess.Read,
+                    HandleInheritability.None, leaveOpen: true);
+                view = mmf.CreateViewAccessor(0, 0, MemoryMappedFileAccess.Read);
+
+                byte* p = null;
+                view.SafeMemoryMappedViewHandle.AcquirePointer(ref p);
+                // PointerOffset is the gap the OS inserted for page alignment (0 here, but
+                // honour it so file offset 0 maps to _base).
+                _base = p + view.PointerOffset;
+            }
+            catch
+            {
+                view?.Dispose();
+                mmf?.Dispose();
+                file.Dispose();
+                throw;
+            }
+
+            _file = file;
+            _mmf = mmf;
+            _view = view;
         }
 
         /// <summary>Mapped file length in bytes.</summary>
@@ -91,6 +137,8 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             _view.SafeMemoryMappedViewHandle.ReleasePointer();
             _view.Dispose();
             _mmf.Dispose();
+            // leaveOpen: true above, so the handle the length came from is ours to close, last.
+            _file.Dispose();
         }
 
         /// <summary>

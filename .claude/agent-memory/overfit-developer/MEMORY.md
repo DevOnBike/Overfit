@@ -44,3 +44,5 @@
 - [Warm vs cold prefill: two instruments](reference_warm_vs_cold_prefill_instruments.md) - gguf_bench fires a warm-up rep (marginal); GenHarness times one COLD Prefill. Same length, same build: 2.87x vs 2.03x.
 - [Pipe deadlock on a polled child](reference_pipe_deadlock_on_child_output.md) - poll() + stdout=PIPE hangs once the child passes ~4 KB; GenHarness echoes the prompt, so long prompts hang AFTER the work. Flat CPU is the tell.
 - [A number's scope is its row title](reference_measurement_scope_is_its_row_title.md) — the 0.999x "exact tie" was ONE gate clause, not the kernel swap (2.98x); the flag was flipped default-ON and REVERTED same day (short CLI 9.5% slower). Decode-measurement traps inside.
+- [Windows link length matrix](reference_windows_link_length_matrix.md) — only a FILE symlink breaks `FileInfo.Length` (junction and dir-symlink do not); `view.Capacity` is page-rounded and is never a file length.
+- [os.walk follows junctions, rmtree does not](reference_oswalk_follows_junctions.md) — a junction in a scratch dir lists C:\qwen3b as if about to be deleted; delete the junction first, re-verify fixtures AFTER cleanup.

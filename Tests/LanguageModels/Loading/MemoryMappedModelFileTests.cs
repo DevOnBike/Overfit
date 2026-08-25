@@ -4,6 +4,7 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using System.Runtime.InteropServices;
+using DevOnBike.Overfit.Exceptions;
 using DevOnBike.Overfit.LanguageModels.Loading;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
@@ -100,6 +101,112 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
                 map.Dispose();
 
                 Assert.Throws<ObjectDisposedException>(() => map.Slice(0, 4));
+            }
+            finally
+            {
+                File.Delete(path);
+            }
+        }
+
+        /// <summary>
+        /// `XC-117`. The length must come from the handle that is actually mapped, never from
+        /// <c>FileInfo</c>. On Windows <c>FileInfo.Length</c> reads a reparse point's own
+        /// metadata, so it returns 0 through a file symbolic link while the map — built with
+        /// <c>capacity: 0</c>, meaning "to the end of the real file" — spans the target's bytes.
+        /// That disagreement made every <c>Slice</c> fail its own bounds check with
+        /// "exceeds mapped length 0", and `GgufLlamaLoader.LoadEmbedding` was the first casualty.
+        /// </summary>
+        [Fact]
+        public void Length_ThroughFileSymbolicLink_IsTheTargetsRealLength()
+        {
+            var dir = Path.Combine(Path.GetTempPath(), "overfit-xc117-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(dir);
+
+            try
+            {
+                var target = Path.Combine(dir, "target.bin");
+                var data = new byte[4097]; // deliberately not a multiple of the page size
+                for (var i = 0; i < data.Length; i++)
+                {
+                    data[i] = (byte)i;
+                }
+                File.WriteAllBytes(target, data);
+
+                var link = Path.Combine(dir, "link.bin");
+
+                try
+                {
+                    File.CreateSymbolicLink(link, target);
+                }
+                catch (IOException e)
+                {
+                    Assert.Skip("this OS/account cannot create a symbolic link: " + e.Message);
+                    return;
+                }
+                catch (UnauthorizedAccessException e)
+                {
+                    Assert.Skip("this OS/account cannot create a symbolic link: " + e.Message);
+                    return;
+                }
+
+                using var map = new MemoryMappedModelFile(link);
+
+                Assert.Equal(4097, map.Length);
+
+                // The bounds check must let the last byte through, and the bytes must be the
+                // target's. A length of 0 makes this throw; a page-rounded length reads past EOF.
+                var tail = map.Slice(4096, 1).Span;
+                Assert.Equal(data[4096], tail[0]);
+            }
+            finally
+            {
+                Directory.Delete(dir, recursive: true);
+            }
+        }
+
+        /// <summary>
+        /// `XC-117`, the other half. The view's capacity is NOT a legal substitute for the file
+        /// length: it is rounded up to the page. Measured on this 4097-byte file the view reports
+        /// 8192, and on <c>C:\qwen3b\qwen.q4km.gguf</c> it reports 2104934400 against a real
+        /// 2104932768. Taking the length from there would let <c>Slice</c> hand out bytes past
+        /// the end of the file, which is a quieter defect than the one it replaced.
+        /// </summary>
+        [Fact]
+        public void Length_IsTheExactFileLength_NotThePageRoundedViewCapacity()
+        {
+            var path = Path.GetTempFileName();
+            try
+            {
+                File.WriteAllBytes(path, new byte[4097]);
+
+                using var map = new MemoryMappedModelFile(path);
+
+                Assert.Equal(4097, map.Length);
+                Assert.Throws<ArgumentOutOfRangeException>(() => map.Slice(4097, 1));
+            }
+            finally
+            {
+                File.Delete(path);
+            }
+        }
+
+        /// <summary>
+        /// A file that really is empty must fail with a message naming the file and suggesting
+        /// something a person can act on — not with "exceeds mapped length 0" out of a later
+        /// <c>Slice</c>, which names the symptom and never the cause.
+        /// </summary>
+        [Fact]
+        public void EmptyFile_ThrowsFormatExceptionNamingTheFile()
+        {
+            var path = Path.GetTempFileName();
+            try
+            {
+                File.WriteAllBytes(path, []);
+
+                var ex = Assert.Throws<OverfitFormatException>(() => new MemoryMappedModelFile(path));
+
+                Assert.Contains(path, ex.Message, StringComparison.Ordinal);
+                Assert.Contains("symbolic link", ex.Message, StringComparison.Ordinal);
             }
             finally
             {
