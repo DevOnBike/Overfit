@@ -157,6 +157,21 @@ DESKTOP_SECONDS = 0.5
 DESKTOP_LOUD_SHARE = 8.0 / (30.0 * PHYSICAL_CORES)
 
 #: Names belonging to the measurement itself, excluded from the foreign total.
+#:
+#: **`llama-bench` and `Benchmarks` were added on 2026-08-25 for `XC-76`**, and without them the guard
+#: condemns the very window it is watching: a 16-thread llama.cpp decode run saturates every core it was
+#: given, so its own CPU time lands in the foreign total at roughly 100% of the window and every reading is
+#: reported as contaminated. That is not a stricter guard, it is a guard that says the same thing about
+#: every window and is therefore ignored — the failure this module's docstring already warns about, in
+#: reverse. Names of processes **under measurement** belong here; names of processes that merely happen to
+#: be running do not.
+#:
+#: **What excluding them costs, named rather than left implicit.** A genuinely COMPETING `Benchmarks`
+#: process no longer shows here as foreign load — but it is caught by a different guard,
+#: `Sources/Benchmark/Program.cs:139`, whose `Global\DevOnBike.Overfit.MachineMeasurement` mutex makes the
+#: second process exit 2. **`llama-bench` has no such mutex, so two concurrent `llama-bench` runs are now
+#: invisible to both guards.** Start one at a time, or wrap it in something that takes the mutex —
+#: `Scripts/gguf_bench.py` does.
 MEASUREMENT_PROCESSES = {
     "dotnet",
     "ProfHarness",
@@ -164,6 +179,8 @@ MEASUREMENT_PROCESSES = {
     "MSBuild",
     "VBCSCompiler",
     "vstest.console",
+    "llama-bench",
+    "Benchmarks",
 }
 
 _SAMPLE = r"""

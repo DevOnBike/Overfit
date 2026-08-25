@@ -3,6 +3,27 @@
 `CLAUDE.md` carries the rule; this file carries the incidents behind it. Everything below happened in this
 repository, and every one of them produced a number that looked authoritative and was worthless.
 
+## Prove the lever is ABSENT before you believe a BASELINE — 2026-08-25, `XC-76`
+
+"Prove the lever is live before believing an A/B" was already here. Its mirror was not, and it cost
+four hours of prefill numbers.
+
+Every `pp512` figure taken in the first half of `XC-76` carried a **1327114624-byte precomputed
+`.repack` sidecar**, attached by `GgufLlamaLoader.TryOpenSidecar:78`, which is **unconditional — no
+flag and no environment variable**. llama.cpp has no equivalent artefact. Measured afterwards by A/B,
+it is worth **2.91x on prefill** and **nothing measurable on decode**, so the like-for-like prefill
+gap is **3.9x** where the sidecar-present number reads **1.3x**. Nobody looked for it until somebody
+happened to mention the file existed.
+
+**So: a measurement must enumerate what is attached to the subject that the comparator cannot have —
+sidecar files, caches, precomputed indexes, warmed state — and declare each one in the result.
+A flag you set is easy to remember; a file the loader finds by itself is not.**
+
+**And presence is not use.** `AttachPrepacked` silently skips tensors that do not match and
+`TryOpenSidecar` swallows a corrupt file, so a `sidecar_present: true` field proves only that bytes
+sit on a disk. **Only an A/B is evidence the artefact did anything**, which promotes that arm from a
+fairness caveat to the measurement that gives the field its meaning.
+
 ## The order of work
 
 **Correctness first, in a separate pass.** Write the clearest expression that gets the maths right and pin

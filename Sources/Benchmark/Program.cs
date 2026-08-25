@@ -6,6 +6,7 @@
 using System.Linq;
 using BenchmarkDotNet.Reports;
 using BenchmarkDotNet.Running;
+using Benchmarks.Helpers;
 using DevOnBike.Overfit.Licensing;
 
 namespace Benchmarks
@@ -96,6 +97,17 @@ namespace Benchmarks
 
                 OverfitLicense.SuppressNotice = true;
                 OverfitLicense.MessageSink = _ => { };
+
+                // The GGUF driver is answered here rather than through BenchmarkDotNet, and it still runs
+                // under the machine mutex taken above — it is a measurement and must exclude the others.
+                // BenchmarkDotNet is not involved at all: this mode exists so an external harness can
+                // wall-clock this process and llama-bench's identically, using neither one's internal
+                // timer, which is the only shape in which a cross-engine ratio means anything.
+                if (Array.Exists(args, arg =>
+                        string.Equals(arg, GgufBenchDriver.Switch, StringComparison.OrdinalIgnoreCase)))
+                {
+                    return GgufBenchDriver.Run(args);
+                }
 
                 // Our own switch is removed before BenchmarkDotNet sees the command line. It parses args
                 // strictly, and an option it does not know is a REJECTED command line — which returns zero

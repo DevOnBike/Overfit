@@ -469,11 +469,105 @@ however much that baseline has moved.
 | the other side | version used | how stale, and how much it matters |
 |---|---|---|
 | **ONNX Runtime** (`Microsoft.ML.OnnxRuntime`, `Sources/Benchmark` only — it is in **no** Overfit code path) | **1.29.0, and the two headline ratios were RE-MEASURED against it on 2026-08-17 — see the re-measurement block below this table** | 1.29.0 shipped 2026-08-12 and the pin is held deliberately, because moving it moves every published Overfit-vs-ORT ratio without a line of Overfit changing. **Measured, six clean A/B process pairs (`PB-ORT1`, 2026-08-12): the two versions do not separate.** Every steady-state ORT arm was faster on 1.29.0 (0.9848–0.9974) and it means nothing — the canaries moved the same way and `Overfit_Batch64` moved further, at 0.9825. **Resolving power stated before the verdict: median cross-process canary spread 4.26%, against an effect of 0.3–1.5%.** So the experiment is *silent* in that band, not negative, and the flattery any published ratio carries is bounded at **≤1.5% — under the noise floor.** No ratio needs restating; the version needs naming. **PIN TAKEN 2026-08-17, reversing the hold.** The hold's stated reason — *"moving it moves every published ratio"* — is refuted in magnitude by the measurement in the same breath: the largest published claim is **7.31× faster than ORT**, and a 1.5% faster ORT makes it **7.20×**, a smaller change than the error bar on the 7.31× itself. The pin was protecting the numbers from a movement nobody can detect, and the alternative it chose instead — naming the version, this row — had already been delivered. **The five benchmark classes were deliberately NOT re-run**, because the flattery is bounded at ≤1.5% and that is under the ±3–4% floor of the measurement that produced the ratios. **That sentence stood for about an hour: the classes WERE then re-run against 1.29.0 (same day, at the user's instruction) and the block below carries the result. It is kept because the reasoning — that no re-run was *needed* — is still correct, and the re-run confirms it.** The bump was verified live rather than assumed — `runtimes/win-x64/native/onnxruntime.dll` resolves to **16,149,344 B**, exactly the 1.29.0 figure `PB-ORT1` recorded against 1.28.0's 15,809,848, which is the check that stops a stale `bin/` copy from making a re-measurement look flat. |
-| **llama.cpp** (the `~1.13× uniform` decode row below) | **`3292da0` = tag `b9441`**, recovered 2026-08-17 — see the section *"Recovering the llama.cpp baseline"* below for how, and for the one thing still unknown | Not written down when the number was taken; reconstructed from the local clone's **reflog**, which is evidence about the checkout rather than about the run. **The `b10088` that appears in `ROADMAP-COMPLETED.md:819` is a DIFFERENT measurement** — that row is prefill, taken 2026-07-22, and `b10088` is dated 2026-07-22, seven weeks *after* the decode sprint, so it cannot be the decode baseline and must not be cited as one. |
+| **llama.cpp** (the `~1.13× uniform` decode row below) | **`3292da0` = tag `b9441`**, recovered 2026-08-17 — see the section *"Recovering the llama.cpp baseline"* below for how, and for the one thing still unknown. **SUPERSEDED for Qwen2.5-3B by `6d5a910` (build 861), measured 2026-08-25 — see *"Overfit vs llama.cpp `6d5a910`"* below.** | Not written down when the number was taken; reconstructed from the local clone's **reflog**, which is evidence about the checkout rather than about the run. **The `b10088` that appears in `ROADMAP-COMPLETED.md:819` is a DIFFERENT measurement** — that row is prefill, taken 2026-07-22, and `b10088` is dated 2026-07-22, seven weeks *after* the decode sprint, so it cannot be the decode baseline and must not be cited as one. **The 2026-08-25 re-measurement closes the hole this row describes**: build, thread counts, model sha256, our commit and our dll hash were all recorded *during* the run rather than recovered afterwards. It does **not** supersede the Bielik-4.5B figure, which is a different model and has not been re-run. |
 
 **The cross-process floor is intrinsic here, not background load.** Canary spread was median 3.17% on a
 loaded box and median 4.26% after a reboot to a single process — slightly *worse* clean. An effect under a
 few percent therefore needs a different experiment shape, not a quieter machine.
+
+### Overfit vs llama.cpp `6d5a910` — measured 2026-08-25 (`XC-76`)
+
+**The first Overfit-versus-llama.cpp ratio this repository can re-make.** Every previous one came from
+something not in the tree; `XC-76` found sixty-plus classes in `Sources/Benchmark` and **not one that loads
+a real GGUF and measures end-to-end decode**. The instrument is now `Scripts/gguf_bench.py` plus
+`Sources/Benchmark/GgufEndToEndThroughputBenchmark.cs` and its `--gguf-bench` driver mode.
+
+**Provenance, because a ratio without it is not citable.** llama.cpp **`6d5a910`, build 861**, sources
+`D:\llamacpp-tmp`, driven through its own `llama-bench`. Model `C:\qwen3b\qwen.q4km.gguf`, **2,104,932,768 B**,
+sha256 `626b4a6678b86442240e33df819e00132d3ba7dddfe1cdc4fbb18e0a9615c62d`, Qwen2.5-3B-Instruct Q4_K_M ·
+Overfit HEAD `c69bc929b5f435b7255f3a12f85219a0ed6061fb`, `DevOnBike.Overfit.dll` `b6a146560e3e854e`, working
+tree dirty (the `XC-76` files themselves) · AMD Ryzen 9 9950X3D, 16 physical / 32 logical · Windows 11 ·
+.NET 10.0.11, Release · both engines interleaved in one session, order alternating per round, 3 rounds.
+
+**Resolving power, stated before the verdict.** The cross-session floor on this box is **±2%**, measured
+three times: the same llama.cpp binary on the same model at the same thread count read `pp512` **389.37**
+at 11:30 and **397.61 / 398.45 / 398.06 / 403.50** through the afternoon. **`llama-bench`'s own
+`stddev_ts` understates its reproducibility by more than an order of magnitude** — 0.03 t/s (0.11%) on
+`tg128` within one warm process against a ~2% move between sessions. **Never judge anything against a
+recorded llama.cpp number without re-taking it in your own session**; the within-session bands below are
+±1.07% and ±1.79%, and the ±2% floor governs anything quoted later. Nothing here is citable past two
+significant figures.
+
+| subject | llama.cpp | Overfit | ratio |
+|---|---:|---:|---|
+| **decode `tg128`, each engine at its own best** | **32.39** ± 0.26 (`-t 12`) | **27.53** ± 0.20 (`-t 24`) | **~1.18×** |
+| decode `tg128`, matched `-t 16` | 31.71 | 27.89 | ~1.14× |
+| prefill `pp512`, each best, **`.repack` sidecar present** | **419.70** ± 3.18 (`-t 32`) | **318.41** ± 5.16 (`-t 32`) | ~1.32× |
+| prefill `pp512`, each best, **no sidecar** | 419.70 † | **108.50** ± 4.33 | **~3.9×** |
+
+† **This one row is cross-campaign and the others are not.** The sidecar A/B measured only Overfit, so its
+`108.50` is divided by the llama.cpp figure from the comparison campaign an hour earlier. Both llama.cpp
+readings that afternoon agree — **419.70 ± 3.18** in the campaign and **422.05 ± 1.29** in the sweep — so
+the division is sound at the ±2% floor and no tighter. The three interleaved rows above it are single-session.
+
+**Read the two prefill rows together or not at all.** `GgufLlamaLoader.TryOpenSidecar` opens
+`<model>.repack` **unconditionally** — no flag, no environment variable — and llama.cpp has no equivalent
+file. Measured by interleaved A/B against a hard link with no sidecar beside it: the sidecar is worth
+**+191.5% (2.91×) on prefill** and **+1.11% on decode against a ±1.60% band, i.e. nothing**. So every
+decode figure here is sidecar-free and stands as measured, while prefill has two honest answers — 1.32×
+for a user who has run `overfit repack` and paid 1,327,114,624 B for the artefact, and **3.9× like-for-like**.
+**Presence is not use**: `AttachPrepacked` silently skips a tensor whose dimensions disagree and
+`TryOpenSidecar` swallows a corrupt file, so the A/B is the only evidence the mechanism did anything.
+
+**`~1.13× uniform` does not survive, and the word that fails is `uniform`.** The gap differs by phase
+(1.18× decode against 1.32× prefill) and by configuration (1.32× against 3.9× on the sidecar alone), so no
+single ratio describes this engine. **The 1.13× itself is NOT refuted here** — it is a **Bielik-4.5B**
+figure and this is Qwen2.5-3B, a different model that has not been compared before. What it does lose is
+its generality.
+
+**Thread count is a lever on both sides and they do not peak together.** Swept, 3 rotated repeats,
+tokens/second:
+
+| `-t` | 8 | 10 | 12 | 16 | 24 | 32 |
+|---|---:|---:|---:|---:|---:|---:|
+| llama.cpp `tg128` | 29.19 | 32.26 | **32.46** | 31.71 | 30.89 | 30.12 |
+| Overfit `tg128` | 23.48 | 27.17 | 27.83 | 27.89 | **27.91** | 27.80 |
+| llama.cpp `pp512` | 245.04 | 288.92 | 339.95 | 393.49 | 397.55 | **422.05** |
+| Overfit `pp512` | 184.02 | 210.85 | 229.04 | 257.05 | 267.33 | **314.59** |
+
+**NEITHER ENGINE'S PREFILL OPTIMUM WAS FOUND — both were still climbing at 32 logical CPUs, where the
+sweep stopped.** So both prefill rows above are a **floor on the ratio, not an answer**, and the next sweep
+has to go past 32. The decode optima are real: both engines turn over inside the swept range.
+
+**llama.cpp's decode peaks at 12 and loses 7% by using all 32 threads**, so `OverfitParallel`'s cap at 10
+decode workers matches this box's memory system rather than being an Overfit quirk. A matched `-t 16`
+comparison measures llama.cpp **2.3% below its own best and flatters us** — which is why the per-engine
+optimum is the headline row. Note also that `-t` names two different things: Overfit resolves `N` to `N`
+general workers **and** `min(N-1, 10)` decode workers, so `-t 16` and `-t 32` both decode on 10.
+
+**How the harness was proven before it was allowed to say anything.** It uses **neither engine's internal
+timer**: the same work unit runs at several repetition counts, each process is wall-clocked from outside,
+and `t(r) = fixed + r·work` is fitted, so process start, model load and warm-up fall into the intercept.
+Three arms licensed it, all against llama.cpp measuring llama.cpp, interleaved:
+
+- **split-phase gate** — `pp512` **396.87 ± 2.21** against llama-bench's **397.61 ± 3.60** (**−0.19%**);
+  `tg128` **31.73 ± 0.15** against **31.57 ± 0.15** (**+0.51%**). Worst R² 0.99963.
+- **same-session cross-check** — `slope / engine's own timer` **1.0027 ± 0.0115** over six fits.
+- **mixed-shape anchor**, on llama-bench's own `-p 512 -n 128` invocation — **5.3169 ± 0.0145 s** per
+  repetition against its own **5.2999 ± 0.0131** (**+0.32%**, band ±0.52%). **The split shape and the mixed
+  shape do not separate**: −0.45% against that band, so isolating the phases into separate processes is not
+  a different measurement here.
+
+**Two findings about our side, each worth its own task.** Overfit's prefill is **four times more variable**
+run-to-run than llama.cpp's — 15% against 3% by each engine's own timer. And the process fixed cost for a
+`tg128` run is **5.56–6.13 s against llama.cpp's 1.35–1.44 s**; the slope protocol removes it from the rate
+correctly, but a user feels those ~4.5 s as time to first token.
+
+**Not measured, so do not assume either way**: whether `OVERFIT_TILED_PREFILL=1` recovers any of the 2.91×
+on a machine with no sidecar; the cause of the prefill variability; and Bielik-4.5B, which is what the
+`~1.13×` row is actually about. **Defender (`MsMpEng`) condemned 9 of ~40 measured windows**, always on
+`Scripts/machine.py`'s named-scanner probe at 0.95–3.63% foreign share against its 8% ceiling; no condemned
+reading was displaced from its neighbours and none was used as a sole source.
 
 ### Overfit vs ONNX Runtime 1.29.0 — re-measured 2026-08-17
 
@@ -3219,7 +3313,8 @@ with no meaning.
 |---|---|
 | Bielik decode after the CPU sprint | 12.55 → **17 tok/s** (bit-identical output) |
 | Qwen-3B with `OVERFIT_REPACK_GEMV` | **24.4 tok/s** (+30%) |
-| gap to llama.cpp | **~1.13× uniform** — this is *not* parity; always best-of-N on both sides. Measured 2026-05-31 against llama.cpp **`3292da0` / `b9441`** on `Bielik-4.5B-v3.0-Instruct-Q4_K_M.gguf` (sha256 `39fb78db…`), recovered 2026-08-17 from the clone's reflog — see *"Recovering the llama.cpp baseline"*. **Their thread count is still unrecorded and is known to matter on this box**, so cite the build, not a thread-for-thread comparison |
+| gap to llama.cpp, **Qwen2.5-3B Q4_K_M**, measured 2026-08-25 | **~1.18× decode** at each engine's own best; prefill **~1.32×** with the `.repack` sidecar and **~3.9×** without it. Against llama.cpp **`6d5a910`** (build 861), both engines interleaved in one session, ±2% cross-session floor stated before the verdict — see *"Overfit vs llama.cpp `6d5a910`"*. **Reproduce it with `python Scripts/gguf_bench.py --compare`; do not cite it without re-taking the reference in your own session** |
+| gap to llama.cpp, **Bielik-4.5B**, measured 2026-05-31 | **~1.13×**, and **the word `uniform` that used to sit here is withdrawn** — the 2026-08-25 Qwen run measures the gap differing by phase and by configuration, so no single ratio describes the engine. The 1.13× itself is **not** refuted: it is a different model and has not been re-run. Against llama.cpp **`3292da0` / `b9441`** on `Bielik-4.5B-v3.0-Instruct-Q4_K_M.gguf` (sha256 `39fb78db…`), recovered 2026-08-17 from the clone's reflog — see *"Recovering the llama.cpp baseline"*. **Their thread count is still unrecorded and is known to matter on this box** — the 2026-08-25 sweep measured llama.cpp's decode peaking at 12 threads and losing 7% at 32 — so cite the build, not a thread-for-thread comparison |
 | QLoRA fine-tuning, 3B | ~3 GB RAM |
 | Phi-4 14B Q4_K_M | ~3.8 tok/s |
 | Android (Motorola Edge 50 Fusion), 0.5B Q4_K | ~3.8 tok/s |

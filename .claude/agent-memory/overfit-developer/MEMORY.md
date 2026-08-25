@@ -36,3 +36,8 @@
 - [A harness carries its own library copy](reference_harness_carries_own_library_copy.md) — ProfHarness/OccupancyHarness bin holds a stale `DevOnBike.Overfit.dll`; building Main or Tests does NOT refresh it, and both A/B arms then run the old default.
 - [mutate.py verdict(): the false ESCAPED, FIXED](reference_mutate_verdict_false_escaped.md) — this runner prints `Failed <FQN>`, not `[FAIL]`; 11 red tests read as "none noticed". Third outcome added; `mutation()` still LF-converts a CRLF file.
 - [Price duplicated work at ONE core](reference_price_duplication_at_one_core.md) — force the split lever, run 1 core: measured 7% per extra gather against a cost model saying 22%.
+- [llama-bench's stddev is intra-process](reference_llamabench_stddev_is_intraprocess.md) — 0.11% within one warm process, ~2% between sessions; cross-session resolving power on this box is ~2%.
+- [Interleave, or drift wears the variable](reference_interleave_or_drift_wears_the_variable.md) — the slope-fit protocol, its conditioning rule, and the 8% monotone campaign drift that faked a +0.87% instrument difference.
+- [`-t N` is TWO thread counts in Overfit](reference_overfit_t_flag_is_two_thread_counts.md) — 16 general / 10 decode; `-t 32` also gives 10. Report both or the row lies about its configuration.
+- [The .repack sidecar is worth +191% on PREFILL only](reference_repack_sidecar_worth.md) — decode does not separate; cannot be switched off; prefill is 1.33x behind llama.cpp with it and 3.87x without.
+- [A symlink breaks the mmap model load](reference_symlink_breaks_mmap_model_load.md) — Windows `FileInfo.Length` returns 0 for a reparse point; use `mklink /H`. Open product defect.
