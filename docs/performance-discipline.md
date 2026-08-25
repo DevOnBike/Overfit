@@ -91,7 +91,8 @@ changes than it has kept:
 | K-blocking + A-packing (im2col GEMM) | regressed, reverted |
 | Winograd F(2,3), 3x3 stride-1 | parity cos 1.0, **+79%** slower on deepcnn (119.7 → 214.4 ms) — sequential scalar transforms, 16 small GEMMs and a 16x U/V/M blow-up beat the 2.25x FLOP cut |
 | AVX-512 decode port | regressed, reverted |
-| Bias in the Q4_K tiled prefill GEMM | **0.999x, an exact tie.** A path census showed `bias.IsEmpty` barred 88% of prefill dispatches from the tiled kernel; lifting it changed nothing, because `ProjectBatchedWeightStationary` already amortises weight decode across the row tile — the same thing the tiling does. The "~3x" in the kernel docs is against re-decode-per-row, not against weight-stationary |
+| `OVERFIT_TILED_PREFILL` default-on (`XC-119`, 2026-08-25) | **2.98x faster prefill, reverted anyway.** The kernel wins and the default loses: the in-process repack costs **+1194 MiB** and **+186 ms once** at the start of decode, so a short CLI invocation measured **9.5% slower for 2.4x the memory**. Decode's per-token rate is untouched. **A win on one phase is not a win** — price the whole process, and price it on the product that gets the worst of it. See `docs/measured-baselines.md` |
+| Bias in the Q4_K tiled prefill GEMM | **0.999x, an exact tie** for that one gate clause — `bias.IsEmpty` barred 88% of prefill dispatches and lifting it changed nothing. **It is not a comparison of the two kernels, and it was read as one for eighteen days.** Measured 2026-08-25 (`XC-119`), tiled against weight-stationary is **2.98x** at `pp512`. See `docs/measured-baselines.md` |
 | `OverfitPool<T>` | 3x to ~3000x slower, deleted |
 
 The wins were the *opposite* of the obvious move: `TensorPrimitives` bulk-SIMD beat a hand micro-kernel, and

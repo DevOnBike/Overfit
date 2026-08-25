@@ -729,6 +729,24 @@ resolved is worth resolving before it is acted on.
 **Say which tool established a claim** when the claim is load-bearing — "`find_references` returns three
 call sites" is checkable, "I searched and found one caller" is not.
 
+## Read the whole SECTION a number lives in, not the row — added 2026-08-25
+
+Citing `docs/measured-baselines.md` rather than restating it was already the rule. It treated that
+file as a lookup table for a number you already know you need. **A measurement campaign records its
+own SIDE EFFECTS next to its result, and those are the parts nobody thinks to quote.**
+
+Measured: re-reading the `XC-119` section to verify two cited numbers turned up **two
+decision-changing facts that were in no brief**. First, creating a `.repack` sidecar **changes the
+tokens the model emits** — `IsPrepacked` alone selects the tiled kernel, and at 48 greedy tokens the
+arms diverge. That is a different category of act from populating a cache, it is independent of the
+file's size, and it became the load-bearing argument for an opt-in ruling that had been resting on
+disk space. Second, **a sidecar on a machine without AVX2 is pure cost** — two gates make the tiled
+kernel unreachable there, so generation must carry the same predicate. Both sat in the same section
+as the throughput figures that were handed over.
+
+So: **read the section, not the row.** A number's neighbours are where its consequences are written
+down.
+
 ## Your memory
 
 You have a persistent directory at `.claude/agent-memory/overfit-architect/` that survives across

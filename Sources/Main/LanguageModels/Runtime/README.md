@@ -27,10 +27,18 @@ enables a repacked weight layout worth about **+30%** on Qwen-3B. Two traps, bot
 - **`OVERFIT_TILED_PREFILL` is a dead flag** whenever a `*.gguf.repack` sidecar sits beside the model,
   because `IsPrepacked` short-circuits it. An A/B across that flag ran an identical mix in both arms
   and measured noise. Count the paths taken before believing any kernel A/B in this directory.
-- Adding bias support to the tiled prefill GEMM measured an **exact tie (0.999×)**, because
-  `ProjectBatchedWeightStationary` already amortises weight decode across the row tile — the same thing
-  the tiling does. The "~3×" in the kernel docs is against re-decode-per-row, not against
-  weight-stationary.
+- **The flag stays opt-in, and that was measured rather than assumed.** The kernel behind it is worth
+  **2.98×** at `pp512` on a model with no sidecar (325.26 ± 3.30 against 109.25 ± 1.68 t/s, `-t 32`,
+  Qwen2.5-3B Q4_K_M, three interleaved fits). It was made default-on on 2026-08-25 and **reverted the same
+  day**: the in-process repack costs **+1194 MiB** and **+186 ms once** at the start of decode, which leaves
+  a short CLI invocation **9.5% slower for 2.4× the memory**. A `*.gguf.repack` sidecar reaches the same
+  kernel with no managed heap and is the route being pursued. Numbers and conditions: `XC-119` in
+  `docs/measured-baselines.md`.
+- Adding bias support to the tiled prefill GEMM measured an **exact tie (0.999×)** — but that is the
+  marginal effect of lifting the `bias.IsEmpty` gate, **not** a measurement of the flag, and it was read as
+  the second for eighteen days. Its mechanism claim is half right: `ProjectBatchedWeightStationary` hoists
+  the *scale* decode out of its row loop and re-does the *nibble* unpack per row, which is what the
+  `block_q4_Kx8` tiling amortises. The "~3×" in the kernel docs is against re-decode-per-row.
 
 ## Where the engine stands
 

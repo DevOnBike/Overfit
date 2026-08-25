@@ -33,9 +33,11 @@ namespace DevOnBike.Overfit.Runtime
         public const string RepackAttn = "OVERFIT_REPACK_ATTN";
 
         /// <summary>Set to 1/true to route the Q4_K PREFILL projections through the register-tiled 8×NR GEMM
-        /// (<c>Q4KGemvKernel.GemmTiled</c>) instead of the weight-stationary kernel. ~3× faster per projection
-        /// under real parallelism (measured), but repacks the weight (adds ~model RAM) so it is experimental /
-        /// off by default.</summary>
+        /// (<c>Q4KGemvKernel.GemmTiled</c>) instead of the weight-stationary kernel. <b>Off by default</b>, and
+        /// measured on 2026-08-25 as a default and reverted: worth 2.98× at <c>pp512</c>, but it repacks the
+        /// weight in-process (+1194 MiB) and leaves a short CLI invocation 9.5% slower. See
+        /// <c>Q4KGemvKernel.TiledPrefillEnabled</c> for the conditions, the AVX2 fallback and why the
+        /// <c>*.gguf.repack</c> sidecar is the route being pursued instead.</summary>
         public const string TiledPrefill = "OVERFIT_TILED_PREFILL";
 
         /// <summary>KV-cache element type — e.g. <c>q8</c> for the int8 KV cache (default F32).</summary>

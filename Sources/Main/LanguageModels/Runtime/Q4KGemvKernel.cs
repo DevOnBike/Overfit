@@ -45,15 +45,38 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
         /// <summary>
         /// Opt-in (<c>OVERFIT_TILED_PREFILL=1</c>) for the register-tiled Q4_K prefill GEMM
-        /// (<see cref="GemmTiled"/>) in place of the weight-stationary kernel. Off by default: it repacks
-        /// the weight (adds ~model RAM) and is AVX2-only.
+        /// (<see cref="GemmTiled"/>) in place of the weight-stationary kernel. <b>Off by default.</b>
+        /// AVX2-only: without AVX2 this resolves to <c>false</c> whatever the variable says, and
+        /// <c>BatchedQuantProjection.DispatchQ4K</c> gates on <c>CpuFeatures.HasAvx2 &amp;&amp; HasFma</c>
+        /// independently, so such a machine keeps the weight-stationary kernel and pays nothing — measured
+        /// 2026-08-25 under <c>DOTNET_EnableAVX2=0</c>: 9.539 t/s flag-unset against 9.535 t/s flag-on, and
+        /// 292 against 294 MiB of peak private commit.
         ///
-        /// <para><b>The "~3×" this used to quote is against re-decode-per-row, not against the kernel it
-        /// replaces.</b> Against weight-stationary — which is what this flag actually swaps out — the
-        /// measured result is an <b>exact tie (0.999×)</b>: <c>ProjectBatchedWeightStationary</c> already
-        /// decodes each super-block once per row tile, so the tiling has nothing left to amortise. Turning
-        /// this on for the speedup named here would have bought nothing. Corrected 2026-08-07 from
-        /// <c>Runtime/README.md</c>, which had it right.</para>
+        /// <para><b>The kernel is worth 2.98×, and the flag was still measured and REVERTED — those are not
+        /// in conflict, and the second is the reason this stays opt-in.</b> Turning it on defaults the
+        /// process to a repack that <see cref="Q4KWeight.EnsureRepacked"/> builds on the heap, which costs
+        /// <b>+1194 MiB of peak private commit</b> and <b>+186 ms once</b> at the start of decode. A long
+        /// session earns that back on its first real prompt. <b>A short CLI invocation never does</b>: a
+        /// 31-token prompt with 128 generated tokens measured <b>6558.2 ± 14.7 ms against 5991.3 ± 17.1 —
+        /// 9.5% slower for 2.4× the memory.</b> The conditions and the fitted coefficients are in
+        /// <c>docs/measured-baselines.md</c> under <c>XC-119</c>; do not restate them from here.</para>
+        ///
+        /// <para><b>Decode's per-token rate is untouched, and the one-off is the managed heap rather than
+        /// this kernel.</b> Fitted <c>decode_ms = fixed + n × per_token</c>, the three arms came out
+        /// 39.41 ± 0.05, 39.62 ± 0.83 and 40.04 ± 1.05 ms per token — every pairing inside one standard
+        /// deviation. A <c>*.gguf.repack</c> sidecar reaches this same kernel through <c>IsPrepacked</c>,
+        /// with <b>no</b> managed heap, and pays 141.5 ± 14.2 ms of fixed cost against the heap route's
+        /// 290.1 ± 21.7. <b>That is why the sidecar is the route being pursued and this flag is not.</b></para>
+        ///
+        /// <para><b>The "exact tie (0.999×)" this comment quoted until 2026-08-25 is a different experiment
+        /// and was never about this flag.</b> That number is the marginal effect of lifting the
+        /// <c>bias.IsEmpty</c> clause out of the dispatch gate — <c>docs/measured-baselines.md</c>, row "Bias
+        /// in the Q4_K tiled prefill GEMM" — and its record carries no model, prompt length or thread count.
+        /// Its stated mechanism is also only half right: <c>ProjectBatchedWeightStationary</c> does hoist the
+        /// <i>scale</i> decode out of its row loop (<c>Q4KDotKernel.WeightStationaryChunk</c>), but it calls
+        /// <c>MainDot</c> against the packed nibbles once per row — so the nibble unpack is precisely what the
+        /// <c>block_q4_Kx8</c> tiling still has left to amortise. <b>The flag is off for the RAM and the
+        /// short-invocation cost above, not because the kernel ties.</b></para>
         /// </summary>
         public static readonly bool TiledPrefillEnabled = ResolveFlag(OverfitEnvironment.TiledPrefill);
 
@@ -78,16 +101,35 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// <inheritdoc cref="AblateF16Scales"/>
         internal static bool AblateNibbleUnpack;
 
-        private static bool ResolveFlag(string envVar)
+        /// <summary>
+        /// Resolves one of the three opt-in flags above: OFF unless the variable asks for it, and OFF without
+        /// AVX2 whatever the variable says.
+        ///
+        /// <para><c>internal</c> rather than <c>private</c> so a test can drive it through a throw-away
+        /// variable name. Until 2026-08-25 nothing pinned what these flags do with an unset, a refusing or an
+        /// unrecognised value: a mutation that flipped the default to on, run against the whole suite with the
+        /// new test class excluded, was noticed by <b>0 of 2795</b> tests.</para>
+        /// </summary>
+        internal static bool ResolveFlag(string envVar)
         {
             if (!CpuFeatures.HasAvx2)
             {
                 return false;
             }
 
-            var raw = Environment.GetEnvironmentVariable(envVar);
-            return raw is "1" || string.Equals(raw, "true", StringComparison.OrdinalIgnoreCase);
+            return IsTruthy(Environment.GetEnvironmentVariable(envVar));
         }
+
+        /// <summary>
+        /// The ON spellings. <b>Unset (<c>null</c>) is not one</b>, and neither is any value this does not
+        /// recognise — <c>OVERFIT_X=yes</c> leaves an opt-in flag off.
+        ///
+        /// <para>A default-ON sibling of this table was written on 2026-08-25 and removed the same day with
+        /// <see cref="TiledPrefillEnabled"/>'s default. It is not kept for a future caller: nothing here needs
+        /// it, and six lines are cheaper to write again than an unused method is to keep honest.</para>
+        /// </summary>
+        internal static bool IsTruthy(string? raw) =>
+            raw is "1" || string.Equals(raw, "true", StringComparison.OrdinalIgnoreCase);
 
         /// <summary>Sequential full-matrix GEMV (one thread).</summary>
         public static void Gemv(

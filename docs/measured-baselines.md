@@ -19,6 +19,152 @@ four of them.
 
 Dev box for most figures: Ryzen 9 9950X3D, Windows, .NET 10, Release.
 
+## `XC-119`: the tiled Q4_K prefill kernel is worth 2.98x, the "exact tie" that said otherwise measured something else, and making the flag default-on was still REVERTED — 2026-08-25
+
+**Outcome first, because this section is long and the last three words of its title are the result.**
+`OVERFIT_TILED_PREFILL` was flipped to default-on, measured, and **reverted the same day**. It stays
+opt-in. The kernel is genuinely worth 2.98x; the *default* is not, because the in-process repack costs
++1194 MiB and leaves a short CLI invocation 9.5% slower. The `*.gguf.repack` sidecar reaches the same
+kernel without either cost and is the route being pursued. Everything below is the evidence, and every
+number in it was taken with the flag toggled explicitly, so none of it depends on what the default is.
+
+**Provenance.** `Scripts/gguf_bench.py` slope fit (`t(r) = fixed + r*work`), `pp512`, `-t 32`,
+`C:\qwen3b\qwen.q4km.gguf` reached through a hard link with **no `*.gguf.repack` sidecar beside it** (a
+sidecar sets `IsPrepacked` and makes this flag inert — see `Runtime/README.md`). Three interleaved fits,
+arm order alternating per round, `machine.quiet_guard` on every window. 9950X3D, Windows, .NET 10, Release,
+HEAD `dc12895`.
+
+| arm | `pp512` | peak private commit | peak working set |
+|---|---|---|---|
+| `OVERFIT_TILED_PREFILL` unset — weight-stationary | **109.25 ± 1.68 t/s** | 616 MiB | 2423 MiB |
+| `OVERFIT_TILED_PREFILL=1` — register-tiled | **325.26 ± 3.30 t/s** | **1894 MiB** | 3690 MiB |
+
+**2.98x, against a within-session band of ±1.84%; worst R² 0.99990.** The cost is **+1278 MiB of peak
+private commit**, because `Q4KWeight.EnsureRepacked` builds a heap copy of every Q4_K tensor on the first
+prefill. **Decode does not separate**: 27.93 against 27.71 t/s at `tg128`, 180 MiB either way — a process
+that never prefills never pays. **This is the number that argued for a default-on flag, and the sections
+below are the ones that overturned it.**
+
+**Honest caveat on the campaign: 3 of 6 windows were condemned by `quiet_guard` for scanner activity**
+(MsMpEng, 0.99–1.92% of 2948–2991 core-s, ceiling 8%), and **all three were flag-unset windows** — those
+runs are 3x longer and so catch more of it. Contamination there inflates the *slow* arm, i.e. it can only
+push the ratio up, and at ≤2% it cannot account for 2.98x. The three flag-on windows were quiet.
+
+**The AVX2 arm, measured rather than reasoned.** Under `DOTNET_EnableAVX2=0`: **9.539 t/s flag-unset
+against 9.535 t/s flag-on**, 292 against 294 MiB. Two independent gates (`Q4KGemvKernel.ResolveFlag` and
+`BatchedQuantProjection.DispatchQ4K`) both require AVX2, so a non-AVX2 machine silently keeps the
+weight-stationary kernel, never repacks, and pays nothing whatever the flag says. Exit code 0 in every arm;
+no crash, no fallback warning, no extra RAM.
+
+### The 2.98× is WARM, and cold it inverts below ~90 prompt tokens
+
+`gguf_bench` fires an untimed warm-up repetition, so the repack is already paid when its clock starts. A
+**cold, one-shot process** — a CLI invocation, a first request — pays it inside its only `Prefill` call.
+`Scripts/GenHarness` times exactly that, two repeats per arm, same box and build:
+
+| cold prefill, one process | `=0` (weight-stationary) | unset (tiled) | |
+|---|---|---|---|
+| **31-token prompt** | 1031 / 1136 ms | **1449 / 1474 ms** | tiled **1.35× SLOWER**, +390 to +440 ms |
+| **505-token prompt** | 5566 / 5675 ms | **2974 / 3000 ms** | tiled **1.87× faster**, −2.6 s |
+
+Fitting a line through those four points puts the break-even near a **90-token prompt** — that is an
+extrapolation from two lengths, not a measurement, and the crossover was not searched for. A server that
+stays warm pays the repack once and wins on every request after the first.
+
+### Decode: no rate loss, but a +186 ms one-off — and it is the managed heap, not the kernel
+
+**An 8-token decode sample reads this as a 1.45× regression. It is not one.** `Scripts/GenHarness`, 505-token
+prompt then decode **in one process**, decode timed at 8, 32 and 128 tokens and fitted as
+`decode_ms = fixed + n × per_token`. Three rounds, arm order rotated, token points rotated, `quiet_guard` on
+every window.
+
+| arm | fixed | per-token | peak private commit | cold prefill |
+|---|---|---|---|---|
+| A — no repack (`=0`) | **103.8 ms** | **39.41 ms** (25.37 t/s) | 1015 MiB | 5566 ms |
+| B — heap repack (the proposed default) | **290.1 ms** | **39.62 ms** (25.24 t/s) | 2209 MiB | 3026 ms |
+| C — mmap'd `.repack` sidecar, `=0` | **141.5 ms** | **40.04 ms** (24.98 t/s) | **930 MiB** | 2780 ms |
+
+**The per-token rate is the same in all three arms** — 1.6% apart, inside the ±2% floor, worst R² 0.99872.
+The whole difference is **+186.3 ms once**, which is why the ratio falls as the sample grows: **1.51× at 8
+tokens, 1.12× at 32, 1.04× at 128**, and toward 1.00× after that.
+
+**Both coefficients with bands, fitted once per round rather than pooled**, because a ratio is the wrong way
+to report a fixed cost and a pooled R² is not an uncertainty:
+
+| arm | `fixed` | `per_token` |
+|---|---|---|
+| A — no repack | **103.8 ± 6.1 ms** | **39.41 ± 0.05 ms** |
+| B — heap repack | **290.1 ± 21.7 ms** | **39.62 ± 0.83 ms** (1.005×) |
+| C — mmap sidecar | **141.5 ± 14.2 ms** | **40.04 ± 1.05 ms** (1.016×) |
+
+An independent two-arm campaign gave `per_token` **39.75 ± 0.28** and **39.75 ± 0.66 ms**, a ratio of
+**1.000×**. **Every `per_token` pairing overlaps inside one standard deviation; every `fixed` pairing is
+five to nine standard deviations apart.** The data supports a one-off startup cost and refutes a per-token
+rate loss. **The one-off does not depend on prompt length either**: +195.4 ms after a 31-token prompt,
++197.2 ms after a 505-token one.
+
+### The measurement that killed the default: which product it suits, and which it does not
+
+A one-off is paid once per **process**, so it lands very differently on a long chat than on a short CLI
+invocation — and the short case carries the cold-prefill penalty as well. Measured end to end: 31-token
+prompt, 128 generated tokens, whole process, 3 interleaved rounds, all windows quiet.
+
+| arm | in-engine total | against A | peak private commit |
+|---|---|---|---|
+| A — no repack (`=0`) | **5991.3 ± 17.1 ms** | — | 849–870 MiB |
+| B — heap repack (**the proposed default**) | **6558.2 ± 14.7 ms** | **+567.0 ms, 9.5% slower** | 2045–2058 MiB |
+| C — mmap sidecar (`=0`) | 6099.9 ± 75.1 ms | +108.6 ms | **793–794 MiB** |
+
+**The two costs are additive and confirmed so**: +422 ms of cold prefill plus +141 ms at the start of decode.
+
+- **A server or a long chat session pays the 567 ms once** and saves 2.6 s on every 505-token prefill. Net
+  ahead from its first real request.
+- **A short CLI invocation pays it on every invocation and saves nothing**, because a 31-token prefill is
+  faster without the repack. **9.5% slower end to end, for 2.4× the memory.** `Sources/Cli` is exactly this
+  case.
+- **The sidecar is the route that suits both**: same tiled kernel, +109 ms (mostly the mmap at load) and
+  *less* memory than not repacking at all.
+
+**C is the discriminator and it names the mechanism.** It runs the *same tiled kernel* as B — its prefill is
+2780 ms against B's 3026 and A's 5566 — with **zero managed heap**, because `IsPrepacked` hands out a mapped
+view. Its fixed cost is +37.7 ms, not +186.3. **So about 80% of the one-off comes from the ~1.2 GiB of
+long-lived LOH arrays, not from the tiled path.** I did not separate a gen2 pause from first-touch commit of
+that heap; both are "the managed heap" and telling them apart needs GC counters.
+
+**This corrects `XC-118`'s "the sidecar is worth essentially nothing".** That is true of *warm prefill
+throughput* only. On peak commit (930 against 2209 MiB) and on decode's fixed cost (141.5 against 290.1 ms)
+the sidecar is clearly the better of the two routes to the same kernel.
+
+**One caveat: 1 of C's 3 windows was condemned** (round 3, MsMpEng, 2.05% of 278 core-s, ceiling 8%). C's
+per-length spread stayed at ±0.09 to ±0.56 t/s, so it did not visibly move, but the window is not clean.
+
+**And the instrument note that made this measurable at all.** `gguf_bench --phase tg` **cannot** produce this
+shape: `Sources/Benchmark/Helpers/GgufThroughputProbe.cs:120-123`'s `ResetForDecode` prefills
+`_decodeSeedToken`, a **single** token, so `-p 512 -n 128` decodes after a 1-token prefill and
+`EnsureRepacked` never fires — measured as 180 MiB peak commit in *both* arms. A decode A/B run that way
+reports "no effect" while running identical code in both arms.
+
+### The kernel is not bit-identical, and greedy text does change — a further reason the default stayed off
+
+Same model, same 31-token prompt, 48 greedy tokens, no sidecar: **the two arms produced different text.**
+Both are coherent and on-topic; the tiled arm drops one clause ("electromechanical computers,"). This is
+the accepted reassociation trade the repacked kernels are held to — validated by coherence, not
+byte-parity. **It is tolerable behind an opt-in flag and would have moved every default user's output**,
+which is a third cost the reverted default carried. `BatchedQuantProjection`'s doc records "24 of 24
+identical greedy tokens" from a 301-token prompt on 2026-08-21; **that does not generalise** — at 48
+tokens from a short prompt the argmax flips.
+
+**What this corrects.** The row "Bias in the Q4_K tiled prefill GEMM" below records an **exact tie
+(0.999x)** and was read for eighteen days — in `Q4KGemvKernel.cs`, in `Runtime/README.md` and in
+`performance-discipline.md` — as meaning the tiled kernel ties the weight-stationary one. It does not: that
+number is the marginal effect of lifting the `bias.IsEmpty` clause out of the dispatch gate. Its mechanism
+claim is also half wrong. `Q4KDotKernel.WeightStationaryChunk` does hoist the *scale* decode (`d`, `dmin`,
+`UnpackQ4_KScalesMins`) out of its row loop, but it calls `MainDot` against the packed nibbles once per
+row — so the nibble unpack is exactly what the `block_q4_Kx8` tiling still has left to amortise.
+**`bias.IsEmpty` no longer exists in the gate, so that arm cannot be re-run**, and the row carries no
+model, prompt length or thread count. Treat it as a narrow result about biased attention projections, not
+as a fact about the flag.
+
 ## `XC-92`: VGG-16's 14x14 convolutions were running on seven cores of sixteen — 2026-08-25
 
 **Provenance.** VGG-16 (`C:\onnxmodels\vgg16.onnx`) through `Scripts/ProfHarness` at `PROF_NODES=1`,
@@ -476,6 +622,25 @@ loaded box and median 4.26% after a reboot to a single process — slightly *wor
 few percent therefore needs a different experiment shape, not a quieter machine.
 
 ### Overfit vs llama.cpp `6d5a910` — measured 2026-08-25 (`XC-76`)
+
+> **LABEL CORRECTION, 2026-08-25, and it applies to every `pp512` number in this section.**
+> `Sources/Benchmark/Helpers/GgufBenchDriver.cs:110` fires an **untimed warm-up repetition** before
+> the timed ones, so these are **WARM MARGINAL** prefill figures, not cold ones. The section did not
+> say so, and that omission is the main session's, not the builder's. **The ratios against llama.cpp
+> stand** — `llama-bench` discards a warm-up of its own, so the comparison is like-for-like; what was
+> wrong is the label.
+>
+> **The distinction is worth 1.41x and it is not a detail.** Measured the same day, one session, one
+> build, `-t 32` on both: at **512 tokens warm** the sidecar reads **2.87x**; at **511 tokens cold**
+> it reads **2.03x**. That single mechanical difference — not prompt length, not build, not thread
+> count — reconciles this section's **2.91x** with `XC-105`'s **1.96x**. Both were right and they
+> answered different questions. **Prompt length is refuted as the cause**: `XC-105`'s own sweep rises
+> monotonically (1.50x at 156, 1.65x at 286, 1.96x at 572), so at 512 it would read BELOW 1.96 and
+> further from 2.91, not closer.
+>
+> **A warm arm never pays `EnsureRepacked`** — the runtime repack lands in the discarded warm-up. So
+> a warm number measures the tiled kernel with its one-time cost amortised away to nothing, and **no
+> design for a first request may be built on it.**
 
 **The first Overfit-versus-llama.cpp ratio this repository can re-make.** Every previous one came from
 something not in the tree; `XC-76` found sixty-plus classes in `Sources/Benchmark` and **not one that loads
@@ -3189,7 +3354,8 @@ re-run or their own archaeology; do not paper over them by copying `b9441` acros
 | **Register-blocking** (direct conv) | regressed | reverted |
 | **K-blocking + A-packing** (im2col GEMM) | regressed | reverted |
 | **AVX-512 decode port** | regressed | Decode is memory-bandwidth-bound after GQA K/V-once + fuse-quantize; a faster dot kernel saves cycles already hidden behind weight-read latency. |
-| **Bias in the Q4_K tiled prefill GEMM** (`GemmTiled`) | **0.999× — an exact tie** | `bias.IsEmpty` barred 88% of prefill dispatches; lifting it changed nothing because `ProjectBatchedWeightStationary` already amortises weight decode across the row tile. The "~3×" in the kernel doc is against re-decode-per-row, **not** against weight-stationary. |
+| **`OVERFIT_TILED_PREFILL` default-on** (`XC-119`, 2026-08-25) | prefill **2.98× faster**, and **reverted anyway** | The kernel wins; the default loses. In-process repack costs **+1194 MiB** peak private commit and **+186 ms once** at the start of decode, so a short CLI invocation (31-token prompt, 128 tokens) went **6558.2 ± 14.7 against 5991.3 ± 17.1 ms — 9.5% slower for 2.4× the memory**. Decode's per-token rate is untouched (39.41/39.62/40.04 ms, all pairings inside 1 sd). The `*.gguf.repack` sidecar reaches the same kernel with **no** managed heap. Full section at the top of this file. |
+| **Bias in the Q4_K tiled prefill GEMM** (`GemmTiled`) | **0.999× — an exact tie** | `bias.IsEmpty` barred 88% of prefill dispatches; lifting it changed nothing. **Read the `XC-119` section at the top before citing this row.** It is the marginal effect of that one gate clause, **not** a comparison of the tiled and weight-stationary kernels — those measure **2.98×** apart — and it carries no model, prompt length or thread count. Its stated mechanism is half right: weight-stationary hoists the *scale* decode and re-does the *nibble* unpack per row. |
 | **`OverfitPool<T>`** | 3× slower typical, ~3000× pathological vs `PooledBuffer<T>` | deleted |
 | **Q6_K weight-stationary** | **+13.5% slower** on `ffn_down` | Canaries drifted 1–2%, so the regression was real, not noise. |
 | **VNNI `vpdpbusd`** vs AVX2 `vpmaddubsw`+`vpmaddwd` | AVX2 ≈ VNNI ≈ 19.1 tok/s, ~0 gain | Decode was already bandwidth-bound, not ALU-bound. |

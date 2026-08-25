@@ -46,6 +46,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// the flag off" property it exists to prove goes untested. A concurrent <c>false</c> does not redden the
         /// model test either — measured 2026-08-21, the two kernels differ by <c>1.150e-5</c> max abs
         /// (<c>2.255e-6</c> relative) and a 301-token prompt gave 24 of 24 identical greedy tokens either way.
+        /// (<b>That last figure does not generalise, and the argument above does not need it to.</b> Measured
+        /// 2026-08-25 on the same model: a 31-token prompt and 48 greedy tokens gave <i>different</i> text in
+        /// the two arms — coherent both ways, one clause apart. The point stands either way: no test outcome
+        /// separates a collided run from a healthy one, which is why the fix is structural.)
         /// What it destroys is that test's <i>purpose</i>: its no-sidecar arm stops calling <c>EnsureRepacked</c>,
         /// the runtime-repack path the whole comparison is about, while <c>Assert.Equal</c> still passes. No test
         /// outcome separates either broken state from a healthy run, so only making the collision impossible
@@ -483,16 +487,21 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             int inputSize, Span<sbyte> quants, Span<float> scales, Span<short> sums, bool preQuantized)
         {
             // Register-tiled GEMM: repacked block_q4_Kx8, decode each super-block once and reuse across a
-            // tile of NR columns - measured ~3x vs RE-DECODE-PER-ROW, 1.61x end-to-end prefill.
+            // tile of NR columns. Measured 2026-08-25 against the weight-stationary kernel this replaces,
+            // pp512, -t 32, Qwen2.5-3B Q4_K_M, no sidecar: 2.98x (325.26 +/- 3.30 against 109.25 +/- 1.68
+            // t/s, three interleaved fits), for +1278 MiB of peak private commit.
             //
-            // The baseline in that "~3x" is the point, and this comment named the wrong one until
-            // 2026-08-07: it said "vs weight-stationary". Against weight-stationary the measured result is
-            // an EXACT TIE (0.999x), because ProjectBatchedWeightStationary already amortises weight decode
-            // across the row tile - the same thing the tiling does. See Runtime/README.md, which has
-            // carried the correction since the bias-support measurement.
+            // The "EXACT TIE (0.999x)" this comment carried from 2026-08-07 to 2026-08-25 was a DIFFERENT
+            // experiment - the marginal effect of lifting the bias.IsEmpty clause out of this gate - and it
+            // was never a measurement of the OVERFIT_TILED_PREFILL flag. Its mechanism claim was also half
+            // wrong: ProjectBatchedWeightStationary hoists the SCALE decode out of its row loop, but calls
+            // MainDot against the packed nibbles once per row, so the nibble unpack is exactly what the
+            // block_q4_Kx8 tiling still has to amortise.
             //
-            // Default-on when the weight is already prepacked (an offline sidecar mmap'd it -> zero
-            // extra RAM); otherwise opt-in via OVERFIT_TILED_PREFILL since repacking copies the weight.
+            // Default-on when the weight is already prepacked (an offline sidecar mmap'd it -> zero extra
+            // RAM); otherwise opt-in via OVERFIT_TILED_PREFILL, because repacking copies the weight onto the
+            // heap. Making the env flag default-on was measured on 2026-08-25 and REVERTED: +1194 MiB and a
+            // short CLI invocation 9.5% slower. The sidecar reaches this same kernel for none of that.
             // No-bias only (GemmTiled applies none). AVX2/FMA required - the kernel is x86-only, so on ARM
             // (e.g. the Android app) this falls through to the weight-stationary path even if a sidecar
             // mmap'd a prepacked layout (IsPrepacked would otherwise bypass the env flag's AVX2 gate).

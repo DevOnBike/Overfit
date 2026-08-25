@@ -41,3 +41,6 @@
 - [`-t N` is TWO thread counts in Overfit](reference_overfit_t_flag_is_two_thread_counts.md) — 16 general / 10 decode; `-t 32` also gives 10. Report both or the row lies about its configuration.
 - [The .repack sidecar is worth +191% on PREFILL only](reference_repack_sidecar_worth.md) — decode does not separate; cannot be switched off; prefill is 1.33x behind llama.cpp with it and 3.87x without.
 - [A symlink breaks the mmap model load](reference_symlink_breaks_mmap_model_load.md) — Windows `FileInfo.Length` returns 0 for a reparse point; use `mklink /H`. Open product defect.
+- [Warm vs cold prefill: two instruments](reference_warm_vs_cold_prefill_instruments.md) - gguf_bench fires a warm-up rep (marginal); GenHarness times one COLD Prefill. Same length, same build: 2.87x vs 2.03x.
+- [Pipe deadlock on a polled child](reference_pipe_deadlock_on_child_output.md) - poll() + stdout=PIPE hangs once the child passes ~4 KB; GenHarness echoes the prompt, so long prompts hang AFTER the work. Flat CPU is the tell.
+- [A number's scope is its row title](reference_measurement_scope_is_its_row_title.md) — the 0.999x "exact tie" was ONE gate clause, not the kernel swap (2.98x); the flag was flipped default-ON and REVERTED same day (short CLI 9.5% slower). Decode-measurement traps inside.

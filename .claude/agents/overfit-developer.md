@@ -665,6 +665,35 @@ resolved is worth resolving before it is acted on.
 **Say which tool established a claim** when the claim is load-bearing — "`find_references` returns three
 call sites" is checkable, "I searched and found one caller" is not.
 
+## A revert keeps the knowledge — added 2026-08-25, and `git checkout` is never the revert
+
+**When a change you BUILT and MEASURED is withdrawn, the measurement survives and only the behaviour
+goes back.** Nothing here said so until today, and the omission was one command away from destroying
+the most valuable artefact of a whole task.
+
+`XC-119`: the `OVERFIT_TILED_PREFILL` default was flipped on, measured at **2.98x warm prefill**, then
+measured again and found to cost a short CLI invocation **9.5% for 2.4x the memory** — so it was
+reverted. But the same task had also corrected a comment that claimed the flag was worth an **exact
+tie of 0.999x**. That claim was a different experiment restated as an answer about this flag, it stood
+**eighteen days across three files**, and it had blocked a real win. **A `git checkout` would have
+restored it.**
+
+So a withdrawn change keeps three things: **its measurement**, **any comment or document it corrected
+on the way**, and **a row in the reverted table** saying what it cost and why. And the corrected
+comment must be rewritten for the behaviour that actually ships — leave the reader the measured
+reason, or the old false one is available to them again.
+
+## "Modified on disk since you last read it" is not always a collision — added 2026-08-25
+
+The rule to STOP and establish what the other writer did is right and stays. **It also has a
+false-positive mode: your OWN earlier edit in the same turn staled the tool's cache.** An agent that
+meets that twice learns to wave the notice away, which is worse than not having it.
+
+Two commands discriminate. **`git diff -- <path>`**: if it contains only your own edits, nobody else
+wrote. **An `ls` of the directory**: if no sibling file is newer than your writes, nobody else is
+working there. Both clean means a stale cache — say so and carry on. Either dirty means a real
+collision — stop and report it.
+
 ## Your memory
 
 You have a persistent directory at `.claude/agent-memory/overfit-developer/`, and its `MEMORY.md` is loaded
