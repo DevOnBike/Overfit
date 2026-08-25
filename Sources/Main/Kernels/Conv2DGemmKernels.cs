@@ -1546,30 +1546,82 @@ namespace DevOnBike.Overfit.Kernels
         /// workers, and never widens the domain past the number of <c>Mr</c> row blocks that exist.</para>
         /// </summary>
         /// <summary>
-        /// Whether the fused im2col path splits M as well as N. <b>Off, because it is measured to lose
-        /// there</b>; <c>OVERFIT_CONV_FUSED_M_SPLIT=1</c> restores it so the loss can be re-measured.
+        /// Whether the fused im2col path splits M as well as N. <b>On since 2026-08-25</b>, when the split
+        /// was capped at two blocks; <c>OVERFIT_CONV_FUSED_M_SPLIT=0</c> turns it off for an A/B.
         ///
-        /// <para><b>A win invalidated by a later change, which is the part worth remembering.</b> The M-split
-        /// was measured as a gain when the B pack it duplicated was a pack. In the fused path the same
+        /// <para><b>It was off before that, and the reason it lost is worth keeping.</b> The M-split was
+        /// measured as a gain when the B pack it duplicated was a pack. In the fused path the same
         /// duplication is an <b>im2col gather</b>: work items are <c>item / mBlocks</c>, so five row-blocks
-        /// sharing a panel gather that panel five times. On VGG-16's last three convolutions that is 16.5 MB
-        /// gathered where 4.1 MB is needed, and it costs more than the extra parallelism returns.</para>
+        /// sharing a panel gather that panel five times. Under the old
+        /// <c>ceil(workers / nPanels)</c> rule that is what the shipping 32-worker pool asked for, and on
+        /// VGG-16's last three convolutions it gathered 16.5 MB where 4.1 MB is needed. <b>Measured
+        /// 2026-08-19, ABAB, three interleaved passes:</b> VGG-16 ran 35.47/34.73/34.92 ms with the split
+        /// against <b>33.68/33.62/33.49 without</b>, <b>-4.1% mean</b>.</para>
         ///
-        /// <para><b>Measured 2026-08-19, ABAB, three interleaved passes:</b> VGG-16 runs 35.47/34.73/34.92 ms
-        /// with the split and <b>33.68/33.62/33.49 without</b> — <b>-4.1% mean</b>, and the spread falls from
-        /// 2.1% to 0.6%. Per layer, nodes 24/26/28 go from 839/814/791 to <b>1007/1014/1025 GFLOP/s</b>.</para>
-        ///
-        /// <para><b>What this does NOT fix.</b> Without the split those layers run seven work items on 32
-        /// workers. 1007 GFLOP/s against this box's 5136 all-core ceiling is 19.6%, and 7/32 is 21.9% — they
-        /// are near-perfectly efficient <i>on seven cores</i>. The parallelism is still missing; the split
-        /// was simply the wrong way to buy it. Expanding the panels once into a shared buffer and then
-        /// splitting M over that buffer is the shape that buys it without the redundant gather, and it is
-        /// what <c>MlasConvExpandThenGemmSegmented</c> does.</para>
+        /// <para><b>What changed is the number of blocks, not the mechanism</b> — see
+        /// <see cref="MaxFusedMBlocks"/> for the arm that separates the two.</para>
         /// </summary>
         internal static readonly bool FusedMSplitEnabled =
-            Environment.GetEnvironmentVariable(OverfitEnvironment.ConvFusedMSplit) == "1";
+            Environment.GetEnvironmentVariable(OverfitEnvironment.ConvFusedMSplit) != "0";
 
-        /// <summary>The M-split decision for the fused path, which is off unless explicitly restored.</summary>
+        /// <summary>
+        /// How many ways one panel's M sweep is split, when it is split at all.
+        ///
+        /// <para><b>Two, and the number is measured rather than reasoned.</b> Each extra block re-gathers
+        /// the whole panel, so the added work is <c>(mBlocks - 1) x gather</c> while the added width is
+        /// only useful up to the number of PHYSICAL cores — which the pool, sized from
+        /// <c>Environment.ProcessorCount</c>, does not know. From the published per-term costs the ratio
+        /// GEMM/gather for one panel is <c>2 x m x 32 x k / 301e9</c> over <c>32 x k x 0.964e-9</c>, i.e.
+        /// <c>m / 145</c>: for VGG's <c>m = 512</c> a two-way split adds 22% work and a four-way adds
+        /// 66%.</para>
+        ///
+        /// <para><b>Measured 2026-08-25 on the shipped binary, VGG-16, 9950X3D, Release, per-node
+        /// profiler, three sittings, arm order rotated, box quiet, canary 1.211-1.228 ms throughout.</b>
+        /// Nodes 14/15/16, median ms, <c>OVERFIT_CONV_FUSED_M_SPLIT=0</c> against the default:
+        /// <b>0.84/0.83/0.82 -> 0.63/0.65/0.64</b> at 16 workers pinned one per physical core, and
+        /// <b>0.85/0.89/0.90 -> 0.58/0.67/0.66</b> at the shipping 32-logical pool. Convolution total
+        /// 17.46 -> 16.58 and 17.08 -> 16.52 ms. <b>The one-core arm is the control and does not move</b>
+        /// (3.96/3.94/3.94 against 3.96/3.96/3.95): a single worker never splits, so the change adds no
+        /// work of its own.</para>
+        ///
+        /// <para><b>Why two and not four, measured on an exploratory build carrying a cap lever.</b> Nodes
+        /// 14/15/16 at the 32-logical pool: no split 0.85/0.88/0.91, cap 4 — which is what
+        /// <c>floor(32/7)</c> asks for — 0.82/0.89/0.88, cap 3 0.71/0.82/0.77, cap 2 0.59/0.67/0.65. The
+        /// cost is monotone in the cap, which is the duplication term and not the width term.</para>
+        ///
+        /// <para><b>The one-round argument is not the whole story, and that is why this is a constant.</b>
+        /// <c>ceil(16/7) = 3</c> puts 21 items on 16 workers — two rounds — and measured
+        /// <b>0.81/0.81/0.80</b>, no better than no split at all. But <c>floor(32/7) = 4</c> fits in one
+        /// round of the 32-worker pool and is <i>also</i> no better, because sixteen of those workers are
+        /// SMT siblings that add no gather throughput. Rounds explain the first arm; duplicated work
+        /// explains the second.</para>
+        /// </summary>
+        private const int MaxFusedMBlocks = 2;
+
+        /// <summary>
+        /// Measurement only: <c>OVERFIT_CONV_FUSED_M_BLOCKS=n</c> forces the fused path to exactly
+        /// <c>n</c> M-blocks on every layer, bypassing the panel-count gate in
+        /// <see cref="FusedMBlocksFor"/>. Unset it is 0 and the gate decides, which is what ships.
+        ///
+        /// <para><b>It is kept because the loss it measured is the useful part</b>, in the same way as
+        /// <see cref="ExpandPanelsEnabled"/>. See <see cref="FusedMBlocksFor"/> for the numbers.</para>
+        ///
+        /// <para><b>A field rather than a readonly, so a test can drive it</b> — a lever that changes the
+        /// row decomposition needs a correctness arm, and the shipping rule never asks for more than two
+        /// blocks, so nothing else in the suite ever executes three or four. Mirrors
+        /// <see cref="AblatePackB"/>. Anything that writes it belongs in
+        /// <c>ExclusiveProcessMeasurementCollection</c>: it is process-wide.</para>
+        /// </summary>
+        internal static int FusedMBlocksOverride = ResolveFusedMBlocksOverride();
+
+        private static int ResolveFusedMBlocksOverride()
+        {
+            var raw = Environment.GetEnvironmentVariable(OverfitEnvironment.ConvFusedMBlocks);
+
+            return int.TryParse(raw, out var blocks) && blocks > 0 ? blocks : 0;
+        }
+
+        /// <summary>The M-split decision for the fused path.</summary>
         private static int ResolveFusedMBlocks(int m, int nPanels)
         {
             if (!FusedMSplitEnabled)
@@ -1577,7 +1629,72 @@ namespace DevOnBike.Overfit.Kernels
                 return 1;
             }
 
-            return ResolveMBlocks(m, nPanels);
+            var rowBlocks = (m + Mr - 1) / Mr;
+
+            if (FusedMBlocksOverride > 0)
+            {
+                return Math.Min(rowBlocks, FusedMBlocksOverride);
+            }
+
+            return FusedMBlocksFor(rowBlocks, nPanels, OverfitParallel.MaxDegreeOfParallelism);
+        }
+
+        /// <summary>
+        /// How many ways the fused path splits M, from the row blocks that exist, the panels the layer
+        /// produces and the workers available. Pure arithmetic, so a test can drive every case with exact
+        /// integers instead of depending on the box it runs on.
+        ///
+        /// <para><b>Two blocks where the panels cannot fill the pool, one everywhere else.</b> VGG-16's
+        /// 14x14 convolutions produce <c>ceil(196/32) = 7</c> panels, so the dispatch at
+        /// <see cref="GemmFusedIm2Col"/> offers seven work items and at most seven workers can ever be
+        /// busy. Measured 2026-08-25 on this box: those layers take <b>3.93 ms at one core, 0.87 at seven
+        /// and 0.83 at sixteen</b> — seven to sixteen cores buys nothing, while a many-panel layer in the
+        /// same run keeps improving (node 1, 1568 panels: 3.85 -> 2.40 ms). Nine of sixteen cores were
+        /// idle, which is what seven items predicts.</para>
+        ///
+        /// <para>How many blocks, and why not more, is <see cref="MaxFusedMBlocks"/>.</para>
+        /// </summary>
+        internal static int FusedMBlocksFor(int rowBlocks, int nPanels, int workers)
+        {
+            if (nPanels <= 0 || rowBlocks <= 1)
+            {
+                return 1;
+            }
+
+            // Integer division rather than `nPanels * 2 > workers`: it cannot overflow, and it IS the
+            // guard. A layer with more than half the workers' worth of panels gets 1 here.
+            //
+            // MEASURED DIRECTLY 2026-08-25 on the layers this excludes, through the override above, which
+            // replaces the 2026-08-18 inference from GFLOP/s at 32 workers on the unfused path. VGG-16's
+            // 28x28 convolutions (nodes 10/11/12, 25 panels, m = 512), 16 workers pinned one per physical
+            // core, three sittings with the arm order rotated, median ms against the shipping rule:
+            //
+            //     blocks   node 10   node 11   node 12   the three together
+            //     1 (ship)   0.970     1.690     1.610     4.27 ms
+            //     2          1.010     1.770     1.690     4.47 ms   +4.7%
+            //     3          1.080     1.860     1.760     4.70 ms  +10.1%
+            //     4          1.130     1.980     1.890     5.00 ms  +17.1%
+            //
+            // EVERY split is a loss and the loss is monotone in the block count, so the gate is not a
+            // threshold to tune — there is no better value on the other side of it.
+            //
+            // WHY, given that 25 items on 16 workers looks like it wants more parallelism. It does not:
+            // `OverfitParallel.For` slices 25 items into ceil(25/16) = 2 per chunk, so the critical path
+            // is 2 items and the DECOMPOSITION alone permits 25/2 = 12.5x. These layers measure 6.79x,
+            // 7.78x and 8.12x at 16 cores, i.e. 54-65% of that, so the binding constraint is not the
+            // decomposition and adding items cannot reach it. Doubling to 50 items gives ceil(50/16) = 4
+            // half-items, which is the SAME 78% occupancy for one extra gather per panel.
+            //
+            // The duplicated gather was measured too, at one core where the override still runs
+            // nPanels * mBlocks items: three blocks add +14.3/+15.0/+14.6% of single-core work on these
+            // three layers and +19.5% on the 14x14 ones. So a gather is ~7% of a panel here, far cheaper
+            // than the m/145 cost model in `MaxFusedMBlocks` predicts — and the split still loses.
+            if (workers / nPanels < 2)
+            {
+                return 1;
+            }
+
+            return Math.Min(rowBlocks, MaxFusedMBlocks);
         }
 
         private static int ResolveMBlocks(int m, int nPanels)

@@ -75,14 +75,24 @@ namespace DevOnBike.Overfit.Runtime
         public const string FuseConvRelu = "OVERFIT_FUSE_CONV_RELU";
 
         /// <summary>
-        /// Set to 1 to re-enable the M-split inside the <b>fused im2col</b> convolution path.
+        /// Set to 0 to disable the M-split inside the <b>fused im2col</b> convolution path.
         ///
-        /// <para><b>The polarity is inverted against the four switches around it, and deliberately.</b> Those
-        /// default on because they are measured wins turned off for an A/B. This one defaults <b>off</b>
-        /// because it is a measured loss kept only so the loss stays reproducible — shipping it on the other
-        /// way round is how a switch once carried an unreachable number into the README.</para>
+        /// <para><b>It defaults ON since 2026-08-25</b>, when the split was capped at two blocks and measured
+        /// a win on VGG-16's 14x14 convolutions. It defaulted off before that, and this text still described
+        /// the old polarity afterwards — so read <c>Conv2DGemmKernels.FusedMSplitEnabled</c>, which is the
+        /// declaration, before trusting prose about which way a switch points.</para>
         /// </summary>
         public const string ConvFusedMSplit = "OVERFIT_CONV_FUSED_M_SPLIT";
+
+        /// <summary>
+        /// EXPLORATORY, for one measurement: force the fused convolution path to exactly this many M-blocks
+        /// on every layer, bypassing the panel-count gate that normally decides.
+        ///
+        /// <para>It exists so that <c>XC-92</c>'s question — whether splitting M pays on VGG-16's 28x28
+        /// convolutions, which produce 25 panels against 16 workers — is settled by an A/B inside one binary
+        /// rather than by arithmetic over a fitted cost model. Unset, it is inert.</para>
+        /// </summary>
+        public const string ConvFusedMBlocks = "OVERFIT_CONV_FUSED_M_BLOCKS";
 
         /// <summary>
         /// Set to 1 to expand every convolution panel once into a shared buffer instead of gathering each

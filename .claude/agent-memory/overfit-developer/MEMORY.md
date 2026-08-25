@@ -32,3 +32,7 @@
 - [A canary needs symmetric warm-up](feedback_warmup_symmetry_canary.md) — cold-vs-warm made an idle machine read -93.5 %; read EVERY line of a timed run, not just the arm you wanted.
 - [string.Create + interpolation chains](reference_string_create_interpolation_chain.md) — CS1620 "must be passed with the 'ref' keyword" really means one operand of the `+` chain lacks `$`.
 - [Provenance record for an unexplained result](reference_provenance_record.md) — `Scripts/provenance.py`; its mtime check sees only source-newer-than-dll, `--compare` is the other arm.
+- [Core-count lever for conv scaling](reference_core_count_lever_for_conv.md) — use `PROF_AFFINITY`+`DOTNET_PROCESSOR_COUNT`; `OVERFIT_PARALLEL_WORKERS` leaves `ResolveMBlocks` sized for 32 and misses the bar by 17%.
+- [A harness carries its own library copy](reference_harness_carries_own_library_copy.md) — ProfHarness/OccupancyHarness bin holds a stale `DevOnBike.Overfit.dll`; building Main or Tests does NOT refresh it, and both A/B arms then run the old default.
+- [mutate.py verdict(): the false ESCAPED, FIXED](reference_mutate_verdict_false_escaped.md) — this runner prints `Failed <FQN>`, not `[FAIL]`; 11 red tests read as "none noticed". Third outcome added; `mutation()` still LF-converts a CRLF file.
+- [Price duplicated work at ONE core](reference_price_duplication_at_one_core.md) — force the split lever, run 1 core: measured 7% per extra gather against a cost model saying 22%.

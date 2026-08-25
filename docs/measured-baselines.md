@@ -19,6 +19,121 @@ four of them.
 
 Dev box for most figures: Ryzen 9 9950X3D, Windows, .NET 10, Release.
 
+## `XC-92`: VGG-16's 14x14 convolutions were running on seven cores of sixteen — 2026-08-25
+
+**Provenance.** VGG-16 (`C:\onnxmodels\vgg16.onnx`) through `Scripts/ProfHarness` at `PROF_NODES=1`,
+driven by `Scripts/xc92_conv_scaling.py`. 9950X3D, Windows, .NET 10, Release. Three sittings, arm order
+rotated, `machine.quiet_guard` on every sitting, canary (`OverfitParallel` on balanced register-only
+work) **1.211-1.228 ms across all six readings, spread 1.1%**.
+
+**The diagnosis, and it is the part that decided the fix.** Those layers produce `N = 196` output
+positions and an AVX-512 panel is 32 columns, so `GemmFusedIm2Col` dispatches `ceil(196/32) = 7` work
+items — at most seven workers can ever be busy. Measured per layer: **3.93 ms at one core, 0.87 at seven
+cores, 0.83 at sixteen.** Seven to sixteen buys nothing, while a many-panel control layer in the same run
+keeps improving (node 1, 1568 panels: 3.85 -> 2.40 ms). **Nine of sixteen cores were idle, not
+inefficient**, and that distinguishes a decomposition fix from a memory-supply one.
+
+**The fix: the fused path splits M two ways** when a layer has fewer than half the workers' worth of
+panels (`Conv2DGemmKernels.FusedMBlocksFor`, and `OVERFIT_CONV_FUSED_M_SPLIT` now defaults ON). Shipped
+binary, `=0` against the default, nodes 14/15/16 median ms:
+
+| pool | before | after | conv total | conv scaling 1 -> 16 |
+|---|---|---|---|---|
+| 16 workers, one per physical core | 0.84 / 0.83 / 0.82 | **0.63 / 0.65 / 0.64** | 17.46 -> 16.58 ms | 6.88x -> **7.25x** |
+| 32 logical (the shipping default) | 0.85 / 0.89 / 0.90 | **0.58 / 0.67 / 0.66** | 17.08 -> 16.52 ms | — |
+| 1 core (control — a single worker never splits) | 3.96 / 3.94 / 3.94 | 3.96 / 3.96 / 3.95 | 120.36 -> 120.13 ms | — |
+
+Per-layer scaling on those three layers goes **4.71/4.77/4.82x to 6.29/6.09/6.17x**. Against ONNX
+Runtime measured in the same sitting, whose equivalent nodes scale **9.50/8.84/9.34x**, that closes
+about a third of the per-layer gap. Whole-convolution in the same run: ours 120.16 -> 16.79 = **7.16x**
+against ORT's 95.46 -> 7.58 = **12.59x**.
+
+**Two negative results from the same session, both worth not re-discovering.**
+
+| tried | outcome |
+|---|---|
+| `OVERFIT_CONV_EXPAND_PANELS=1` — the MLAS-shaped expand-then-GEMM path already in the tree, which gathers each panel once into a shared 4.1 MB buffer and then splits M 64 ways over it | **17-25% SLOWER on exactly those layers** (0.82 -> 0.97/1.02/1.01 ms), three sittings, every other layer unmoved. It removes the duplicated gather and pays more for it elsewhere; the buffer leaves L2 |
+| The obvious `floor(workers / nPanels)` rule, which gives 4 blocks at the 32-logical pool | **neutral** (0.85/0.88/0.91 -> 0.82/0.89/0.88). Cost is monotone in the block count: cap 4 neutral, cap 3 0.71/0.82/0.77, cap 2 0.59/0.67/0.65 — the duplicated gather is the term that matters, and the extra sixteen workers are SMT siblings that add no gather throughput |
+| `ceil(workers / nPanels)` = 3 blocks at 16 workers, which is what the unfused `ResolveMBlocks` asks for | **no better than no split at all** (0.81/0.81/0.80): 21 items over 16 workers is two rounds |
+
+**What this does NOT establish.** One model and one layer shape (`m = 512`, `k = 4608`, 7 panels). The
+constant 2 is measured at 7 panels on a 16-core part, not derived. Whole-convolution totals on this
+harness occasionally jump ~15% with the target layers unchanged — node 0 reads 1.05 ms in most runs and
+1.63-1.71 in others — so read the per-layer rows, not the totals. **And the first attempt at the shipped
+A/B measured nothing**: `Scripts/ProfHarness/bin` carries its own copy of `DevOnBike.Overfit.dll`, it was
+two edits stale, and both arms ran the old default. The tell was arms identical to three decimals with a
+1-core control that moved 1.6%. Assert the harness's copy hashes equal to the one you just built.
+
+## `XC-92`: VGG-16's 28x28 convolutions are NOT decomposition-starved, and splitting M is a loss at every block count — 2026-08-25
+
+**Provenance.** The instrument of the section above: VGG-16 (`C:\onnxmodels\vgg16.onnx`) through
+`Scripts/ProfHarness` at `PROF_NODES=1`, driven from `Scripts/xc92_conv_scaling.py`'s runner by the
+`PROF_AFFINITY` + `DOTNET_PROCESSOR_COUNT` route. 9950X3D, Windows, .NET 10, Release. Three sittings,
+arm order rotated, canary **1.204-1.221 ms across six readings, spread 1.4%**. `machine.quiet_guard`
+condemned sitting 1 (MsMpEng, 1.36% foreign load); sittings 2 and 3 are quiet and all three agree to
+within 2% on every arm, so nothing here rests on the condemned one.
+
+**The question.** Nodes 10/11/12 produce `ceil(784/32) = 25` panels. `OverfitParallel.For` slices that
+into `ceil(25/16) = 2` items per chunk, so **three of sixteen chunks are empty** and occupancy is 78%.
+The proposal was to split M until the items round-fit, as the 14x14 layers' two-way split did.
+
+**Measured: every split is a loss, and the loss is monotone in the block count.**
+`OVERFIT_CONV_FUSED_M_BLOCKS=n`, 16 workers pinned one per physical core, median ms across the three
+sittings:
+
+| blocks | node 10 | node 11 | node 12 | the three together | against the shipping rule |
+|---|---|---|---|---|---|
+| **1 (ships)** | **0.970** | **1.690** | **1.610** | **4.27 ms** | — |
+| 2 | 1.010 | 1.770 | 1.690 | 4.47 ms | **+4.7%** |
+| 3 | 1.080 | 1.860 | 1.760 | 4.70 ms | **+10.1%** |
+| 4 | 1.130 | 1.980 | 1.890 | 5.00 ms | **+17.1%** |
+
+There is no better value on the other side of the gate, so it is not a threshold to tune. **The lever is
+kept** (`OverfitEnvironment.ConvFusedMBlocks`) for the same reason as `ConvExpandPanels`: the loss is the
+useful part, and without it this question returns.
+
+**The reason, and it is the transferable half.** The decomposition is not what binds. A worker sweep at
+1/4/8/12/13/16 physical cores, one sitting, quiet, canary 1.215 -> 1.219 ms — measured speedup against
+what the slicing arithmetic alone permits, `items / ceil(items / min(w, items))`:
+
+| node | shape | items | w=4 | w=8 | w=12 | w=13 | w=16 | model at w=16 |
+|---|---|---:|---|---|---|---|---|---|
+| 1 | 224x224 | 1568 | 3.52x | 5.88x | 6.11x | 6.57x | **7.38x** | 16.00x |
+| 4 | 112x112 | 392 | 3.70x | 6.70x | 7.09x | 8.34x | **8.78x** | 15.68x |
+| 8 | 56x56 | 98 | 3.72x | 6.56x | 7.88x | 8.53x | **8.53x** | 14.00x |
+| 10 | 28x28 | 25 | 3.29x | 5.15x | 5.49x | 7.01x | **6.79x** | 12.50x |
+| 11 | 28x28 | 25 | 3.38x | 5.41x | 6.26x | 7.92x | **7.78x** | 12.50x |
+| 12 | 28x28 | 25 | 3.35x | 5.33x | 6.44x | 8.32x | **8.12x** | 12.50x |
+| 16 | 14x14 | 7 | 3.05x | 4.91x | 4.91x | 4.91x | **6.44x** | 7.00x |
+
+**Two things follow, and they point in opposite directions.**
+
+**The slicing model is real.** It predicts a step of exactly 1.5x between 12 and 13 workers for 25 items
+(`ceil(25/12) = 3` -> `ceil(25/13) = 2`) and equal times from 13 to 16. Measured: **+21.7 / +21.0 /
++22.7%** at 12 -> 13, and **-1.8 to -3.2%** at 13 -> 16 — the three layers are *slower* on sixteen cores
+than on thirteen. The step is at the predicted core count and nowhere else.
+
+**And it is not what binds at sixteen cores.** The realised fraction of the model **falls as the model's
+ceiling rises**: 65% at 25 items, 61% at 98, 56% at 392, 46% at 1568. **No convolution node in this model
+exceeds 8.78x at 16 cores**, whatever its item count. Nodes 11 and 12 already reach 7.78x and 8.12x, so
+they sit inside that envelope — they are not the outlier the 14x14 layers were, which measured 4.8x
+against a decomposition ceiling of 7.0x. **The whole prize on these three layers, if they were lifted to
+the best-scaling node in the model, is 4.27 -> 3.74 ms: 3.2% of a 16.44 ms convolution.**
+
+**The duplicated gather, measured instead of modelled.** Under the override a single worker still runs
+`nPanels * mBlocks` items, so the 1-core arm prices the duplication directly: three blocks add
+**+14.3 / +15.0 / +14.6%** of single-core work on nodes 10/11/12 and **+19.5%** on the 14x14 layers. One
+extra gather is therefore about **7%** of a panel here — far cheaper than the `m / 145` cost model in
+`Conv2DGemmKernels.MaxFusedMBlocks` predicts (22%) — **and the split still loses**. Do not reach for that
+cost model to predict a decomposition trade; measure the 1-core arm.
+
+**What this does NOT establish.** One model, one box, one panel width. The envelope of ~8.8x is a
+property of this machine and these layer shapes; nothing here identifies its cause, and per-core stall
+attribution at 1 core against 16 is still the open question the row points at uProf for. The 12 -> 13
+step was measured in **one** sitting, not three — it is the shape of the curve that is evidence, not its
+last digit. And `PROF_NODES=1` costs a fixed amount per call, which depresses the 16-core arm more than
+the 1-core arm, so every scaling figure here is conservative.
+
 ## What FP16 costs in accuracy, and it corrected a signed plan by 30 % — 2026-08-22
 
 Measured on the host by `GpuProbe --fp16-bound`, so **no GPU is involved and none is needed**. Relative
