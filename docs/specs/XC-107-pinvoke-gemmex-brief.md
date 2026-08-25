@@ -446,6 +446,28 @@ cannot be withdrawn. This is a business decision with a permanent technical cons
 *If unanswered:* **Assumption** — the arm is written, no agent commits anything, and placement is settled by
 the user at commit time, exactly as `C1`'s assumption already says.
 
+> **ANSWERED 2026-08-25 by the client: PUBLISH.** And the question's own premise was wrong, which is the
+> part worth keeping. The claim that this file "publishes the exact shape a commercial GPU build would take"
+> was reasoned from the CATEGORY — P/Invoke to a GPU library, and GPU is the moat — rather than from the
+> content. **Read, the content is a binding to a public C API and nothing else.** Every constant comes from
+> NVIDIA's own `cublas_api.h`, which an agent fetched over plain HTTP in about 100 kB; every entry point
+> (`cublasCreate_v2`, `cublasDestroy_v2`, `cublasSetStream_v2`, `cublasGetVersion_v2`, `cublasGemmEx`) is
+> documented public cuBLAS. The one interesting comment in `CublasGemmExArm.cs` is the row-major /
+> column-major identity that avoids a transpose, which is textbook BLAS. **Nothing about Q4_K,
+> quantisation, LoRA, or any Overfit kernel appears in either file.** A competent developer reproduces the
+> whole of `CublasNative.cs` in an afternoon, so withholding it protects nothing and costs a working probe.
+>
+> **The only real consideration was never IP — it is that publishing SIGNALS INTENT**, telling a reader
+> Overfit is exploring a GPU route. That signal is already out: `Demo/GpuProbe/README.md` states the probe
+> exists to price a GPU port, and this plan says so at length, and **both were committed before this
+> decision**. The arm adds nothing to it.
+>
+> **WHAT WOULD REVERSE THIS, and it is a different file rather than a different mood.** If the arm ever
+> grows Overfit-specific work — a device-side Q4_K dequantise, our own kernel scheduling, anything encoding
+> how *this* engine uses a GPU — that is new content, a new decision, and this answer does not cover it.
+> The moat is the kernels, the loaders, the quantisation and the zero-allocation runtime. None of it is
+> in these files.
+
 **C5 remains open and X3 sharpens it.** With our own resolver, shipping `cublas64_NN.dll` inside the zip
 would make the probe self-sufficient on a machine with only a driver. Still a licence question about a
 third party's binary being handed to a fourth party. **Restated, not answered.**
