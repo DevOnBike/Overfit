@@ -87,10 +87,39 @@ dotnet test ./Tests/Tests.csproj -c Release --collect:"XPlat Code Coverage" --re
 dotnet run -c Release --project Sources/Benchmark -- --filter "*SingleInferenceBenchmark*"
 .\Sources\Benchmark\run.cmd                                      # runs all benchmarks (--filter *)
 
-dotnet publish ./Tests/AotSmokeTest/AotSmokeTest.csproj -c Release -r linux-x64 -p:PublishAot=true -p:TreatWarningsAsErrors=true  # real AOT guard (requires C++ toolchain locally)
+dotnet publish ./Tests/AotSmokeTest/AotSmokeTest.csproj -c Release -r win-x64 -p:PublishAot=true -p:TreatWarningsAsErrors=true    # real AOT guard — on this box use win-x64 and see the note below
 .\update-code-headers.cmd                                        # applies file-header template (dotnet format / IDE0073)
 .\cleanup.cmd                                                    # purge bin/obj/.vs caches
 ```
+
+**Two of those commands do not work as written on this box, and the AOT one used to read like a dead end.**
+
+**`dotnet build -c Release` on the whole solution FAILS while the semantic-navigator MCP server is
+running**, with `MSB3021` / `MSB3027`: the server holds `Tools/SemanticNavigator`'s own
+`overfit-navigator.dll` open, so MSBuild cannot copy `obj` → `bin`. **It is not a code fault and it is not
+worth killing the server for.** Build the project you need instead — `dotnet build Tests/Tests.csproj -c
+Release` pulls in `Main` and covers almost every task here. Measured 2026-08-27: **25 of the 26 solution
+projects build clean one at a time**; only `SemanticNavigator` is blocked.
+
+**The AOT guard line said "requires C++ toolchain locally" and that reading cost a session's worth of
+"cannot check this here".** The toolchain IS installed — `C:\Program Files (x86)\Microsoft Visual
+Studio\2022\BuildTools` with the `VC.Tools.x86.x64` workload. What is missing is **`vswhere.exe` on
+`PATH`**, and ILCompiler reports that as `error MSB3073` out of
+`Microsoft.NETCore.Native.targets(396,5)` — a message that names neither `vswhere` nor `PATH` in a way
+anyone reads as fixable. **Put the installer directory on `PATH` and the guard runs:**
+
+```powershell
+$env:PATH = "C:\Program Files (x86)\Microsoft Visual Studio\Installer;$env:PATH"
+```
+
+From `.claude/do.py`, pass it through `env=` in `subprocess.run` — a shell prefix does not survive.
+**Verified 2026-08-27: exit 0, zero errors, zero IL warnings, a 0.9 MB native binary that runs and prints
+`Overfit AOT smoketest - ok`.** The block above now says `-r win-x64`, which is what works here; **the
+`aot-guard` CI job publishes `linux-x64`**, and cross-publishing that from Windows needs a different
+linker, so do not copy the CI runtime identifier into a local run.
+
+**A failure that names a missing tool is worth ten seconds of checking before it becomes "not available
+on this box".** The guard was reported unavailable, and it works.
 
 `Benchmark/Program.cs` uses `BenchmarkSwitcher.FromAssembly(...)`, so the standard BenchmarkDotNet CLI
 works end to end — select a class with `--filter`, or pass nothing for the interactive picker.
