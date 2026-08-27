@@ -80,9 +80,28 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
             get;
         }
 
+        /// <summary>
+        /// The file's <c>tokenizer.ggml.add_eos_token</c> flag, false when absent.
+        ///
+        /// <para><b>Read here, applied by the caller.</b> Unlike <see cref="AddBosByDefault"/> this is
+        /// deliberately NOT honoured by <see cref="Encode(string, bool?)"/>. Encode is also the chat path's
+        /// tokenizer, where <c>ChatTemplate</c> already renders the model's own end markers into the prompt
+        /// text; appending another end-of-text on top of them would change every prompt on any model that
+        /// sets the flag. The embedding path, which genuinely needs the trailing token, appends
+        /// <see cref="EosId"/> itself.</para>
+        ///
+        /// <para>Qwen3-Embedding sets it. Measured on Qwen3-Embedding-0.6B Q8_0 against llama.cpp: with the
+        /// EOS appended the cosine is 0.9994, without it 0.796.</para>
+        /// </summary>
+        public bool AddEosByDefault
+        {
+            get;
+        }
+
         private GgufTokenizer(
             string model, string[] tokens, int[] tokenTypes, float[] scores, string[] merges,
-            int bos, int eos, int unk, bool addBos, bool addSpacePrefix, string preType)
+            int bos, int eos, int unk, bool addBos, bool addSpacePrefix, string preType,
+            bool addEos = false)
         {
             ArgumentNullException.ThrowIfNull(tokens);
             ArgumentNullException.ThrowIfNull(tokenTypes);
@@ -112,6 +131,7 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
             EosId = eos;
             UnknownId = unk;
             AddBosByDefault = addBos;
+            AddEosByDefault = addEos;
             _addSpacePrefix = addSpacePrefix;
 
             _tokenToId = new Dictionary<string, int>(tokens.Length);
@@ -182,9 +202,11 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
             var addBos = reader.GetMeta("tokenizer.ggml.add_bos_token", !isBpe);
             var addSpacePrefix = reader.GetMeta("tokenizer.ggml.add_space_prefix", !isBpe);
             var preType = reader.GetMeta("tokenizer.ggml.pre", "default");
+            // Read, not applied — see AddEosByDefault for why the default is false and why Encode ignores it.
+            var addEos = reader.GetMeta("tokenizer.ggml.add_eos_token", false);
 
             return new GgufTokenizer(model, tokens, tokenTypes, scores, merges, bos, eos, unk,
-                addBos, addSpacePrefix, preType);
+                addBos, addSpacePrefix, preType, addEos);
         }
 
         /// <summary>Convenience: open the GGUF and build the tokenizer (does not retain the reader).</summary>

@@ -65,6 +65,15 @@ namespace DevOnBike.Overfit.Tests
         Qwen3BTokenizerJson,
 
         /// <summary>
+        /// The Qwen3-Embedding-0.6B Q8_0 GGUF, for the decoder-LM embedding parity tests.
+        ///
+        /// <para>Only the model file, not the reference vectors beside it: those are committed under
+        /// <c>Tests/test_fixtures/</c> and are present on every box, so gating on them would report a
+        /// broken checkout as a missing fixture.</para>
+        /// </summary>
+        Qwen3EmbeddingGguf,
+
+        /// <summary>
         /// AVX2 and FMA on the running CPU.
         ///
         /// <para><b>Not a fixture at all, and that is why it is worth naming here.</b> These tests measure

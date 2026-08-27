@@ -16,7 +16,7 @@ separately validated) · **❌ not yet** (different architecture — see the roa
 | Family | `general.architecture` | Notes |
 |---|---|---|
 | **Qwen2 / Qwen2.5** | `qwen2` | 0.5B–72B, GQA + RoPE + SwiGLU + RMSNorm |
-| **Qwen3** (dense) | `qwen3` | per-head QK-RMSNorm + explicit head_dim |
+| **Qwen3** (dense) | `qwen3` | per-head QK-RMSNorm + explicit head_dim; also covers Qwen3-Embedding |
 | **Llama 2 / 3.x** | `llama` | incl. RoPE scaling on 3.x |
 | **Mistral** | `llama` / `mistral` | 7B and arch-compatible variants |
 | **Phi-3 / Phi-3.5** | `phi3` | fused QKV + fused gate/up split, LongRoPE (ctx ≤ 4096) |
@@ -70,12 +70,38 @@ separately validated) · **❌ not yet** (different architecture — see the roa
 | **BGE-small/base/large-en-v1.5** | ✅ | BERT/WordPiece (`overfit pull bge`) |
 | **E5-small/base/large-v2** | ✅ | BERT/WordPiece (`overfit pull e5`) |
 | **GTE-* (English, BERT)** | 🟢 | BERT/WordPiece variants |
+| **Qwen3-Embedding-0.6B** | ✅ | `qwen3` decoder-LM embedder, GGUF — **multilingual**, validated (see below) |
+| **Qwen3-Embedding-4B / -8B** | 🟢 | same `qwen3` architecture and the same convention; not separately validated |
 | **multilingual-e5 · bge-m3 · paraphrase-multilingual** | ❌ | XLM-RoBERTa / **SentencePiece** tokenizer (not supported) |
 | **nomic-embed-text** | ❌ | custom BERT variant (rotary) |
 
-**Multilingual RAG workaround (no extra model):** embed with the loaded chat GGUF's own hidden states —
+### Multilingual embeddings: use Qwen3-Embedding
+
+**The SentencePiece blocker in the row above does not apply to it.** Qwen3-Embedding is a `qwen3` decoder
+used as an embedder, and it ships the Qwen3 byte-level BPE vocabulary *inside the GGUF*, which
+`GgufEmbeddedTokenizer` already reads — so it needs no sibling tokenizer and routes around the missing
+SentencePiece support entirely. Qwen ship official GGUF under Apache 2.0.
+
+```csharp
+using var embedder = GgufSentenceEmbedder.ForQwen3Embedding(@"C:\qwen3-embed\Qwen3-Embedding-0.6B-Q8_0.gguf");
+var query   = embedder.EmbedQuery("Jaka jest stolica Francji?");   // instruction prefix applied
+var passage = embedder.EmbedPassage("Stolica Francji to Paryż.");   // passage side stays bare
+```
+
+**Validated against two independent references**, both on the same quantised bytes where possible:
+cosine **0.9995** against llama.cpp's `llama-embedding` on four texts including Polish, and the model
+card's own published similarity matrix reproduced to a worst deviation of **0.000988**. The numbers, what
+they were measured on, and one open question about the dequantised path are in
+[`measured-baselines.md`](measured-baselines.md).
+
+**Peak RAM is the trade to know about:** the embedder defaults to `quantize: false` because re-quantising
+an already-quantised file moves *pairwise* similarity by 8.5e-3, and that costs **3.27 GB** peak against
+1.61 GB for the 0.6B file. Pass `quantize: true` on the 4B and 8B siblings unless the box is large.
+
+**Multilingual RAG without a second model:** embed with the loaded chat GGUF's own hidden states —
 `OverfitClient.Embed(text)` (e.g. Bielik for Polish), with mean-centering for the anisotropy. Good for ranking;
-see `docs/rag-testing.md`.
+see `docs/rag-testing.md`. **Vectors produced before 2026-08-27 must be re-embedded** — `Embed` pooled the
+pre-final-norm hidden state until then, which is a different space; see the CHANGELOG.
 
 ---
 

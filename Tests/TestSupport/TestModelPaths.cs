@@ -199,6 +199,39 @@ namespace DevOnBike.Overfit.Tests.TestSupport
             public static string RequireConfigJsonPath() => Require(ConfigJsonPath, EnvVar, "BGE config.json");
         }
 
+        /// <summary>
+        /// Qwen/Qwen3-Embedding-0.6B, the official GGUF — a decoder LM used as a sentence embedder.
+        /// Default <c>C:\qwen3-embed</c>; override with <c>OVERFIT_QWEN3_EMBED_DIR</c>.
+        ///
+        /// <para>Unlike the BERT embedder fixtures this needs no sibling tokenizer: the GGUF's own
+        /// <c>tokenizer.ggml.*</c> metadata carries the Qwen3 byte-level BPE vocabulary.</para>
+        /// </summary>
+        public static class Qwen3Embedding
+        {
+            private const string EnvVar = "OVERFIT_QWEN3_EMBED_DIR";
+            public static string Dir => Resolve(EnvVar, @"c:\qwen3-embed");
+            public static string GgufPath => Path.Combine(Dir, "Qwen3-Embedding-0.6B-Q8_0.gguf");
+
+            /// <summary>
+            /// llama.cpp reference vectors for the parity test. Committed under
+            /// <c>Tests/test_fixtures/</c> (~116 KB) and copied to the test output, so unlike the model
+            /// itself it is present on every box including CI. Regenerate with
+            /// <c>Scripts/qwen3_embedding_reference.py</c>.
+            /// </summary>
+            public static string LlamaCppReferenceJsonPath => Path.Combine(
+                AppContext.BaseDirectory, "test_fixtures", "qwen3_embedding_llamacpp_reference.json");
+
+            public static string RequireGgufPath() => Require(GgufPath, EnvVar, "Qwen3-Embedding-0.6B Q8_0 GGUF");
+
+            /// <summary>
+            /// The reference JSON, or a throw. Deliberately not a skip: this file is committed, so its
+            /// absence means the build did not copy it, which is a broken checkout rather than a missing
+            /// fixture — and the two need different responses.
+            /// </summary>
+            public static string RequireLlamaCppReferenceJsonPath() => Require(
+                LlamaCppReferenceJsonPath, EnvVar, "Qwen3-Embedding llama.cpp reference vectors");
+        }
+
         /// <summary>intfloat/e5-small-v2 — default <c>C:\e5</c>; override with <c>OVERFIT_E5_DIR</c>.</summary>
         public static class E5
         {

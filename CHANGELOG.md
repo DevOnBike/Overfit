@@ -45,7 +45,50 @@ statement are how twenty-two versions went unrecorded.
 
 ## [Unreleased]
 
-_Nothing yet._
+### Breaking
+
+- **`CachedLlamaSession.Embed` and `OverfitClient.Embed` now pool the hidden state AFTER the final norm.
+  Every embedding vector produced by an earlier version is in a different space and must be re-embedded.**
+  They pooled the state BEFORE the final norm, which no reference implementation means by an embedding:
+  HuggingFace's `last_hidden_state` and llama.cpp's `llama-embedding` both mean the post-norm state, and
+  the final norm's per-channel gain is strongly anisotropic (Qwen3-Embedding-0.6B: -0.1196 to 15.3125), so
+  the two are different directions rather than a rounding apart. Measured against llama.cpp reading the
+  same quantised bytes, mean pooling moved from **0.83-0.89** to **0.9996-0.9999**; last-token pooling from
+  **0.94** to **0.9995**.
+
+  **The signature did not change, so `Scripts/api_compat_check.py` reports this clean and no tool will warn
+  you.** This entry is the only record. Anything that stored a vector — a vector index, a RAG cache, a
+  similarity threshold tuned by hand — must be rebuilt. The pre-norm vector is still available, unchanged,
+  through `CachedLlamaSession.LastHiddenState`, which is what the logit-lens and PyTorch-parity paths want.
+
+- **`PersistentVectorStore` file format version 1 → 2, and existing `.psp` caches are rejected on load.**
+  The header now carries an embedding-space id supplied by the caller and compared on load; a mismatch
+  throws `OverfitFormatException`. Without it a cache written before the change above reloads cleanly —
+  same documents, same dimension, same source count, all four of the things the reload validated — and
+  every query cosine is then computed between two different embedding spaces with nothing thrown and
+  nothing logged. See [ADR 0003](docs/adr/0003-persisted-vector-store-embedding-space-identity.md). The
+  ASP.NET RAG demo turns the throw into a logged rebuild, so an operator sees one warning and a re-index.
+
+### Added
+
+- **`GgufSentenceEmbedder`** — sentence embeddings from a decoder LM in a GGUF file, the counterpart to
+  `SentenceEmbedder`, which is BERT/WordPiece by construction. `Embed` / `EmbedQuery` / `EmbedPassage`,
+  pooling and retrieval prefixes, and a `ForQwen3Embedding` factory carrying Qwen's own published
+  convention. See [ADR 0004](docs/adr/0004-gguf-decoder-lm-sentence-embedder-public-surface.md).
+
+- **Qwen3-Embedding (0.6B/4B/8B) support**, validated on 0.6B against two independent references: cosine
+  **0.9995** against llama.cpp on four texts including Polish, and the model card's own published
+  similarity matrix reproduced to a worst deviation of **0.000988**. This is the first multilingual
+  embedder the library supports — it uses the Qwen3 byte-level BPE vocabulary embedded in the GGUF, so it
+  needs no SentencePiece tokenizer, which is what blocked every other multilingual embedder.
+
+- **`GgufTokenizer.AddEosByDefault`** exposes the file's `tokenizer.ggml.add_eos_token` flag. Read here,
+  applied by the embedder; `Encode` deliberately still does not honour it, because `Encode` is also the
+  chat path's tokenizer and `ChatTemplate` already renders the model's own end markers.
+
+- **`PersistentVectorStore.EmbeddingSpaceId`**, plus an optional constructor parameter and an optional
+  `Load` parameter. Both default to empty, so existing callers keep working; an empty id means "unknown"
+  and does not match a non-empty one.
 
 ## [10.1.0] - 2026-08-16
 

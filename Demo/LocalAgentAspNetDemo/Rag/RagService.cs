@@ -6,6 +6,7 @@
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
+using DevOnBike.Overfit.Demo.LocalAgent.Infrastructure;
 using DevOnBike.Overfit.LanguageModels;
 using DevOnBike.Overfit.LanguageModels.Embeddings;
 using DevOnBike.Overfit.LanguageModels.Retrieval;
@@ -184,7 +185,10 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.Rag
                 _embeddingMean = _useModelEmbeddings && allRaw.Count > 0 ? ComputeMean(allRaw, dim) : null;
 
                 var collection = Path.GetFileName(dataDir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
-                var persistent = new PersistentVectorStore(dim, string.IsNullOrEmpty(collection) ? "rag" : collection);
+                var persistent = new PersistentVectorStore(
+                    dim,
+                    string.IsNullOrEmpty(collection) ? "rag" : collection,
+                    EmbeddingSpaceId());
                 foreach (var fc in fileChunks)
                 {
                     // Center (no-op when no mean) the raw vectors, then index the file under its content hash.
@@ -213,11 +217,16 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.Rag
             PersistentVectorStore loaded;
             try
             {
-                loaded = PersistentVectorStore.Load(cachePath);
+                loaded = PersistentVectorStore.Load(cachePath, EmbeddingSpaceId());
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Ignoring unreadable RAG index cache at {Path}; rebuilding.", cachePath);
+                // Covers three cases and must keep covering all three: an unreadable/corrupt file, a file
+                // written by an older format version, and — since XC-131 — a file written in a DIFFERENT
+                // EMBEDDING SPACE. The third one used to load cleanly: same dimension, same source count,
+                // same content hashes, and then every query cosine compared a post-norm query vector against
+                // pre-norm document vectors, silently. The exception message names which case it was.
+                _logger.LogWarning(ex, "Ignoring RAG index cache at {Path}; rebuilding.", cachePath);
                 return null;
             }
 
@@ -505,6 +514,28 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.Rag
             sb.AppendLine();
             sb.Append("Question: ").AppendLine(question);
             return sb.ToString();
+        }
+
+        /// <summary>
+        /// Identity of the embedding space this service's vectors live in, persisted with the index and
+        /// checked on reload. Everything whose change would move the vectors goes in it: the mode, the model,
+        /// the pooling semantics and the dimension.
+        ///
+        /// <para><b>The <c>postnorm</c> tag is the point.</b> Until 2026-08-27 model-mode embeddings pooled
+        /// the PRE-final-norm hidden state; they now pool the post-norm one, which is what every reference
+        /// implementation means. Nothing the cache validated moved when that changed — same documents, same
+        /// dimension, same file count — so a stale cache reloaded and every answer got quietly worse. If the
+        /// pooling ever moves again, this string must move with it.</para>
+        /// </summary>
+        private string EmbeddingSpaceId()
+        {
+            if (_useModelEmbeddings)
+            {
+                return $"model-hidden|postnorm|mean|{ModelPathResolver.Resolve(_config)}|{_client.EmbeddingDimension}";
+            }
+
+            var embedder = GetEmbedder();
+            return $"sentence-embedder|{embedder.Pooling}|{ResolveEmbeddingDir()}|{embedder.Dimension}";
         }
 
         private SentenceEmbedder GetEmbedder()

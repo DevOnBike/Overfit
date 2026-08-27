@@ -23,30 +23,66 @@ namespace DevOnBike.Overfit.LanguageModels.Retrieval
     public sealed class PersistentVectorStore
     {
         private const uint FileMagic = 0x3150_5350; // "PSP1" little-endian (Persistent Store, v1)
-        private const int FileVersion = 1;
+
+        // 1 -> 2 on 2026-08-27 (XC-131). Version 1 files carry no embedding-space id, so they cannot be
+        // checked against one and must be rejected. That is the point of the bump rather than a side effect:
+        // XC-131 changed what CachedLlamaSession.Embed returns, and a v1 cache written before it reloads
+        // cleanly afterwards — same dimension, same source count, same content hashes — after which every
+        // query cosine is computed between two different embedding spaces, with nothing thrown and nothing
+        // logged. There is no reader for v1 and none is planned; a cache is reproducible from its sources.
+        private const int FileVersion = 2;
 
         private VectorStore _store;
         private readonly Dictionary<string, SourceEntry> _sources;
 
-        public PersistentVectorStore(int dimension, string collectionName = "default")
+        /// <param name="dimension">Vector width.</param>
+        /// <param name="collectionName">A human label for this index. Persisted.</param>
+        /// <param name="embeddingSpaceId">Identifies the embedding space these vectors live in; persisted and
+        /// checked on <see cref="Load"/>. See <see cref="EmbeddingSpaceId"/> for what belongs in it.</param>
+        public PersistentVectorStore(int dimension, string collectionName = "default", string embeddingSpaceId = "")
         {
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(dimension);
             ArgumentException.ThrowIfNullOrEmpty(collectionName);
+            ArgumentNullException.ThrowIfNull(embeddingSpaceId);
 
             _store = new VectorStore(dimension);
             _sources = new Dictionary<string, SourceEntry>(StringComparer.Ordinal);
             CollectionName = collectionName;
+            EmbeddingSpaceId = embeddingSpaceId;
         }
 
-        private PersistentVectorStore(string collectionName, VectorStore store, Dictionary<string, SourceEntry> sources)
+        private PersistentVectorStore(
+            string collectionName,
+            string embeddingSpaceId,
+            VectorStore store,
+            Dictionary<string, SourceEntry> sources)
         {
             CollectionName = collectionName;
+            EmbeddingSpaceId = embeddingSpaceId;
             _store = store;
             _sources = sources;
         }
 
         /// <summary>A human label for this index (e.g. the corpus / tenant name). Persisted.</summary>
         public string CollectionName
+        {
+            get;
+        }
+
+        /// <summary>
+        /// Opaque identity of the embedding space these vectors live in. Persisted, and
+        /// <see cref="Load"/> refuses a file whose id differs from the one the caller expects.
+        ///
+        /// <para><b>The store cannot compute this and does not try.</b> It receives <c>float[]</c> and has no
+        /// idea which model, pooling mode, prefix or quantisation produced them — only the caller does. What
+        /// to put in it: everything whose change would move the vectors. For a GGUF embedder that is the
+        /// model file's identity, the pooling mode, the query and passage prefixes, and the quantise flag.</para>
+        ///
+        /// <para><b>Empty means "unknown" and does not match a non-empty id.</b> A wildcard would restore the
+        /// silent cross-space comparison this field exists to reject, so the comparison is plain equality and
+        /// the field only earns its keep once callers populate it.</para>
+        /// </summary>
+        public string EmbeddingSpaceId
         {
             get;
         }
@@ -159,6 +195,7 @@ namespace DevOnBike.Overfit.LanguageModels.Retrieval
             writer.Write(FileMagic);
             writer.Write(FileVersion);
             writer.Write(CollectionName);
+            writer.Write(EmbeddingSpaceId);
 
             writer.Write(_sources.Count);
             foreach (var (sourceId, entry) in _sources)
@@ -175,10 +212,18 @@ namespace DevOnBike.Overfit.LanguageModels.Retrieval
             _store.WriteTo(writer);
         }
 
-        /// <summary>Reloads a collection written by <see cref="Save"/> — index-once-restart-query.</summary>
-        public static PersistentVectorStore Load(string path)
+        /// <summary>
+        /// Reloads a collection written by <see cref="Save"/> — index-once-restart-query.
+        /// </summary>
+        /// <param name="path">The file written by <see cref="Save"/>.</param>
+        /// <param name="expectedEmbeddingSpaceId">The space the caller is about to compare against. A file
+        /// written in a different space throws <see cref="OverfitFormatException"/> rather than loading,
+        /// because a cosine across two embedding spaces is meaningless and nothing downstream can detect it.
+        /// See <see cref="EmbeddingSpaceId"/>.</param>
+        public static PersistentVectorStore Load(string path, string expectedEmbeddingSpaceId = "")
         {
             ArgumentNullException.ThrowIfNull(path);
+            ArgumentNullException.ThrowIfNull(expectedEmbeddingSpaceId);
 
             using var stream = new FileStream(path, FileMode.Open, FileAccess.Read);
             using var reader = new BinaryReader(stream);
@@ -194,6 +239,15 @@ namespace DevOnBike.Overfit.LanguageModels.Retrieval
             }
 
             var collectionName = reader.ReadString();
+            var embeddingSpaceId = reader.ReadString();
+            if (!string.Equals(embeddingSpaceId, expectedEmbeddingSpaceId, StringComparison.Ordinal))
+            {
+                throw new OverfitFormatException(
+                    $"'{path}' was written in embedding space '{embeddingSpaceId}' but the caller expects "
+                    + $"'{expectedEmbeddingSpaceId}'. The stored vectors cannot be compared against vectors "
+                    + "from a different space; re-index the corpus.");
+            }
+
             var sourceCount = reader.ReadInt32();
             if (sourceCount < 0)
             {
@@ -219,7 +273,7 @@ namespace DevOnBike.Overfit.LanguageModels.Retrieval
             }
 
             var store = VectorStore.ReadFrom(reader);
-            return new PersistentVectorStore(collectionName, store, sources);
+            return new PersistentVectorStore(collectionName, embeddingSpaceId, store, sources);
         }
 
         /// <summary>One indexed source document: its content hash + the chunk ids it produced.</summary>

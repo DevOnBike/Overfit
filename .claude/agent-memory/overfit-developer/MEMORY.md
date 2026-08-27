@@ -46,3 +46,4 @@
 - [A number's scope is its row title](reference_measurement_scope_is_its_row_title.md) — the 0.999x "exact tie" was ONE gate clause, not the kernel swap (2.98x); the flag was flipped default-ON and REVERTED same day (short CLI 9.5% slower). Decode-measurement traps inside.
 - [Windows link length matrix](reference_windows_link_length_matrix.md) — only a FILE symlink breaks `FileInfo.Length` (junction and dir-symlink do not); `view.Capacity` is page-rounded and is never a file length.
 - [os.walk follows junctions, rmtree does not](reference_oswalk_follows_junctions.md) — a junction in a scratch dir lists C:\qwen3b as if about to be deleted; delete the junction first, re-verify fixtures AFTER cleanup.
+- [Model cards publish their own expected numbers](reference_model_card_published_matrix_oracle.md) — a free third-party oracle; read the machine configs, not the prose. `llama-embedding --version` goes to STDERR.

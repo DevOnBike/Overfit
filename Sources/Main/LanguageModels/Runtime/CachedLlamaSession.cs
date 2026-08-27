@@ -998,17 +998,31 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// engine by <b>any</b> of its sessions — not necessarily this one. It answers "this session" only
         /// while the engine has a single session, or immediately after this session decoded.</para>
         /// </summary>
-        public ReadOnlySpan<float> LastHiddenState => _stack.LastFinalHidden;
+        public ReadOnlySpan<float> LastHiddenState => _stack.HiddenBeforeFinalNorm;
 
         /// <summary>Embedding vector length (model dimension).</summary>
         public int EmbeddingDimension => _config.DModel;
 
         /// <summary>
         /// Encodes <paramref name="tokens"/> into a single embedding vector by pooling the
-        /// per-token final hidden states — the in-process embeddings primitive for RAG /
+        /// per-token <b>post-final-norm</b> hidden states — the in-process embeddings primitive for RAG /
         /// vector-store use. RESETS the session (it's a fresh encode pass, not generation;
         /// the KV cache ends filled with these tokens). <paramref name="destination"/> must be
         /// at least <see cref="EmbeddingDimension"/> long. L2-normalised by default (cosine-ready).
+        ///
+        /// <para><b>The pooled tensor changed on 2026-08-27 and every previously stored vector is
+        /// invalid.</b> This pooled the PRE-final-norm state, which no reference implementation means by
+        /// an embedding; it now pools the post-norm state that HuggingFace calls <c>last_hidden_state</c>.
+        /// Vectors written by an earlier version are in a different space and must be re-embedded — a
+        /// cosine between the two spaces is meaningless and nothing detects it, which is why
+        /// <see cref="DevOnBike.Overfit.LanguageModels.Retrieval.PersistentVectorStore"/> now carries an
+        /// embedding-space id. The pre-norm vector is still available, unchanged, through
+        /// <see cref="LastHiddenState"/>, which is what the logit-lens and PyTorch-parity paths want.</para>
+        ///
+        /// <para><b>No EOS is appended.</b> Decoder-LM embedders that require a trailing end-of-text token
+        /// (Qwen3-Embedding sets <c>tokenizer.ggml.add_eos_token</c>) must append it to
+        /// <paramref name="tokens"/> before calling. Measured on Qwen3-Embedding-0.6B: appending it moves
+        /// the cosine against llama.cpp from 0.796 to 0.9994.</para>
         /// </summary>
         public void Embed(
             ReadOnlySpan<int> tokens,
@@ -1038,8 +1052,14 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
             for (var i = 0; i < tokens.Length; i++)
             {
-                DecodeTokenWithoutLogits(tokens[i]);   // updates _stack.LastFinalHidden
-                var h = _stack.LastFinalHidden;
+                DecodeTokenWithoutLogits(tokens[i]);   // updates both of the stack's hidden snapshots
+                // POST-final-norm, and the distinction is the whole of XC-131. Until 2026-08-27 this read
+                // the stack's PRE-norm snapshot, one identifier away. HuggingFace's `last_hidden_state` and
+                // llama.cpp's `llama-embedding` both mean the POST-norm state, and the final norm's gamma is
+                // strongly anisotropic (Qwen3-Embedding-0.6B: -0.1196 to 15.3125), so the two are different
+                // directions rather than a rounding difference. Measured against llama.cpp on the same
+                // quantised bytes: cosine 0.9994 post-norm, 0.9411 pre-norm.
+                var h = _stack.HiddenAfterFinalNorm;
                 if (pooling == EmbeddingPooling.Mean)
                 {
                     for (var j = 0; j < d; j++)

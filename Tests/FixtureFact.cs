@@ -133,6 +133,11 @@ namespace DevOnBike.Overfit.Tests
                     return Check(TestModelPaths.Qwen3B.TokenizerJsonPath,
                         "tokenizer.json is not present in the Qwen-3B directory (set OVERFIT_QWEN3B_DIR)");
 
+                case TestFixture.Qwen3EmbeddingGguf:
+                    return Check(TestModelPaths.Qwen3Embedding.GgufPath,
+                        "the Qwen3-Embedding-0.6B Q8_0 GGUF is not present (set OVERFIT_QWEN3_EMBED_DIR) — "
+                        + "download Qwen/Qwen3-Embedding-0.6B-GGUF");
+
                 case TestFixture.Avx2AndFma:
                     // Not a path. Check() would ask the filesystem about a capability, so this answers
                     // directly — and returns a non-null sentinel rather than a path, because there is

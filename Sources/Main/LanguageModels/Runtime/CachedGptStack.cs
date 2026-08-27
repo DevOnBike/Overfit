@@ -269,7 +269,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// decode, so skipping the LM head (~27 % of per-token decode cost on
         /// GPT-2 Small) gives free prefill speedup.
         ///
-        /// After this call, <see cref="LastFinalHidden"/> is updated; the
+        /// After this call, <see cref="HiddenBeforeFinalNorm"/> and <see cref="HiddenAfterFinalNorm"/> are both
+        /// updated; the
         /// previous <c>LastLogits</c> snapshot is left untouched.
         /// </summary>
         internal void DecodeWithoutLogits(
@@ -330,7 +331,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             }
 
             // Save hidden state BEFORE final norm.
-            // LastFinalHidden matches Python: x before rms_norm(x, fg2, eps).
+            // HiddenBeforeFinalNorm matches Python: x before rms_norm(x, fg2, eps).
             new ReadOnlySpan<float>(current, 0, DModel).CopyTo(_lastFinalHidden);
 
             ApplyFinalNorm(current, weights, _finalHidden);
@@ -382,7 +383,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// counterpart of looping <see cref="DecodeWithoutLogits"/>. Each layer uses
         /// <see cref="CachedTransformerBlock.DecodeBatched"/> (batched MHA + FFN), so
         /// the result is <b>bit-identical</b> to the single-token loop. After the call
-        /// <see cref="LastFinalHidden"/> and the final-norm output hold the LAST
+        /// <see cref="HiddenBeforeFinalNorm"/> and <see cref="HiddenAfterFinalNorm"/> hold the LAST
         /// token's state, ready for <see cref="ProjectLogits"/> (the only token whose
         /// logits a prefill needs). Scoped to the F32 / GPT-2 path (standard LayerNorm,
         /// GeLU/ReLU FFN, MHA, no RoPE — the blocks throw otherwise). The caller must
@@ -482,7 +483,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// Batched prefill for the Llama/Qwen quantized path — the multi-token counterpart of looping
         /// <see cref="DecodeWithoutLogits"/>, using <see cref="CachedTransformerBlock.DecodeBatchedQuant"/>
         /// (RMSNorm + RoPE + GQA + SwiGLU + quantized weights). After the call, the final-norm output of
-        /// the LAST row is in <see cref="LastFinalHidden"/> / <c>_finalHidden</c>, ready for
+        /// the LAST row is in <see cref="HiddenAfterFinalNorm"/>, ready for
         /// <see cref="ProjectLogits"/> (the only token whose logits a prefill needs). The caller must
         /// advance the cache to <c>basePosition + rows</c> first.
         ///
@@ -650,7 +651,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         }
 
         /// <summary>
-        /// Projects the saved <see cref="LastFinalHidden"/>-norm output into
+        /// Projects the saved <see cref="HiddenAfterFinalNorm"/> into
         /// vocabulary logits. Call this once per token-of-interest after one
         /// or more <see cref="DecodeWithoutLogits"/> calls. The standard
         /// <see cref="Decode"/> entry point does this automatically.
@@ -794,19 +795,33 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// <see cref="LogitLensFromHidden"/> expects, and the one <c>CachedLlamaSession.LastHiddenState</c>
         /// exposes.
         ///
-        /// <para><b>Not the same tensor as <see cref="GetLastFinalHidden"/></b>, one prefix away, which copies
-        /// the <b>post</b>-norm <c>_finalHidden</c> — the input to the LM head. Reading this file quickly, the
-        /// two names look like an accessor and its span-filling twin; they are not. The names are wrong and are
-        /// staying wrong: <see cref="GetLastFinalHidden"/> is <c>public</c> on a <c>public</c> class, so a
-        /// rename is an API break, and this release already carries enough of those. Read the summary, not the
-        /// name.</para>
+        /// <para><b>Renamed 2026-08-27 from <c>LastFinalHidden</c>.</b> Under the old name it sat one prefix
+        /// away from the public <see cref="GetLastFinalHidden"/>, which copies the <b>post</b>-norm
+        /// <c>_finalHidden</c>. The comment that used to live here predicted exactly the confusion those two
+        /// names invite — and then <c>CachedLlamaSession.Embed</c> made that mistake anyway and shipped it, so
+        /// every embedding this library produced pooled the pre-norm state (`XC-131`). A comment did not stop
+        /// it. The internal half of the name pair costs nothing to fix, so it is fixed; the public
+        /// <see cref="GetLastFinalHidden"/> keeps its misleading name until a release that already breaks the
+        /// public surface.</para>
         /// </summary>
-        internal ReadOnlySpan<float> LastFinalHidden => _lastFinalHidden.AsSpan(0, DModel);
+        internal ReadOnlySpan<float> HiddenBeforeFinalNorm => _lastFinalHidden.AsSpan(0, DModel);
+
+        /// <summary>
+        /// Hidden state AFTER the final norm — <c>rms_norm(x, fg2, eps)</c>, the LM head's input. This is what
+        /// HuggingFace calls <c>last_hidden_state</c> and what llama.cpp pools for an embedding, so it is the
+        /// vector any sentence embedding must be built from.
+        ///
+        /// <para>A span rather than a copy, unlike the public <see cref="GetLastFinalHidden"/>. The embedding
+        /// path reads this once per token inside its pooling loop and only reads it, so a
+        /// <c>DModel</c>-element copy per token would be pure waste on a path that must not allocate.</para>
+        /// </summary>
+        internal ReadOnlySpan<float> HiddenAfterFinalNorm => _finalHidden.AsSpan(0, DModel);
 
         /// <summary>
         /// Copies the <b>post</b>-final-norm hidden — <c>rms_norm(x, fg2, eps)</c>, the LM head's input — into
         /// <paramref name="destination"/> (length <c>DModel</c>). Despite the name this is <b>not</b>
-        /// <see cref="LastFinalHidden"/>, which is the <b>pre</b>-norm vector; see that member's remarks.
+        /// <see cref="HiddenBeforeFinalNorm"/>, which is the <b>pre</b>-norm vector; it is the same tensor as
+        /// <see cref="HiddenAfterFinalNorm"/>, copied instead of borrowed.
         /// </summary>
         public void GetLastFinalHidden(Span<float> destination)
             => _finalHidden.AsSpan(0, DModel).CopyTo(destination);
@@ -831,7 +846,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// Copies the captured residual stream AFTER transformer layer <paramref name="layer"/> (its output
         /// hidden, before the final norm) into <paramref name="destination"/>. Requires capture to have been
         /// enabled before the decode. <paramref name="layer"/> is 0-based; layer <c>LayerCount-1</c> is the
-        /// last layer, whose value equals <see cref="LastFinalHidden"/>.
+        /// last layer, whose value equals <see cref="HiddenBeforeFinalNorm"/>.
         /// </summary>
         public void GetLayerActivation(int layer, Span<float> destination)
         {

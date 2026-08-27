@@ -93,5 +93,72 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Retrieval
                 File.Delete(path);
             }
         }
+
+        /// <summary>
+        /// <b>The guard against a silent cross-space comparison</b> — the failure `XC-131` produced. When
+        /// what the embedder returns changes, nothing else in this file moves: the documents are the same,
+        /// so the content hashes match; the hidden size is the same, so the dimension matches; the file
+        /// count is the same. A cache written under the old semantics therefore reloaded cleanly and every
+        /// query cosine was then computed between two different embedding spaces, with nothing thrown and
+        /// nothing logged. Only an explicit identity can see it, so a mismatch throws.
+        ///
+        /// <para><b>An empty id is "unknown" and must not act as a wildcard.</b> Treating it as one would
+        /// restore exactly the silent path, so the last case below is not pedantry — it is the whole
+        /// mechanism.</para>
+        /// </summary>
+        [Fact]
+        public void Load_RefusesAFileWrittenInADifferentEmbeddingSpace()
+        {
+            var store = new PersistentVectorStore(dimension: 3, collectionName: "docs", embeddingSpaceId: "model-x|postnorm|1024");
+            store.IndexSource("a.md", "h1", [Chunk("a#0", [1f, 0f, 0f], "alpha")]);
+
+            var path = Path.Combine(Path.GetTempPath(), $"psp-{Guid.NewGuid():N}.bin");
+            try
+            {
+                store.Save(path);
+
+                // Same space → loads, and the id survives the round trip.
+                var loaded = PersistentVectorStore.Load(path, "model-x|postnorm|1024");
+                Assert.Equal("model-x|postnorm|1024", loaded.EmbeddingSpaceId);
+                Assert.Equal(1, loaded.Count);
+
+                // Different pooling semantics on the same model → refused, not silently compared.
+                var changed = Assert.Throws<OverfitFormatException>(
+                    () => PersistentVectorStore.Load(path, "model-x|prenorm|1024"));
+                Assert.Contains("embedding space", changed.Message, StringComparison.OrdinalIgnoreCase);
+
+                // A caller that supplies no id must NOT match a file that carries one.
+                Assert.Throws<OverfitFormatException>(() => PersistentVectorStore.Load(path));
+            }
+            finally
+            {
+                File.Delete(path);
+            }
+        }
+
+        /// <summary>
+        /// The default is an empty id at both ends, so every existing caller keeps working — the field only
+        /// starts costing anything once somebody populates it.
+        /// </summary>
+        [Fact]
+        public void Load_WithNoEmbeddingSpaceId_RoundTripsAsBefore()
+        {
+            var store = new PersistentVectorStore(dimension: 2, collectionName: "docs");
+            store.IndexSource("a.md", "h", [Chunk("a#0", [1f, 0f])]);
+            Assert.Equal(string.Empty, store.EmbeddingSpaceId);
+
+            var path = Path.Combine(Path.GetTempPath(), $"psp-{Guid.NewGuid():N}.bin");
+            try
+            {
+                store.Save(path);
+                var loaded = PersistentVectorStore.Load(path);
+                Assert.Equal(string.Empty, loaded.EmbeddingSpaceId);
+                Assert.Equal("a#0", loaded.Search([1f, 0f], topK: 1)[0].Id);
+            }
+            finally
+            {
+                File.Delete(path);
+            }
+        }
     }
 }
