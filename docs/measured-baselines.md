@@ -103,7 +103,66 @@ per arm (they agree to 1 MB):
 default on the 8B sibling would need roughly 32 GB dequantised, so `quantize:true` is the sane choice
 there. This figure has NOT been through `overfit-perf-claim-auditor`.
 
-### OPEN: the first token disagrees on the dequantised path, and the cause is not settled
+### SETTLED 2026-08-27 (`XC-132`): the first token disagrees, and the DEQUANTISED arm is the RIGHT one
+
+**Read the correction before the tables below, because they were assembled under a premise that turned
+out to be false.** Everything measured here is reproducible; what was wrong is what it was taken to
+mean. The tables score `quantize:false` against llama.cpp and treat llama.cpp as an oracle. **It is not
+one at position 0.** llama.cpp quantises activations exactly as our `quantize:true` arm does, so the
+two share a single error and agree with each other:
+
+| quantity, position 0 | text 0 | text 1 | text 2 | text 3 |
+|---|---|---|---|---|
+| `cos(ours-true, llama.cpp)` | 0.999997 | 0.999979 | 0.999979 | 0.999981 |
+| `cos(ours-false, llama.cpp)` | 0.978582 | 0.906376 | 0.906376 | 0.974090 |
+| `cos(ours-true, ours-false)` | 0.978504 | 0.906116 | 0.906116 | 0.973363 |
+
+The last two rows agree to five decimals. So "`false` disagrees with llama.cpp" and "our two arms
+disagree" are one statement, and llama.cpp cannot decide which arm is right.
+
+**What decided it: a float64 reference over the same Q8_0 weights.** `Scripts/xc132_float64_reference.py`
+dequantises the file once and runs all 28 blocks in double precision. Position 0 is tractable and no
+other position is: the model is causal, so the softmax runs over one key and equals 1.0, the attention
+output IS V, and Q, K, the QK-RMSNorms and RoPE cannot reach the result.
+
+| text | token | `cos(float64, ours-false)` | `cos(float64, ours-true)` | \|ref64\| | \|false\| | \|true\| |
+|---|---|---|---|---|---|---|
+| 0 | 785 | **1.000000** | 0.978504 | 116.60 | 116.60 | 121.57 |
+| 1 | 623 | **1.000000** | 0.906116 | 99.95 | 99.95 | 121.48 |
+| 2 | 623 | **1.000000** | 0.906116 | 99.95 | 99.95 | 121.48 |
+| 3 | 641 | **1.000000** | 0.973363 | 102.27 | 102.27 | 103.08 |
+
+**`quantize:false` is the accurate arm. `quantize:true` and llama.cpp carry the error.**
+
+**The instrument validated itself before its answer was read**, which is the only reason the row above
+is worth anything. The same code at float32 reproduces the F32 arm at cosine 1.000000 — a transposed
+matrix or a missing embedding scale fails that loudly. It also reproduces **5704.5 on channel 35 at
+layer 26** independently, the figure the original investigation reported.
+
+**The mechanism, measured.** At position 0 the residual stream is dominated by one channel: channel 35
+holds **32x the row RMS** flat from layer 2 to layer 26 (row norm ~6000, channel ~5950), and block 27
+cancels it. Q8 activation quantisation carries one scale per 32-element block, so the block holding
+channel 35 takes its step from 5704 and every other element inside that block is destroyed. **This is
+an ACTIVATION-quantisation error** — not weight quantisation, and not the arithmetic of the
+cancellation itself. It appears only where a massive activation does.
+
+**REFUTED: it is not the embedding row of those tokens.** No repeated token carries the anomaly to a
+later position — token 3239 at positions 7 and 15 of text 3 scores 0.998604 / 0.997316; token 279 at 14
+and 20 scores 0.997388 / 0.999760. The token only sets the SIZE of the error.
+
+**A trap in the instrument, worth carrying forward.** `llama-embedding` defaults to
+`--embd-normalize 2`, which L2-normalises every per-token row. The mean of normalised rows is not the
+normalised mean, so with the default the rows rebuild `--pooling mean` at 0.999502 instead of 1.000000
+and every per-position number is slightly wrong. Per-position work needs `-1`.
+
+**THE SECOND CLUSTER IS ALSO SETTLED, and the same way — see `XC-134`.** Text 3 positions 1-16 show
+`cos(ours-true, llama.cpp)` falling to 0.990111 at position 13. The float64 reference was extended to
+the full causal path (`--sequence`) and reproduces our `quantize:false` arm at cosine **1.000000** at
+every position 0 through 13. **Our attention path is exact; llama.cpp is the arm that deviates.**
+Refuted on the way: llama.cpp's batching, a magnitude artefact, RoPE (by a repeated-identical-token
+probe where the gap is flat with position) and our own KV-cache precision.
+
+#### The original measurement, kept because it is correct as data
 
 Per-position cosine against llama.cpp `--pooling none`, **position 0 only** (every other position is above
 0.99 in both arms):
@@ -140,9 +199,11 @@ each prefix of the token stream with last-token pooling, which is exact for a ca
 size of the position-0 error varies by token (0.9786 there against 0.9064 on texts 1 and 2) and outweighs
 the 1/n dilution.
 
-**Consequence for the `quantize` default: the two pooling modes want opposite values.** Last-token pooling
-never reads position 0 and is better at `quantize:false` (pairwise 4.6e-4 against 8.5e-3); mean pooling is
-better at `quantize:true`.
+**~~Consequence for the `quantize` default: the two pooling modes want opposite values.~~ WITHDRAWN
+2026-08-27 by `XC-132`.** The claim was that mean pooling is better at `quantize:true`. It is better
+*against llama.cpp*, and llama.cpp shares that arm's error. Against the float64 reference, `false` is
+the accurate arm at position 0. **Leave `quantize:false` for both pooling modes when accuracy is what
+you want; the reason to pass `true` is peak RAM and nothing else.**
 
 **`XC-133`, decided 2026-08-27: `FromGguf`'s POOLING default moved from `Mean` to `LastToken`, and
 `quantize` stayed `false`.** The old pair was the weakest of the four combinations and it was the
@@ -160,12 +221,15 @@ carried:** because every call passed the argument, no test reached the default a
 been changed in either direction without turning anything red. `FromGgufDefaults_AreLastTokenPooling_AndMatchLlamaCpp`
 now covers it.
 
-**Still open, and NOT fixed by this decision:** a caller who explicitly selects `Mean` still gets the worse
-`quantize` half. The parameter documents the interaction; `XC-132` is the unexplained cause.
+**The `XC-133` decision survives `XC-132`, but only half its reasoning does.** The pooling half stands on
+evidence that never involved position 0: the file itself declares `qwen3.pooling_type = 3` (LAST) and
+Qwen's `1_Pooling/config.json` sets `pooling_mode_lasttoken`. The advice to pass `quantize:true` with
+mean pooling is withdrawn.
 
-**Not established:** whether that ~20x amplification is entirely the arithmetic of cancelling a channel ten
-times larger than the result, or whether the dequantised path has a defect of its own. Settling it needs
-instrumentation inside the block. It is invisible to last-token pooling, which never reads position 0.
+**~~Not established: whether that ~20x amplification is the arithmetic of the cancellation or a defect in
+the dequantised path.~~ ANSWERED 2026-08-27: neither.** The dequantised path is correct; the amplified
+quantity is the Q8 ACTIVATION quantisation on a row where one channel carries 32x the RMS. It is
+invisible to last-token pooling, which never reads position 0.
 
 ---
 

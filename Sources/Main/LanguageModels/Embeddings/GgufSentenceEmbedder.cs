@@ -120,23 +120,33 @@ namespace DevOnBike.Overfit.LanguageModels.Embeddings
         /// each, agreeing to 1 MB). That scales with the model, so <c>true</c> is the sane choice on the 4B
         /// and 8B siblings unless the box is large — the 8B would need roughly 32 GB dequantised.
         ///
-        /// <para><b>The better value depends on <paramref name="pooling"/>, and the two point opposite
-        /// ways.</b> The figures above are last-token pooling, which never reads position 0. Mean pooling
-        /// does, and on the dequantised path the first token's hidden state diverges from llama.cpp badly
-        /// (cosine 0.9064-0.9786 at position 0, against 0.99998 quantised). Mean-pooled cosine against
-        /// llama.cpp, four texts of 8 to 26 tokens: <c>false</c> gives 0.999211 / 0.997530 / 0.997622 /
-        /// 0.999525 and <c>true</c> gives 0.999889 / 0.999755 / 0.999755 / 0.999576 — up to <b>10x</b> more
-        /// deviation on the dequantised path. Drop position 0 from both means and the two collapse together
-        /// (largest remaining gap 4.5e-5), so it is that position and nothing else. <b>So: leave this false
-        /// for last-token pooling, and prefer true for mean pooling</b> until the position-0 divergence is
-        /// resolved. It is not length that decides — the shortest text here has the milder gap, because the
-        /// size of the position-0 error varies by token and outweighs the 1/n dilution.</para>
+        /// <para><b>An earlier version of this comment told you to pass <c>true</c> with mean pooling. That
+        /// advice was BACKWARDS and is withdrawn — see <c>XC-132</c>, settled 2026-08-27.</b> It rested on
+        /// "at position 0 the dequantised state diverges from llama.cpp", which is true and does not mean
+        /// what it looks like: <b>llama.cpp is not an independent opinion there.</b> It quantises activations
+        /// exactly as this loader does at <c>true</c>, so the two share one error and agree with each other.
+        /// Measured: <c>cos(ours-true, llama.cpp)</c> at position 0 is 0.999979-0.999997, while
+        /// <c>cos(ours-true, ours-false)</c> equals <c>cos(ours-false, llama.cpp)</c> to five decimals.</para>
         ///
-        /// <para><b>The default pair is coherent, and a caller who overrides only
-        /// <paramref name="pooling"/> breaks it.</b> <c>LastToken</c> + <c>false</c> is the strongest of the
-        /// four combinations; passing <c>pooling: Mean</c> alone lands on the weakest one. Pass
-        /// <c>quantize: true</c> with it. This coupling is deliberately NOT automated — a default that reads
-        /// another argument is invisible in the signature, and <c>XC-133</c> rejected that shape.</para></param>
+        /// <para><b>A float64 reference decided it, and it is not close.</b> The same Q8_0 weights,
+        /// dequantised once and pushed through the whole stack in double precision by
+        /// <c>Scripts/xc132_float64_reference.py</c>, reproduce the <c>false</c> arm at cosine
+        /// <b>1.000000</b> on all four texts, norms agreeing to two decimals. The <c>true</c> arm sits
+        /// <b>0.906116 to 0.978504</b> away from that reference. <b>So <c>false</c> is the accurate arm at
+        /// position 0 and <c>true</c> carries the error</b>, and the earlier mean-pooled table scored the
+        /// correct arm against a reference that shares the incorrect arm's mistake.</para>
+        ///
+        /// <para><b>The mechanism, measured rather than argued.</b> At position 0 the residual stream is
+        /// dominated by a single channel: channel 35 reaches <b>32x the RMS</b> of the row and holds it flat
+        /// from layer 2 to layer 26 (5977 down to 5704 on a row whose norm is about 6000), and block 27
+        /// cancels it. Q8 activation quantisation carries one scale per 32-element block, so the block
+        /// holding channel 35 sets its step from 5704 and every other element inside it is destroyed. That
+        /// is the <c>true</c> arm's error, and it is confined to the positions where a massive activation
+        /// appears.</para>
+        ///
+        /// <para><b>So: leave this <c>false</c> for BOTH pooling modes when accuracy is what you want.</b>
+        /// The reason to pass <c>true</c> is peak RAM and nothing else — which is a real reason on the 4B
+        /// and 8B siblings, and is why the parameter exists. It is a precision trade, not a free one.</para></param>
         /// <param name="maxContextLength">KV-cache size in tokens; longer inputs are truncated. 1024 matches
         /// <c>OverfitClient</c>'s dedicated embed session and keeps the cache well under the weights.</param>
         public static GgufSentenceEmbedder FromGguf(

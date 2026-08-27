@@ -195,10 +195,24 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Embeddings
         /// second-SMALLEST gap, because the size of the position-0 error varies by token (0.9786 there
         /// against 0.9064 on texts 1 and 2) and outweighs the 1/n dilution.</para>
         ///
-        /// <para><b>What was NOT established:</b> whether that 20x amplification is entirely the arithmetic
-        /// of cancelling a channel ten times larger than the result, or whether the dequantised path has a
-        /// defect of its own. Settling it needs instrumentation inside the block, which is outside this
-        /// task. Until it is settled this test states the measured band rather than a target.</para>
+        /// <para><b>SETTLED 2026-08-27 (<c>XC-132</c>), and the answer INVERTS what this test's name
+        /// suggests about which arm is at fault.</b> The dequantised path is the ACCURATE one here. A float64
+        /// reference over the same Q8_0 weights (<c>Scripts/xc132_float64_reference.py</c>) reproduces the
+        /// <c>quantize:false</c> arm at cosine <b>1.000000</b> on all four texts and sits <b>0.906116 to
+        /// 0.978504</b> from the <c>quantize:true</c> arm. <b>llama.cpp is not an independent reference at
+        /// position 0</b>: it quantises activations exactly as <c>quantize:true</c> does, so the two share
+        /// one error — <c>cos(ours-true, llama.cpp)</c> is 0.999979-0.999997 while
+        /// <c>cos(ours-true, ours-false)</c> equals <c>cos(ours-false, llama.cpp)</c> to five decimals.</para>
+        ///
+        /// <para><b>The mechanism is Q8 ACTIVATION quantisation, not the cancellation arithmetic.</b> At
+        /// position 0 channel 35 carries 32x the row RMS, flat from layer 2 to layer 26. A Q8 block covers
+        /// 32 elements with one scale, so the block holding that channel takes its step from 5704 and every
+        /// other element in it is destroyed.</para>
+        ///
+        /// <para><b>This test is still correct and still worth keeping — as a MEASUREMENT, not a verdict.</b>
+        /// It pins the size of the disagreement against llama.cpp, which is exactly the quantity that would
+        /// move if either engine's quantised path changed. Read its 0.997 threshold as "the dequantised arm
+        /// differs from llama.cpp by this much and no more", never as "the dequantised arm is worse".</para>
         ///
         /// <para>The second assertion is the half that gives the first one meaning: on the SAME arm,
         /// last-token pooling still clears 0.999. Without it a reader cannot tell a position-0 problem from

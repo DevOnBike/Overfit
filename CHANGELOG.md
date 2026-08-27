@@ -45,6 +45,45 @@ statement are how twenty-two versions went unrecorded.
 
 ## [Unreleased]
 
+_Nothing yet._
+
+## [10.1.1] - 2026-08-27
+
+**READ THIS BEFORE UPGRADING: this is a `PATCH` number on a release that BREAKS BINARY COMPATIBILITY, and
+the two disagree on purpose.** The versioning policy at the top of this file reserves `PATCH` for
+backwards-compatible work and bumps `MINOR` for a break. **The maintainer chose `10.1.1` over `10.2.0`
+anyway, on 2026-08-27, and this paragraph is the record of that decision** — the policy requires a breaking
+verdict to be recorded here, not resolved by picking a smaller number quietly.
+
+**The evidence the decision was taken against.** `Scripts/api_compat_check.py` resolved **10.1.0** as the
+latest package on nuget.org, compared this build against it and returned **BREAKING**, exit code 1, with
+four blocking findings:
+
+| symbol | change | consequence |
+|---|---|---|
+| `PersistentVectorStore..ctor` | 2 parameters → 3 | `MissingMethodException` |
+| `PersistentVectorStore.Load` | 1 parameter → 2 | `MissingMethodException` |
+| `OverfitParallel.For` | two overloads, parameter lists changed | `MissingMethodException` |
+
+All four arrived through parameters **with default values**. That is the shape that hides: source callers
+recompile unchanged, and the method they were originally compiled against no longer exists in metadata.
+
+**What this costs a consumer.** A project that upgrades by recompiling is fine. A project that drops the
+new assembly beside an unchanged compiled client — a plugin host, a deployed application patched in place —
+gets a run-time failure and a `PATCH` number that told it not to expect one. **`10.1.1` will not warn
+anybody, so this section is the only warning.**
+
+**Publishing this build as 10.1.0 would have republished a breaking change under an existing number**,
+which is the exact accident the comparator was written for after 2026-08-12/13. That part the number does
+prevent.
+
+**The date stamps the work, not the publish.** This section was stamped on 2026-08-27 with the tree
+uncommitted and nothing pushed. `## [10.0.30] - 2026-07-05` higher in this file has the same ambiguity and
+it is called out there; this note exists so nobody has to guess a second time.
+
+**Those four findings are NOT the only breaks in this release.** The pooling change below moves behaviour
+without moving a signature, so no tool reports it — read the `Breaking` section, not the table.
+
 ### Breaking
 
 - **`CachedLlamaSession.Embed` and `OverfitClient.Embed` now pool the hidden state AFTER the final norm.
@@ -76,12 +115,18 @@ statement are how twenty-two versions went unrecorded.
   pooling and retrieval prefixes, and a `ForQwen3Embedding` factory carrying Qwen's own published
   convention. See [ADR 0004](docs/adr/0004-gguf-decoder-lm-sentence-embedder-public-surface.md).
 
-  **`FromGguf` defaults to `LastToken` pooling and `quantize:false`**, which is the strongest of the four
-  measured combinations against llama.cpp. It defaulted to `Mean` before it was ever released, which was
-  the weakest one: mean pooling reads position 0, and on the dequantised path that position disagrees with
-  llama.cpp (`XC-132`, unresolved). A caller who overrides only `pooling: Mean` lands back on the weak pair
-  and should pass `quantize: true` with it — the parameter documents this and the coupling is deliberately
-  not automated.
+  **`FromGguf` defaults to `LastToken` pooling and `quantize:false`.** It defaulted to `Mean` before it was
+  ever released. `LastToken` is what the file itself asks for — it sets `qwen3.pooling_type = 3` (LAST) —
+  and what Qwen's own `1_Pooling/config.json` specifies.
+
+  **`quantize:false` is the accurate setting, and that is the opposite of what an earlier draft of this
+  entry said** (`XC-132`, settled 2026-08-27). At token position 0 the two `quantize` arms disagree at
+  cosine 0.906-0.979, and llama.cpp cannot arbitrate: it quantises activations exactly as `quantize:true`
+  does, so the two share one error and agree with each other to five decimals. A float64 reference over the
+  same Q8_0 weights reproduces the `false` arm at cosine **1.000000** and sits **0.906-0.979** from the
+  `true` arm. The cause is Q8 activation quantisation on a row where one channel carries 32x the RMS.
+  **Pass `quantize: true` to save peak RAM — 1608 MB against 3270 MB on the 0.6B file — and know that it
+  is a precision trade, not a free one.**
 
 - **Qwen3-Embedding (0.6B/4B/8B) support**, validated on 0.6B against two independent references: cosine
   **0.9995** against llama.cpp on four texts including Polish, and the model card's own published
@@ -94,8 +139,15 @@ statement are how twenty-two versions went unrecorded.
   chat path's tokenizer and `ChatTemplate` already renders the model's own end markers.
 
 - **`PersistentVectorStore.EmbeddingSpaceId`**, plus an optional constructor parameter and an optional
-  `Load` parameter. Both default to empty, so existing callers keep working; an empty id means "unknown"
-  and does not match a non-empty one.
+  `Load` parameter. Both default to empty; an empty id means "unknown" and does not match a non-empty one.
+
+  **Source-compatible, BINARY-BREAKING — an earlier draft of this entry said "existing callers keep
+  working", and that is true only of callers who recompile.** `Scripts/api_compat_check.py` classifies both
+  members `BinaryBreaking` against the published 10.1.0: the constructor went from two parameters to three
+  and `Load` from one to two, so an assembly compiled against 10.1.0 gets `MissingMethodException` at run
+  time. **A default value does not prevent this** — it makes the call site compile again, and the method the
+  old caller was compiled against no longer exists in metadata. Corrected 2026-08-27 after the comparator
+  ran; nobody had run it against these members before.
 
 ## [10.1.0] - 2026-08-16
 

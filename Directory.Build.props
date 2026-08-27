@@ -1,7 +1,7 @@
 ﻿<Project>
     <PropertyGroup>
-        <Version>10.1.0</Version>
-        <FileVersion>10.1.0</FileVersion>
+        <Version>10.1.1</Version>
+        <FileVersion>10.1.1</FileVersion>
 
         <!-- The last version actually ON nuget.org, which is NOT the same thing as `Version` above and is
              the only correct anchor for anything that must reference a published package — today just
