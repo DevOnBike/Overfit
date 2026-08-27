@@ -238,6 +238,53 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Embeddings
         }
 
         /// <summary>
+        /// <b>Pins the defaults of <see cref="GgufSentenceEmbedder.FromGguf"/>, which nothing asserted until
+        /// 2026-08-27.</b> Every other call in this file passes <c>pooling</c> explicitly, so the default was
+        /// reachable by no test at all and could be changed without turning anything red. That is how
+        /// <c>XC-133</c> shipped: the default was <see cref="EmbeddingPooling.Mean"/>, which pairs with the
+        /// <c>quantize:false</c> default to make the weakest of the four measured combinations.
+        ///
+        /// <para><b>The assertion on <c>Pooling</c> alone is not enough and is not the point.</b> It states
+        /// the contract; the cosine below is what proves the contract is worth having. The two together fail
+        /// for different reasons: flip the default back to <c>Mean</c> and BOTH go red, because a mean-pooled
+        /// vector on this arm reads 0.997530 against llama.cpp's last-token reference and misses 0.999.</para>
+        ///
+        /// <para><b>The oracle is llama.cpp's <c>--pooling last</c> output on the same quantised bytes</b>, the
+        /// same fixture the other tests here read. The threshold 0.999 is the band the post-norm path was
+        /// measured at: 0.999417 / 0.999460 / 0.999434 / 0.999672.</para>
+        ///
+        /// <para><b>NOT covered here:</b> the <c>quantize</c> default itself. Its evidence is pairwise
+        /// similarity rather than per-vector cosine, which
+        /// <see cref="LastTokenEmbeddings_MatchLlamaCpp_PerVectorAndPairwise"/> and
+        /// <c>docs/measured-baselines.md</c> carry. A per-vector test cannot separate the two
+        /// <c>quantize</c> arms — that is the whole finding of the 18x section in that document.</para>
+        /// </summary>
+        [FixtureFact(TestFixture.Qwen3EmbeddingGguf, "20s")]
+        public void FromGgufDefaults_AreLastTokenPooling_AndMatchLlamaCpp()
+        {
+            using var reference = LoadReference();
+            var texts = ReadStrings(reference.RootElement.GetProperty("texts"));
+            var expectedLast = ReadVectors(reference.RootElement.GetProperty("last"));
+
+            using var embedder = GgufSentenceEmbedder.FromGguf(
+                TestModelPaths.Qwen3Embedding.RequireGgufPath());
+
+            Assert.Equal(EmbeddingPooling.LastToken, embedder.Pooling);
+            Assert.Null(embedder.QueryPrefix);
+            Assert.Null(embedder.PassagePrefix);
+
+            for (var t = 0; t < texts.Length; t++)
+            {
+                var cos = Cosine(embedder.Embed(texts[t]), expectedLast[t]);
+                _out.WriteLine($"[{t}] default-pooling cos={cos:F6}");
+                Assert.True(
+                    cos >= 0.999,
+                    $"text {t}: the DEFAULT configuration scores {cos:F6} against llama.cpp's last-token "
+                    + "output. Either the pooling default moved off LastToken, or the default pair regressed.");
+            }
+        }
+
+        /// <summary>
         /// <b>The HuggingFace tiebreak, and the only oracle here that shares nothing with llama.cpp.</b> The
         /// model card publishes the similarity matrix its own full-precision PyTorch model produces for four
         /// specific texts. Reproducing it end to end exercises the query instruction prefix, the passage side

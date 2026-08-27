@@ -76,6 +76,13 @@ statement are how twenty-two versions went unrecorded.
   pooling and retrieval prefixes, and a `ForQwen3Embedding` factory carrying Qwen's own published
   convention. See [ADR 0004](docs/adr/0004-gguf-decoder-lm-sentence-embedder-public-surface.md).
 
+  **`FromGguf` defaults to `LastToken` pooling and `quantize:false`**, which is the strongest of the four
+  measured combinations against llama.cpp. It defaulted to `Mean` before it was ever released, which was
+  the weakest one: mean pooling reads position 0, and on the dequantised path that position disagrees with
+  llama.cpp (`XC-132`, unresolved). A caller who overrides only `pooling: Mean` lands back on the weak pair
+  and should pass `quantize: true` with it — the parameter documents this and the coupling is deliberately
+  not automated.
+
 - **Qwen3-Embedding (0.6B/4B/8B) support**, validated on 0.6B against two independent references: cosine
   **0.9995** against llama.cpp on four texts including Polish, and the model card's own published
   similarity matrix reproduced to a worst deviation of **0.000988**. This is the first multilingual

@@ -94,7 +94,17 @@ namespace DevOnBike.Overfit.LanguageModels.Embeddings
         /// <param name="ggufPath">Path to the <c>*.gguf</c> file. Its embedded tokenizer vocabulary is used;
         /// no sibling <c>tokenizer.json</c> is needed.</param>
         /// <param name="pooling">How per-token states collapse to one vector. Decoder LMs trained as
-        /// embedders almost always want <see cref="EmbeddingPooling.LastToken"/>.</param>
+        /// embedders almost always want <see cref="EmbeddingPooling.LastToken"/>, which is why it is the
+        /// default here and why that differs from <see cref="SentenceEmbedder"/>, whose BERT-family models
+        /// want <see cref="EmbeddingPooling.Mean"/> or <see cref="EmbeddingPooling.Cls"/>.
+        ///
+        /// <para><b>The default was <see cref="EmbeddingPooling.Mean"/> until 2026-08-27 (<c>XC-133</c>),
+        /// which paired the worse half of this parameter with the worse half of <paramref name="quantize"/>.</b>
+        /// Mean pooling reads position 0, the dequantised path disagrees with llama.cpp there, and
+        /// <paramref name="quantize"/> defaults to <c>false</c> — so the out-of-the-box combination was the
+        /// weakest of the four measured. <see cref="EmbeddingPooling.LastToken"/> never reads position 0, so
+        /// the default pair is now the strongest one. The measurements are on
+        /// <paramref name="quantize"/>.</para></param>
         /// <param name="queryPrefix">Prepended by <see cref="EmbedQuery(string)"/>.</param>
         /// <param name="passagePrefix">Prepended by <see cref="EmbedPassage(string)"/>.</param>
         /// <param name="appendEndOfText">Append the file's end-of-text token to every input. When null, the
@@ -120,12 +130,18 @@ namespace DevOnBike.Overfit.LanguageModels.Embeddings
         /// (largest remaining gap 4.5e-5), so it is that position and nothing else. <b>So: leave this false
         /// for last-token pooling, and prefer true for mean pooling</b> until the position-0 divergence is
         /// resolved. It is not length that decides — the shortest text here has the milder gap, because the
-        /// size of the position-0 error varies by token and outweighs the 1/n dilution.</para></param>
+        /// size of the position-0 error varies by token and outweighs the 1/n dilution.</para>
+        ///
+        /// <para><b>The default pair is coherent, and a caller who overrides only
+        /// <paramref name="pooling"/> breaks it.</b> <c>LastToken</c> + <c>false</c> is the strongest of the
+        /// four combinations; passing <c>pooling: Mean</c> alone lands on the weakest one. Pass
+        /// <c>quantize: true</c> with it. This coupling is deliberately NOT automated — a default that reads
+        /// another argument is invisible in the signature, and <c>XC-133</c> rejected that shape.</para></param>
         /// <param name="maxContextLength">KV-cache size in tokens; longer inputs are truncated. 1024 matches
         /// <c>OverfitClient</c>'s dedicated embed session and keeps the cache well under the weights.</param>
         public static GgufSentenceEmbedder FromGguf(
             string ggufPath,
-            EmbeddingPooling pooling = EmbeddingPooling.Mean,
+            EmbeddingPooling pooling = EmbeddingPooling.LastToken,
             string? queryPrefix = null,
             string? passagePrefix = null,
             bool? appendEndOfText = null,

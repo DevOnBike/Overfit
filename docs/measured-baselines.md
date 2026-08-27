@@ -86,7 +86,8 @@ right.
 Per-vector cosine moves by 1.4e-4 between those two arms and pairwise similarity by 8.5e-3 — **sixty times
 more.** Similarity is the quantity every consumer of an embedding actually uses, so a test that checks only
 per-vector parity would sign off on the worse configuration. This is why `GgufSentenceEmbedder` defaults to
-`quantize:false`.
+`quantize:false`. These figures are last-token pooling; mean pooling inverts the answer, and the default
+that follows from that is settled under `XC-133` below.
 
 ### What that default costs: peak RAM, and it scales with the model
 
@@ -141,9 +142,26 @@ the 1/n dilution.
 
 **Consequence for the `quantize` default: the two pooling modes want opposite values.** Last-token pooling
 never reads position 0 and is better at `quantize:false` (pairwise 4.6e-4 against 8.5e-3); mean pooling is
-better at `quantize:true`. `GgufSentenceEmbedder` keeps `false` as its default and documents the
-interaction on the parameter; making the default depend on the pooling mode is a design change nobody has
-signed.
+better at `quantize:true`.
+
+**`XC-133`, decided 2026-08-27: `FromGguf`'s POOLING default moved from `Mean` to `LastToken`, and
+`quantize` stayed `false`.** The old pair was the weakest of the four combinations and it was the
+out-of-the-box path for anyone not using `ForQwen3Embedding`; the new pair is the strongest one. Two
+alternatives were rejected. Flipping `quantize` to `true` instead would have repaired mean pooling and
+halved peak RAM, but it degrades last-token pooling and `ForQwen3Embedding` carries its own `false`, so the
+two factories would then disagree. Deriving `quantize` from `pooling` was rejected because a default that
+reads another argument is invisible in the signature.
+
+**The change cost nothing externally, and that is why it was cheap rather than a break.** `GgufSentenceEmbedder`
+is new and unreleased — it sits under `[Unreleased]` in `CHANGELOG.md` — and no production code calls
+`FromGguf`: a scan of `Sources/`, `Tests/` and `Demo/` on 2026-08-27 returned `ForQwen3Embedding` and four
+test sites, and every one of those passes `pooling` explicitly. **That last fact is also the defect this
+carried:** because every call passed the argument, no test reached the default at all, so it could have
+been changed in either direction without turning anything red. `FromGgufDefaults_AreLastTokenPooling_AndMatchLlamaCpp`
+now covers it.
+
+**Still open, and NOT fixed by this decision:** a caller who explicitly selects `Mean` still gets the worse
+`quantize` half. The parameter documents the interaction; `XC-132` is the unexplained cause.
 
 **Not established:** whether that ~20x amplification is entirely the arithmetic of cancelling a channel ten
 times larger than the result, or whether the dequantised path has a defect of its own. Settling it needs

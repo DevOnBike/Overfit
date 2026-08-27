@@ -67,7 +67,12 @@ cannot see the code and cannot be asked to change.
 **Three defaults become a contract, and each is decided on purpose:**
 
 1. **Pooling.** Set by the `ForQwen3Embedding` factory to the model family's convention. The generic
-   constructor takes it as a parameter, as `FromPretrained` does.
+   constructor takes it as a parameter, as `FromPretrained` does. **Amended 2026-08-27 by `XC-133`: the
+   generic default is `LastToken`, not `Mean`.** This ADR left the generic default unstated and the
+   implementation took `Mean` from `SentenceEmbedder`, whose models are BERT-family; on a decoder LM that
+   pairs with the `quantize:false` default below to make the weakest of the four measured combinations,
+   because mean pooling reads position 0 and the dequantised path disagrees with llama.cpp there. The
+   numbers and the two rejected alternatives are in `docs/measured-baselines.md`.
 2. **`quantize: false`.** An embedder's entire product is the vector. Re-quantising an already-Q8_0 file
    moves the *pairwise* similarity by 8.5e-3 against llama.cpp, 18x the F32 deviation of 4.6e-4 — a
    correctness cost on the quantity callers consume. **Conditional on spike S3**: this dequantizes to F32,
