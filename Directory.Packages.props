@@ -136,7 +136,7 @@
     <!-- 2.0.11 is SOURCE-IDENTICAL to 2.0.10 — verified against the upstream v2.0.10...v2.0.11 comparison,
          not inferred from the version shape. It is a re-stamp tied to the SDK release train, so the risk is
          zero by construction rather than by judgement. `Cli` is the only consumer. -->
-    <PackageVersion Include="System.CommandLine" Version="2.0.11" />
+    <PackageVersion Include="System.CommandLine" Version="2.0.12" />
     <!-- HELD at 10.0.10 while 10.0.11 exists, deliberately. This is TensorPrimitives — a decode hot-path
          dependency — and this repository does not take a version bump on a hot path without a measurement,
          however unlikely a servicing release is to touch vectorization. What it needs is a canary run (an
@@ -165,7 +165,7 @@
          STILL OUTSTANDING and NOT closed by this pin: the 10.0.11 servicing release also moves the shared
          runtime and SDK, which DOES change the JIT. That install is a separate action and does warrant a
          canary. See XC-21. -->
-    <PackageVersion Include="System.Numerics.Tensors" Version="10.0.11" />
+    <PackageVersion Include="System.Numerics.Tensors" Version="10.0.12" />
     <PackageVersion Include="xunit.v3" Version="3.2.2" />
     <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5" />
   </ItemGroup>
