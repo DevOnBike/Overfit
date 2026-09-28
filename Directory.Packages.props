@@ -80,13 +80,13 @@
          The one breaking item in 10.9.0 is Microsoft.Extensions.AI.OpenAI constraining OpenAI to 2.12.x —
          a package this solution does not reference. Checked after the bump rather than assumed:
          Sources/Extensions.AI is IsAotCompatible + IsTrimmable, and the build emits no IL2xxx/IL3xxx. -->
-    <PackageVersion Include="Microsoft.Extensions.AI.Abstractions" Version="10.9.0" />
+    <PackageVersion Include="Microsoft.Extensions.AI.Abstractions" Version="10.10.1" />
     <!-- 10.9.0 taken 2026-08-12 with Abstractions above (Evaluation depends on it; leaving these at 10.8.0
          would pin two halves of one release train apart). The 10.9.0 change here is the generated report
          UI — new Overview / Cases / History / Comparison views. Only consumer is Demo/EvaluationDemo, which
          is not packed and not in the AOT guard, so the blast radius is a demo's HTML output. -->
-    <PackageVersion Include="Microsoft.Extensions.AI.Evaluation" Version="10.9.0" />
-    <PackageVersion Include="Microsoft.Extensions.AI.Evaluation.Quality" Version="10.9.0" />
+    <PackageVersion Include="Microsoft.Extensions.AI.Evaluation" Version="10.10.0" />
+    <PackageVersion Include="Microsoft.Extensions.AI.Evaluation.Quality" Version="10.10.0" />
     <PackageVersion Include="Microsoft.ML" Version="5.0.0" />
     <!-- HELD at 1.28.0 while 1.29.0 exists, deliberately, and NOT for the usual "it might be slower" reason:
          this package is not in any Overfit code path at all. Its only consumer is Sources/Benchmark, where it
